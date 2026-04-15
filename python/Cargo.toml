@@ -1,0 +1,26 @@
+[package]
+name = "molpack-python"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["MolCrafts"]
+license = "BSD-3-Clause"
+description = "Python bindings for molpack molecular packing"
+repository = "https://github.com/MolCrafts/molpack"
+homepage = "https://github.com/MolCrafts/molpack"
+
+[lib]
+name = "molpack_python"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.28", features = ["extension-module"] }
+numpy = "0.28"
+ndarray = "0.17"
+molpack = { path = "..", package = "molcrafts-molpack", version = "0.1.0" }
+
+# Standalone package — not a member of any outer workspace.
+[workspace]
+
+[features]
+default = []

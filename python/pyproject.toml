@@ -1,0 +1,62 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "molcrafts-molpack"
+version = "0.1.0"
+description = "Python bindings for molpack molecular packing (Packmol port)"
+requires-python = ">=3.12"
+readme = "../README.md"
+license = "BSD-3-Clause"
+dependencies = ["numpy>=2.0"]
+
+[project.urls]
+Homepage = "https://github.com/MolCrafts/molpack"
+Repository = "https://github.com/MolCrafts/molpack"
+
+[tool.maturin]
+python-source = "python"
+module-name = "molpack.molpack"
+features = ["pyo3/extension-module"]
+exclude = [
+  "python/molpack/*.so",
+  "python/molpack/*.dylib",
+  "python/molpack/*.dll",
+  "python/molpack/*.dSYM",
+  "python/molpack/*.dSYM/**",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+src = ["python", "tests", "examples"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # isort
+  "UP",  # pyupgrade
+]
+ignore = [
+  "E501", # line too long — enforced by formatter, not linter
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["molpack"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ty]
+[tool.ty.environment]
+python-version = "3.12"
+# tests import _common via sys.path.insert at runtime; ty cannot follow dynamic
+# path manipulation, so we declare the examples dir as an extra source root.
+extra-paths = ["examples"]

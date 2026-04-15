@@ -1,0 +1,30 @@
+[project]
+site_name = "molpack (Python)"
+site_url = "https://molcrafts.github.io/molpack/"
+site_description = "Packmol-grade molecular packing — Python bindings"
+site_author = "MolCrafts"
+repo_url = "https://github.com/MolCrafts/molpack"
+repo_name = "MolCrafts/molpack"
+
+nav = [
+  { "Home" = "index.md" },
+  { "Installation" = "installation.md" },
+  { "Getting Started" = "getting-started.md" },
+  { "User Guide" = [
+    "guide/targets.md",
+    "guide/restraints.md",
+    "guide/packer.md",
+    "guide/periodic-boundaries.md",
+  ] },
+  { "Examples" = "examples.md" },
+  { "API Reference" = "api-reference.md" },
+]
+
+[project.theme]
+features = [
+  "navigation.instant",
+  "navigation.tabs",
+  "navigation.sections",
+  "content.code.copy",
+  "content.code.annotate",
+]

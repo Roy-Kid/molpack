@@ -1,0 +1,60 @@
+name: Feature Request
+description: Propose a new restraint type, region, handler, or API change
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening a request, please check the existing issues and the
+        [extending guide](https://docs.rs/molcrafts-molpack/latest/molpack/extending)
+        to see if the feature can already be implemented as a user plugin.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - New Restraint type
+        - New Region type
+        - New Handler
+        - New Relaxer
+        - API change (Molpack / Target)
+        - Performance
+        - Python bindings
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What use case or limitation drives this request?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: |
+        Describe the API you'd like to see. A sketch is fine:
+      render: rust
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you try? Why is this the right approach?
+
+  - type: checkboxes
+    id: direction3
+    attributes:
+      label: Direction-3 compatibility
+      description: |
+        molpack follows the direction-3 rule — user types compose identically with
+        built-ins. Please confirm this request respects that contract.
+      options:
+        - label: This feature can be (or already is) implementable as a user plugin
+        - label: It requires a core change because user plugins cannot achieve it

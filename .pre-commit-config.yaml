@@ -1,0 +1,37 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.6
+    hooks:
+      - id: ruff-format
+        files: ^python/
+      - id: ruff
+        files: ^python/
+        args: [--fix]
+
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty (Python type check)
+        language: system
+        entry: sh -c 'cd python && ty check python tests examples'
+        files: ^python/
+        pass_filenames: false
+
+      - id: rustfmt
+        name: rustfmt
+        language: system
+        entry: cargo fmt
+        args: [--]
+        types: [rust]
+        pass_filenames: true

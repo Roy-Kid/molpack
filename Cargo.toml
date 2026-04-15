@@ -1,0 +1,60 @@
+[package]
+name = "molcrafts-molpack"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["MolCrafts"]
+license = "BSD-3-Clause"
+description = "Faithful Rust port of Packmol molecular packing (split off from molrs)"
+repository = "https://github.com/MolCrafts/molpack"
+homepage = "https://github.com/MolCrafts/molpack"
+documentation = "https://docs.rs/molcrafts-molpack"
+readme = "README.md"
+keywords = ["packmol", "molecular-modeling", "chemistry", "simulation"]
+categories = ["science", "algorithms"]
+
+[lib]
+name = "molpack"
+
+[dependencies]
+# Path deps are for local development; `version` fields are used by
+# `cargo publish` to resolve against the crates.io registry.
+molrs = { path = "../molrs/molrs-core", version = "0.0.8", package = "molcrafts-molrs-core", default-features = false }
+molrs_io = { path = "../molrs/molrs-io", version = "0.0.8", package = "molcrafts-molrs-io" }
+rand = "0.9"
+ndarray = "0.17"
+log = "0.4"
+env_logger = "0.11"
+rayon = { version = "1.11", optional = true }
+
+[features]
+default = []
+rayon = ["dep:rayon", "molrs/rayon"]
+filesystem = ["molrs_io/filesystem"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "pack_end_to_end"
+harness = false
+
+[[bench]]
+name = "evaluate_unscaled"
+harness = false
+
+[[bench]]
+name = "run_iteration"
+harness = false
+
+[[bench]]
+name = "run_phase"
+harness = false
+
+[[bench]]
+name = "objective_dispatch"
+harness = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

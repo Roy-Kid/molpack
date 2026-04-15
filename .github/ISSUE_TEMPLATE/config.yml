@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://docs.rs/molcrafts-molpack
+    about: API reference and rustdoc chapters (getting_started, concepts, architecture, extending)
+  - name: Python docs
+    url: https://github.com/MolCrafts/molpack/tree/master/python/docs
+    about: Python binding guide and examples

@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  # ── fast gates (run in parallel) ──────────────────────────────────────────
+
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  python-lint:
+    name: python lint + types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: molpack
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff + ty
+        run: pip install ruff ty
+      - name: ruff format
+        run: ruff format --check .
+        working-directory: molpack/python
+      - name: ruff lint
+        run: ruff check .
+        working-directory: molpack/python
+      - name: ty check
+        run: ty check python tests examples
+        working-directory: molpack/python
+
+  # ── rust lint gate ─────────────────────────────────────────────────────────
+
+  clippy:
+    name: clippy
+    needs: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: MolCrafts/molrs
+          path: molrs
+      - uses: actions/checkout@v4
+        with:
+          path: molpack
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: molpack
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: molpack
+
+  # ── full checks (blocked on both lint gates) ───────────────────────────────
+
+  test:
+    name: test
+    needs: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: MolCrafts/molrs
+          path: molrs
+      - uses: actions/checkout@v4
+        with:
+          path: molpack
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: molpack
+      - name: Cache test data
+        uses: actions/cache@v4
+        with:
+          path: molrs/molrs-core/target/tests-data
+          key: ${{ runner.os }}-test-data-${{ hashFiles('molrs/scripts/fetch-test-data.sh') }}
+      - name: Fetch test data
+        run: bash scripts/fetch-test-data.sh
+        working-directory: molrs
+      - name: Test
+        run: cargo test --lib --tests --examples
+        working-directory: molpack
+      - name: Benches build
+        run: cargo bench --no-run
+        working-directory: molpack
+
+  docs:
+    name: docs
+    needs: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: MolCrafts/molrs
+          path: molrs
+      - uses: actions/checkout@v4
+        with:
+          path: molpack
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: molpack
+      - name: cargo doc
+        run: cargo doc --no-deps --all-features
+        working-directory: molpack
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  python:
+    name: python bindings
+    needs: [clippy, python-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: MolCrafts/molrs
+          path: molrs
+      - uses: actions/checkout@v4
+        with:
+          path: molpack
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: molpack
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install maturin + pytest
+        run: pip install maturin pytest numpy
+      - name: Build + install molpack
+        run: maturin develop --release
+        working-directory: molpack/python
+      - name: Run Python tests
+        run: pytest -v
+        working-directory: molpack/python
