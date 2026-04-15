@@ -142,11 +142,11 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install maturin + pytest
-        run: pip install maturin pytest numpy
-      - name: Build + install molpack
-        run: maturin develop --release
-        working-directory: molpack/python
-      - name: Run Python tests
-        run: pytest -v
+      - name: Build + test Python bindings
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install maturin pytest numpy
+          maturin develop --release
+          pytest -v
         working-directory: molpack/python
