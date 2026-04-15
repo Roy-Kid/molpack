@@ -13,7 +13,7 @@ def _make_tiny_pack():
     radii = np.array([1.0, 1.0], dtype=np.float64)
     target = molpack.Target.from_coords(
         positions, radii, 3, elements=["O", "H"]
-    ).with_constraint(molpack.InsideBox([0.0, 0.0, 0.0], [15.0, 15.0, 15.0]))
+    ).with_restraint(molpack.InsideBox([0.0, 0.0, 0.0], [15.0, 15.0, 15.0]))
     packer = molpack.Packer(tolerance=2.0).with_progress(False)
     return packer.pack([target], max_loops=50, seed=42)
 
@@ -63,7 +63,7 @@ class TestPackerErrorPaths:
         # Zero-length axis is rejected inside pack().
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
         radii = np.array([1.0], dtype=np.float64)
-        target = molpack.Target.from_coords(positions, radii, 1).with_constraint(
+        target = molpack.Target.from_coords(positions, radii, 1).with_restraint(
             molpack.InsideBox([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
         )
         packer = molpack.Packer().with_progress(False).with_pbc_box([0.0, 10.0, 10.0])
@@ -79,7 +79,7 @@ class TestPackerAcceptsCompositeConstraint:
             molpack.OutsideSphere(2.0, [10.0, 10.0, 10.0])
         )
 
-        target = molpack.Target.from_coords(positions, radii, 3).with_constraint(bundle)
+        target = molpack.Target.from_coords(positions, radii, 3).with_restraint(bundle)
         packer = molpack.Packer(tolerance=2.0).with_progress(False)
         result = packer.pack([target], max_loops=100, seed=42)
 

@@ -48,8 +48,8 @@ count. Immutable — builder methods return new instances.
 
 **Restraints**
 
-- `.with_constraint(restraint) -> Target`
-- `.with_constraint_for_atoms(indices: list[int], restraint) -> Target`
+- `.with_restraint(restraint) -> Target`
+- `.with_restraint_for_atoms(indices: list[int], restraint) -> Target`
   — 1-based indexing.
 
 **Solver budget**
@@ -139,7 +139,7 @@ Half-space $\{\mathbf{x} : \mathbf{n}\cdot\mathbf{x} \le d\}$.
 
 A bundle of restraints. Construct by calling `.and_()` on any
 restraint; accepts nested `MoleculeConstraint` arguments. Pass to
-`Target.with_constraint` like any single restraint.
+`Target.with_restraint` like any single restraint.
 
 ---
 

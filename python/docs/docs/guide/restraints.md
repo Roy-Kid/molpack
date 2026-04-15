@@ -39,7 +39,7 @@ bundle = InsideBox([0, 0, 0], [40, 40, 40]).and_(
     OutsideSphere(radius=5.0, center=[20, 20, 20])
 )
 
-target = target.with_constraint(bundle)
+target = target.with_restraint(bundle)
 ```
 
 Chain further:
@@ -62,11 +62,11 @@ and produces a new composite.
 A restraint can be applied at three scopes. See [Targets](targets.md)
 for the detailed per-target API and the `Packer` guide for broadcast.
 
-- **Whole target** — `target.with_constraint(r)`.
-- **Atom subset** — `target.with_constraint_for_atoms([1, 2, 3], r)`
+- **Whole target** — `target.with_restraint(r)`.
+- **Atom subset** — `target.with_restraint_for_atoms([1, 2, 3], r)`
   (1-based indices, Packmol convention).
 - **All targets** — `packer.pack(…)` takes no broadcast argument in
-  the Python binding; replicate by calling `with_constraint` on each
+  the Python binding; replicate by calling `with_restraint` on each
   target.
 
 ## Semantics

@@ -40,7 +40,7 @@ which it should be packed.
 ```python
 from molpack import InsideBox
 
-water = water.with_constraint(
+water = water.with_restraint(
     InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
 )
 ```
@@ -110,7 +110,7 @@ water = (
     Target.from_coords(water_positions, water_radii, count=100,
                        elements=["O", "H", "H"])
     .with_name("water")
-    .with_constraint(InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    .with_restraint(InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
 result = Packer(tolerance=2.0, precision=0.01).pack(

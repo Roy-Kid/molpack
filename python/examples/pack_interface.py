@@ -24,12 +24,12 @@ def main() -> None:
     water = (
         molpack.Target.from_coords(water_pos, water_rad, count=100, elements=water_els)
         .with_name("water")
-        .with_constraint(molpack.InsideBox([-20.0, 0.0, 0.0], [0.0, 39.0, 39.0]))
+        .with_restraint(molpack.InsideBox([-20.0, 0.0, 0.0], [0.0, 39.0, 39.0]))
     )
     chloroform = (
         molpack.Target.from_coords(chlor_pos, chlor_rad, count=30, elements=chlor_els)
         .with_name("chloroform")
-        .with_constraint(molpack.InsideBox([0.0, 0.0, 0.0], [21.0, 39.0, 39.0]))
+        .with_restraint(molpack.InsideBox([0.0, 0.0, 0.0], [21.0, 39.0, 39.0]))
     )
     t3 = (
         molpack.Target.from_coords(t3_pos, t3_rad, count=1, elements=t3_els)

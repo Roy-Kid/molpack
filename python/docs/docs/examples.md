@@ -63,12 +63,12 @@ box = InsideBox([0, 0, 0], [40, 40, 40])
 water_target = (
     Target.from_coords(water_pos, water_rad, count=1000, elements=water_els)
     .with_name("water")
-    .with_constraint(box)
+    .with_restraint(box)
 )
 urea_target = (
     Target.from_coords(urea_pos, urea_rad, count=400, elements=urea_els)
     .with_name("urea")
-    .with_constraint(box)
+    .with_restraint(box)
 )
 
 result = Packer().pack([water_target, urea_target], max_loops=400, seed=1_234_567)

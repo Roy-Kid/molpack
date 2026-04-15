@@ -40,7 +40,7 @@ class TestSmallBoxPack:
         target = (
             molpack.Target.from_coords(pos, rad, count=20, elements=els)
             .with_name("water")
-            .with_constraint(molpack.InsideBox([0.0, 0.0, 0.0], [15.0, 15.0, 15.0]))
+            .with_restraint(molpack.InsideBox([0.0, 0.0, 0.0], [15.0, 15.0, 15.0]))
         )
         packer = molpack.Packer(tolerance=2.0).with_progress(False)
         result = packer.pack([target], max_loops=200, seed=42)
@@ -59,12 +59,12 @@ class TestSmallBoxPack:
         water = (
             molpack.Target.from_coords(w_pos, w_rad, count=20, elements=w_els)
             .with_name("water")
-            .with_constraint(box)
+            .with_restraint(box)
         )
         urea = (
             molpack.Target.from_coords(u_pos, u_rad, count=10, elements=u_els)
             .with_name("urea")
-            .with_constraint(box)
+            .with_restraint(box)
         )
 
         packer = molpack.Packer(tolerance=2.0).with_progress(False)
@@ -83,7 +83,7 @@ class TestReproducibility:
         make = lambda: (  # noqa: E731
             molpack.Target.from_coords(
                 pos, rad, count=10, elements=els
-            ).with_constraint(molpack.InsideBox([0.0, 0.0, 0.0], [15.0, 15.0, 15.0]))
+            ).with_restraint(molpack.InsideBox([0.0, 0.0, 0.0], [15.0, 15.0, 15.0]))
         )
         packer = molpack.Packer().with_progress(False)
         r1 = packer.pack([make()], max_loops=100, seed=7)
@@ -94,7 +94,7 @@ class TestReproducibility:
         pos, rad, els = water_template
         target = molpack.Target.from_coords(
             pos, rad, count=10, elements=els
-        ).with_constraint(molpack.InsideBox([0.0, 0.0, 0.0], [15.0, 15.0, 15.0]))
+        ).with_restraint(molpack.InsideBox([0.0, 0.0, 0.0], [15.0, 15.0, 15.0]))
         packer = molpack.Packer().with_progress(False)
         r1 = packer.pack([target], max_loops=100, seed=1)
         r2 = packer.pack([target], max_loops=100, seed=2)
@@ -107,7 +107,7 @@ class TestCompositeConstraints:
         pos, rad, els = water_template
         target = molpack.Target.from_coords(
             pos, rad, count=5, elements=els
-        ).with_constraint(
+        ).with_restraint(
             molpack.InsideBox([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]).and_(
                 molpack.OutsideSphere(5.0, [15.0, 15.0, 15.0])
             )

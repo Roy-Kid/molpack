@@ -5,7 +5,7 @@
 //! ``MoleculeConstraint`` — a bundle of restraints applied together.
 //!
 //! When a ``MoleculeConstraint`` (or a single restraint) is passed to
-//! ``Target.with_constraint`` / ``with_constraint_for_atoms``, every restraint
+//! ``Target.with_restraint`` / ``with_restraint_for_atoms``, every restraint
 //! in the bundle is attached to the target independently.
 
 use crate::helpers::NpF;

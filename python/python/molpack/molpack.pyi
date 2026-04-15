@@ -103,7 +103,7 @@ class Target:
         elements: list[str] | None = None,
     ) -> Target: ...
     def with_name(self, name: str) -> Target: ...
-    def with_constraint(
+    def with_restraint(
         self,
         constraint: InsideBox
         | InsideSphere
@@ -112,7 +112,7 @@ class Target:
         | BelowPlane
         | MoleculeConstraint,
     ) -> Target: ...
-    def with_constraint_for_atoms(
+    def with_restraint_for_atoms(
         self,
         indices: list[int],
         constraint: InsideBox

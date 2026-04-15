@@ -28,7 +28,7 @@ def main() -> None:
             positions, radii, count=100, elements=["O", "H", "H"]
         )
         .with_name("water")
-        .with_constraint(molpack.InsideBox([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
+        .with_restraint(molpack.InsideBox([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
     )
 
     packer = molpack.Packer(tolerance=2.0, precision=0.01).with_progress(False)

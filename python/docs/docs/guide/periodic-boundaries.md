@@ -54,7 +54,7 @@ the faces respect each other:
 ```python
 cell = [30.0, 30.0, 30.0]
 
-target = target.with_constraint(InsideBox([0, 0, 0], cell))
+target = target.with_restraint(InsideBox([0, 0, 0], cell))
 packer = Packer(tolerance=2.0).with_pbc_box(cell)
 result = packer.pack([target], max_loops=200, seed=42)
 ```

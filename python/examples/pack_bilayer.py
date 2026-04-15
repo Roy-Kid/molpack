@@ -24,33 +24,33 @@ def main() -> None:
     water_low = (
         molpack.Target.from_coords(water_pos, water_rad, count=50, elements=water_els)
         .with_name("water_low")
-        .with_constraint(molpack.InsideBox([0.0, 0.0, -10.0], [40.0, 40.0, 0.0]))
+        .with_restraint(molpack.InsideBox([0.0, 0.0, -10.0], [40.0, 40.0, 0.0]))
     )
 
     water_high = (
         molpack.Target.from_coords(water_pos, water_rad, count=50, elements=water_els)
         .with_name("water_high")
-        .with_constraint(molpack.InsideBox([0.0, 0.0, 28.0], [40.0, 40.0, 38.0]))
+        .with_restraint(molpack.InsideBox([0.0, 0.0, 28.0], [40.0, 40.0, 38.0]))
     )
 
     lipid_low = (
         molpack.Target.from_coords(lipid_pos, lipid_rad, count=10, elements=lipid_els)
         .with_name("lipid_low")
-        .with_constraint(molpack.InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 14.0]))
+        .with_restraint(molpack.InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 14.0]))
         # tail atoms 31–32 below z=2
-        .with_constraint_for_atoms([31, 32], molpack.BelowPlane([0.0, 0.0, 1.0], 2.0))
+        .with_restraint_for_atoms([31, 32], molpack.BelowPlane([0.0, 0.0, 1.0], 2.0))
         # head atoms 1–2 above z=12
-        .with_constraint_for_atoms([1, 2], molpack.AbovePlane([0.0, 0.0, 1.0], 12.0))
+        .with_restraint_for_atoms([1, 2], molpack.AbovePlane([0.0, 0.0, 1.0], 12.0))
     )
 
     lipid_high = (
         molpack.Target.from_coords(lipid_pos, lipid_rad, count=10, elements=lipid_els)
         .with_name("lipid_high")
-        .with_constraint(molpack.InsideBox([0.0, 0.0, 14.0], [40.0, 40.0, 28.0]))
+        .with_restraint(molpack.InsideBox([0.0, 0.0, 14.0], [40.0, 40.0, 28.0]))
         # head atoms 1–2 below z=16
-        .with_constraint_for_atoms([1, 2], molpack.BelowPlane([0.0, 0.0, 1.0], 16.0))
+        .with_restraint_for_atoms([1, 2], molpack.BelowPlane([0.0, 0.0, 1.0], 16.0))
         # tail atoms 31–32 above z=26
-        .with_constraint_for_atoms([31, 32], molpack.AbovePlane([0.0, 0.0, 1.0], 26.0))
+        .with_restraint_for_atoms([31, 32], molpack.AbovePlane([0.0, 0.0, 1.0], 26.0))
     )
 
     show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"

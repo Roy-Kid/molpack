@@ -27,23 +27,23 @@ def main() -> None:
     water_inner = (
         molpack.Target.from_coords(water_pos, water_rad, count=308, elements=water_els)
         .with_name("water_inner")
-        .with_constraint(molpack.InsideSphere(13.0, ORIGIN))
+        .with_restraint(molpack.InsideSphere(13.0, ORIGIN))
     )
 
     # 2. Inner lipid layer: head atom 37 inside r=14, tail atom 5 outside r=26.
     lipid_inner = (
         molpack.Target.from_coords(lipid_pos, lipid_rad, count=90, elements=lipid_els)
         .with_name("lipid_inner")
-        .with_constraint_for_atoms([37], molpack.InsideSphere(14.0, ORIGIN))
-        .with_constraint_for_atoms([5], molpack.OutsideSphere(26.0, ORIGIN))
+        .with_restraint_for_atoms([37], molpack.InsideSphere(14.0, ORIGIN))
+        .with_restraint_for_atoms([5], molpack.OutsideSphere(26.0, ORIGIN))
     )
 
     # 3. Outer lipid layer: tail atom 5 inside r=29, head atom 37 outside r=41.
     lipid_outer = (
         molpack.Target.from_coords(lipid_pos, lipid_rad, count=300, elements=lipid_els)
         .with_name("lipid_outer")
-        .with_constraint_for_atoms([5], molpack.InsideSphere(29.0, ORIGIN))
-        .with_constraint_for_atoms([37], molpack.OutsideSphere(41.0, ORIGIN))
+        .with_restraint_for_atoms([5], molpack.InsideSphere(29.0, ORIGIN))
+        .with_restraint_for_atoms([37], molpack.OutsideSphere(41.0, ORIGIN))
     )
 
     # 4. Outer water shell: inside ±47.5 box and outside sphere r=43.
@@ -52,7 +52,7 @@ def main() -> None:
             water_pos, water_rad, count=17_536, elements=water_els
         )
         .with_name("water_outer")
-        .with_constraint(
+        .with_restraint(
             molpack.InsideBox([-47.5, -47.5, -47.5], [47.5, 47.5, 47.5]).and_(
                 molpack.OutsideSphere(43.0, ORIGIN)
             )

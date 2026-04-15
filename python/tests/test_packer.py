@@ -76,30 +76,30 @@ class TestTargetBuilder:
         assert "water" in repr(t2)
         assert "water" not in repr(t)
 
-    def test_with_constraint(self):
+    def test_with_restraint(self):
         t = self._make_target()
         c = molpack.InsideBox([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
-        t2 = t.with_constraint(c)
+        t2 = t.with_restraint(c)
         assert t2 is not t
 
-    def test_with_constraint_type_error(self):
+    def test_with_restraint_type_error(self):
         t = self._make_target()
         with pytest.raises(TypeError):
-            t.with_constraint("not_a_constraint")
+            t.with_restraint("not_a_constraint")
 
-    def test_with_constraint_for_atoms(self):
+    def test_with_restraint_for_atoms(self):
         t = self._make_two_atom_target()
         c = molpack.InsideSphere(5.0, [0.0, 0.0, 0.0])
-        t2 = t.with_constraint_for_atoms([1], c)
+        t2 = t.with_restraint_for_atoms([1], c)
         assert t2 is not t
 
-    def test_with_constraint_for_atoms_validates_packmol_indices(self):
+    def test_with_restraint_for_atoms_validates_packmol_indices(self):
         t = self._make_two_atom_target()
         c = molpack.InsideSphere(5.0, [0.0, 0.0, 0.0])
         with pytest.raises(ValueError, match="1-based indexing"):
-            t.with_constraint_for_atoms([0], c)
+            t.with_restraint_for_atoms([0], c)
         with pytest.raises(ValueError, match="1-based indexing"):
-            t.with_constraint_for_atoms([3], c)
+            t.with_restraint_for_atoms([3], c)
 
     def test_with_maxmove(self):
         t = self._make_target()
@@ -191,7 +191,7 @@ class TestPackerPack:
     def test_minimal_packing(self):
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
         radii = np.array([1.0], dtype=np.float64)
-        target = molpack.Target.from_coords(positions, radii, 3).with_constraint(
+        target = molpack.Target.from_coords(positions, radii, 3).with_restraint(
             molpack.InsideBox([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
         )
 
@@ -206,7 +206,7 @@ class TestPackerPack:
     def test_result_elements_match_positions(self):
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
         radii = np.array([1.0], dtype=np.float64)
-        target = molpack.Target.from_coords(positions, radii, 3).with_constraint(
+        target = molpack.Target.from_coords(positions, radii, 3).with_restraint(
             molpack.InsideBox([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
         )
 
@@ -225,7 +225,7 @@ class TestPackerPack:
         radii = np.array([1.52, 1.20, 1.20], dtype=np.float64)
         target = molpack.Target.from_coords(
             positions, radii, 2, elements=["O", "H", "H"]
-        ).with_constraint(molpack.InsideBox([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]))
+        ).with_restraint(molpack.InsideBox([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]))
 
         packer = molpack.Packer(tolerance=2.0).with_progress(False)
         result = packer.pack([target], max_loops=50, seed=42)
@@ -243,8 +243,8 @@ class TestPackerPack:
         rad2 = np.array([1.0, 1.0], dtype=np.float64)
 
         box_c = molpack.InsideBox([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
-        t1 = molpack.Target.from_coords(pos1, rad1, 2).with_constraint(box_c)
-        t2 = molpack.Target.from_coords(pos2, rad2, 3).with_constraint(box_c)
+        t1 = molpack.Target.from_coords(pos1, rad1, 2).with_restraint(box_c)
+        t2 = molpack.Target.from_coords(pos2, rad2, 3).with_restraint(box_c)
 
         packer = molpack.Packer(tolerance=2.0).with_progress(False)
         result = packer.pack([t1, t2], max_loops=50, seed=42)
@@ -255,7 +255,7 @@ class TestPackerPack:
     def test_with_seed_reproducible(self):
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
         radii = np.array([1.0], dtype=np.float64)
-        target = molpack.Target.from_coords(positions, radii, 3).with_constraint(
+        target = molpack.Target.from_coords(positions, radii, 3).with_restraint(
             molpack.InsideBox([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
         )
 
@@ -274,10 +274,10 @@ class TestPackerPack:
         radii = np.array([1.0], dtype=np.float64)
         box_constraint = molpack.InsideBox([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
 
-        t1 = molpack.Target.from_coords(positions, radii, 2).with_constraint(
+        t1 = molpack.Target.from_coords(positions, radii, 2).with_restraint(
             box_constraint
         )
-        t2 = molpack.Target.from_coords(positions, radii, 3).with_constraint(
+        t2 = molpack.Target.from_coords(positions, radii, 3).with_restraint(
             box_constraint
         )
 
@@ -288,7 +288,7 @@ class TestPackerPack:
     def test_pack_result_repr(self):
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
         radii = np.array([1.0], dtype=np.float64)
-        target = molpack.Target.from_coords(positions, radii, 2).with_constraint(
+        target = molpack.Target.from_coords(positions, radii, 2).with_restraint(
             molpack.InsideBox([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
         )
         packer = molpack.Packer().with_progress(False)
@@ -302,8 +302,8 @@ class TestPackerPack:
         radii = np.array([1.0, 1.0], dtype=np.float64)
         target = (
             molpack.Target.from_coords(positions, radii, 2)
-            .with_constraint(molpack.InsideBox([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]))
-            .with_constraint_for_atoms([1], molpack.AbovePlane([0.0, 0.0, 1.0], 0.0))
+            .with_restraint(molpack.InsideBox([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]))
+            .with_restraint_for_atoms([1], molpack.AbovePlane([0.0, 0.0, 1.0], 0.0))
             .constrain_rotation_x(0.0, 30.0)
             .constrain_rotation_y(0.0, 30.0)
             .constrain_rotation_z(0.0, 30.0)

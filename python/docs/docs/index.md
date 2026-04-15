@@ -24,7 +24,7 @@ radii = np.array([1.52, 1.20, 1.20])
 water = (
     Target.from_coords(positions, radii, count=100, elements=["O", "H", "H"])
     .with_name("water")
-    .with_constraint(InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    .with_restraint(InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
 result = Packer(tolerance=2.0, precision=0.01).pack([water], max_loops=200, seed=42)

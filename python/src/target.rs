@@ -81,7 +81,7 @@ impl PyTarget {
         }
     }
 
-    fn with_constraint(&self, constraint: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+    fn with_restraint(&self, constraint: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let restraints = extract_restraints(constraint)?;
         let mut target = self.inner.clone();
         for r in restraints {
@@ -90,7 +90,7 @@ impl PyTarget {
         Ok(PyTarget { inner: target })
     }
 
-    fn with_constraint_for_atoms(
+    fn with_restraint_for_atoms(
         &self,
         indices: Vec<usize>,
         constraint: &Bound<'_, pyo3::types::PyAny>,

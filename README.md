@@ -53,7 +53,7 @@ from molpack import InsideBox, Packer, Target
 target = (
     Target.from_coords(positions, radii, count=100, elements=["O", "H", "H"])
     .with_name("water")
-    .with_constraint(InsideBox([0, 0, 0], [40, 40, 40]))
+    .with_restraint(InsideBox([0, 0, 0], [40, 40, 40]))
 )
 result = Packer(tolerance=2.0).pack([target], max_loops=200, seed=42)
 ```

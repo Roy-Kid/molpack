@@ -36,19 +36,19 @@ def main() -> None:
     water = (
         molpack.Target.from_coords(water_pos, water_rad, count=1000, elements=water_els)
         .with_name("water")
-        .with_constraint(sphere)
+        .with_restraint(sphere)
     )
     sodium = (
         molpack.Target.from_coords(
             sodium_pos, sodium_rad, count=30, elements=sodium_els
         )
         .with_name("sodium")
-        .with_constraint(sphere)
+        .with_restraint(sphere)
     )
     chloride = (
         molpack.Target.from_coords(chlor_pos, chlor_rad, count=20, elements=chlor_els)
         .with_name("chloride")
-        .with_constraint(sphere)
+        .with_restraint(sphere)
     )
 
     show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"

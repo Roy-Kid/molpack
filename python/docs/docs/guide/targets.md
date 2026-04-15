@@ -83,7 +83,7 @@ Two scopes:
 ```python
 from molpack import InsideBox
 
-target = target.with_constraint(InsideBox([0, 0, 0], [40, 40, 40]))
+target = target.with_restraint(InsideBox([0, 0, 0], [40, 40, 40]))
 ```
 
 ### A subset of atoms
@@ -91,14 +91,14 @@ target = target.with_constraint(InsideBox([0, 0, 0], [40, 40, 40]))
 ```python
 from molpack import BelowPlane, AbovePlane
 
-target = target.with_constraint_for_atoms(
+target = target.with_restraint_for_atoms(
     [31, 32],                                    # 1-based atom indices
     BelowPlane([0.0, 0.0, 1.0], 2.0),
 )
 ```
 
 !!! note "1-based indexing"
-    `with_constraint_for_atoms` uses Packmol's 1-based atom indices.
+    `with_restraint_for_atoms` uses Packmol's 1-based atom indices.
     Passing `0` or an index `> natoms` raises `ValueError`.
 
 Multiple restraints compose with `.and_()` (see [Restraints](restraints.md)).
