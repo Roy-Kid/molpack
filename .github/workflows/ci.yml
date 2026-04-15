@@ -146,7 +146,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install maturin pytest numpy
+          pip install maturin pytest numpy molcrafts-molrs
           maturin develop --release
           pytest -v
         working-directory: molpack/python
