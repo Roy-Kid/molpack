@@ -100,11 +100,7 @@ fn smoke_pack_mixture() {
         .spawn()
         .and_then(|mut child| {
             use std::io::Write;
-            child
-                .stdin
-                .as_mut()
-                .unwrap()
-                .write_all(inp.as_bytes())?;
+            child.stdin.as_mut().unwrap().write_all(inp.as_bytes())?;
             child.wait_with_output()
         })
         .expect("run molpack");
@@ -116,7 +112,11 @@ fn smoke_pack_mixture() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(out_path.exists(), "output file not created: {}", out_path.display());
+    assert!(
+        out_path.exists(),
+        "output file not created: {}",
+        out_path.display()
+    );
 
     // Clean up.
     let _ = std::fs::remove_file(&out_path);
