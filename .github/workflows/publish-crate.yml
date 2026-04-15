@@ -17,11 +17,11 @@ jobs:
     needs: ci
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           repository: MolCrafts/molrs
           path: molrs
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           path: molpack
       - uses: dtolnay/rust-toolchain@stable
