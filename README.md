@@ -14,9 +14,8 @@ Part of the [molrs](https://github.com/MolCrafts/molrs) toolkit.
 
 **Rust**
 
-```toml
-[dependencies]
-molcrafts-molpack = "0.1"
+```bash
+cargo add molcrafts-molpack
 ```
 
 **Python**
@@ -55,26 +54,6 @@ frame = molrs.read_pdb("water.pdb")
 water = (
     Target("water", frame, count=100)
     .with_restraint(InsideBox([0, 0, 0], [40, 40, 40]))
-)
-result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
-```
-
-No `molrs`? Pass a plain dict instead:
-
-```python
-import numpy as np
-from molpack import InsideBox, Molpack, Target
-
-frame = {
-    "atoms": {
-        "x": np.array([0.0, 0.96, -0.24]),
-        "y": np.array([0.0, 0.0,   0.93]),
-        "z": np.zeros(3),
-        "element": ["O", "H", "H"],
-    }
-}
-water = Target("water", frame, count=100).with_restraint(
-    InsideBox([0, 0, 0], [40, 40, 40])
 )
 result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
 ```
