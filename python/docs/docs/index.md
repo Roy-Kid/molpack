@@ -11,23 +11,17 @@ reference output for five canonical workloads.
 ## At a glance
 
 ```python
-import numpy as np
-from molpack import Target, Packer, InsideBox
+import molrs
+from molpack import InsideBox, Molpack, Target
 
-positions = np.array([
-    [0.0, 0.0, 0.0],
-    [0.96, 0.0, 0.0],
-    [-0.24, 0.93, 0.0],
-])
-radii = np.array([1.52, 1.20, 1.20])
+frame = molrs.read_pdb("water.pdb")
 
 water = (
-    Target.from_coords(positions, radii, count=100, elements=["O", "H", "H"])
-    .with_name("water")
+    Target("water", frame, count=100)
     .with_restraint(InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
-result = Packer(tolerance=2.0, precision=0.01).pack([water], max_loops=200, seed=42)
+result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
 print(f"converged={result.converged}  natoms={result.natoms}  fdist={result.fdist:.4f}")
 ```
 
@@ -48,9 +42,8 @@ print(f"converged={result.converged}  natoms={result.natoms}  fdist={result.fdis
 - Rust crate: [`molcrafts-molpack`](https://crates.io/crates/molcrafts-molpack)
   — the underlying engine. All algorithmic details are documented there.
 - [`molcrafts-molrs`](https://pypi.org/project/molcrafts-molrs/) —
-  companion Python package for file I/O (PDB, XYZ, …), SMILES parsing,
-  and the `Frame` data model. `molpack` itself is I/O-free: use `molrs`
-  (or plain numpy) to load coordinates and feed them to
-  [`Target.from_coords`][targets].
+  companion package for file I/O (PDB, XYZ, …) and the `Frame` data
+  model. Pass a `molrs.Frame` directly to `Target`; no manual array
+  extraction needed.
 
 [targets]: guide/targets.md

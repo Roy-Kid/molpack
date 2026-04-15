@@ -2,26 +2,23 @@
 //!
 //! Python API:
 //!
-//! | Python class         | Rust wrapper         | Purpose                             |
-//! |----------------------|----------------------|-------------------------------------|
-//! | `Target`             | [`PyTarget`]         | Molecule specification for packing  |
-//! | `Packer`             | [`PyPacker`]         | Molecular packer (Packmol port)     |
-//! | `PackResult`         | [`PyPackResult`]     | Pack output (positions, elements)   |
-//! | `InsideBox`          | [`PyInsideBox`]      | Box restraint                       |
-//! | `InsideSphere`       | [`PyInsideSphere`]   | Sphere restraint (inside)           |
-//! | `OutsideSphere`      | [`PyOutsideSphere`]  | Sphere restraint (outside)          |
-//! | `AbovePlane`         | [`PyAbovePlane`]     | Half-space restraint                |
-//! | `BelowPlane`         | [`PyBelowPlane`]     | Half-space restraint                |
-//! | `MoleculeConstraint` | [`PyMoleculeConstraint`] | Bundle of restraints            |
+//! | Python class     | Rust wrapper     | Purpose                            |
+//! |------------------|------------------|------------------------------------|
+//! | `Target`         | [`PyTarget`]     | Molecule specification for packing |
+//! | `Molpack`        | [`PyPacker`]     | Molecular packer (Packmol port)    |
+//! | `PackResult`     | [`PyPackResult`] | Pack output (positions, elements)  |
+//! | `InsideBox`      | [`PyInsideBox`]  | Box restraint                      |
+//! | `InsideSphere`   | [`PyInsideSphere`] | Sphere restraint (inside)        |
+//! | `OutsideSphere`  | [`PyOutsideSphere`] | Sphere restraint (outside)      |
+//! | `AbovePlane`     | [`PyAbovePlane`] | Half-space restraint               |
+//! | `BelowPlane`     | [`PyBelowPlane`] | Half-space restraint               |
 
 use pyo3::prelude::*;
 
 mod helpers;
 
 mod constraint;
-use constraint::{
-    PyAbovePlane, PyBelowPlane, PyInsideBox, PyInsideSphere, PyMoleculeConstraint, PyOutsideSphere,
-};
+use constraint::{PyAbovePlane, PyBelowPlane, PyInsideBox, PyInsideSphere, PyOutsideSphere};
 
 mod target;
 use target::PyTarget;
@@ -36,7 +33,6 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyOutsideSphere>()?;
     m.add_class::<PyAbovePlane>()?;
     m.add_class::<PyBelowPlane>()?;
-    m.add_class::<PyMoleculeConstraint>()?;
 
     m.add_class::<PyTarget>()?;
     m.add_class::<PyPacker>()?;

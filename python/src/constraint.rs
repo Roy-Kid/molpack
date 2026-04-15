@@ -1,12 +1,9 @@
 //! Python wrappers for molecular packing restraints.
 //!
 //! Each concrete restraint (``InsideBox``, ``InsideSphere``, ``OutsideSphere``,
-//! ``AbovePlane``, ``BelowPlane``) can be composed via ``.and_()`` to build a
-//! ``MoleculeConstraint`` — a bundle of restraints applied together.
-//!
-//! When a ``MoleculeConstraint`` (or a single restraint) is passed to
-//! ``Target.with_restraint`` / ``with_restraint_for_atoms``, every restraint
-//! in the bundle is attached to the target independently.
+//! ``AbovePlane``, ``BelowPlane``) can be attached to a target via
+//! ``Target.with_restraint`` or ``Target.with_restraint_for_atoms``.
+//! Multiple restraints may be stacked by calling these methods repeatedly.
 
 use crate::helpers::NpF;
 use molpack::restraint::Restraint;
@@ -52,7 +49,9 @@ impl Restraint for AnyRestraint {
     }
 }
 
-fn extract_single(obj: &Bound<'_, pyo3::types::PyAny>) -> PyResult<AnyRestraint> {
+pub(crate) fn extract_restraint(
+    obj: &Bound<'_, pyo3::types::PyAny>,
+) -> PyResult<AnyRestraint> {
     if let Ok(c) = obj.extract::<PyInsideBox>() {
         return Ok(AnyRestraint::InsideBox(c.inner));
     }
@@ -69,25 +68,8 @@ fn extract_single(obj: &Bound<'_, pyo3::types::PyAny>) -> PyResult<AnyRestraint>
         return Ok(AnyRestraint::BelowPlane(c.inner));
     }
     Err(pyo3::exceptions::PyTypeError::new_err(
-        "expected a restraint (InsideBox, InsideSphere, OutsideSphere, AbovePlane, BelowPlane, MoleculeConstraint)",
+        "expected a restraint (InsideBox, InsideSphere, OutsideSphere, AbovePlane, BelowPlane)",
     ))
-}
-
-pub(crate) fn extract_restraints(
-    obj: &Bound<'_, pyo3::types::PyAny>,
-) -> PyResult<Vec<AnyRestraint>> {
-    if let Ok(mc) = obj.extract::<PyMoleculeConstraint>() {
-        return Ok(mc.restraints);
-    }
-    Ok(vec![extract_single(obj)?])
-}
-
-macro_rules! restraint_and {
-    ($self_:expr, $other:expr) => {{
-        let mut rs = vec![AnyRestraint::from($self_.inner.clone())];
-        rs.extend(extract_restraints($other)?);
-        Ok(PyMoleculeConstraint { restraints: rs })
-    }};
 }
 
 #[pyclass(name = "InsideBox", from_py_object)]
@@ -105,19 +87,8 @@ impl PyInsideBox {
         }
     }
 
-    #[pyo3(name = "and_")]
-    fn and_(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyMoleculeConstraint> {
-        restraint_and!(self, other)
-    }
-
     fn __repr__(&self) -> String {
         "InsideBox(...)".to_string()
-    }
-}
-
-impl From<InsideBoxRestraint> for AnyRestraint {
-    fn from(r: InsideBoxRestraint) -> Self {
-        AnyRestraint::InsideBox(r)
     }
 }
 
@@ -136,19 +107,8 @@ impl PyInsideSphere {
         }
     }
 
-    #[pyo3(name = "and_")]
-    fn and_(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyMoleculeConstraint> {
-        restraint_and!(self, other)
-    }
-
     fn __repr__(&self) -> String {
         "InsideSphere(...)".to_string()
-    }
-}
-
-impl From<InsideSphereRestraint> for AnyRestraint {
-    fn from(r: InsideSphereRestraint) -> Self {
-        AnyRestraint::InsideSphere(r)
     }
 }
 
@@ -167,19 +127,8 @@ impl PyOutsideSphere {
         }
     }
 
-    #[pyo3(name = "and_")]
-    fn and_(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyMoleculeConstraint> {
-        restraint_and!(self, other)
-    }
-
     fn __repr__(&self) -> String {
         "OutsideSphere(...)".to_string()
-    }
-}
-
-impl From<OutsideSphereRestraint> for AnyRestraint {
-    fn from(r: OutsideSphereRestraint) -> Self {
-        AnyRestraint::OutsideSphere(r)
     }
 }
 
@@ -198,19 +147,8 @@ impl PyAbovePlane {
         }
     }
 
-    #[pyo3(name = "and_")]
-    fn and_(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyMoleculeConstraint> {
-        restraint_and!(self, other)
-    }
-
     fn __repr__(&self) -> String {
         "AbovePlane(...)".to_string()
-    }
-}
-
-impl From<AbovePlaneRestraint> for AnyRestraint {
-    fn from(r: AbovePlaneRestraint) -> Self {
-        AnyRestraint::AbovePlane(r)
     }
 }
 
@@ -229,38 +167,7 @@ impl PyBelowPlane {
         }
     }
 
-    #[pyo3(name = "and_")]
-    fn and_(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyMoleculeConstraint> {
-        restraint_and!(self, other)
-    }
-
     fn __repr__(&self) -> String {
         "BelowPlane(...)".to_string()
-    }
-}
-
-impl From<BelowPlaneRestraint> for AnyRestraint {
-    fn from(r: BelowPlaneRestraint) -> Self {
-        AnyRestraint::BelowPlane(r)
-    }
-}
-
-#[pyclass(name = "MoleculeConstraint", from_py_object)]
-#[derive(Clone)]
-pub struct PyMoleculeConstraint {
-    pub(crate) restraints: Vec<AnyRestraint>,
-}
-
-#[pymethods]
-impl PyMoleculeConstraint {
-    #[pyo3(name = "and_")]
-    fn and_(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyMoleculeConstraint> {
-        let mut rs = self.restraints.clone();
-        rs.extend(extract_restraints(other)?);
-        Ok(PyMoleculeConstraint { restraints: rs })
-    }
-
-    fn __repr__(&self) -> String {
-        format!("MoleculeConstraint(restraints={})", self.restraints.len())
     }
 }

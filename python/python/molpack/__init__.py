@@ -1,11 +1,12 @@
+"""molpack — Packmol-grade molecular packing with Python bindings."""
+
 from .molpack import (
     AbovePlane,
     BelowPlane,
     InsideBox,
     InsideSphere,
-    MoleculeConstraint,
+    Molpack,
     OutsideSphere,
-    Packer,
     PackResult,
     Target,
 )
@@ -16,8 +17,7 @@ __all__ = [
     "OutsideSphere",
     "AbovePlane",
     "BelowPlane",
-    "MoleculeConstraint",
     "Target",
-    "Packer",
+    "Molpack",
     "PackResult",
 ]

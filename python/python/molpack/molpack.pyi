@@ -3,91 +3,35 @@ Type stubs for the molpack native extension (compiled from Rust via PyO3).
 """
 
 from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 # ---------------------------------------------------------------------------
-# Constraint types
+# Restraint types
 # ---------------------------------------------------------------------------
 
-AnyConstraint = "InsideBox | InsideSphere | OutsideSphere | AbovePlane | BelowPlane | MoleculeConstraint"
+AnyRestraint = "InsideBox | InsideSphere | OutsideSphere | AbovePlane | BelowPlane"
 
 class InsideBox:
     def __init__(self, min: Sequence[float], max: Sequence[float]) -> None: ...
-    def and_(
-        self,
-        other: InsideBox
-        | InsideSphere
-        | OutsideSphere
-        | AbovePlane
-        | BelowPlane
-        | MoleculeConstraint,
-    ) -> MoleculeConstraint: ...
     def __repr__(self) -> str: ...
 
 class InsideSphere:
     def __init__(self, radius: float, center: Sequence[float]) -> None: ...
-    def and_(
-        self,
-        other: InsideBox
-        | InsideSphere
-        | OutsideSphere
-        | AbovePlane
-        | BelowPlane
-        | MoleculeConstraint,
-    ) -> MoleculeConstraint: ...
     def __repr__(self) -> str: ...
 
 class OutsideSphere:
     def __init__(self, radius: float, center: Sequence[float]) -> None: ...
-    def and_(
-        self,
-        other: InsideBox
-        | InsideSphere
-        | OutsideSphere
-        | AbovePlane
-        | BelowPlane
-        | MoleculeConstraint,
-    ) -> MoleculeConstraint: ...
     def __repr__(self) -> str: ...
 
 class AbovePlane:
     def __init__(self, normal: Sequence[float], distance: float) -> None: ...
-    def and_(
-        self,
-        other: InsideBox
-        | InsideSphere
-        | OutsideSphere
-        | AbovePlane
-        | BelowPlane
-        | MoleculeConstraint,
-    ) -> MoleculeConstraint: ...
     def __repr__(self) -> str: ...
 
 class BelowPlane:
     def __init__(self, normal: Sequence[float], distance: float) -> None: ...
-    def and_(
-        self,
-        other: InsideBox
-        | InsideSphere
-        | OutsideSphere
-        | AbovePlane
-        | BelowPlane
-        | MoleculeConstraint,
-    ) -> MoleculeConstraint: ...
-    def __repr__(self) -> str: ...
-
-class MoleculeConstraint:
-    def and_(
-        self,
-        other: InsideBox
-        | InsideSphere
-        | OutsideSphere
-        | AbovePlane
-        | BelowPlane
-        | MoleculeConstraint,
-    ) -> MoleculeConstraint: ...
     def __repr__(self) -> str: ...
 
 # ---------------------------------------------------------------------------
@@ -95,32 +39,16 @@ class MoleculeConstraint:
 # ---------------------------------------------------------------------------
 
 class Target:
-    @staticmethod
-    def from_coords(
-        positions: NDArray[np.float64],
-        radii: NDArray[np.float64],
-        count: int,
-        elements: list[str] | None = None,
-    ) -> Target: ...
+    def __init__(self, name: str, frame: Any, count: int) -> None: ...
     def with_name(self, name: str) -> Target: ...
     def with_restraint(
         self,
-        constraint: InsideBox
-        | InsideSphere
-        | OutsideSphere
-        | AbovePlane
-        | BelowPlane
-        | MoleculeConstraint,
+        constraint: InsideBox | InsideSphere | OutsideSphere | AbovePlane | BelowPlane,
     ) -> Target: ...
     def with_restraint_for_atoms(
         self,
         indices: list[int],
-        constraint: InsideBox
-        | InsideSphere
-        | OutsideSphere
-        | AbovePlane
-        | BelowPlane
-        | MoleculeConstraint,
+        constraint: InsideBox | InsideSphere | OutsideSphere | AbovePlane | BelowPlane,
     ) -> Target: ...
     def with_maxmove(self, maxmove: int) -> Target: ...
     def with_center(self) -> Target: ...
@@ -149,7 +77,7 @@ class Target:
     def __repr__(self) -> str: ...
 
 # ---------------------------------------------------------------------------
-# Packer & PackResult
+# Molpack & PackResult
 # ---------------------------------------------------------------------------
 
 class PackResult:
@@ -167,19 +95,30 @@ class PackResult:
     def natoms(self) -> int: ...
     def __repr__(self) -> str: ...
 
-class Packer:
-    def __init__(self, tolerance: float = 2.0, precision: float = 0.01) -> None: ...
-    def with_tolerance(self, tolerance: float) -> Packer: ...
-    def with_precision(self, precision: float) -> Packer: ...
-    def with_maxit(self, maxit: int) -> Packer: ...
-    def with_nloop0(self, nloop0: int) -> Packer: ...
-    def with_sidemax(self, sidemax: float) -> Packer: ...
-    def with_movefrac(self, movefrac: float) -> Packer: ...
-    def with_movebadrandom(self, enabled: bool) -> Packer: ...
-    def with_disable_movebad(self, disabled: bool) -> Packer: ...
-    def with_pbc(self, min: Sequence[float], max: Sequence[float]) -> Packer: ...
-    def with_pbc_box(self, lengths: Sequence[float]) -> Packer: ...
-    def with_progress(self, enabled: bool) -> Packer: ...
+class Molpack:
+    def __init__(
+        self,
+        tolerance: float = 2.0,
+        precision: float = 0.01,
+        maxit: int = 20,
+        nloop0: int = 0,
+        sidemax: float = 1000.0,
+        movefrac: float = 0.05,
+        movebadrandom: bool = False,
+        disable_movebad: bool = False,
+        progress: bool = True,
+    ) -> None: ...
+    def with_tolerance(self, tolerance: float) -> Molpack: ...
+    def with_precision(self, precision: float) -> Molpack: ...
+    def with_maxit(self, maxit: int) -> Molpack: ...
+    def with_nloop0(self, nloop0: int) -> Molpack: ...
+    def with_sidemax(self, sidemax: float) -> Molpack: ...
+    def with_movefrac(self, movefrac: float) -> Molpack: ...
+    def with_movebadrandom(self, enabled: bool) -> Molpack: ...
+    def with_disable_movebad(self, disabled: bool) -> Molpack: ...
+    def with_pbc(self, min: Sequence[float], max: Sequence[float]) -> Molpack: ...
+    def with_pbc_box(self, lengths: Sequence[float]) -> Molpack: ...
+    def with_progress(self, enabled: bool) -> Molpack: ...
     def pack(
         self,
         targets: list[Target],

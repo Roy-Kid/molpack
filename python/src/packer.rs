@@ -71,7 +71,7 @@ impl PyPackResult {
     }
 }
 
-#[pyclass(name = "Packer")]
+#[pyclass(name = "Molpack")]
 pub struct PyPacker {
     tolerance: F,
     precision: F,
@@ -88,19 +88,40 @@ pub struct PyPacker {
 #[pymethods]
 impl PyPacker {
     #[new]
-    #[pyo3(signature = (tolerance=2.0, precision=0.01))]
-    fn new(tolerance: NpF, precision: NpF) -> Self {
+    #[pyo3(signature = (
+        tolerance=2.0,
+        precision=0.01,
+        maxit=20,
+        nloop0=0,
+        sidemax=1000.0,
+        movefrac=0.05,
+        movebadrandom=false,
+        disable_movebad=false,
+        progress=true,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        tolerance: NpF,
+        precision: NpF,
+        maxit: usize,
+        nloop0: usize,
+        sidemax: NpF,
+        movefrac: NpF,
+        movebadrandom: bool,
+        disable_movebad: bool,
+        progress: bool,
+    ) -> Self {
         PyPacker {
             tolerance,
             precision,
-            maxit: 20,
-            nloop0: 0,
-            sidemax: 1000.0,
-            movefrac: 0.05,
-            movebadrandom: false,
-            disable_movebad: false,
+            maxit,
+            nloop0,
+            sidemax,
+            movefrac,
+            movebadrandom,
+            disable_movebad,
             pbc: None,
-            progress: true,
+            progress,
         }
     }
 
@@ -214,8 +235,8 @@ impl PyPacker {
 
     fn __repr__(&self) -> String {
         format!(
-            "Packer(tolerance={:.2}, precision={:.4})",
-            self.tolerance, self.precision
+            "Molpack(tolerance={:.2}, precision={:.4}, maxit={}, nloop0={}, sidemax={:.1}, movefrac={:.3})",
+            self.tolerance, self.precision, self.maxit, self.nloop0, self.sidemax, self.movefrac
         )
     }
 }

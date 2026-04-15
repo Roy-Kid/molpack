@@ -22,7 +22,7 @@ molcrafts-molpack = "0.1"
 **Python**
 
 ```bash
-pip install molcrafts-molpack
+pip install molcrafts-molpack molcrafts-molrs
 ```
 
 ## Quick start
@@ -47,15 +47,36 @@ let result = Molpack::new()
 **Python**
 
 ```python
-import numpy as np
-from molpack import InsideBox, Packer, Target
+import molrs
+from molpack import InsideBox, Molpack, Target
 
-target = (
-    Target.from_coords(positions, radii, count=100, elements=["O", "H", "H"])
-    .with_name("water")
+frame = molrs.read_pdb("water.pdb")
+
+water = (
+    Target("water", frame, count=100)
     .with_restraint(InsideBox([0, 0, 0], [40, 40, 40]))
 )
-result = Packer(tolerance=2.0).pack([target], max_loops=200, seed=42)
+result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
+```
+
+No `molrs`? Pass a plain dict instead:
+
+```python
+import numpy as np
+from molpack import InsideBox, Molpack, Target
+
+frame = {
+    "atoms": {
+        "x": np.array([0.0, 0.96, -0.24]),
+        "y": np.array([0.0, 0.0,   0.93]),
+        "z": np.zeros(3),
+        "element": ["O", "H", "H"],
+    }
+}
+water = Target("water", frame, count=100).with_restraint(
+    InsideBox([0, 0, 0], [40, 40, 40])
+)
+result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
 ```
 
 ## Examples

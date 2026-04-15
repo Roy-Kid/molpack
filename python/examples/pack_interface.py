@@ -9,31 +9,27 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import molrs
+
 import molpack
-from _common import read_pdb_as_arrays
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE.parent.parent / "examples" / "pack_interface"
 
 
 def main() -> None:
-    water_pos, water_rad, water_els = read_pdb_as_arrays(DATA / "water.pdb")
-    chlor_pos, chlor_rad, chlor_els = read_pdb_as_arrays(DATA / "chloroform.pdb")
-    t3_pos, t3_rad, t3_els = read_pdb_as_arrays(DATA / "t3.pdb")
+    water_frame = molrs.read_pdb(str(DATA / "water.pdb"))
+    chlor_frame = molrs.read_pdb(str(DATA / "chloroform.pdb"))
+    t3_frame = molrs.read_pdb(str(DATA / "t3.pdb"))
 
-    water = (
-        molpack.Target.from_coords(water_pos, water_rad, count=100, elements=water_els)
-        .with_name("water")
-        .with_restraint(molpack.InsideBox([-20.0, 0.0, 0.0], [0.0, 39.0, 39.0]))
+    water = molpack.Target("water", water_frame, count=100).with_restraint(
+        molpack.InsideBox([-20.0, 0.0, 0.0], [0.0, 39.0, 39.0])
     )
-    chloroform = (
-        molpack.Target.from_coords(chlor_pos, chlor_rad, count=30, elements=chlor_els)
-        .with_name("chloroform")
-        .with_restraint(molpack.InsideBox([0.0, 0.0, 0.0], [21.0, 39.0, 39.0]))
+    chloroform = molpack.Target("chloroform", chlor_frame, count=30).with_restraint(
+        molpack.InsideBox([0.0, 0.0, 0.0], [21.0, 39.0, 39.0])
     )
     t3 = (
-        molpack.Target.from_coords(t3_pos, t3_rad, count=1, elements=t3_els)
-        .with_name("t3")
+        molpack.Target("t3", t3_frame, count=1)
         .with_center()
         .fixed_at_with_euler(
             position=[0.0, 20.0, 20.0],
@@ -42,7 +38,7 @@ def main() -> None:
     )
 
     show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
-    packer = molpack.Packer(tolerance=2.0, precision=0.01).with_progress(show_progress)
+    packer = molpack.Molpack(tolerance=2.0, precision=0.01).with_progress(show_progress)
 
     result = packer.pack([water, chloroform, t3], max_loops=400, seed=1_234_567)
 
