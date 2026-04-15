@@ -62,7 +62,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: molpack
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets --features filesystem -- -D warnings
         working-directory: molpack
 
   # ── full checks (blocked on both lint gates) ───────────────────────────────
@@ -91,8 +91,11 @@ jobs:
       - name: Fetch test data
         run: bash scripts/fetch-test-data.sh
         working-directory: molrs
-      - name: Test
+      - name: Test (library + examples)
         run: cargo test --lib --tests --examples
+        working-directory: molpack
+      - name: Test CLI (filesystem feature)
+        run: cargo test --test cli --features filesystem
         working-directory: molpack
       - name: Benches build
         run: cargo bench --no-run

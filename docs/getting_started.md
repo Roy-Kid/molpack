@@ -4,6 +4,124 @@ This chapter walks through the minimum you need to run a packing job
 and the most common customization points. Read the reference docs of
 individual types on the crate landing page for full details.
 
+## CLI
+
+The `molpack` binary accepts the same `.inp` script format as the original
+Packmol, making it a drop-in replacement for the command-line workflow.
+
+### Installing
+
+```bash
+cargo install molcrafts-molpack --features filesystem
+```
+
+Or build from source:
+
+```bash
+cargo build --release --bin molpack --features filesystem
+```
+
+### Running a script
+
+```bash
+# File argument — paths inside the script resolve relative to its directory
+molpack mixture.inp
+
+# Stdin — compatible with the classic Packmol invocation
+molpack < mixture.inp
+cat mixture.inp | molpack
+```
+
+### Script format
+
+The `.inp` format is line-oriented. Lines starting with `#` are comments.
+Global keywords come first; each molecule type occupies a
+`structure … end structure` block.
+
+```text
+# Global settings
+tolerance 2.0          # minimum atom–atom distance in Å (default 2.0)
+seed 42                # random seed for reproducibility (optional)
+filetype pdb           # input format for all structure files (optional)
+output packed.pdb      # output file; format inferred from extension
+nloop 400              # max outer-loop iterations (default 400)
+
+# One block per molecule type
+structure water.pdb
+  number 1000
+  inside box 0. 0. 0. 40. 40. 40.
+end structure
+
+structure urea.pdb
+  number 400
+  inside box 0. 0. 0. 40. 40. 40.
+end structure
+```
+
+**Restraint keywords** (all Packmol restraint types are supported):
+
+| Keyword | Scope | Description |
+|---|---|---|
+| `inside box x0 y0 z0 x1 y1 z1` | molecule / atoms | Axis-aligned box |
+| `inside sphere cx cy cz r` | molecule / atoms | Sphere |
+| `outside sphere cx cy cz r` | molecule / atoms | Exclusion sphere |
+| `over plane nx ny nz d` | molecule / atoms | Half-space (above) |
+| `below plane nx ny nz d` | molecule / atoms | Half-space (below) |
+
+Per-atom-subset restraints use an `atoms … end atoms` sub-block:
+
+```text
+structure palmitoil.pdb
+  number 10
+  inside box 0. 0. 0. 40. 40. 14.
+  atoms 31 32          # 1-based atom indices
+    below plane 0. 0. 1. 2.
+  end atoms
+  atoms 1 2
+    over plane 0. 0. 1. 12.
+  end atoms
+end structure
+```
+
+Fixed-position placement:
+
+```text
+structure protein.pdb
+  number 1
+  center
+  fixed 0. 0. 0. 0. 0. 0.   # x y z  euler_x euler_y euler_z
+end structure
+```
+
+### Extended format support
+
+molpack extends Packmol's PDB/XYZ input support with the additional readers
+from molrs-io. The `filetype` keyword or file extension selects the format:
+
+| Format | Read | Write | Extension / `filetype` keyword |
+|---|---|---|---|
+| PDB | ✓ | ✓ | `.pdb` / `pdb` |
+| XYZ | ✓ | ✓ | `.xyz` / `xyz` |
+| SDF / MOL | ✓ | — | `.sdf`, `.mol` / `sdf` |
+| LAMMPS dump | ✓ | ✓ | `.lammpstrj` / `lammps_dump` |
+| LAMMPS data | ✓ | — | `.data` / `lammps_data` |
+
+The output format is always inferred from the extension of the `output` path.
+
+### Running the canonical Packmol examples via CLI
+
+The five canonical workloads each ship with a `.inp` file:
+
+```bash
+molpack examples/pack_mixture/mixture.inp
+molpack examples/pack_bilayer/bilayer-comment.inp
+molpack examples/pack_interface/interface.inp
+molpack examples/pack_solvprotein/solvprotein.inp
+molpack examples/pack_spherical/spherical.inp
+```
+
+---
+
 ## Adding the dependency
 
 ```toml

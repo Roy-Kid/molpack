@@ -12,7 +12,13 @@ Part of the [molrs](https://github.com/MolCrafts/molrs) toolkit.
 
 ## Install
 
-**Rust**
+**CLI**
+
+```bash
+cargo install molcrafts-molpack --features filesystem
+```
+
+**Rust library**
 
 ```bash
 cargo add molcrafts-molpack
@@ -23,6 +29,50 @@ cargo add molcrafts-molpack
 ```bash
 pip install molcrafts-molpack molcrafts-molrs
 ```
+
+## CLI
+
+The `molpack` binary accepts the same `.inp` script format as Packmol, making it a drop-in replacement. Relative file paths in the script are resolved against the script's own directory (file-arg mode) or the current directory (stdin mode).
+
+```bash
+# File argument (paths resolved relative to the .inp file's directory)
+molpack mixture.inp
+
+# Stdin — compatible with Packmol usage
+molpack < mixture.inp
+cat mixture.inp | molpack
+```
+
+**Supported `.inp` keywords**
+
+| Keyword | Description |
+|---|---|
+| `tolerance <f>` | Minimum atom–atom distance (Å). Default 2.0 |
+| `seed <n>` | Random seed for reproducibility |
+| `filetype <fmt>` | Input format for all structure files |
+| `output <path>` | Output file path (format inferred from extension) |
+| `nloop <n>` | Maximum outer-loop iterations. Default 400 |
+| `avoid_overlap <yes\|no>` | Parsed for compatibility |
+| `structure <file>` … `end structure` | One block per molecule type |
+| `number <n>` | Copies to pack |
+| `inside box x0 y0 z0 x1 y1 z1` | Axis-aligned box restraint |
+| `inside sphere cx cy cz r` | Sphere restraint |
+| `outside sphere cx cy cz r` | Exclusion sphere |
+| `over plane nx ny nz d` | Half-space (above) restraint |
+| `below plane nx ny nz d` | Half-space (below) restraint |
+| `center` | Center molecule at origin before packing |
+| `fixed x y z ex ey ez` | Fix molecule at position + Euler angles |
+| `atoms i j …` … `end atoms` | Per-atom-subset restraints |
+
+**Extended format support** — beyond Packmol's PDB/XYZ, molpack also reads SDF/MOL, LAMMPS dump, and LAMMPS data files. Set `filetype` to `sdf`, `lammps_dump`, or `lammps_data`, or use the matching file extension:
+
+| Format | Read | Write | Extension / filetype |
+|---|---|---|---|
+| PDB | ✓ | ✓ | `.pdb` / `pdb` |
+| XYZ | ✓ | ✓ | `.xyz` / `xyz` |
+| SDF / MOL | ✓ | — | `.sdf`, `.mol` / `sdf` |
+| LAMMPS dump | ✓ | ✓ | `.lammpstrj` / `lammps_dump` |
+| LAMMPS data | ✓ | — | `.data` / `lammps_data` |
 
 ## Quick start
 

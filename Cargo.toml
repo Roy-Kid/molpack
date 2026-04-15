@@ -26,6 +26,7 @@ ndarray = "0.17"
 log = "0.4"
 env_logger = "0.11"
 rayon = { version = "1.11", optional = true }
+clap = { version = "4", features = ["derive"] }
 
 [features]
 default = []
@@ -54,6 +55,11 @@ harness = false
 [[bench]]
 name = "objective_dispatch"
 harness = false
+
+[[bin]]
+name = "molpack"
+path = "src/bin/molpack/main.rs"
+required-features = ["filesystem"]
 
 [profile.release]
 lto = "thin"
