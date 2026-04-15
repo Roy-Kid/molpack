@@ -116,7 +116,9 @@ impl Default for Molpack {
 impl Molpack {
     /// Create a packer with no handlers.
     /// Add handlers via [`add_handler`][Self::add_handler]:
-    /// [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], etc.
+    /// [`ProgressHandler`][crate::ProgressHandler],
+    /// [`EarlyStopHandler`][crate::EarlyStopHandler],
+    /// [`XYZHandler`][crate::XYZHandler], etc.
     pub fn new() -> Self {
         Self {
             handlers: Vec::new(),

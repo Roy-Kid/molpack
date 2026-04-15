@@ -50,7 +50,7 @@ impl SwapState {
 
     /// action=1: set up reduced x for `itype` only.
     ///
-    /// Returns the compact x vector (length = nmols[itype] * 6).
+    /// Returns the compact x vector (length = `nmols[itype]` * 6).
     /// Also updates `sys.ntotmol` and `sys.comptype`.
     pub fn set_type(&self, itype: usize, sys: &mut PackContext) -> Vec<F> {
         // Byte-offsets in xfull for this type's COM/euler variables

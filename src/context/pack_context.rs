@@ -56,21 +56,21 @@ pub struct PackContext {
     pub constraints: Constraints,
 
     // ---- Atom Cartesian coordinates (updated every function evaluation) ----
-    /// Current Cartesian positions: xcart[icart] = [x, y, z]. Size: ntotat.
+    /// Current Cartesian positions: `xcart[icart]` = `[x, y, z]`. Size: ntotat.
     pub xcart: Vec<[F; 3]>,
-    /// Element per atom: elements[icart]. Size: ntotat. `None` means unknown/"X".
+    /// Element per atom: `elements[icart]`. Size: ntotat. `None` means unknown/"X".
     pub elements: Vec<Option<Element>>,
 
     // ---- Reference (centered) coordinates ----
-    /// Reference coordinates coor[idatom] = [x, y, z]. Size: total atoms across all types.
+    /// Reference coordinates `coor[idatom]` = `[x, y, z]`. Size: total atoms across all types.
     pub coor: Vec<[F; 3]>,
 
     // ---- Radii ----
-    /// Current radii (may be scaled): radius[icart]. Size: ntotat.
+    /// Current radii (may be scaled): `radius[icart]`. Size: ntotat.
     pub radius: Vec<F>,
-    /// Original (unscaled) radii: radius_ini[icart]. Size: ntotat.
+    /// Original (unscaled) radii: `radius_ini[icart]`. Size: ntotat.
     pub radius_ini: Vec<F>,
-    /// Function scaling per atom: fscale[icart]. Size: ntotat.
+    /// Function scaling per atom: `fscale[icart]`. Size: ntotat.
     pub fscale: Vec<F>,
 
     // ---- Short radius (optional secondary penalty) ----
@@ -89,11 +89,11 @@ pub struct PackContext {
     pub frest_atom: Vec<F>,
 
     // ---- Molecule topology ----
-    /// Number of molecules per type: nmols[itype]. 0-based type index.
+    /// Number of molecules per type: `nmols[itype]`. 0-based type index.
     pub nmols: Vec<usize>,
-    /// Number of atoms per type: natoms[itype]. 0-based type index.
+    /// Number of atoms per type: `natoms[itype]`. 0-based type index.
     pub natoms: Vec<usize>,
-    /// First datum atom index (0-based) for each type: idfirst[itype].
+    /// First datum atom index (0-based) for each type: `idfirst[itype]`.
     pub idfirst: Vec<usize>,
     /// Total number of types (free).
     pub ntype: usize,
@@ -115,7 +115,7 @@ pub struct PackContext {
     pub rot_bound: Vec<[[F; 2]; 3]>,
 
     // ---- Restraints ----
-    /// All restraints pool: restraints[irest].
+    /// All restraints pool: `restraints[irest]`.
     pub restraints: Vec<Arc<dyn Restraint>>,
     /// CSR offsets for per-atom restraint indices:
     /// restraints of atom `icart` are in `iratom_data[iratom_offsets[icart]..iratom_offsets[icart+1]]`.
@@ -124,9 +124,9 @@ pub struct PackContext {
     pub iratom_data: Vec<RestraintRef>,
 
     // ---- Cell list bookkeeping ----
-    /// Type index per atom: ibtype[icart] (0-based type index).
+    /// Type index per atom: `ibtype[icart]` (0-based type index).
     pub ibtype: Vec<usize>,
-    /// Molecule index within its type: ibmol[icart] (0-based).
+    /// Molecule index within its type: `ibmol[icart]` (0-based).
     pub ibmol: Vec<usize>,
     /// Is this a fixed atom?
     pub fixedatom: Vec<bool>,
@@ -140,16 +140,16 @@ pub struct PackContext {
     pub pbc_min: [F; 3],
 
     // ---- Linked cell lists ----
-    /// latomfirst[i][j][k] = first atom index in cell (i,j,k), None means empty.
+    /// `latomfirst[i][j][k]` = first atom index in cell (i,j,k), None means empty.
     /// Stored as flat Vec indexed by `index_cell`.
     pub latomfirst: Vec<Option<usize>>,
-    /// latomnext[icart] = next atom in the same cell (None = end).
+    /// `latomnext[icart]` = next atom in the same cell (None = end).
     pub latomnext: Vec<Option<usize>>,
     /// Fixed atom list per cell (permanent).
     pub latomfix: Vec<Option<usize>>,
     /// Occupied cell linked list: first cell.
     pub lcellfirst: Option<usize>,
-    /// lcellnext[icell] = next occupied cell.
+    /// `lcellnext[icell]` = next occupied cell.
     pub lcellnext: Vec<Option<usize>>,
     /// Is cell empty?
     pub empty_cell: Vec<bool>,

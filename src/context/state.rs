@@ -1,4 +1,4 @@
-//! Runtime state views over [`PackContext`](super::PackContext).
+//! Runtime state views over [`PackContext`].
 
 use super::PackContext;
 use molrs::types::F;

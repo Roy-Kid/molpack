@@ -61,6 +61,11 @@ name = "molpack"
 path = "src/bin/molpack/main.rs"
 required-features = ["filesystem"]
 
+[[test]]
+name = "cli"
+path = "tests/cli.rs"
+required-features = ["filesystem"]
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
