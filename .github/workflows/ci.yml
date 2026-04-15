@@ -30,8 +30,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install ruff + ty
-        run: pip install ruff ty
+      - name: Install ruff + ty + type-check deps
+        run: pip install ruff ty numpy pytest molcrafts-molrs
       - name: ruff format
         run: ruff format --check .
         working-directory: molpack/python

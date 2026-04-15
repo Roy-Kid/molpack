@@ -112,3 +112,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Bugs and feature requests via [GitHub Is
 ## License
 
 BSD-3-Clause
+
+## References
+
+- Martínez, L.; Andrade, R.; Birgin, E. G.; Martínez, J. M.
+  **PACKMOL: A package for building initial configurations for molecular dynamics simulations.**
+  *J. Comput. Chem.* **2009**, *30* (13), 2157–2164.
+  https://doi.org/10.1002/jcc.21224
