@@ -1,4 +1,4 @@
-//! Read-only model/topology view over [`PackContext`](super::PackContext).
+//! Read-only model/topology view over [`PackContext`].
 
 use super::PackContext;
 

@@ -1,10 +1,9 @@
 """Shared helpers for the molpack Python examples.
 
-Keeps the examples self-contained: a minimal PDB loader and a small
-van der Waals radius table let every example run without depending on
-`molcrafts-molrs` (or any other I/O library). If you already have
-`molrs` installed, replace ``read_pdb_as_arrays`` with
-``molrs.read_pdb`` plus ``block.view("x")`` etc.
+Provides a minimal PDB loader for cases where ``molrs`` is unavailable.
+When ``molrs`` is installed, prefer ``molrs.read_pdb(path)`` directly —
+the returned ``Frame`` can be passed straight to
+``molpack.Target(name, frame, count)``.
 """
 
 from __future__ import annotations

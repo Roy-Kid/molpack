@@ -4,12 +4,8 @@ Import surface:
 
 ```python
 from molpack import (
-    # Target + packer
-    Target, Packer, PackResult,
-    # Restraints
+    Target, Molpack, PackResult,
     InsideBox, InsideSphere, OutsideSphere, AbovePlane, BelowPlane,
-    # Composite
-    MoleculeConstraint,
 )
 ```
 
@@ -17,17 +13,22 @@ from molpack import (
 
 ## `Target`
 
-Molecule-type specification: template coords, radii, elements, copy
-count. Immutable — builder methods return new instances.
+Molecule-type specification: template geometry, element symbols, copy
+count. VdW radii are looked up automatically from element symbols
+(Bondi 1964). Immutable — builder methods return new instances.
 
 **Constructor**
 
-- `Target.from_coords(positions, radii, count, elements=None)` →
-  `Target`
-    - `positions : ndarray (N, 3) float64`
-    - `radii     : ndarray (N,)   float64`
-    - `count     : int`
-    - `elements  : list[str] | None` — default `"X"` per atom.
+```python
+Target(name: str, frame, count: int)
+```
+
+- `name`  — label used in diagnostics and output.
+- `frame` — any object with `frame["atoms"]` returning a block with
+  columns `"x"`, `"y"`, `"z"`, and `"element"` (or `"symbol"` for
+  `molrs` PDB frames). Accepts `molrs.Frame`, `molpy.Frame`, or a
+  plain dict.
+- `count` — number of copies to produce.
 
 **Metadata builders**
 
@@ -40,7 +41,7 @@ count. Immutable — builder methods return new instances.
 - `.fixed_at(position: [x, y, z]) -> Target`
 - `.fixed_at_with_euler(position, euler) -> Target` — `euler` in radians.
 
-**Rotation bounds**
+**Rotation bounds** (degrees)
 
 - `.constrain_rotation_x(center_deg, half_width_deg) -> Target`
 - `.constrain_rotation_y(center_deg, half_width_deg) -> Target`
@@ -48,9 +49,10 @@ count. Immutable — builder methods return new instances.
 
 **Restraints**
 
-- `.with_constraint(restraint) -> Target`
-- `.with_constraint_for_atoms(indices: list[int], restraint) -> Target`
-  — 1-based indexing.
+- `.with_restraint(restraint) -> Target` — attach to all atoms; call
+  multiple times to stack restraints.
+- `.with_restraint_for_atoms(indices: list[int], restraint) -> Target`
+  — 1-based Packmol atom indices.
 
 **Solver budget**
 
@@ -65,13 +67,25 @@ count. Immutable — builder methods return new instances.
 
 ---
 
-## `Packer`
+## `Molpack`
 
 Orchestrator for the three-phase GENCAN optimizer.
 
 **Constructor**
 
-- `Packer(tolerance=2.0, precision=0.01)`
+```python
+Molpack(
+    tolerance=2.0,
+    precision=0.01,
+    maxit=20,
+    nloop0=0,
+    sidemax=1000.0,
+    movefrac=0.05,
+    movebadrandom=False,
+    disable_movebad=False,
+    progress=True,
+)
+```
 
 **Builder methods** (all immutable)
 
@@ -83,14 +97,15 @@ Orchestrator for the three-phase GENCAN optimizer.
 - `.with_movefrac(f: float)`
 - `.with_movebadrandom(enabled: bool)`
 - `.with_disable_movebad(disabled: bool)`
-- `.with_pbc(min: [x, y, z], max: [x, y, z])`
-- `.with_pbc_box(lengths: [x, y, z])`
+- `.with_pbc(min: [x,y,z], max: [x,y,z])`
+- `.with_pbc_box(lengths: [x,y,z])`
 - `.with_progress(enabled: bool)`
 
 **Run**
 
-- `.pack(targets: list[Target], max_loops: int, seed: int | None = None)
-   -> PackResult`
+```python
+.pack(targets: list[Target], max_loops: int = 200, seed: int | None = None) -> PackResult
+```
 
 ---
 
@@ -111,8 +126,7 @@ Read-only output container.
 
 ## Restraints
 
-All restraint classes are immutable and support `.and_(other)` to
-compose into a `MoleculeConstraint`.
+All restraint classes are immutable.
 
 ### `InsideBox(min, max)`
 
@@ -129,29 +143,19 @@ Complement of closed ball.
 ### `AbovePlane(normal, distance)`
 
 Half-space $\{\mathbf{x} : \mathbf{n}\cdot\mathbf{x} \ge d\}$.
-`normal` is a 3-element sequence; the packer does not auto-normalise.
 
 ### `BelowPlane(normal, distance)`
 
 Half-space $\{\mathbf{x} : \mathbf{n}\cdot\mathbf{x} \le d\}$.
 
-### `MoleculeConstraint`
-
-A bundle of restraints. Construct by calling `.and_()` on any
-restraint; accepts nested `MoleculeConstraint` arguments. Pass to
-`Target.with_constraint` like any single restraint.
-
 ---
 
 ## Exceptions
 
-`molpack` raises standard Python exceptions from `pack()`:
+`molpack` raises standard Python exceptions:
 
-- `ValueError` — shape mismatch, invalid atom index (must be 1-based
-  and in $[1, N]$), invalid PBC box.
-- `RuntimeError` — optimizer-level failures (produced from
-  `PackError::Display`).
+- `ValueError` — invalid atom index (must be 1-based and in $[1, N]$),
+  or mismatched array lengths when building a frame manually.
+- `RuntimeError` — optimizer-level failures (zero targets, invalid PBC
+  box, etc.). Message is the Rust `PackError::Display` rendering.
 - `TypeError` — wrong argument type passed to restraint builders.
-
-No custom exception hierarchy is exposed; consume the message string
-for diagnostics.

@@ -8,13 +8,27 @@ import pytest
 import molpack
 
 
-def _make_tiny_pack():
+def _make_frame(
+    positions: np.ndarray,
+    elements: list[str],
+) -> dict:
+    return {
+        "atoms": {
+            "x": positions[:, 0].copy(),
+            "y": positions[:, 1].copy(),
+            "z": positions[:, 2].copy(),
+            "element": elements,
+        }
+    }
+
+
+def _make_tiny_pack() -> molpack.PackResult:
     positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float64)
-    radii = np.array([1.0, 1.0], dtype=np.float64)
-    target = molpack.Target.from_coords(
-        positions, radii, 3, elements=["O", "H"]
-    ).with_constraint(molpack.InsideBox([0.0, 0.0, 0.0], [15.0, 15.0, 15.0]))
-    packer = molpack.Packer(tolerance=2.0).with_progress(False)
+    frame = _make_frame(positions, ["O", "H"])
+    target = molpack.Target("mol", frame, 3).with_restraint(
+        molpack.InsideBox([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
+    )
+    packer = molpack.Molpack(tolerance=2.0).with_progress(False)
     return packer.pack([target], max_loops=50, seed=42)
 
 
@@ -53,34 +67,48 @@ class TestPackResultProperties:
         assert result.elements == ["O", "H"] * 3
 
 
-class TestPackerErrorPaths:
+class TestMolpackErrorPaths:
     def test_empty_targets_list_raises(self):
-        packer = molpack.Packer().with_progress(False)
+        packer = molpack.Molpack().with_progress(False)
         with pytest.raises(RuntimeError):
             packer.pack([], max_loops=10, seed=1)
 
     def test_invalid_pbc_raises_runtime(self):
         # Zero-length axis is rejected inside pack().
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
-        radii = np.array([1.0], dtype=np.float64)
-        target = molpack.Target.from_coords(positions, radii, 1).with_constraint(
+        frame = {
+            "atoms": {
+                "x": positions[:, 0],
+                "y": positions[:, 1],
+                "z": positions[:, 2],
+                "element": ["X"],
+            }
+        }
+        target = molpack.Target("mol", frame, 1).with_restraint(
             molpack.InsideBox([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
         )
-        packer = molpack.Packer().with_progress(False).with_pbc_box([0.0, 10.0, 10.0])
+        packer = molpack.Molpack().with_progress(False).with_pbc_box([0.0, 10.0, 10.0])
         with pytest.raises(RuntimeError):
             packer.pack([target], max_loops=10, seed=1)
 
 
-class TestPackerAcceptsCompositeConstraint:
-    def test_molecule_constraint_bundle(self):
+class TestMultipleRestraints:
+    def test_stacked_restraints(self):
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
-        radii = np.array([1.0], dtype=np.float64)
-        bundle = molpack.InsideBox([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]).and_(
-            molpack.OutsideSphere(2.0, [10.0, 10.0, 10.0])
+        frame = {
+            "atoms": {
+                "x": positions[:, 0],
+                "y": positions[:, 1],
+                "z": positions[:, 2],
+                "element": ["X"],
+            }
+        }
+        target = (
+            molpack.Target("mol", frame, 3)
+            .with_restraint(molpack.InsideBox([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]))
+            .with_restraint(molpack.OutsideSphere(2.0, [10.0, 10.0, 10.0]))
         )
-
-        target = molpack.Target.from_coords(positions, radii, 3).with_constraint(bundle)
-        packer = molpack.Packer(tolerance=2.0).with_progress(False)
+        packer = molpack.Molpack(tolerance=2.0).with_progress(False)
         result = packer.pack([target], max_loops=100, seed=42)
 
         assert result.positions.shape == (3, 3)

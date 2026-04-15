@@ -1,21 +1,89 @@
 //! Python wrapper for packing `Target`.
 //!
-//! A [`PyTarget`] describes one type of molecule to pack: its template
-//! coordinates, radii, element symbols, and the number of copies.
+//! [`PyTarget`] describes one type of molecule to pack: its template
+//! geometry, element symbols, and the number of copies.
 //!
-//! Unlike the old molrs-python binding, this standalone molpack binding does
-//! not accept a `molrs.Frame` object directly (PyO3 types do not cross
-//! extension modules). Construct targets from numpy arrays via
-//! [`PyTarget::from_coords`]; callers with a `molrs.Frame` should extract
-//! positions/elements on the Python side and forward them here.
+//! The constructor accepts any ``frame``-like object with a ``"atoms"`` block:
+//!
+//! - ``molrs.Frame`` (from ``molrs.read_pdb`` / ``read_xyz``) — block columns
+//!   are accessed via ``.view(name)`` since ``molrs.Block`` has no ``__getitem__``.
+//! - ``molpy.Frame`` / plain dicts — columns accessed via ``block[name]``.
+//!
+//! Rust calls the appropriate Python method by probing ``.view()`` first, then
+//! falling back to ``[]``.  The element column is tried as ``"element"`` first
+//! (molpy, XYZ), then ``"symbol"`` (molrs PDB).
 
-use crate::constraint::extract_restraints;
+use crate::constraint::extract_restraint;
 use crate::helpers::NpF;
 use molpack::F;
 use molpack::target::Target;
-use numpy::{PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyAny;
+
+/// Bondi (1964) van der Waals radius for a given element symbol (Å).
+/// Falls back to 1.50 Å for unknowns.
+pub(crate) fn vdw_radius_for(element: &str) -> NpF {
+    match element.to_uppercase().as_str() {
+        "H" => 1.20,
+        "C" => 1.70,
+        "N" => 1.55,
+        "O" => 1.52,
+        "F" => 1.47,
+        "P" => 1.80,
+        "S" => 1.80,
+        "CL" => 1.75,
+        "BR" => 1.85,
+        "I" => 1.98,
+        "NA" => 2.27,
+        "K" => 2.75,
+        "CA" => 1.73,
+        "MG" => 1.73,
+        "ZN" => 1.39,
+        "FE" => 1.94,
+        _ => 1.50,
+    }
+}
+
+/// Read a numeric column from an atoms block.
+///
+/// Tries `block.view(name)` first (``molrs.Block``), then ``block[name]``
+/// (``molpy.Block`` / plain dict).
+fn read_column(block: &Bound<'_, PyAny>, name: &str) -> PyResult<Vec<NpF>> {
+    if let Ok(col) = block.call_method1("view", (name,)) {
+        return col.extract();
+    }
+    block
+        .get_item(name)
+        .map_err(|_| {
+            PyValueError::new_err(format!(r#"atoms block has no "{name}" column"#))
+        })?
+        .extract()
+}
+
+/// Read the element-symbol column from an atoms block.
+///
+/// Tries the columns ``"element"`` and ``"symbol"`` in order, using both
+/// ``.view()`` (molrs) and ``[]`` (molpy / dict) access per column.
+///
+/// | Source          | Column    | Access  |
+/// |-----------------|-----------|---------|
+/// | molrs PDB       | ``symbol``  | `.view()` |
+/// | molrs XYZ       | ``element`` | `.view()` |
+/// | molpy / dict    | ``element`` | `[]`    |
+fn read_element_column(block: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    for col in ["element", "symbol"] {
+        if let Ok(arr) = block.call_method1("view", (col,)) {
+            return arr.extract();
+        }
+        if let Ok(arr) = block.get_item(col) {
+            return arr.extract();
+        }
+    }
+    Err(PyValueError::new_err(
+        r#"atoms block must have an "element" or "symbol" column"#,
+    ))
+}
 
 #[pyclass(name = "Target", from_py_object)]
 #[derive(Clone)]
@@ -25,53 +93,52 @@ pub struct PyTarget {
 
 #[pymethods]
 impl PyTarget {
-    /// Create a target from coordinate and radii arrays.
+    /// Create a packing target from a molecule frame.
     ///
     /// Parameters
     /// ----------
-    /// positions : numpy.ndarray, shape (N, 3), dtype float64
-    ///     Template atom positions.
-    /// radii : numpy.ndarray, shape (N,), dtype float64
-    ///     Van der Waals radii.
+    /// name : str
+    ///     Molecule name (used in diagnostics and output).
+    /// frame : Frame-like
+    ///     Any object with ``frame["atoms"]`` returning a block.
+    ///     Supports ``molrs.Frame``, ``molpy.Frame``, and plain dicts.
     /// count : int
     ///     Number of copies to pack.
-    /// elements : list[str], optional
-    ///     Element symbols, one per atom. Defaults to ``["X"] * N``.
-    ///
-    /// Returns
-    /// -------
-    /// Target
-    #[staticmethod]
-    #[pyo3(signature = (positions, radii, count, elements=None))]
-    fn from_coords(
-        positions: PyReadonlyArray2<'_, NpF>,
-        radii: PyReadonlyArray1<'_, NpF>,
+    #[new]
+    #[pyo3(signature = (name, frame, count))]
+    fn new(
+        name: &str,
+        frame: &Bound<'_, PyAny>,
         count: usize,
-        elements: Option<Vec<String>>,
     ) -> PyResult<Self> {
-        let pos = positions.as_array();
-        let rad = radii.as_array();
-        if pos.ncols() != 3 {
-            return Err(PyValueError::new_err("positions must have shape (N, 3)"));
-        }
-        if pos.nrows() != rad.len() {
+        let atoms = frame.get_item("atoms").map_err(|_| {
+            PyValueError::new_err(r#"frame must have an "atoms" block"#)
+        })?;
+
+        let x: Vec<NpF> = read_column(&atoms, "x")?;
+        let y: Vec<NpF> = read_column(&atoms, "y")?;
+        let z: Vec<NpF> = read_column(&atoms, "z")?;
+        let elements: Vec<String> = read_element_column(&atoms)?;
+
+        let n = x.len();
+        if y.len() != n || z.len() != n || elements.len() != n {
             return Err(PyValueError::new_err(
-                "positions and radii must have the same length",
+                "x, y, z, and element arrays must all have the same length",
             ));
         }
-        if let Some(ref els) = elements
-            && els.len() != pos.nrows()
-        {
-            return Err(PyValueError::new_err(
-                "elements must have the same length as positions",
-            ));
-        }
-        let coords: Vec<[F; 3]> = pos.rows().into_iter().map(|r| [r[0], r[1], r[2]]).collect();
-        let radii_vec: Vec<F> = rad.to_vec();
-        let mut target = Target::from_coords(&coords, &radii_vec, count);
-        if let Some(els) = elements {
-            target.elements = els;
-        }
+
+        let coords: Vec<[F; 3]> = x
+            .iter()
+            .zip(y.iter())
+            .zip(z.iter())
+            .map(|((xi, yi), zi)| [*xi, *yi, *zi])
+            .collect();
+        let radii: Vec<F> = elements.iter().map(|e| vdw_radius_for(e)).collect();
+
+        let mut target = Target::from_coords(&coords, &radii, count);
+        target.elements = elements;
+        let target = target.with_name(name);
+
         Ok(PyTarget { inner: target })
     }
 
@@ -81,27 +148,26 @@ impl PyTarget {
         }
     }
 
-    fn with_constraint(&self, constraint: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
-        let restraints = extract_restraints(constraint)?;
-        let mut target = self.inner.clone();
-        for r in restraints {
-            target = target.with_restraint(r);
-        }
-        Ok(PyTarget { inner: target })
+    fn with_restraint(&self, constraint: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let restraint = extract_restraint(constraint)?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_restraint(restraint),
+        })
     }
 
-    fn with_constraint_for_atoms(
+    fn with_restraint_for_atoms(
         &self,
         indices: Vec<usize>,
         constraint: &Bound<'_, pyo3::types::PyAny>,
     ) -> PyResult<Self> {
         validate_atom_indices(&indices, self.inner.natoms())?;
-        let restraints = extract_restraints(constraint)?;
-        let mut target = self.inner.clone();
-        for r in restraints {
-            target = target.with_restraint_for_atoms(&indices, r);
-        }
-        Ok(PyTarget { inner: target })
+        let restraint = extract_restraint(constraint)?;
+        Ok(PyTarget {
+            inner: self
+                .inner
+                .clone()
+                .with_restraint_for_atoms(&indices, restraint),
+        })
     }
 
     fn with_maxmove(&self, maxmove: usize) -> Self {

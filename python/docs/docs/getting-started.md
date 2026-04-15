@@ -2,60 +2,75 @@
 
 A minimal end-to-end pack: 100 water molecules inside a 40 Å cube.
 
-## 1. Build a Target
+## 1. Load a molecule
 
-A `Target` bundles the template geometry of one molecule type with the
-number of copies to pack.
+Use `molrs.read_pdb` to load a template PDB file — the returned
+`Frame` can be passed directly to `Target`:
+
+```python
+import molrs
+
+frame = molrs.read_pdb("water.pdb")
+```
+
+No `molrs`? Build the frame as a plain dict:
 
 ```python
 import numpy as np
+
+frame = {
+    "atoms": {
+        "x": np.array([0.00,  0.96, -0.24]),
+        "y": np.array([0.00,  0.00,  0.93]),
+        "z": np.zeros(3),
+        "element": ["O", "H", "H"],
+    }
+}
+```
+
+## 2. Create a Target
+
+A `Target` bundles a molecule template with the number of copies to pack.
+VdW radii are looked up automatically from element symbols (Bondi 1964).
+
+```python
 from molpack import Target
 
-water_positions = np.array([
-    [0.00,  0.00, 0.00],   # O
-    [0.96,  0.00, 0.00],   # H
-    [-0.24, 0.93, 0.00],   # H
-])
-water_radii = np.array([1.52, 1.20, 1.20])
-
-water = Target.from_coords(
-    water_positions, water_radii,
-    count=100,
-    elements=["O", "H", "H"],
-).with_name("water")
+water = Target("water", frame, count=100)
 ```
 
 Arguments:
 
-- `positions`  — `(N, 3)` float64 numpy array, Å.
-- `radii`      — `(N,)` float64 numpy array, Å (typically van der Waals).
-- `count`      — number of copies to produce.
-- `elements`   — optional element symbols; default `"X"` per atom.
+- `name`  — label used in diagnostics and output.
+- `frame` — any object supporting `frame["atoms"]`, with columns
+  `"x"`, `"y"`, `"z"`, and `"element"` (or `"symbol"` for molrs PDB frames).
+- `count` — number of copies to produce.
 
-## 2. Attach a restraint
+All builder methods are **immutable** — they return a new `Target`.
 
-Every target needs at least one restraint — the geometric region into
-which it should be packed.
+## 3. Attach a restraint
+
+Every target needs at least one restraint — the geometric region it
+should be packed into.
 
 ```python
 from molpack import InsideBox
 
-water = water.with_constraint(
+water = water.with_restraint(
     InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
 )
 ```
 
-Five concrete restraints are shipped: `InsideBox`, `InsideSphere`,
-`OutsideSphere`, `AbovePlane`, `BelowPlane`. Compose multiple restraints
-with `.and_()` — see [Restraints](guide/restraints.md).
+Five built-in restraints: `InsideBox`, `InsideSphere`, `OutsideSphere`,
+`AbovePlane`, `BelowPlane`. Stack multiple restraints with repeated
+`.with_restraint()` calls — see [Restraints](guide/restraints.md).
 
-## 3. Pack
+## 4. Pack
 
 ```python
-from molpack import Packer
+from molpack import Molpack
 
-packer = Packer(tolerance=2.0, precision=0.01)
-result = packer.pack([water], max_loops=200, seed=42)
+result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
 
 print(f"converged: {result.converged}")
 print(f"natoms:    {result.natoms}")
@@ -63,59 +78,42 @@ print(f"fdist:     {result.fdist:.4f}   (distance-violation sum)")
 print(f"frest:     {result.frest:.4f}   (restraint-violation sum)")
 ```
 
-Arguments:
+`result.positions` is an `(N, 3)` float64 numpy array of packed
+coordinates. `result.elements` is the element list in the same order.
 
-- `targets`    — list of `Target`s (one per molecule type).
-- `max_loops`  — outer-iteration budget per phase.
-- `seed`       — optional reproducibility seed.
+## 5. Save
 
-`result.positions` is an `(N, 3)` float64 numpy array of the packed
-atom coordinates. `result.elements` is the element list in the same
-order.
-
-## 4. Save
-
-`molpack` does not write files directly. Either:
-
-- Use numpy (`np.savetxt`, `.npz`, …) on `result.positions`, or
-- Pass coordinates to `molcrafts-molrs` to write PDB / XYZ:
+`molpack` does not write files directly. Pass the result back to `molrs`:
 
 ```python
 import molrs
 
-frame = molrs.Frame()
+out_frame = molrs.Frame()
 atoms = molrs.Block()
-atoms.set_float("x", result.positions[:, 0])
-atoms.set_float("y", result.positions[:, 1])
-atoms.set_float("z", result.positions[:, 2])
-atoms.set_string("element", result.elements)
-frame.set_block("atoms", atoms)
-molrs.write_xyz("packed.xyz", frame)
+atoms.insert("x", result.positions[:, 0])
+atoms.insert("y", result.positions[:, 1])
+atoms.insert("z", result.positions[:, 2])
+atoms.insert("element", result.elements)
+out_frame["atoms"] = atoms
+molrs.write_xyz("packed.xyz", out_frame)
 ```
+
+Or use numpy directly (`np.savetxt`, `.npz`, …) on `result.positions`.
 
 ## Full script
 
 ```python
-import numpy as np
-from molpack import Target, Packer, InsideBox
+import molrs
+from molpack import InsideBox, Molpack, Target
 
-water_positions = np.array([
-    [0.00,  0.00, 0.00],
-    [0.96,  0.00, 0.00],
-    [-0.24, 0.93, 0.00],
-])
-water_radii = np.array([1.52, 1.20, 1.20])
+frame = molrs.read_pdb("water.pdb")
 
 water = (
-    Target.from_coords(water_positions, water_radii, count=100,
-                       elements=["O", "H", "H"])
-    .with_name("water")
-    .with_constraint(InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    Target("water", frame, count=100)
+    .with_restraint(InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
-result = Packer(tolerance=2.0, precision=0.01).pack(
-    [water], max_loops=200, seed=42,
-)
+result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
 
 assert result.converged
 print(f"packed {result.natoms} atoms")
@@ -124,6 +122,6 @@ print(f"packed {result.natoms} atoms")
 ## Next steps
 
 - [Targets](guide/targets.md) — orientation, centering, fixed placement.
-- [Restraints](guide/restraints.md) — composition, per-atom scoping.
-- [Packer](guide/packer.md) — all builder options.
-- [Examples](examples.md) — five complete Packmol workloads ported to Python.
+- [Restraints](guide/restraints.md) — per-atom scoping, stacking.
+- [Packer](guide/packer.md) — all constructor and builder options.
+- [Examples](examples.md) — five complete Packmol workloads.
