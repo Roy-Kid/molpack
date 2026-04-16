@@ -1,4 +1,4 @@
-# molpack Behavior Alignment with Packmol
+# molpack Behavior Parity with Packmol
 
 ## Scope
 - Alignment target: `/Users/roykid/work/packmol` source behavior.

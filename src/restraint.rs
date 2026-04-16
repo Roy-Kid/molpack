@@ -6,7 +6,7 @@
 //! beside the 14 Packmol-originals in type space.
 //!
 //! Numerical equivalence to the Fortran `comprest.f90` (value) and `gwalls.f90`
-//! (gradient) is preserved branch-for-branch; see `docs/packmol_alignment.md`.
+//! (gradient) is preserved branch-for-branch; see `docs/packmol_parity.md`.
 //!
 //! **Gradient convention**: `Restraint::fg` accumulates INTO `g` with `+=`.
 //! Do not overwrite; many restraints may contribute to the same atom.

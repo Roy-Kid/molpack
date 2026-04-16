@@ -31,7 +31,7 @@
 //!
 //! Reference material (not rustdoc):
 //!
-//! - [Packmol alignment](https://github.com/MolCrafts/molpack/blob/master/docs/packmol_alignment.md)
+//! - [Packmol parity](https://github.com/MolCrafts/molpack/blob/master/docs/packmol_parity.md)
 //!   — kind-number ↔ Rust struct mapping with Fortran pointers.
 //!
 //! ## Quick example
