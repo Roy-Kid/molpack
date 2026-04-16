@@ -72,7 +72,7 @@
 //! ## Feature flags
 //!
 //! - `rayon` — opt into the parallel evaluator (also forwards to `molrs-core`).
-//! - `filesystem` — forward to `molrs-io/filesystem`.
+//! - `cli` — build the `molpack` binary and its integration tests (pulls in `clap`).
 //!
 //! Precision is fixed at `f64` via `molrs::types::F`.
 

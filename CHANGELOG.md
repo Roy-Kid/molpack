@@ -15,7 +15,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `Handler` trait with four built-ins: `NullHandler`, `ProgressHandler`, `EarlyStopHandler`, `XYZHandler`
 - `Relaxer` trait with `TorsionMcRelaxer` built-in
 - Optional `rayon` feature for parallel objective evaluation
-- Optional `filesystem` feature forwarded from `molrs_io`
+- Optional `cli` feature that gates the `molpack` binary and its `clap` dependency
 - Python bindings via PyO3 + maturin (`molcrafts-molpack` on PyPI)
 - Five canonical Packmol workloads as examples (mixture, bilayer, spherical, interface, solvprotein)
 - Criterion benchmark suite (five benches covering end-to-end and hot-path microbenchmarks)

@@ -13,7 +13,7 @@ coordinates that satisfy all constraints.
 === "CLI"
 
     ```bash
-    cargo install molcrafts-molpack --features filesystem
+    cargo install molcrafts-molpack --features cli
     ```
 
 === "Rust library"

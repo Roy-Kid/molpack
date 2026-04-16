@@ -15,7 +15,7 @@ Part of the [molrs](https://github.com/MolCrafts/molrs) toolkit.
 **CLI**
 
 ```bash
-cargo install molcrafts-molpack --features filesystem
+cargo install molcrafts-molpack --features cli
 ```
 
 **Rust library**

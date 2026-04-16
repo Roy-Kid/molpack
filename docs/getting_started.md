@@ -12,13 +12,13 @@ Packmol, making it a drop-in replacement for the command-line workflow.
 ### Installing
 
 ```bash
-cargo install molcrafts-molpack --features filesystem
+cargo install molcrafts-molpack --features cli
 ```
 
 Or build from source:
 
 ```bash
-cargo build --release --bin molpack --features filesystem
+cargo build --release --bin molpack --features cli
 ```
 
 ### Running a script
