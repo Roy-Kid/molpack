@@ -105,6 +105,9 @@ pub struct Molpack {
     disable_movebad: bool,
     /// User-defined periodic box, matching Packmol `pbc` input semantics.
     pbc: Option<PBCBox>,
+    /// Run the pair-kernel reductions on rayon. Off by default: see
+    /// [`parallel_pair_eval`][Self::parallel_pair_eval].
+    parallel_pair_eval: bool,
 }
 
 impl Default for Molpack {
@@ -133,6 +136,7 @@ impl Molpack {
             movebadrandom: false,
             disable_movebad: false,
             pbc: None,
+            parallel_pair_eval: false,
         }
     }
 
@@ -204,6 +208,27 @@ impl Molpack {
     /// Enable/disable Packmol `disable_movebad` (main loop gate).
     pub fn disable_movebad(mut self, disabled: bool) -> Self {
         self.disable_movebad = disabled;
+        self
+    }
+
+    /// Run `compute_f` / `compute_fg`'s pair-kernel reductions on rayon
+    /// worker threads. Off by default.
+    ///
+    /// Parallelism is opt-in because the crossover where rayon pays off
+    /// is **workload-shaped, not size-shaped** — the per-call parallel
+    /// speedup measured on isolated `compute_fg` doesn't predict
+    /// end-to-end `Molpack::pack` wall clock (task-dispatch overhead
+    /// accumulates across thousands of calls per pack; `movebad`
+    /// iterations skip the parallel path entirely; real workloads often
+    /// *regress* even when `active_cells.len()` clears any naive
+    /// threshold). The user knows their workload shape; the library
+    /// doesn't.
+    ///
+    /// Compile with `--features rayon` for this flag to have any
+    /// effect. Without the feature the pair kernel is serial
+    /// unconditionally and this setting is silently ignored.
+    pub fn parallel_pair_eval(mut self, enabled: bool) -> Self {
+        self.parallel_pair_eval = enabled;
         self
     }
 
@@ -338,25 +363,33 @@ impl Molpack {
         }
         sys.coor = coor;
 
-        // Assign radii and element symbols.
+        // Assign radii, element symbols, and per-atom (itype, imol) tags.
         // Packmol uses `radius = tolerance/2` for ALL atoms (packmol.f90 line 283:
         //   `radius(i) = dism/2.d0`), not VdW radii from the PDB file.
+        // `ibtype` / `ibmol` are derivable from position in the sequential
+        // atom layout, so we set them here once instead of having
+        // `insert_atom_in_cell` rewrite the same constants on every eval.
         let atom_radius = self.tolerance / 2.0;
         let mut icart = 0usize;
-        for target in free_targets.iter() {
-            for _imol in 0..target.count {
+        for (itype, target) in free_targets.iter().enumerate() {
+            for imol in 0..target.count {
                 for iatom in 0..target.natoms() {
                     sys.radius[icart] = atom_radius;
                     sys.radius_ini[icart] = atom_radius;
+                    sys.ibtype[icart] = itype;
+                    sys.ibmol[icart] = imol;
                     sys.elements[icart] = Element::by_symbol(&target.elements[iatom]);
                     icart += 1;
                 }
             }
         }
-        for target in fixed_targets.iter() {
+        for (fi, target) in fixed_targets.iter().enumerate() {
+            let itype = ntype + fi;
             for iatom in 0..target.natoms() {
                 sys.radius[icart] = atom_radius;
                 sys.radius_ini[icart] = atom_radius;
+                sys.ibtype[icart] = itype;
+                sys.ibmol[icart] = 0;
                 sys.elements[icart] = Element::by_symbol(&target.elements[iatom]);
                 icart += 1;
             }
@@ -417,6 +450,14 @@ impl Molpack {
                 fixed_icart += 1;
             }
         }
+        // Populate the AoS `atom_props` mirror from the individual per-atom
+        // Vecs now that every hot-loop field is finalized. `sync_atom_props`
+        // also refreshes the `any_fixed_atoms` / `any_short_radius`
+        // summary flags used by the hot-loop fast paths.
+        sys.sync_atom_props();
+        // Plumb the builder's opt-in parallel flag through to the
+        // objective kernels.
+        sys.parallel_pair_eval = self.parallel_pair_eval;
 
         // Write constant columns (element, mol_id) into the output frame.
         // These don't change during optimization; positions are added at the end.
@@ -586,12 +627,14 @@ fn reference_coords(target: &Target) -> &[[F; 3]] {
 pub fn evaluate_unscaled(sys: &mut PackContext, xwork: &[F]) -> (F, F, F) {
     sys.work.radiuswork.copy_from_slice(&sys.radius);
     for i in 0..sys.ntotat {
-        sys.radius[i] = sys.radius_ini[i];
+        sys.set_radius(i, sys.radius_ini[i]);
     }
     let f_total = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
     let fdist = sys.fdist;
     let frest = sys.frest;
-    sys.radius.copy_from_slice(&sys.work.radiuswork);
+    for i in 0..sys.ntotat {
+        sys.set_radius(i, sys.work.radiuswork[i]);
+    }
     (f_total, fdist, frest)
 }
 
@@ -766,7 +809,8 @@ pub fn run_iteration(
     if *radscale > 1.0 && (fimp < 2.0 || (fdist < precision && fimp < 10.0)) {
         *radscale = (0.9 * *radscale).max(1.0);
         for i in 0..sys.ntotat {
-            sys.radius[i] = sys.radius_ini[i].max(0.9 * sys.radius[i]);
+            let new_r = sys.radius_ini[i].max(0.9 * sys.radius[i]);
+            sys.set_radius(i, new_r);
         }
     }
 
@@ -859,7 +903,7 @@ pub fn run_phase(
     // Packmol resets radscale = discale at the START of each phase.
     let mut radscale = discale;
     for icart in 0..sys.ntotat {
-        sys.radius[icart] = discale * sys.radius_ini[icart];
+        sys.set_radius(icart, discale * sys.radius_ini[icart]);
     }
 
     // Get working x vector (compact for per-type, full for all-type)

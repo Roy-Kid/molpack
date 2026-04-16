@@ -37,6 +37,7 @@ fn build_ctx() -> PackContext {
     sys.radius.fill(0.75);
     sys.radius_ini.fill(1.5);
     sys.work.radiuswork.resize(ntotat, 0.0);
+    sys.sync_atom_props();
     sys
 }
 

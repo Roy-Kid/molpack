@@ -39,7 +39,7 @@ pub fn movebad(
     sys.move_flag = true;
     sys.work.radiuswork.copy_from_slice(&sys.radius);
     for i in 0..sys.ntotat {
-        sys.radius[i] = sys.radius_ini[i];
+        sys.set_radius(i, sys.radius_ini[i]);
     }
     sys.evaluate(x, EvalMode::FOnly, None);
     sys.move_flag = false;
@@ -164,7 +164,9 @@ pub fn movebad(
     }
 
     sys.evaluate(x, EvalMode::FOnly, None);
-    sys.radius.copy_from_slice(&sys.work.radiuswork);
+    for i in 0..sys.ntotat {
+        sys.set_radius(i, sys.work.radiuswork[i]);
+    }
 }
 
 /// Flashsort (O(N) histogram sort) — sort array `a` ascending,

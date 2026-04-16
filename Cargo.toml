@@ -56,6 +56,15 @@ harness = false
 name = "objective_dispatch"
 harness = false
 
+[[bench]]
+name = "pair_kernel"
+harness = false
+
+[[bench]]
+name = "partial_gradient_merge"
+harness = false
+required-features = ["rayon"]
+
 [[bin]]
 name = "molpack"
 path = "src/bin/molpack/main.rs"
