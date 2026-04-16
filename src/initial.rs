@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use crate::cell::{index_cell, setcell};
 use crate::constraints::EvalMode;
-use crate::context::PackContext;
+use crate::context::{NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat};
 use crate::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::movebad::{MoveBadConfig, movebad};
@@ -310,7 +310,7 @@ pub fn initial(
 
     sys.move_flag = false;
     sys.init1 = false;
-    sys.lcellfirst = None;
+    sys.lcellfirst = NONE_IDX;
 
     for i in 0..sys.ntype_with_fixed {
         sys.comptype[i] = true;
@@ -377,11 +377,14 @@ pub fn initial(
     // Init xcart (Packmol initial.f90 lines 121-138)
     init_xcart_from_x(x, sys);
 
-    // Mark fixed atoms (Packmol initial.f90 lines 140-165)
     let free_atoms = sys.ntotat - sys.nfixedat;
-    for icart in free_atoms..sys.ntotat {
-        sys.fixedatom[icart] = true;
-    }
+    // Packmol's initial.f90 lines 140-165 re-flip fixedatom=true on the
+    // fixed-atom tail here, but by this point `Molpack::pack` has already
+    // done that and called `sync_atom_props` — writing the `Vec<bool>`
+    // directly would desynchronize `atom_props` and trip the debug
+    // invariant in `compute_f`. The assertion below confirms the state
+    // inherited from `pack()` is already what Packmol expects.
+    debug_assert!((free_atoms..sys.ntotat).all(|icart| sys.fixedatom[icart]));
 
     // ── 4. Phase 1: constraint-only GENCAN per type (reduced x) ──────────────
     // Packmol initial.f90 lines 174-224 (via swaptype)
@@ -561,11 +564,11 @@ pub fn initial(
             &sys.ncells,
         );
         let icell = index_cell(&cell, &sys.ncells);
-        if sys.latomfix[icell].is_none() {
+        if sys.latomfix[icell] == NONE_IDX {
             sys.fixed_cells.push(icell);
         }
         sys.latomnext[icart] = sys.latomfix[icell];
-        sys.latomfix[icell] = Some(icart);
+        sys.latomfix[icell] = icart as u32;
     }
 
     // ── 7. Random initial point using cm_min/cm_max ───────────────────────────
@@ -715,7 +718,11 @@ pub fn init_xcart_from_x(x: &[F], sys: &mut PackContext) {
             for iatom in 0..sys.natoms[itype] {
                 let pos = compcart(&xcm, &sys.coor[idatom_base + iatom], &v1, &v2, &v3);
                 sys.xcart[icart] = pos;
-                sys.fixedatom[icart] = false;
+                // Packmol's initial.f90 sets fixedatom=false on every free
+                // atom here, but in Rust that bit is already false from
+                // construction and `sync_atom_props` has been called —
+                // writing it again would desync `atom_props` flags.
+                debug_assert!(!sys.fixedatom[icart]);
                 icart += 1;
             }
 
