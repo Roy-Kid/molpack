@@ -44,12 +44,13 @@
 //!
 //! let target = Target::from_coords(&positions, &radii, 100)
 //!     .with_name("water")
-//!     .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0, 40.0, 40.0]));
+//!     .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0, 40.0, 40.0], [false; 3]));
 //!
 //! let result = Molpack::new()
-//!     .tolerance(2.0)
-//!     .precision(0.01)
-//!     .pack(&[target], 200, Some(42))?;
+//!     .with_tolerance(2.0)
+//!     .with_precision(0.01)
+//!     .with_seed(42)
+//!     .pack(&[target], 200)?;
 //!
 //! println!("converged = {}, natoms = {}", result.converged, result.natoms());
 //! # Ok::<(), molpack::PackError>(())
@@ -62,7 +63,7 @@
 //! | Builder | [`Molpack`], [`PackResult`] |
 //! | Target  | [`Target`], [`CenteringMode`] |
 //! | Restraint trait + 14 concrete structs | [`Restraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…Restraint` |
-//! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`FromRegion`], [`InsideBoxRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`BBox`] |
+//! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
 //! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`PhaseInfo`], [`PhaseReport`] |
 //! | Relaxer trait + built-in | [`Relaxer`], [`RelaxerRunner`], [`TorsionMcRelaxer`] (aliased to `TorsionMcHook`) |
 //! | Errors | [`PackError`] |
@@ -110,22 +111,21 @@ pub use molrs::Element;
 pub use molrs::types::F;
 pub use packer::{Molpack, PackResult};
 pub use region::{
-    And, BBox, FromRegion, InsideBoxRegion, InsideSphereRegion, Not, Or, OutsideSphereRegion,
-    Region, RegionExt,
+    Aabb, And, InsideBoxRegion, InsideSphereRegion, Not, Or, OutsideSphereRegion, Region,
+    RegionExt, RegionRestraint,
 };
-pub use relaxer::Relaxer as Hook;
-pub use relaxer::RelaxerRunner as HookRunner;
-pub use relaxer::TorsionMcRelaxer as TorsionMcHook;
-pub use relaxer::{
-    Relaxer, RelaxerRunner, TorsionMcRelaxer, compute_excluded_pairs, self_avoidance_penalty,
-};
+#[allow(deprecated)]
+pub use region::{BBox, FromRegion};
+pub use relaxer::{Relaxer, RelaxerRunner, TorsionMcRelaxer};
 pub use restraint::{
     AboveGaussianRestraint, AbovePlaneRestraint, BelowGaussianRestraint, BelowPlaneRestraint,
     InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint, InsideEllipsoidRestraint,
     InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint, OutsideCylinderRestraint,
     OutsideEllipsoidRestraint, OutsideSphereRestraint, Restraint,
 };
-pub use target::{CenteringMode, Target};
+#[allow(deprecated)]
+pub use target::FixedPlacement;
+pub use target::{Angle, Axis, CenteringMode, Placement, Target};
 pub use validation::{ValidationReport, ViolationMetrics, validate_from_targets};
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -145,3 +145,76 @@ pub mod architecture {}
 
 #[doc = include_str!("../docs/extending.md")]
 pub mod extending {}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Prelude — bulk re-export of the vocabulary a typical packing script needs.
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Bulk re-export of the items a typical packing script needs.
+///
+/// ```no_run
+/// use molpack::prelude::*;
+///
+/// let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 10)
+///     .with_restraint(InsideBoxRestraint::new([0.0; 3], [10.0; 3], [false; 3]));
+/// let result = Molpack::new().pack(&[target], 100)?;
+/// # Ok::<(), molpack::PackError>(())
+/// ```
+///
+/// The crate root still re-exports everything for direct `use molpack::T`
+/// access; the prelude exists to avoid a 20-line `use` block at the top of
+/// every example.
+pub mod prelude {
+    pub use crate::{
+        // Region + combinators + lift
+        Aabb,
+        // Restraint trait + 14 concrete impls
+        AboveGaussianRestraint,
+        AbovePlaneRestraint,
+        And,
+        // Target + centering + angle / axis / placement
+        Angle,
+        Axis,
+        BelowGaussianRestraint,
+        BelowPlaneRestraint,
+        CenteringMode,
+        // Handlers
+        EarlyStopHandler,
+        Handler,
+        InsideBoxRegion,
+        InsideBoxRestraint,
+        InsideCubeRestraint,
+        InsideCylinderRestraint,
+        InsideEllipsoidRestraint,
+        InsideSphereRegion,
+        InsideSphereRestraint,
+        // Core builder + result + error
+        Molpack,
+        Not,
+        NullHandler,
+        Or,
+        OutsideBoxRestraint,
+        OutsideCubeRestraint,
+        OutsideCylinderRestraint,
+        OutsideEllipsoidRestraint,
+        OutsideSphereRegion,
+        OutsideSphereRestraint,
+        PackError,
+        PackResult,
+        PhaseInfo,
+        PhaseReport,
+        Placement,
+        ProgressHandler,
+        Region,
+        RegionExt,
+        RegionRestraint,
+        // Relaxer
+        Relaxer,
+        RelaxerRunner,
+        Restraint,
+        StepInfo,
+        Target,
+        TorsionMcRelaxer,
+        XYZHandler,
+    };
+}

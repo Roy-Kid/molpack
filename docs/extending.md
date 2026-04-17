@@ -135,7 +135,7 @@ use molpack::{InsideBoxRestraint, Target};
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 
 let target = Target::from_coords(pos, rad, 100)
-    .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3]))
+    .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]))
     .with_restraint(PlaneTether { normal: [0.0, 0.0, 1.0], offset: 20.0, k: 1.0 });
 ```
 
@@ -189,7 +189,7 @@ impl Region for ConeRegion {
 #     fn contains(&self, _x: &[F; 3]) -> bool { true }
 #     fn signed_distance(&self, _x: &[F; 3]) -> F { 0.0 }
 # }
-use molpack::{FromRegion, InsideSphereRegion, RegionExt, Target};
+use molpack::{InsideSphereRegion, RegionExt, RegionRestraint, Target};
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 
 let cone = ConeRegion {
@@ -201,7 +201,7 @@ let sphere = InsideSphereRegion::new([0.0; 3], 10.0);
 let region = cone.and(sphere);
 
 let target = Target::from_coords(pos, rad, 100)
-    .with_restraint(FromRegion(region));
+    .with_restraint(RegionRestraint(region));
 ```
 
 [`RegionExt::and`](crate::RegionExt::and) / `or` / `not` come from a
@@ -308,7 +308,7 @@ pub struct JiggleRelaxer {
 }
 
 impl Relaxer for JiggleRelaxer {
-    fn build(&self, _ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner> {
+    fn spawn(&self, _ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner> {
         Box::new(JiggleRunner {
             steps: self.steps,
             max_delta: self.max_delta,
@@ -454,9 +454,9 @@ note. Cross the hard gate → tighten the change or roll back.
 - **`Cell<f64>` is not `Sync`.** Use `AtomicU64` +
   `f64::to_bits` / `from_bits` for interior mutability in
   `Send + Sync` contexts.
-- **1-based atom indexing.** `Target::with_restraint_for_atoms`
-  follows Packmol convention. `&[1, 2]` selects the first two atoms.
-  Internally converted to 0-based.
+- **0-based atom indexing.** `Target::with_atom_restraint` uses
+  Rust-native 0-based indices. `&[0, 1]` selects the first two atoms.
+  Packmol `.inp` files use 1-based — subtract 1 at the parse boundary.
 - **`count == 1` required for relaxers.** Multi-copy targets share
   reference coords.
 - **`radscale` is phase-dependent.** Don't hard-code atomic radii —

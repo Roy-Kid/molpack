@@ -126,7 +126,13 @@ fn bench_compute_fg(c: &mut Criterion) {
         let g_len = 6 * n;
         group.bench_function(&label, |b| {
             b.iter_batched_ref(
-                || (sys_template_clone(&sys_template), x.clone(), vec![0.0; g_len]),
+                || {
+                    (
+                        sys_template_clone(&sys_template),
+                        x.clone(),
+                        vec![0.0; g_len],
+                    )
+                },
                 |(sys, x, g)| {
                     std::hint::black_box(compute_fg(x, sys, g));
                 },

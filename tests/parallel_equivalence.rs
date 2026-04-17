@@ -100,7 +100,7 @@ fn compute_fg_parallel_matches_compute_g_serial_large_system() {
 
     // Serial path via compute_f + compute_g; compute_g is not
     // parallelised, so its gradient is the reference ordering.
-    let f_sep = compute_f(&x, &mut sys_b, );
+    let f_sep = compute_f(&x, &mut sys_b);
     let mut g_sep = vec![0.0; x.len()];
     molpack::objective::compute_g(&x, &mut sys_b, &mut g_sep);
 

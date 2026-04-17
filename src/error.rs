@@ -11,8 +11,16 @@ pub enum PackError {
     NoTargets,
     /// A molecule has no atoms.
     EmptyMolecule(usize),
-    /// Invalid user-defined periodic box.
+    /// A restraint declared a periodic box whose `max - min` is
+    /// non-positive on at least one axis.
     InvalidPBCBox { min: [F; 3], max: [F; 3] },
+    /// Two or more restraints declared periodic boxes with different
+    /// bounds or different per-axis periodicity flags. Only one periodic
+    /// box is allowed per packing run.
+    ConflictingPeriodicBoxes {
+        first: ([F; 3], [F; 3], [bool; 3]),
+        second: ([F; 3], [F; 3], [bool; 3]),
+    },
 }
 
 impl fmt::Display for PackError {
@@ -30,6 +38,11 @@ impl fmt::Display for PackError {
                 f,
                 "Invalid PBC box: min={:?}, max={:?} (all max-min components must be > 0)",
                 min, max
+            ),
+            PackError::ConflictingPeriodicBoxes { first, second } => write!(
+                f,
+                "Conflicting periodic boxes declared by restraints: {first:?} vs {second:?}. \
+                 At most one periodic InsideBoxRestraint is allowed per packing run."
             ),
         }
     }

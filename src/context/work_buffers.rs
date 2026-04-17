@@ -52,6 +52,7 @@ pub struct WorkBuffers {
     pub cached_cell_length: [F; 3],
     pub cached_pbc_min: [F; 3],
     pub cached_pbc_length: [F; 3],
+    pub cached_pbc_periodic: [bool; 3],
     /// Whether the cached geometry metadata is valid.
     pub cached_geometry_valid: bool,
 }
@@ -73,6 +74,7 @@ impl WorkBuffers {
             cached_cell_length: [0.0; 3],
             cached_pbc_min: [0.0; 3],
             cached_pbc_length: [0.0; 3],
+            cached_pbc_periodic: [false; 3],
             cached_geometry_valid: false,
         }
     }
@@ -165,6 +167,7 @@ impl WorkBuffers {
         cell_length: [F; 3],
         pbc_min: [F; 3],
         pbc_length: [F; 3],
+        pbc_periodic: [bool; 3],
     ) -> bool {
         self.cached_geometry_valid
             && self.cached_init1 == init1
@@ -172,6 +175,7 @@ impl WorkBuffers {
             && self.cached_cell_length == cell_length
             && self.cached_pbc_min == pbc_min
             && self.cached_pbc_length == pbc_length
+            && self.cached_pbc_periodic == pbc_periodic
             && self.cached_x == x
             && self.cached_comptype == comptype
     }
@@ -186,6 +190,7 @@ impl WorkBuffers {
         cell_length: [F; 3],
         pbc_min: [F; 3],
         pbc_length: [F; 3],
+        pbc_periodic: [bool; 3],
     ) {
         self.cached_x.clear();
         self.cached_x.extend_from_slice(x);
@@ -196,6 +201,7 @@ impl WorkBuffers {
         self.cached_cell_length = cell_length;
         self.cached_pbc_min = pbc_min;
         self.cached_pbc_length = pbc_length;
+        self.cached_pbc_periodic = pbc_periodic;
         self.cached_geometry_valid = true;
     }
 }

@@ -34,6 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(InsideBoxRestraint::new(
             [0.0, 0.0, -10.0],
             [40.0, 40.0, 0.0],
+            [false; 3],
         ))
         .with_name("water_low");
 
@@ -41,36 +42,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(InsideBoxRestraint::new(
             [0.0, 0.0, 28.0],
             [40.0, 40.0, 38.0],
+            [false; 3],
         ))
         .with_name("water_high");
 
     let lipid_low = Target::new(lipid.clone(), 10)
-        .with_restraint(InsideBoxRestraint::new([0.0, 0.0, 0.0], [40.0, 40.0, 14.0]))
-        .with_restraint_for_atoms(&[31, 32], BelowPlaneRestraint::new([0.0, 0.0, 1.0], 2.0))
-        .with_restraint_for_atoms(&[1, 2], AbovePlaneRestraint::new([0.0, 0.0, 1.0], 12.0))
+        .with_restraint(InsideBoxRestraint::new(
+            [0.0, 0.0, 0.0],
+            [40.0, 40.0, 14.0],
+            [false; 3],
+        ))
+        .with_atom_restraint(&[30, 31], BelowPlaneRestraint::new([0.0, 0.0, 1.0], 2.0))
+        .with_atom_restraint(&[0, 1], AbovePlaneRestraint::new([0.0, 0.0, 1.0], 12.0))
         .with_name("lipid_low");
 
     let lipid_high = Target::new(lipid, 10)
         .with_restraint(InsideBoxRestraint::new(
             [0.0, 0.0, 14.0],
             [40.0, 40.0, 28.0],
+            [false; 3],
         ))
-        .with_restraint_for_atoms(&[1, 2], BelowPlaneRestraint::new([0.0, 0.0, 1.0], 16.0))
-        .with_restraint_for_atoms(&[31, 32], AbovePlaneRestraint::new([0.0, 0.0, 1.0], 26.0))
+        .with_atom_restraint(&[0, 1], BelowPlaneRestraint::new([0.0, 0.0, 1.0], 16.0))
+        .with_atom_restraint(&[30, 31], AbovePlaneRestraint::new([0.0, 0.0, 1.0], 26.0))
         .with_name("lipid_high");
 
     let targets = vec![water_low, water_high, lipid_low, lipid_high];
-    let mut packer = Molpack::new();
+    let mut packer = Molpack::new().with_seed(1_234_567);
     if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.add_handler(ProgressHandler::new());
+        packer = packer.with_handler(ProgressHandler::new());
     }
     if std::env::var_os("MOLRS_PACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.add_handler(XYZHandler::new(out_dir.join("bilayer.xyz"), 10));
+        packer = packer.with_handler(XYZHandler::new(out_dir.join("bilayer.xyz"), 10));
     }
 
-    packer.pack(&targets, 800, Some(1_234_567))?;
+    packer.pack(&targets, 800)?;
 
     Ok(())
 }

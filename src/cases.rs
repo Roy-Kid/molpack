@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use molrs_io::pdb::read_pdb_frame;
 
-use crate::target::Target;
+use crate::target::{Angle, CenteringMode, Target};
 use crate::{
     AbovePlaneRestraint, BelowPlaneRestraint, InsideBoxRestraint, InsideSphereRestraint,
     OutsideSphereRestraint,
@@ -79,7 +79,8 @@ pub fn build_targets(case: ExampleCase, base: &Path) -> Result<Vec<Target>, Box<
         ExampleCase::Mixture => {
             let water = read_pdb_frame(base.join("water.pdb"))?;
             let urea = read_pdb_frame(base.join("urea.pdb"))?;
-            let box_restraint = InsideBoxRestraint::cube_from_origin([0.0, 0.0, 0.0], 40.0);
+            let box_restraint =
+                InsideBoxRestraint::cube_from_origin([0.0, 0.0, 0.0], 40.0, [false; 3]);
             vec![
                 Target::new(water, 1000)
                     .with_restraint(box_restraint)
@@ -97,38 +98,33 @@ pub fn build_targets(case: ExampleCase, base: &Path) -> Result<Vec<Target>, Box<
                     .with_restraint(InsideBoxRestraint::new(
                         [0.0, 0.0, -10.0],
                         [40.0, 40.0, 0.0],
+                        [false; 3],
                     ))
                     .with_name("water_low"),
                 Target::new(water, 50)
                     .with_restraint(InsideBoxRestraint::new(
                         [0.0, 0.0, 28.0],
                         [40.0, 40.0, 38.0],
+                        [false; 3],
                     ))
                     .with_name("water_high"),
                 Target::new(lipid.clone(), 10)
-                    .with_restraint(InsideBoxRestraint::new([0.0, 0.0, 0.0], [40.0, 40.0, 14.0]))
-                    .with_restraint_for_atoms(
-                        &[31, 32],
-                        BelowPlaneRestraint::new([0.0, 0.0, 1.0], 2.0),
-                    )
-                    .with_restraint_for_atoms(
-                        &[1, 2],
-                        AbovePlaneRestraint::new([0.0, 0.0, 1.0], 12.0),
-                    )
+                    .with_restraint(InsideBoxRestraint::new(
+                        [0.0, 0.0, 0.0],
+                        [40.0, 40.0, 14.0],
+                        [false; 3],
+                    ))
+                    .with_atom_restraint(&[30, 31], BelowPlaneRestraint::new([0.0, 0.0, 1.0], 2.0))
+                    .with_atom_restraint(&[0, 1], AbovePlaneRestraint::new([0.0, 0.0, 1.0], 12.0))
                     .with_name("lipid_low"),
                 Target::new(lipid, 10)
                     .with_restraint(InsideBoxRestraint::new(
                         [0.0, 0.0, 14.0],
                         [40.0, 40.0, 28.0],
+                        [false; 3],
                     ))
-                    .with_restraint_for_atoms(
-                        &[1, 2],
-                        BelowPlaneRestraint::new([0.0, 0.0, 1.0], 16.0),
-                    )
-                    .with_restraint_for_atoms(
-                        &[31, 32],
-                        AbovePlaneRestraint::new([0.0, 0.0, 1.0], 26.0),
-                    )
+                    .with_atom_restraint(&[0, 1], BelowPlaneRestraint::new([0.0, 0.0, 1.0], 16.0))
+                    .with_atom_restraint(&[30, 31], AbovePlaneRestraint::new([0.0, 0.0, 1.0], 26.0))
                     .with_name("lipid_high"),
             ]
         }
@@ -141,15 +137,25 @@ pub fn build_targets(case: ExampleCase, base: &Path) -> Result<Vec<Target>, Box<
                     .with_restraint(InsideBoxRestraint::new(
                         [-20.0, 0.0, 0.0],
                         [0.0, 39.0, 39.0],
+                        [false; 3],
                     ))
                     .with_name("water"),
                 Target::new(chloroform, 30)
-                    .with_restraint(InsideBoxRestraint::new([0.0, 0.0, 0.0], [21.0, 39.0, 39.0]))
+                    .with_restraint(InsideBoxRestraint::new(
+                        [0.0, 0.0, 0.0],
+                        [21.0, 39.0, 39.0],
+                        [false; 3],
+                    ))
                     .with_name("chloroform"),
                 Target::new(t3, 1)
                     .with_name("t3")
-                    .with_center()
-                    .fixed_at_with_euler([0.0, 20.0, 20.0], [1.57, 1.57, 1.57]),
+                    .with_centering(CenteringMode::Center)
+                    .fixed_at([0.0, 20.0, 20.0])
+                    .with_orientation([
+                        Angle::from_radians(1.57),
+                        Angle::from_radians(1.57),
+                        Angle::from_radians(1.57),
+                    ]),
             ]
         }
         ExampleCase::Solvprotein => {
@@ -161,7 +167,7 @@ pub fn build_targets(case: ExampleCase, base: &Path) -> Result<Vec<Target>, Box<
             vec![
                 Target::new(protein, 1)
                     .with_name("protein")
-                    .with_center()
+                    .with_centering(CenteringMode::Center)
                     .fixed_at([0.0, 0.0, 0.0]),
                 Target::new(water, 1000)
                     .with_restraint(sphere)
@@ -183,17 +189,18 @@ pub fn build_targets(case: ExampleCase, base: &Path) -> Result<Vec<Target>, Box<
                     .with_restraint(InsideSphereRestraint::new(origin, 13.0))
                     .with_name("water_inner"),
                 Target::new(lipid.clone(), 90)
-                    .with_restraint_for_atoms(&[37], InsideSphereRestraint::new(origin, 14.0))
-                    .with_restraint_for_atoms(&[5], OutsideSphereRestraint::new(origin, 26.0))
+                    .with_atom_restraint(&[36], InsideSphereRestraint::new(origin, 14.0))
+                    .with_atom_restraint(&[4], OutsideSphereRestraint::new(origin, 26.0))
                     .with_name("lipid_inner"),
                 Target::new(lipid, 300)
-                    .with_restraint_for_atoms(&[5], InsideSphereRestraint::new(origin, 29.0))
-                    .with_restraint_for_atoms(&[37], OutsideSphereRestraint::new(origin, 41.0))
+                    .with_atom_restraint(&[4], InsideSphereRestraint::new(origin, 29.0))
+                    .with_atom_restraint(&[36], OutsideSphereRestraint::new(origin, 41.0))
                     .with_name("lipid_outer"),
                 Target::new(water, 17536)
                     .with_restraint(InsideBoxRestraint::new(
                         [-47.5, -47.5, -47.5],
                         [47.5, 47.5, 47.5],
+                        [false; 3],
                     ))
                     .with_restraint(OutsideSphereRestraint::new(origin, 43.0))
                     .with_name("water_outer"),

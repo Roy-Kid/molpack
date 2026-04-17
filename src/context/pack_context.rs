@@ -223,6 +223,11 @@ pub struct PackContext {
     pub cell_length: [F; 3],
     pub pbc_length: [F; 3],
     pub pbc_min: [F; 3],
+    /// Per-axis periodicity flags. `pbc_periodic[k] == true` means axis
+    /// `k` wraps in the pair-kernel minimum image and the cell list;
+    /// `false` means the cell list clamps and no wrap is applied. Set
+    /// from restraints that override `Restraint::periodic_box()`.
+    pub pbc_periodic: [bool; 3],
 
     // ---- Linked cell lists ----
     /// `latomfirst[icell]` = first atom index in cell, `NONE_IDX` if empty.
@@ -336,6 +341,7 @@ impl PackContext {
             cell_length: [1.0; 3],
             pbc_length: [1.0; 3],
             pbc_min: [0.0; 3],
+            pbc_periodic: [false; 3],
             latomfirst: vec![NONE_IDX; ncell_total],
             latomnext: vec![NONE_IDX; ntotat],
             latomfix: vec![NONE_IDX; ncell_total],
@@ -831,8 +837,7 @@ mod atom_props_tests {
         );
         sys.set_fixed_atom(0, false);
         assert_eq!(
-            sys.atom_props[0].flags,
-            ATOM_FLAG_SHORT,
+            sys.atom_props[0].flags, ATOM_FLAG_SHORT,
             "clearing FIXED must leave SHORT intact"
         );
         sys.debug_assert_atom_props_sync();

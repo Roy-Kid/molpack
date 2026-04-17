@@ -47,7 +47,7 @@ fn assert_gradient_opposes_violation(r: &dyn Restraint, pos: &[F; 3], label: &st
 
 #[test]
 fn inside_box_satisfied() {
-    let r = InsideBoxRestraint::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+    let r = InsideBoxRestraint::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0], [false; 3]);
     assert_eq!(r.f(&[5.0, 5.0, 5.0], SCALE, SCALE2), 0.0);
     assert_eq!(r.f(&[0.0, 0.0, 0.0], SCALE, SCALE2), 0.0);
     assert_eq!(r.f(&[10.0, 10.0, 10.0], SCALE, SCALE2), 0.0);
@@ -55,7 +55,7 @@ fn inside_box_satisfied() {
 
 #[test]
 fn inside_box_violated() {
-    let r = InsideBoxRestraint::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+    let r = InsideBoxRestraint::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0], [false; 3]);
     assert!(r.f(&[11.0, 5.0, 5.0], SCALE, SCALE2) > 0.0);
     assert!(r.f(&[-1.0, 5.0, 5.0], SCALE, SCALE2) > 0.0);
     assert!(r.f(&[5.0, -1.0, 5.0], SCALE, SCALE2) > 0.0);
@@ -63,7 +63,7 @@ fn inside_box_violated() {
 
 #[test]
 fn inside_box_gradient_direction() {
-    let r = InsideBoxRestraint::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+    let r = InsideBoxRestraint::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0], [false; 3]);
     let mut g = [0.0 as F; 3];
     grad(&r, &[11.0, 5.0, 5.0], &mut g);
     assert!(g[0] > 0.0);
@@ -76,7 +76,7 @@ fn inside_box_gradient_direction() {
 
 #[test]
 fn inside_box_cube_from_origin() {
-    let r = InsideBoxRestraint::cube_from_origin([0.0, 0.0, 0.0], 10.0);
+    let r = InsideBoxRestraint::cube_from_origin([0.0, 0.0, 0.0], 10.0, [false; 3]);
     assert_eq!(r.min, [0.0, 0.0, 0.0]);
     assert_eq!(r.max, [10.0, 10.0, 10.0]);
 }
@@ -274,7 +274,7 @@ fn below_gaussian_satisfied_and_violated() {
 
 #[test]
 fn gradient_zero_when_inside_box() {
-    let r = InsideBoxRestraint::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+    let r = InsideBoxRestraint::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0], [false; 3]);
     let mut g = [0.0 as F; 3];
     grad(&r, &[5.0, 5.0, 5.0], &mut g);
     assert!(g[0].abs() < TOL);
@@ -306,7 +306,7 @@ fn gradient_zero_when_outside_sphere() {
 
 #[test]
 fn gradient_accumulates() {
-    let r = InsideBoxRestraint::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+    let r = InsideBoxRestraint::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0], [false; 3]);
     let mut g = [100.0 as F; 3];
     grad(&r, &[11.0, 5.0, 5.0], &mut g);
     assert!(g[0] > 100.0, "gradient should accumulate, not overwrite");
@@ -344,7 +344,7 @@ fn user_plugin_restraint_is_type_equal_to_builtin() {
     // — there is no second-class citizenship for plugins.
     use molpack::Target;
     let t = Target::from_coords(&[[0.0; 3]], &[1.0], 1)
-        .with_restraint(InsideBoxRestraint::new([0.0; 3], [10.0; 3]))
+        .with_restraint(InsideBoxRestraint::new([0.0; 3], [10.0; 3], [false; 3]))
         .with_restraint(MyHalfSpaceRestraint { z_min: 5.0 });
     assert_eq!(t.molecule_restraints.len(), 2);
 }

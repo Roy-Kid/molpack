@@ -33,6 +33,12 @@ use molrs::types::F;
 /// - `is_parallel_safe` — if `false`, scheduler serializes this restraint
 ///   (Python-backed restraints MUST return `false`)
 /// - `name` — human-readable identifier (default: `std::any::type_name::<Self>()`)
+/// - `periodic_box` — opt-in: a restraint may declare that it defines a
+///   periodic axis-aligned box (`min`, `max`, `periodic[k]` per axis).
+///   At most one periodic box may be declared across all restraints on a
+///   packing run; the packer resolves multiple declarations by requiring
+///   identical bounds. Default `None` (non-periodic); only
+///   [`InsideBoxRestraint`] overrides it.
 ///
 /// `Debug` is required on concrete impls so `Target` / `Molpack` remain
 /// printable for diagnostics. All built-in restraints derive it; user types
@@ -45,6 +51,13 @@ pub trait Restraint: Send + Sync + std::fmt::Debug {
     }
     fn name(&self) -> &'static str {
         std::any::type_name::<Self>()
+    }
+    /// Declare that this restraint defines a periodic box for the
+    /// pair-kernel minimum-image wrap. Return `Some((min, max, periodic))`
+    /// where `periodic[k] == true` marks axis `k` as wrapping. Default
+    /// `None` means this restraint does not imply PBC.
+    fn periodic_box(&self) -> Option<([F; 3], [F; 3], [bool; 3])> {
+        None
     }
 }
 
@@ -65,6 +78,10 @@ impl Restraint for Box<dyn Restraint> {
     #[inline]
     fn name(&self) -> &'static str {
         (**self).name()
+    }
+    #[inline]
+    fn periodic_box(&self) -> Option<([F; 3], [F; 3], [bool; 3])> {
+        (**self).periodic_box()
     }
 }
 
@@ -138,37 +155,54 @@ impl Restraint for InsideCubeRestraint {
 // ============================================================================
 
 /// Packmol kind 3 — quadratic penalty forcing atom inside axis-aligned box.
+///
+/// `periodic[k] == true` marks axis `k` as periodic: the pair-kernel
+/// minimum-image wrap uses this box's extent for axis `k`, and the cell
+/// list on axis `k` wraps instead of clamping. The soft confinement
+/// penalty (`f` / `fg`) is always active regardless of `periodic` — a
+/// periodic axis still keeps atoms in the reference image via the
+/// penalty; `periodic` only affects pair-distance and cell lookup.
 #[derive(Debug, Clone, Copy)]
 pub struct InsideBoxRestraint {
     pub min: [F; 3],
     pub max: [F; 3],
+    pub periodic: [bool; 3],
 }
 
 impl InsideBoxRestraint {
-    pub fn new(min: [F; 3], max: [F; 3]) -> Self {
-        Self { min, max }
+    /// Construct a box restraint with explicit bounds and per-axis
+    /// periodicity flags. Pass `[false; 3]` for a purely-confining box;
+    /// `[true; 3]` for a fully-periodic box; mixed flags give slab
+    /// geometries (e.g. `[true, true, false]` = XY-periodic slab).
+    pub fn new(min: [F; 3], max: [F; 3], periodic: [bool; 3]) -> Self {
+        Self { min, max, periodic }
     }
 
-    /// Construct an axis-aligned cubic box from an origin and isotropic side length.
-    pub fn cube_from_origin(origin: [F; 3], side: F) -> Self {
+    /// Construct an axis-aligned cubic box from an origin and isotropic
+    /// side length, with per-axis periodicity flags.
+    pub fn cube_from_origin(origin: [F; 3], side: F, periodic: [bool; 3]) -> Self {
         Self {
             min: origin,
             max: [origin[0] + side, origin[1] + side, origin[2] + side],
+            periodic,
         }
     }
 
     /// Construct an axis-aligned box from a molrs-core `SimBox`.
     ///
-    /// The restraint bounds are `origin` → `origin + lengths`. Off-axis
-    /// cells (triclinic tilts) are not representable as an axis-aligned
+    /// The restraint bounds are `origin` → `origin + lengths`; caller
+    /// supplies the `periodic` flags explicitly (the `SimBox` type does
+    /// not currently carry per-axis periodicity). Off-axis cells
+    /// (triclinic tilts) are not representable as an axis-aligned
     /// restraint — write a custom `impl Restraint` for those.
-    pub fn from_simbox(simbox: &molrs::region::SimBox) -> Self {
+    pub fn from_simbox(simbox: &molrs::region::SimBox, periodic: [bool; 3]) -> Self {
         let origin = simbox.origin_view();
         let lengths = simbox.lengths();
         let o = [origin[0], origin[1], origin[2]];
         Self {
             min: o,
             max: [o[0] + lengths[0], o[1] + lengths[1], o[2] + lengths[2]],
+            periodic,
         }
     }
 }
@@ -214,6 +248,14 @@ impl Restraint for InsideBoxRestraint {
             g[2] += scale * 2.0 * a3;
         }
         self.f(pos, scale, scale2)
+    }
+
+    fn periodic_box(&self) -> Option<([F; 3], [F; 3], [bool; 3])> {
+        if self.periodic.iter().any(|&p| p) {
+            Some((self.min, self.max, self.periodic))
+        } else {
+            None
+        }
     }
 }
 

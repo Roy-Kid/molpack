@@ -92,27 +92,32 @@ fn new_uses_geometric_center_even_when_elements_are_known() {
 
 #[test]
 fn with_restraint() {
-    let t = Target::from_coords(&water_positions(), &water_radii(), 5)
-        .with_restraint(InsideBoxRestraint::new([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]));
+    let t = Target::from_coords(&water_positions(), &water_radii(), 5).with_restraint(
+        InsideBoxRestraint::new([0.0, 0.0, 0.0], [20.0, 20.0, 20.0], [false; 3]),
+    );
     assert_eq!(t.molecule_restraints.len(), 1);
 }
 
 #[test]
 fn with_restraint_chained() {
     let t = Target::from_coords(&water_positions(), &water_radii(), 5)
-        .with_restraint(InsideBoxRestraint::new([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]))
+        .with_restraint(InsideBoxRestraint::new(
+            [0.0, 0.0, 0.0],
+            [20.0, 20.0, 20.0],
+            [false; 3],
+        ))
         .with_restraint(InsideSphereRestraint::new([10.0, 10.0, 10.0], 50.0));
     assert_eq!(t.molecule_restraints.len(), 2);
 }
 
 #[test]
-fn with_restraint_for_atoms() {
-    let t = Target::from_coords(&water_positions(), &water_radii(), 5).with_restraint_for_atoms(
-        &[1, 2], // Packmol 1-based → internally 0-based [0, 1]
-        InsideSphereRestraint::new([0.0, 0.0, 0.0], 5.0),
-    );
+fn with_atom_restraint() {
+    // Indices are now 0-based (matching Rust convention) — no internal
+    // conversion happens. Caller subtracts 1 when porting from Packmol
+    // `.inp` files.
+    let t = Target::from_coords(&water_positions(), &water_radii(), 5)
+        .with_atom_restraint(&[0, 1], InsideSphereRestraint::new([0.0, 0.0, 0.0], 5.0));
     assert_eq!(t.atom_restraints.len(), 1);
-    // Indices converted to 0-based
     assert_eq!(t.atom_restraints[0].0, vec![0, 1]);
 }
 
@@ -120,35 +125,44 @@ fn with_restraint_for_atoms() {
 
 #[test]
 fn fixed_at_sets_count_to_1() {
-    let t = Target::from_coords(&water_positions(), &water_radii(), 5).fixed_at([0.0, 0.0, 0.0]);
+    // Explicit count=1 to satisfy the assertion in fixed_at().
+    let t = Target::from_coords(&water_positions(), &water_radii(), 1).fixed_at([0.0, 0.0, 0.0]);
     assert_eq!(t.count, 1);
     assert!(t.fixed_at.is_some());
     let fp = t.fixed_at.unwrap();
     assert!((fp.position[0]).abs() < 1e-6);
-    assert!((fp.euler[0]).abs() < 1e-6);
+    assert!((fp.orientation[0].radians()).abs() < 1e-6);
 }
 
 #[test]
-fn fixed_at_with_euler() {
-    let t = Target::from_coords(&water_positions(), &water_radii(), 5)
-        .fixed_at_with_euler([1.0, 2.0, 3.0], [0.1, 0.2, 0.3]);
+fn fixed_at_with_orientation() {
+    use molpack::Angle;
+    let t = Target::from_coords(&water_positions(), &water_radii(), 1)
+        .fixed_at([1.0, 2.0, 3.0])
+        .with_orientation([
+            Angle::from_radians(0.1),
+            Angle::from_radians(0.2),
+            Angle::from_radians(0.3),
+        ]);
     assert_eq!(t.count, 1);
     let fp = t.fixed_at.unwrap();
     assert!((fp.position[0] - 1.0).abs() < 1e-6);
-    assert!((fp.euler[2] - 0.3).abs() < 1e-6);
+    assert!((fp.orientation[2].radians() - 0.3).abs() < 1e-6);
 }
 
 #[test]
 fn fixed_target_auto_centering_disabled() {
     // When fixed_at is used with Auto centering (default), the fixed molecule
     // should NOT be centered — its input coords are used directly.
-    let free = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 1)
-        .with_restraint(InsideBoxRestraint::new([-5.0, -5.0, -5.0], [5.0, 5.0, 5.0]));
+    let free = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 1).with_restraint(
+        InsideBoxRestraint::new([-5.0, -5.0, -5.0], [5.0, 5.0, 5.0], [false; 3]),
+    );
     let fixed = Target::from_coords(&[[10.0, 0.0, 0.0], [12.0, 0.0, 0.0]], &[1.0, 1.0], 1)
         .fixed_at([0.0, 0.0, 0.0]);
 
     let result = Molpack::new()
-        .pack(&[free, fixed], 5, Some(1))
+        .with_seed(1)
+        .pack(&[free, fixed], 5)
         .expect("pack should succeed");
 
     // Fixed atoms follow free atoms in output.
@@ -158,14 +172,16 @@ fn fixed_target_auto_centering_disabled() {
 
 #[test]
 fn fixed_target_centered() {
-    let free = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 1)
-        .with_restraint(InsideBoxRestraint::new([-5.0, -5.0, -5.0], [5.0, 5.0, 5.0]));
+    let free = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 1).with_restraint(
+        InsideBoxRestraint::new([-5.0, -5.0, -5.0], [5.0, 5.0, 5.0], [false; 3]),
+    );
     let fixed = Target::from_coords(&[[10.0, 0.0, 0.0], [12.0, 0.0, 0.0]], &[1.0, 1.0], 1)
-        .with_center()
+        .with_centering(molpack::CenteringMode::Center)
         .fixed_at([0.0, 0.0, 0.0]);
 
     let result = Molpack::new()
-        .pack(&[free, fixed], 5, Some(1))
+        .with_seed(1)
+        .pack(&[free, fixed], 5)
         .expect("pack should succeed");
 
     // COM of [10,12] = 11. After centering, ref_coords = [-1, +1].
@@ -177,39 +193,46 @@ fn fixed_target_centered() {
 // ── centering modes ────────────────────────────────────────────────────────
 
 #[test]
-fn with_center_mode() {
+fn with_centering_center() {
     use molpack::CenteringMode;
-    let t = Target::from_coords(&water_positions(), &water_radii(), 1).with_center();
+    let t = Target::from_coords(&water_positions(), &water_radii(), 1)
+        .with_centering(CenteringMode::Center);
     assert_eq!(t.centering, CenteringMode::Center);
 }
 
 #[test]
-fn without_centering_mode() {
+fn with_centering_off() {
     use molpack::CenteringMode;
-    let t = Target::from_coords(&water_positions(), &water_radii(), 1).without_centering();
-    assert_eq!(t.centering, CenteringMode::None);
+    let t = Target::from_coords(&water_positions(), &water_radii(), 1)
+        .with_centering(CenteringMode::Off);
+    assert_eq!(t.centering, CenteringMode::Off);
 }
 
 // ── rotation constraints ───────────────────────────────────────────────────
 
 #[test]
-fn constrain_rotation() {
+fn with_rotation_bound() {
+    use molpack::{Angle, Axis};
     let t = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 1)
-        .constrain_rotation_x(0.0, 10.0)
-        .constrain_rotation_y(90.0, 5.0)
-        .constrain_rotation_z(180.0, 15.0);
-    // x → teta (index 2), y → beta (index 0), z → gama (index 1)
-    assert!(t.constrain_rotation[0].is_some()); // beta (y)
-    assert!(t.constrain_rotation[1].is_some()); // gama (z)
-    assert!(t.constrain_rotation[2].is_some()); // teta (x)
+        .with_rotation_bound(Axis::X, Angle::from_degrees(0.0), Angle::from_degrees(10.0))
+        .with_rotation_bound(Axis::Y, Angle::from_degrees(90.0), Angle::from_degrees(5.0))
+        .with_rotation_bound(
+            Axis::Z,
+            Angle::from_degrees(180.0),
+            Angle::from_degrees(15.0),
+        );
+    // Euler variable order: [beta(Y) = 0, gama(Z) = 1, teta(X) = 2]
+    assert!(t.rotation_bound[0].is_some()); // beta (Y)
+    assert!(t.rotation_bound[1].is_some()); // gama (Z)
+    assert!(t.rotation_bound[2].is_some()); // teta (X)
 }
 
-// ── maxmove ────────────────────────────────────────────────────────────────
+// ── perturb budget ─────────────────────────────────────────────────────────
 
 #[test]
-fn with_maxmove() {
-    let t = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 1).with_maxmove(5);
-    assert_eq!(t.maxmove, Some(5));
+fn with_perturb_budget() {
+    let t = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 1).with_perturb_budget(5);
+    assert_eq!(t.perturb_budget, Some(5));
 }
 
 // ── default element ────────────────────────────────────────────────────────

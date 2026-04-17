@@ -30,7 +30,7 @@
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
-use molpack::{InsideSphereRestraint, Molpack, ProgressHandler, Target, XYZHandler};
+use molpack::{CenteringMode, InsideSphereRestraint, Molpack, ProgressHandler, Target, XYZHandler};
 use molrs_io::pdb::read_pdb_frame;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let protein_target = Target::new(protein, 1)
         .with_name("protein")
-        .with_center()
+        .with_centering(CenteringMode::Center)
         .fixed_at([0.0, 0.0, 0.0]);
 
     let water_target = Target::new(water, 1000)
@@ -63,18 +63,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(sphere)
         .with_name("chloride");
 
-    let mut packer = Molpack::new();
+    let mut packer = Molpack::new().with_seed(1_234_567);
     if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.add_handler(ProgressHandler::new());
+        packer = packer.with_handler(ProgressHandler::new());
     }
     if std::env::var_os("MOLRS_PACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.add_handler(XYZHandler::new(out_dir.join("solvprotein.xyz"), 10));
+        packer = packer.with_handler(XYZHandler::new(out_dir.join("solvprotein.xyz"), 10));
     }
 
     let targets = vec![protein_target, water_target, sodium_target, chloride_target];
-    packer.pack(&targets, 800, Some(1_234_567))?;
+    packer.pack(&targets, 800)?;
 
     Ok(())
 }

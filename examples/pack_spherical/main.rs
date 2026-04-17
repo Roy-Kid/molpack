@@ -71,16 +71,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    Packmol input constrains only specific atoms:
     //    atom 37 inside sphere r=14, atom 5 outside sphere r=26.
     let lipid_inner = Target::new(lipid.clone(), 90)
-        .with_restraint_for_atoms(&[37], InsideSphereRestraint::new(origin, 14.0))
-        .with_restraint_for_atoms(&[5], OutsideSphereRestraint::new(origin, 26.0))
+        .with_atom_restraint(&[36], InsideSphereRestraint::new(origin, 14.0))
+        .with_atom_restraint(&[4], OutsideSphereRestraint::new(origin, 26.0))
         .with_name("lipid_inner");
 
     // 3. Outer lipid layer: 300 molecules.
     //    Packmol input constrains only specific atoms:
     //    atom 5 inside sphere r=29, atom 37 outside sphere r=41.
     let lipid_outer = Target::new(lipid, 300)
-        .with_restraint_for_atoms(&[5], InsideSphereRestraint::new(origin, 29.0))
-        .with_restraint_for_atoms(&[37], OutsideSphereRestraint::new(origin, 41.0))
+        .with_atom_restraint(&[4], InsideSphereRestraint::new(origin, 29.0))
+        .with_atom_restraint(&[36], OutsideSphereRestraint::new(origin, 41.0))
         .with_name("lipid_outer");
 
     // 4. Outer water shell: 17536 molecules, box ±47.5, outside sphere r=43
@@ -88,21 +88,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(InsideBoxRestraint::new(
             [-47.5, -47.5, -47.5],
             [47.5, 47.5, 47.5],
+            [false; 3],
         ))
         .with_restraint(OutsideSphereRestraint::new(origin, 43.0))
         .with_name("water_outer");
 
     // Target order matches Packmol: water_inner → lipid_inner → lipid_outer → water_outer
     let targets = vec![water_inner, lipid_inner, lipid_outer, water_outer];
-    let mut packer = Molpack::new();
+    let mut packer = Molpack::new().with_seed(1_234_567);
     if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.add_handler(ProgressHandler::new());
+        packer = packer.with_handler(ProgressHandler::new());
     }
 
     // Match spherical-comment.inp defaults:
     // - nloop defaults to 200 * ntype (ntype = 4 => 800)
     // - seed defaults to 1234567
-    packer.pack(&targets, 800, Some(1_234_567))?;
+    packer.pack(&targets, 800)?;
 
     Ok(())
 }

@@ -301,7 +301,7 @@ pub fn initial(
     discale: F,
     sidemax: F,
     nloop0: usize,
-    pbc: Option<([F; 3], [F; 3])>,
+    pbc: Option<([F; 3], [F; 3], [bool; 3])>,
     movebad_cfg: &MoveBadConfig<'_>,
     rng: &mut impl Rng,
 ) {
@@ -514,13 +514,14 @@ pub fn initial(
 
     // ── 6. Setup periodic box + cell grid + fixed atoms ──────────────────────
     // Packmol initial.f90 lines 272-317
-    if let Some((pbc_min, pbc_max)) = pbc {
+    if let Some((pbc_min, pbc_max, pbc_periodic)) = pbc {
         sys.pbc_min = pbc_min;
         sys.pbc_length = [
             pbc_max[0] - pbc_min[0],
             pbc_max[1] - pbc_min[1],
             pbc_max[2] - pbc_min[2],
         ];
+        sys.pbc_periodic = pbc_periodic;
     } else {
         sys.pbc_min = sys.sizemin;
         sys.pbc_length = [
@@ -528,6 +529,7 @@ pub fn initial(
             sys.sizemax[1] - sys.sizemin[1],
             sys.sizemax[2] - sys.sizemin[2],
         ];
+        sys.pbc_periodic = [false; 3];
     }
 
     let cell_side = if radmax > 0.0 {
@@ -562,6 +564,7 @@ pub fn initial(
             &sys.pbc_length,
             &sys.cell_length,
             &sys.ncells,
+            &sys.pbc_periodic,
         );
         let icell = index_cell(&cell, &sys.ncells);
         if sys.latomfix[icell] == NONE_IDX {

@@ -33,7 +33,7 @@ fn pbc_constants(sys: &PackContext) -> PbcConstants {
     let mut inv_length = [0.0 as F; 3];
     let mut any_active = false;
     for k in 0..3 {
-        if length[k] > 0.0 {
+        if sys.pbc_periodic[k] && length[k] > 0.0 {
             inv_length[k] = 1.0 / length[k];
             any_active = true;
         }
@@ -127,11 +127,26 @@ impl AtomHotState {
 /// Port of `computef.f90`.
 ///
 /// `x` layout: [COM₀..COMₙ (3N)] ++ [euler₀..eulerₙ (3N)]
+///
+/// Takes the geometry-cache fast path when `x` and the cell grid are identical
+/// to the last expansion: the Cartesian rebuild and linked-cell rebuild are
+/// skipped and only the constraint + pair kernels re-run on the stored state.
+/// The packer hits this path on every outer iteration when it re-evaluates at
+/// unscaled radii after `pgencan` returns, since radius mutation does not
+/// invalidate the cache key.
 pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
     sys.debug_assert_atom_props_sync();
     sys.increment_ncf();
     sys.fdist = 0.0;
     sys.frest = 0.0;
+
+    if matches_cached_geometry(x, sys) {
+        let mut f = accumulate_constraint_values_from_xcart(sys);
+        if !sys.init1 {
+            f += accumulate_pair_f(sys);
+        }
+        return f;
+    }
 
     if !sys.init1 {
         sys.resetcells();
@@ -152,6 +167,9 @@ pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
 
 /// Compute objective function value and gradient in one pass over geometry/state.
 /// This avoids rebuilding Cartesian coordinates and cell lists twice.
+///
+/// Takes the geometry-cache fast path when `x` and the cell grid match the
+/// last expansion — the Cartesian rebuild and linked-cell rebuild are skipped.
 pub fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
     sys.debug_assert_atom_props_sync();
     sys.increment_ncf();
@@ -159,6 +177,15 @@ pub fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
     sys.fdist = 0.0;
     sys.frest = 0.0;
     sys.work.gxcar.fill([0.0; 3]);
+
+    if matches_cached_geometry(x, sys) {
+        let mut f = accumulate_constraint_values_and_gradients_from_xcart(sys);
+        if !sys.init1 {
+            f += accumulate_pair_fg(sys);
+        }
+        project_cartesian_gradient(x, sys, g);
+        return f;
+    }
 
     if !sys.init1 {
         sys.resetcells();
@@ -188,12 +215,7 @@ pub fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
 /// packs the ten or so hot fields into one cache line per atom (see
 /// [`AtomProps`]).
 #[inline(always)]
-fn fparc(
-    icart: usize,
-    first_jcart: u32,
-    sys: &mut PackContext,
-    pbc: &PbcConstants,
-) -> (F, F) {
+fn fparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstants) -> (F, F) {
     let mut result = 0.0;
     let mut local_fdist: F = 0.0;
     let mut jcart_id = first_jcart;
@@ -397,6 +419,59 @@ fn accumulate_constraint_gradient_from_xcart(sys: &mut PackContext) {
     }
 }
 
+/// F-only counterpart to [`accumulate_constraint_gradient_from_xcart`]. Walks
+/// `sys.xcart` (assumed current from a prior expansion) and re-applies each
+/// restraint's function value, returning the accumulated penalty. Used by the
+/// `compute_f` cache fast path when the Cartesian expansion can be skipped.
+#[inline]
+fn accumulate_constraint_values_from_xcart(sys: &mut PackContext) -> F {
+    let mut f = 0.0;
+    let mut icart = 0usize;
+
+    for itype in 0..sys.ntype {
+        if !sys.comptype[itype] {
+            icart += sys.nmols[itype] * sys.natoms[itype];
+            continue;
+        }
+
+        for _imol in 0..sys.nmols[itype] {
+            for _iatom in 0..sys.natoms[itype] {
+                let pos = sys.xcart[icart];
+                f += accumulate_constraint_value(icart, &pos, sys);
+                icart += 1;
+            }
+        }
+    }
+
+    f
+}
+
+/// Combined F+G counterpart to [`accumulate_constraint_gradient_from_xcart`].
+/// Used by the `compute_fg` cache fast path.
+#[inline]
+fn accumulate_constraint_values_and_gradients_from_xcart(sys: &mut PackContext) -> F {
+    let mut f = 0.0;
+    let mut icart = 0usize;
+
+    for itype in 0..sys.ntype {
+        if !sys.comptype[itype] {
+            icart += sys.nmols[itype] * sys.natoms[itype];
+            continue;
+        }
+
+        for _imol in 0..sys.nmols[itype] {
+            for _iatom in 0..sys.natoms[itype] {
+                let pos = sys.xcart[icart];
+                f += accumulate_constraint_value(icart, &pos, sys);
+                accumulate_constraint_gradient(icart, &pos, sys);
+                icart += 1;
+            }
+        }
+    }
+
+    f
+}
+
 #[inline(always)]
 fn insert_atom_in_cell(icart: usize, pos: &[F; 3], sys: &mut PackContext) {
     let cell = setcell(
@@ -405,6 +480,7 @@ fn insert_atom_in_cell(icart: usize, pos: &[F; 3], sys: &mut PackContext) {
         &sys.pbc_length,
         &sys.cell_length,
         &sys.ncells,
+        &sys.pbc_periodic,
     );
     let icell = index_cell(&cell, &sys.ncells);
     sys.latomnext[icart] = sys.latomfirst[icell];
@@ -621,10 +697,7 @@ fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
             }
             (f_local, fdist_local)
         })
-        .reduce(
-            || (0.0 as F, 0.0 as F),
-            |a, b| (a.0 + b.0, a.1.max(b.1)),
-        );
+        .reduce(|| (0.0 as F, 0.0 as F), |a, b| (a.0 + b.0, a.1.max(b.1)));
 
     // Merge per-thread gradients back into the main buffer. Small
     // systems stay serial to avoid rayon dispatch overhead dominating
@@ -712,12 +785,7 @@ fn gparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstan
 /// Returns `(penalty_sum, fdist_max)`. Caller reduces `fdist_max` locally
 /// and writes `sys.fdist` once after the cell walk completes.
 #[inline(always)]
-fn fgparc(
-    icart: usize,
-    first_jcart: u32,
-    sys: &mut PackContext,
-    pbc: &PbcConstants,
-) -> (F, F) {
+fn fgparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstants) -> (F, F) {
     let mut result = 0.0;
     let mut local_fdist: F = 0.0;
     let mut jcart_id = first_jcart;
@@ -903,12 +971,7 @@ fn fgparc_stats(
 
 #[cfg(feature = "rayon")]
 #[inline(always)]
-fn fparc_stats(
-    icart: usize,
-    first_jcart: u32,
-    sys: &PackContext,
-    pbc: &PbcConstants,
-) -> (F, F) {
+fn fparc_stats(icart: usize, first_jcart: u32, sys: &PackContext, pbc: &PbcConstants) -> (F, F) {
     let mut result: F = 0.0;
     let mut fdist_max: F = 0.0;
     let mut jcart_id = first_jcart;
@@ -1021,6 +1084,7 @@ fn matches_cached_geometry(x: &[F], sys: &PackContext) -> bool {
         sys.cell_length,
         sys.pbc_min,
         sys.pbc_length,
+        sys.pbc_periodic,
     )
 }
 
@@ -1034,6 +1098,7 @@ fn update_cached_geometry(x: &[F], sys: &mut PackContext) {
         sys.cell_length,
         sys.pbc_min,
         sys.pbc_length,
+        sys.pbc_periodic,
     );
 }
 

@@ -14,7 +14,8 @@ use std::path::PathBuf;
 
 use std::collections::HashSet;
 
-use molpack::{Hook, TorsionMcHook, compute_excluded_pairs, self_avoidance_penalty};
+use molpack::TorsionMcRelaxer;
+use molpack::relaxer::{Relaxer, compute_excluded_pairs, self_avoidance_penalty};
 use molrs::hydrogens::add_hydrogens;
 use molrs::molgraph::{Atom, AtomId, MolGraph};
 use molrs::types::F;
@@ -320,13 +321,13 @@ fn main() {
         excluded.len()
     );
 
-    let hook = TorsionMcHook::new(&graph)
+    let hook = TorsionMcRelaxer::new(&graph)
         .with_self_avoidance(0.75)
         .with_temperature(0.1)
         .with_steps(1)
         .with_max_delta(std::f64::consts::PI as F / 8.0);
 
-    let mut runner = hook.build(&coords);
+    let mut runner = hook.spawn(&coords);
     let mut current = coords;
     let mut f_current = f0;
 

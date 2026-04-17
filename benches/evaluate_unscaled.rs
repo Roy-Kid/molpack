@@ -20,8 +20,8 @@ fn build_snapshot() -> (PackContext, Vec<f64>) {
         &example_dir_from_manifest(ExampleCase::Mixture),
     )
     .expect("build targets");
-    let mut packer = Molpack::new();
-    let _ = packer.pack(&targets, 1, Some(1_234_567)).expect("pack");
+    let mut packer = Molpack::new().with_seed(1_234_567);
+    let _ = packer.pack(&targets, 1).expect("pack");
 
     let ntotat = 400;
     let mut sys = PackContext::new(ntotat, 0, 0);

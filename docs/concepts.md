@@ -54,7 +54,7 @@ pub trait Region: Send + Sync + std::fmt::Debug {
     fn contains(&self, x: &[F; 3]) -> bool;
     fn signed_distance(&self, x: &[F; 3]) -> F;
     fn signed_distance_grad(&self, x: &[F; 3]) -> [F; 3] { /* default FD */ }
-    fn bounding_box(&self) -> Option<BBox> { None }
+    fn bounding_box(&self) -> Option<Aabb> { None }
 }
 ```
 
@@ -65,7 +65,7 @@ analytic chain-rule gradients (max / min / negate). The
 `.and(...)` / `.or(...)` / `.not()` methods.
 
 Any `Region` lifts to a `Restraint` via
-[`FromRegion<R>`](crate::FromRegion):
+[`RegionRestraint<R>`](crate::RegionRestraint):
 
 ```text
 penalty(x) = scale2 * max(0, signed_distance(x))²
@@ -104,7 +104,7 @@ lifecycle points:
 ```text
 pub trait Handler: Send {
     fn on_start        (&mut self, ntotat, ntotmol)       {}
-    fn on_initial      (&mut self, sys: &PackContext)     {}
+    fn on_initialized  (&mut self, sys: &PackContext)     {}
     fn on_step         (&mut self, info: &StepInfo, sys);   // required
     fn on_phase_start  (&mut self, info: &PhaseInfo)      {}
     fn on_phase_end    (&mut self, info, report: &PhaseReport) {}
@@ -154,7 +154,7 @@ A [`Target`](crate::Target) describes one molecule type:
 - Its attached restraints (per-target + per-atom-subset).
 - Its attached relaxers.
 - Optional fixed placement (Euler + translation).
-- Optional Euler-angle bounds (`constrain_rotation_x/y/z`).
+- Optional Euler-angle bounds (`with_rotation_bound(Axis, Angle, Angle)`).
 
 Targets are snapshotted at `pack()` entry — mutating a `Target` after
 passing it to the packer has no effect.
@@ -165,12 +165,13 @@ passing it to the packer has no effect.
 
 ```text
 Molpack::new()
-    .tolerance(2.0)
-    .precision(0.01)
-    .maxit(20)
-    .pbc(min, max)              // or .pbc_box(lengths)
-    .add_handler(...)
-    .add_restraint(...)         // global; broadcast to every target
+    .with_tolerance(2.0)
+    .with_precision(0.01)
+    .with_inner_iterations(20)
+    .with_handler(...)
+    .with_global_restraint(...) // broadcast to every target
+    // PBC declared via InsideBoxRestraint::new(min, max, [true; 3])
+    // on any target restraint — not a Molpack method.
     .pack(&[targets], max_loops, seed)
 ```
 
@@ -199,7 +200,7 @@ against synthetic test problems will interact with it.
 Formal statement (spec §4):
 
 ```text
-molpack.add_restraint(r)
+molpack.with_global_restraint(r)
     ≡  for t in targets { t.with_restraint(r.clone()) }
 ```
 

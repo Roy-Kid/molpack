@@ -95,6 +95,7 @@ fn gradient_box_constraint() {
     sys.restraints = vec![Arc::new(InsideBoxRestraint::new(
         [0.0, 0.0, 0.0],
         [1.0, 1.0, 1.0],
+        [false; 3],
     ))];
     sys.iratom_offsets = vec![0, 1];
     sys.iratom_data = vec![0];
@@ -262,6 +263,7 @@ fn gradient_combined_constraint_and_pairs() {
     sys.restraints = vec![Arc::new(InsideBoxRestraint::new(
         [0.0, 0.0, 0.0],
         [5.0, 5.0, 5.0],
+        [false; 3],
     ))];
     sys.iratom_offsets = vec![0, 1, 1, 1]; // only first atom has constraint
     sys.iratom_data = vec![0];
@@ -315,6 +317,7 @@ fn fused_function_and_gradient_matches_separate_evaluation() {
     sys.restraints = vec![Arc::new(InsideBoxRestraint::new(
         [0.0, 0.0, 0.0],
         [5.0, 5.0, 5.0],
+        [false; 3],
     ))];
     sys.iratom_offsets = vec![0, 1, 1, 2, 2];
     sys.iratom_data = vec![0, 0];

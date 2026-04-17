@@ -3,7 +3,8 @@
 //! integration tests exercising the public API.
 
 use molpack::{
-    F, Hook, InsideBoxRestraint, InsideSphereRestraint, Molpack, NullHandler, Target, TorsionMcHook,
+    F, InsideBoxRestraint, InsideSphereRestraint, Molpack, NullHandler, Relaxer, Target,
+    TorsionMcRelaxer,
 };
 use molrs::molgraph::{Atom, MolGraph};
 
@@ -41,14 +42,14 @@ fn chain(n: usize, bond_length: F) -> (MolGraph, Vec<[F; 3]>, Vec<F>) {
 #[test]
 fn detects_rotatable_bonds() {
     let (graph, _, _) = chain(10, 1.54);
-    let hook = TorsionMcHook::new(&graph);
+    let hook = TorsionMcRelaxer::new(&graph);
     assert_eq!(hook.bonds.len(), 7, "10-atom chain has 7 rotatable bonds");
 }
 
 #[test]
 fn short_chain_fewer_bonds() {
     let (graph, _, _) = chain(3, 1.5);
-    let hook = TorsionMcHook::new(&graph);
+    let hook = TorsionMcRelaxer::new(&graph);
     // 3-atom chain: only terminal bonds → 0 rotatable
     assert_eq!(hook.bonds.len(), 0);
 }
@@ -56,7 +57,7 @@ fn short_chain_fewer_bonds() {
 #[test]
 fn four_atom_chain_has_one_bond() {
     let (graph, _, _) = chain(4, 1.5);
-    let hook = TorsionMcHook::new(&graph);
+    let hook = TorsionMcRelaxer::new(&graph);
     assert_eq!(hook.bonds.len(), 1);
 }
 
@@ -65,11 +66,11 @@ fn four_atom_chain_has_one_bond() {
 #[test]
 fn runner_modifies_coords() {
     let (graph, coords, _) = chain(5, 1.5);
-    let hook = TorsionMcHook::new(&graph)
+    let hook = TorsionMcRelaxer::new(&graph)
         .with_temperature(10.0)
         .with_steps(50);
 
-    let mut runner = hook.build(&coords);
+    let mut runner = hook.spawn(&coords);
     let mut rng = rand::rng();
     let result = runner.on_iter(&coords, 1000.0, &mut |_| 999.0, &mut rng);
 
@@ -87,11 +88,11 @@ fn runner_modifies_coords() {
 #[test]
 fn runner_acceptance_rate_between_0_and_1() {
     let (graph, coords, _) = chain(8, 1.5);
-    let hook = TorsionMcHook::new(&graph)
+    let hook = TorsionMcRelaxer::new(&graph)
         .with_temperature(1.0)
         .with_steps(100);
 
-    let mut runner = hook.build(&coords);
+    let mut runner = hook.spawn(&coords);
     let mut rng = rand::rng();
     let _ = runner.on_iter(&coords, 100.0, &mut |_| 50.0, &mut rng);
 
@@ -107,7 +108,7 @@ fn runner_acceptance_rate_between_0_and_1() {
 #[test]
 fn target_with_hook_requires_count_1() {
     let (graph, coords, radii) = chain(5, 1.5);
-    let hook = TorsionMcHook::new(&graph);
+    let hook = TorsionMcRelaxer::new(&graph);
     let _target = Target::from_coords(&coords, &radii, 1).with_relaxer(hook);
 }
 
@@ -115,7 +116,7 @@ fn target_with_hook_requires_count_1() {
 #[should_panic(expected = "relaxers require count == 1")]
 fn target_with_hook_panics_for_count_gt_1() {
     let (graph, coords, radii) = chain(5, 1.5);
-    let hook = TorsionMcHook::new(&graph);
+    let hook = TorsionMcRelaxer::new(&graph);
     let _target = Target::from_coords(&coords, &radii, 2).with_relaxer(hook);
 }
 
@@ -126,19 +127,24 @@ fn pack_with_torsion_hook_in_box() {
     let n = 10;
     let (graph, coords, radii) = chain(n, 1.5);
 
-    let hook = TorsionMcHook::new(&graph)
+    let hook = TorsionMcRelaxer::new(&graph)
         .with_temperature(1.0)
         .with_steps(10)
         .with_max_delta(std::f64::consts::PI as F / 4.0);
 
     let target = Target::from_coords(&coords, &radii, 1)
         .with_name("chain")
-        .with_restraint(InsideBoxRestraint::new([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]))
+        .with_restraint(InsideBoxRestraint::new(
+            [0.0, 0.0, 0.0],
+            [20.0, 20.0, 20.0],
+            [false; 3],
+        ))
         .with_relaxer(hook);
 
     let result = Molpack::new()
-        .add_handler(NullHandler)
-        .pack(&[target], 10, Some(42))
+        .with_handler(NullHandler)
+        .with_seed(42)
+        .pack(&[target], 10)
         .expect("pack should not fail");
 
     assert_eq!(result.natoms(), n);
@@ -149,7 +155,7 @@ fn pack_with_torsion_hook_in_sphere() {
     let n = 20;
     let (graph, coords, radii) = chain(n, 1.5);
 
-    let hook = TorsionMcHook::new(&graph)
+    let hook = TorsionMcRelaxer::new(&graph)
         .with_temperature(0.5)
         .with_steps(20);
 
@@ -159,8 +165,9 @@ fn pack_with_torsion_hook_in_sphere() {
         .with_relaxer(hook);
 
     let result = Molpack::new()
-        .add_handler(NullHandler)
-        .pack(&[target], 15, Some(123))
+        .with_handler(NullHandler)
+        .with_seed(123)
+        .pack(&[target], 15)
         .expect("pack should not fail");
 
     assert_eq!(result.natoms(), n);
@@ -176,20 +183,21 @@ fn pack_hook_with_regular_target() {
     let n = 5;
     let (graph, chain_coords, chain_radii) = chain(n, 1.5);
 
-    let restraint = InsideBoxRestraint::new([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]);
+    let restraint = InsideBoxRestraint::new([0.0, 0.0, 0.0], [30.0, 30.0, 30.0], [false; 3]);
 
     let chain_target = Target::from_coords(&chain_coords, &chain_radii, 1)
         .with_name("chain")
         .with_restraint(restraint)
-        .with_relaxer(TorsionMcHook::new(&graph).with_steps(5));
+        .with_relaxer(TorsionMcRelaxer::new(&graph).with_steps(5));
 
     let point_target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 3)
         .with_name("points")
         .with_restraint(restraint);
 
     let result = Molpack::new()
-        .add_handler(NullHandler)
-        .pack(&[chain_target, point_target], 10, Some(99))
+        .with_handler(NullHandler)
+        .with_seed(99)
+        .pack(&[chain_target, point_target], 10)
         .expect("pack should not fail");
 
     assert_eq!(result.natoms(), 8); // 5 chain + 3 point
@@ -200,7 +208,7 @@ fn pack_hook_with_regular_target() {
 #[test]
 fn hook_builder_methods() {
     let (graph, _, _) = chain(10, 1.5);
-    let hook = TorsionMcHook::new(&graph)
+    let hook = TorsionMcRelaxer::new(&graph)
         .with_temperature(2.0)
         .with_steps(20)
         .with_max_delta(1.0)
@@ -215,7 +223,7 @@ fn hook_builder_methods() {
 // ── StepInfo with hook acceptance ──────────────────────────────────────────
 
 #[test]
-fn step_info_hook_acceptance() {
+fn step_info_relaxer_acceptance_field() {
     use molpack::StepInfo;
     use molpack::handler::PhaseInfo;
 
@@ -232,9 +240,9 @@ fn step_info_hook_acceptance() {
         improvement_pct: 5.0,
         radscale: 1.1,
         precision: 0.01,
-        hook_acceptance: vec![(0, 0.35)],
+        relaxer_acceptance: vec![(0, 0.35)],
     };
 
-    assert_eq!(info.hook_acceptance.len(), 1);
-    assert!((info.hook_acceptance[0].1 - 0.35).abs() < 1e-10);
+    assert_eq!(info.relaxer_acceptance.len(), 1);
+    assert!((info.relaxer_acceptance[0].1 - 0.35).abs() < 1e-10);
 }

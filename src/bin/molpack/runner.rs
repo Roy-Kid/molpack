@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use molpack::{
-    AbovePlaneRestraint, BelowPlaneRestraint, InsideBoxRestraint, InsideSphereRestraint, Molpack,
-    OutsideSphereRestraint, ProgressHandler, Target,
+    AbovePlaneRestraint, Angle, BelowPlaneRestraint, CenteringMode, InsideBoxRestraint,
+    InsideSphereRestraint, Molpack, OutsideSphereRestraint, ProgressHandler, Target,
 };
 
 use crate::io;
@@ -31,8 +31,11 @@ pub fn run(input: ParsedInput, base_dir: &Path) -> Result<(), String> {
 
     // Build Molpack.
     let mut packer = Molpack::new()
-        .tolerance(input.tolerance)
-        .add_handler(ProgressHandler::new());
+        .with_tolerance(input.tolerance)
+        .with_handler(ProgressHandler::new());
+    if let Some(seed) = input.seed {
+        packer = packer.with_seed(seed);
+    }
 
     // Build Target list.
     let targets: Vec<Target> = input
@@ -43,7 +46,7 @@ pub fn run(input: ParsedInput, base_dir: &Path) -> Result<(), String> {
 
     // Run packing.
     let result = packer
-        .pack(&targets, input.nloop, input.seed)
+        .pack(&targets, input.nloop)
         .map_err(|e| format!("packing failed: {e}"))?;
 
     // Report convergence.
@@ -89,11 +92,15 @@ fn build_target(
     }
 
     if s.center {
-        target = target.with_center();
+        target = target.with_centering(CenteringMode::Center);
     }
 
     if let Some((pos, euler)) = s.fixed {
-        target = target.fixed_at_with_euler(pos, euler);
+        target = target.fixed_at(pos).with_orientation([
+            Angle::from_radians(euler[0]),
+            Angle::from_radians(euler[1]),
+            Angle::from_radians(euler[2]),
+        ]);
     }
 
     Ok(target)
@@ -102,7 +109,7 @@ fn build_target(
 fn apply_mol_restraint(target: Target, r: &ParsedRestraint) -> Target {
     match *r {
         ParsedRestraint::InsideBox { min, max } => {
-            target.with_restraint(InsideBoxRestraint::new(min, max))
+            target.with_restraint(InsideBoxRestraint::new(min, max, [false; 3]))
         }
         ParsedRestraint::InsideSphere { center, radius } => {
             target.with_restraint(InsideSphereRestraint::new(center, radius))
@@ -120,22 +127,32 @@ fn apply_mol_restraint(target: Target, r: &ParsedRestraint) -> Target {
 }
 
 fn apply_atom_group(mut target: Target, group: &ParsedAtomGroup) -> Result<Target, String> {
+    // Parsed atom indices follow Packmol's 1-based convention in the
+    // `.inp` file; Target::with_atom_restraint expects 0-based.
+    let zero_indexed: Vec<usize> = group
+        .atom_indices
+        .iter()
+        .map(|&i| i.saturating_sub(1))
+        .collect();
     for r in &group.restraints {
-        let indices = &group.atom_indices;
-        target =
-            match *r {
-                ParsedRestraint::InsideBox { min, max } => {
-                    target.with_restraint_for_atoms(indices, InsideBoxRestraint::new(min, max))
-                }
-                ParsedRestraint::InsideSphere { center, radius } => target
-                    .with_restraint_for_atoms(indices, InsideSphereRestraint::new(center, radius)),
-                ParsedRestraint::OutsideSphere { center, radius } => target
-                    .with_restraint_for_atoms(indices, OutsideSphereRestraint::new(center, radius)),
-                ParsedRestraint::AbovePlane { normal, distance } => target
-                    .with_restraint_for_atoms(indices, AbovePlaneRestraint::new(normal, distance)),
-                ParsedRestraint::BelowPlane { normal, distance } => target
-                    .with_restraint_for_atoms(indices, BelowPlaneRestraint::new(normal, distance)),
-            };
+        let indices = zero_indexed.as_slice();
+        target = match *r {
+            ParsedRestraint::InsideBox { min, max } => {
+                target.with_atom_restraint(indices, InsideBoxRestraint::new(min, max, [false; 3]))
+            }
+            ParsedRestraint::InsideSphere { center, radius } => {
+                target.with_atom_restraint(indices, InsideSphereRestraint::new(center, radius))
+            }
+            ParsedRestraint::OutsideSphere { center, radius } => {
+                target.with_atom_restraint(indices, OutsideSphereRestraint::new(center, radius))
+            }
+            ParsedRestraint::AbovePlane { normal, distance } => {
+                target.with_atom_restraint(indices, AbovePlaneRestraint::new(normal, distance))
+            }
+            ParsedRestraint::BelowPlane { normal, distance } => {
+                target.with_atom_restraint(indices, BelowPlaneRestraint::new(normal, distance))
+            }
+        };
     }
     Ok(target)
 }
