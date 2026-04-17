@@ -8,6 +8,7 @@ from .molpack import (
     Molpack,
     OutsideSphere,
     PackResult,
+    StepInfo,
     Target,
 )
 
@@ -20,4 +21,5 @@ __all__ = [
     "Target",
     "Molpack",
     "PackResult",
+    "StepInfo",
 ]

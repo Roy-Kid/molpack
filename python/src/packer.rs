@@ -3,7 +3,11 @@
 //! Provides [`PyPacker`] (a Packmol-grade molecular packer) and
 //! [`PyPackResult`] (the output container).
 
-use crate::helpers::{NpF, pack_error_to_pyerr};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
+use crate::handler::PyHandlerWrapper;
+use crate::helpers::{NpF, pack_error_to_pyerr, take_err};
 use crate::target::PyTarget;
 use molpack::F;
 use molpack::handler::ProgressHandler;
@@ -83,6 +87,7 @@ pub struct PyPacker {
     disable_movebad: bool,
     pbc: Option<([F; 3], [F; 3])>,
     progress: bool,
+    py_handlers: Vec<Py<pyo3::types::PyAny>>,
 }
 
 #[pymethods]
@@ -122,6 +127,7 @@ impl PyPacker {
             disable_movebad,
             pbc: None,
             progress,
+            py_handlers: Vec::new(),
         }
     }
 
@@ -199,9 +205,20 @@ impl PyPacker {
         }
     }
 
+    /// Register a Python observer for packing progress. The object may
+    /// implement any subset of `on_start(ntotat, ntotmol)`,
+    /// `on_step(info) -> bool | None`, `on_finish()`; missing methods
+    /// are skipped. Returning `True` from `on_step` requests early stop.
+    fn add_handler(&self, handler: Py<pyo3::types::PyAny>) -> Self {
+        let mut cloned = self.clone_fields();
+        cloned.py_handlers.push(handler);
+        cloned
+    }
+
     #[pyo3(signature = (targets, max_loops=200, seed=None))]
     fn pack(
         &self,
+        py: Python<'_>,
         targets: Vec<PyTarget>,
         max_loops: usize,
         seed: Option<u64>,
@@ -226,24 +243,45 @@ impl PyPacker {
             packer = packer.add_handler(ProgressHandler::new());
         }
 
-        let result = packer
-            .pack(&rust_targets, max_loops, seed)
-            .map_err(pack_error_to_pyerr)?;
+        // Any handler stashing an error or returning `True` from `on_step`
+        // flips this shared flag, which terminates the loop at the next check.
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        for py_h in &self.py_handlers {
+            let wrapper = PyHandlerWrapper::new(py_h.clone_ref(py), Arc::clone(&stop_flag));
+            packer = packer.add_handler(wrapper);
+        }
 
+        let result = packer.pack(&rust_targets, max_loops, seed);
+
+        // Python exceptions take priority: any PackError from this run is
+        // a downstream symptom of the callback that raised.
+        if let Some(py_err) = take_err() {
+            return Err(py_err);
+        }
+
+        let result = result.map_err(pack_error_to_pyerr)?;
         Ok(PyPackResult { inner: result })
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "Molpack(tolerance={:.2}, precision={:.4}, maxit={}, nloop0={}, sidemax={:.1}, movefrac={:.3})",
-            self.tolerance, self.precision, self.maxit, self.nloop0, self.sidemax, self.movefrac
+            "Molpack(tolerance={:.2}, precision={:.4}, maxit={}, nloop0={}, sidemax={:.1}, movefrac={:.3}, handlers={})",
+            self.tolerance,
+            self.precision,
+            self.maxit,
+            self.nloop0,
+            self.sidemax,
+            self.movefrac,
+            self.py_handlers.len(),
         )
     }
 }
 
 impl PyPacker {
     fn clone_fields(&self) -> PyPacker {
-        PyPacker {
+        // `Py<PyAny>::clone_ref` needs a GIL token; the builder is
+        // called from Python so `Python::attach` is a cheap no-op here.
+        Python::attach(|py| PyPacker {
             tolerance: self.tolerance,
             precision: self.precision,
             maxit: self.maxit,
@@ -254,6 +292,7 @@ impl PyPacker {
             disable_movebad: self.disable_movebad,
             pbc: self.pbc,
             progress: self.progress,
-        }
+            py_handlers: self.py_handlers.iter().map(|h| h.clone_ref(py)).collect(),
+        })
     }
 }
