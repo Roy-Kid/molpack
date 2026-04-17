@@ -25,9 +25,16 @@
 use pyo3::prelude::*;
 
 mod helpers;
+use helpers::register_errors;
+
+mod types;
+use types::{PyAngle, PyAxis, PyCenteringMode};
 
 mod constraint;
-use constraint::{PyAbovePlane, PyBelowPlane, PyInsideBox, PyInsideSphere, PyOutsideSphere};
+use constraint::{
+    PyAbovePlaneRestraint, PyBelowPlaneRestraint, PyInsideBoxRestraint, PyInsideSphereRestraint,
+    PyOutsideSphereRestraint,
+};
 
 mod handler;
 use handler::PyStepInfo;
@@ -40,16 +47,22 @@ use packer::{PyPackResult, PyPacker};
 
 #[pymodule]
 fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PyInsideBox>()?;
-    m.add_class::<PyInsideSphere>()?;
-    m.add_class::<PyOutsideSphere>()?;
-    m.add_class::<PyAbovePlane>()?;
-    m.add_class::<PyBelowPlane>()?;
+    m.add_class::<PyAngle>()?;
+    m.add_class::<PyAxis>()?;
+    m.add_class::<PyCenteringMode>()?;
+
+    m.add_class::<PyInsideBoxRestraint>()?;
+    m.add_class::<PyInsideSphereRestraint>()?;
+    m.add_class::<PyOutsideSphereRestraint>()?;
+    m.add_class::<PyAbovePlaneRestraint>()?;
+    m.add_class::<PyBelowPlaneRestraint>()?;
 
     m.add_class::<PyTarget>()?;
     m.add_class::<PyPacker>()?;
     m.add_class::<PyPackResult>()?;
     m.add_class::<PyStepInfo>()?;
+
+    register_errors(m.py(), m)?;
 
     Ok(())
 }

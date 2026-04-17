@@ -1,8 +1,7 @@
 //! Python wrappers for molecular packing restraints.
 //!
-//! Each built-in restraint (``InsideBox``, ``InsideSphere``, ``OutsideSphere``,
-//! ``AbovePlane``, ``BelowPlane``) is a ``#[pyclass]`` with its own
-//! parameters. Custom Python-defined restraints are supported via **duck
+//! Each built-in restraint is a `#[pyclass]` named `*Restraint` to mirror the
+//! Rust type names. Custom Python-defined restraints are supported via **duck
 //! typing**: any object exposing callable ``f(x, scale, scale2)`` and
 //! ``fg(x, scale, scale2)`` attributes may be passed to
 //! ``Target.with_restraint``; see [`PyCallableRestraint`] for the contract.
@@ -50,28 +49,30 @@ impl Restraint for SharedRestraint {
     fn name(&self) -> &'static str {
         self.0.name()
     }
+    #[inline]
+    fn periodic_box(&self) -> Option<([F; 3], [F; 3], [bool; 3])> {
+        self.0.periodic_box()
+    }
 }
 
 // ============================================================================
 // Extractor: try each built-in `#[pyclass]`, else duck-type on `f`/`fg`.
 // ============================================================================
 
-pub(crate) fn extract_restraint(
-    obj: &Bound<'_, pyo3::types::PyAny>,
-) -> PyResult<SharedRestraint> {
-    if let Ok(c) = obj.extract::<PyInsideBox>() {
+pub(crate) fn extract_restraint(obj: &Bound<'_, pyo3::types::PyAny>) -> PyResult<SharedRestraint> {
+    if let Ok(c) = obj.extract::<PyInsideBoxRestraint>() {
         return Ok(SharedRestraint(Arc::new(c.inner)));
     }
-    if let Ok(c) = obj.extract::<PyInsideSphere>() {
+    if let Ok(c) = obj.extract::<PyInsideSphereRestraint>() {
         return Ok(SharedRestraint(Arc::new(c.inner)));
     }
-    if let Ok(c) = obj.extract::<PyOutsideSphere>() {
+    if let Ok(c) = obj.extract::<PyOutsideSphereRestraint>() {
         return Ok(SharedRestraint(Arc::new(c.inner)));
     }
-    if let Ok(c) = obj.extract::<PyAbovePlane>() {
+    if let Ok(c) = obj.extract::<PyAbovePlaneRestraint>() {
         return Ok(SharedRestraint(Arc::new(c.inner)));
     }
-    if let Ok(c) = obj.extract::<PyBelowPlane>() {
+    if let Ok(c) = obj.extract::<PyBelowPlaneRestraint>() {
         return Ok(SharedRestraint(Arc::new(c.inner)));
     }
 
@@ -86,9 +87,9 @@ pub(crate) fn extract_restraint(
     }
 
     Err(PyTypeError::new_err(
-        "expected a restraint: one of InsideBox / InsideSphere / OutsideSphere / \
-         AbovePlane / BelowPlane, or an object with callable `f(x, scale, scale2)` \
-         and `fg(x, scale, scale2)` methods",
+        "expected a restraint: one of InsideBoxRestraint / InsideSphereRestraint / \
+         OutsideSphereRestraint / AbovePlaneRestraint / BelowPlaneRestraint, or an \
+         object with callable `f(x, scale, scale2)` and `fg(x, scale, scale2)` methods",
     ))
 }
 
@@ -175,79 +176,93 @@ impl Restraint for PyCallableRestraint {
 }
 
 // ============================================================================
-// Built-in restraint `#[pyclass]` wrappers (unchanged from prior version —
-// they each hold a concrete `*Restraint` struct and expose a `__new__`).
+// Built-in restraint `#[pyclass]` wrappers. Names match the Rust types
+// (`*Restraint` suffix); parameter order mirrors the Rust constructors.
 // ============================================================================
 
-#[pyclass(name = "InsideBox", from_py_object)]
+#[pyclass(name = "InsideBoxRestraint", from_py_object)]
 #[derive(Clone)]
-pub struct PyInsideBox {
+pub struct PyInsideBoxRestraint {
     pub(crate) inner: InsideBoxRestraint,
 }
 
 #[pymethods]
-impl PyInsideBox {
+impl PyInsideBoxRestraint {
     #[new]
-    fn new(min: [NpF; 3], max: [NpF; 3]) -> Self {
+    #[pyo3(signature = (min, max, periodic=(false, false, false)))]
+    fn new(min: [NpF; 3], max: [NpF; 3], periodic: (bool, bool, bool)) -> Self {
         Self {
-            inner: InsideBoxRestraint::new(min, max),
+            inner: InsideBoxRestraint::new(min, max, [periodic.0, periodic.1, periodic.2]),
         }
     }
 
     fn __repr__(&self) -> String {
-        "InsideBox(...)".to_string()
+        let p = self.inner.periodic;
+        format!(
+            "InsideBoxRestraint(min={:?}, max={:?}, periodic=({}, {}, {}))",
+            self.inner.min, self.inner.max, p[0], p[1], p[2],
+        )
     }
 }
 
-#[pyclass(name = "InsideSphere", from_py_object)]
+#[pyclass(name = "InsideSphereRestraint", from_py_object)]
 #[derive(Clone)]
-pub struct PyInsideSphere {
+pub struct PyInsideSphereRestraint {
     pub(crate) inner: InsideSphereRestraint,
 }
 
 #[pymethods]
-impl PyInsideSphere {
+impl PyInsideSphereRestraint {
     #[new]
-    fn new(radius: NpF, center: [NpF; 3]) -> Self {
+    #[pyo3(signature = (center, radius))]
+    fn new(center: [NpF; 3], radius: NpF) -> Self {
         Self {
             inner: InsideSphereRestraint::new(center, radius),
         }
     }
 
     fn __repr__(&self) -> String {
-        "InsideSphere(...)".to_string()
+        format!(
+            "InsideSphereRestraint(center={:?}, radius={})",
+            self.inner.center, self.inner.radius,
+        )
     }
 }
 
-#[pyclass(name = "OutsideSphere", from_py_object)]
+#[pyclass(name = "OutsideSphereRestraint", from_py_object)]
 #[derive(Clone)]
-pub struct PyOutsideSphere {
+pub struct PyOutsideSphereRestraint {
     pub(crate) inner: OutsideSphereRestraint,
 }
 
 #[pymethods]
-impl PyOutsideSphere {
+impl PyOutsideSphereRestraint {
     #[new]
-    fn new(radius: NpF, center: [NpF; 3]) -> Self {
+    #[pyo3(signature = (center, radius))]
+    fn new(center: [NpF; 3], radius: NpF) -> Self {
         Self {
             inner: OutsideSphereRestraint::new(center, radius),
         }
     }
 
     fn __repr__(&self) -> String {
-        "OutsideSphere(...)".to_string()
+        format!(
+            "OutsideSphereRestraint(center={:?}, radius={})",
+            self.inner.center, self.inner.radius,
+        )
     }
 }
 
-#[pyclass(name = "AbovePlane", from_py_object)]
+#[pyclass(name = "AbovePlaneRestraint", from_py_object)]
 #[derive(Clone)]
-pub struct PyAbovePlane {
+pub struct PyAbovePlaneRestraint {
     pub(crate) inner: AbovePlaneRestraint,
 }
 
 #[pymethods]
-impl PyAbovePlane {
+impl PyAbovePlaneRestraint {
     #[new]
+    #[pyo3(signature = (normal, distance))]
     fn new(normal: [NpF; 3], distance: NpF) -> Self {
         Self {
             inner: AbovePlaneRestraint::new(normal, distance),
@@ -255,19 +270,23 @@ impl PyAbovePlane {
     }
 
     fn __repr__(&self) -> String {
-        "AbovePlane(...)".to_string()
+        format!(
+            "AbovePlaneRestraint(normal={:?}, distance={})",
+            self.inner.normal, self.inner.distance,
+        )
     }
 }
 
-#[pyclass(name = "BelowPlane", from_py_object)]
+#[pyclass(name = "BelowPlaneRestraint", from_py_object)]
 #[derive(Clone)]
-pub struct PyBelowPlane {
+pub struct PyBelowPlaneRestraint {
     pub(crate) inner: BelowPlaneRestraint,
 }
 
 #[pymethods]
-impl PyBelowPlane {
+impl PyBelowPlaneRestraint {
     #[new]
+    #[pyo3(signature = (normal, distance))]
     fn new(normal: [NpF; 3], distance: NpF) -> Self {
         Self {
             inner: BelowPlaneRestraint::new(normal, distance),
@@ -275,6 +294,9 @@ impl PyBelowPlane {
     }
 
     fn __repr__(&self) -> String {
-        "BelowPlane(...)".to_string()
+        format!(
+            "BelowPlaneRestraint(normal={:?}, distance={})",
+            self.inner.normal, self.inner.distance,
+        )
     }
 }

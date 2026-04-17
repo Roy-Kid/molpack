@@ -7,9 +7,52 @@ use std::sync::Mutex;
 /// Numpy float type matching molpack's `F = f64`.
 pub type NpF = f64;
 
-/// Convert a [`molpack::PackError`] to a Python `RuntimeError`.
+// ── Typed exception hierarchy ──────────────────────────────────────────────
+//
+// Rooted at `PackError` so callers can catch any packing failure with a
+// single ``except molpack.PackError`` clause. Leaf types mirror the Rust
+// `PackError` variants and are the canonical exception classes users should
+// match against.
+
+pyo3::create_exception!(molpack, PackError, PyRuntimeError);
+pyo3::create_exception!(molpack, ConstraintsFailedError, PackError);
+pyo3::create_exception!(molpack, MaxIterationsError, PackError);
+pyo3::create_exception!(molpack, NoTargetsError, PackError);
+pyo3::create_exception!(molpack, EmptyMoleculeError, PackError);
+pyo3::create_exception!(molpack, InvalidPBCBoxError, PackError);
+pyo3::create_exception!(molpack, ConflictingPeriodicBoxesError, PackError);
+
+/// Register all `PackError` subclasses on a module.
+pub fn register_errors(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("PackError", py.get_type::<PackError>())?;
+    m.add(
+        "ConstraintsFailedError",
+        py.get_type::<ConstraintsFailedError>(),
+    )?;
+    m.add("MaxIterationsError", py.get_type::<MaxIterationsError>())?;
+    m.add("NoTargetsError", py.get_type::<NoTargetsError>())?;
+    m.add("EmptyMoleculeError", py.get_type::<EmptyMoleculeError>())?;
+    m.add("InvalidPBCBoxError", py.get_type::<InvalidPBCBoxError>())?;
+    m.add(
+        "ConflictingPeriodicBoxesError",
+        py.get_type::<ConflictingPeriodicBoxesError>(),
+    )?;
+    Ok(())
+}
+
+/// Convert a [`molpack::PackError`] to the matching typed Python exception.
 pub fn pack_error_to_pyerr(e: molpack::PackError) -> PyErr {
-    PyRuntimeError::new_err(e.to_string())
+    let msg = e.to_string();
+    match e {
+        molpack::PackError::ConstraintsFailed(_) => ConstraintsFailedError::new_err(msg),
+        molpack::PackError::MaxIterations => MaxIterationsError::new_err(msg),
+        molpack::PackError::NoTargets => NoTargetsError::new_err(msg),
+        molpack::PackError::EmptyMolecule(_) => EmptyMoleculeError::new_err(msg),
+        molpack::PackError::InvalidPBCBox { .. } => InvalidPBCBoxError::new_err(msg),
+        molpack::PackError::ConflictingPeriodicBoxes { .. } => {
+            ConflictingPeriodicBoxesError::new_err(msg)
+        }
+    }
 }
 
 /// Sink for Python exceptions raised inside Rust-invoked callbacks

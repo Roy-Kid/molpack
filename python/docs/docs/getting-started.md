@@ -36,15 +36,16 @@ VdW radii are looked up automatically from element symbols (Bondi 1964).
 ```python
 from molpack import Target
 
-water = Target("water", frame, count=100)
+water = Target(frame, count=100).with_name("water")
 ```
 
 Arguments:
 
-- `name`  — label used in diagnostics and output.
 - `frame` — any object supporting `frame["atoms"]`, with columns
   `"x"`, `"y"`, `"z"`, and `"element"` (or `"symbol"` for molrs PDB frames).
 - `count` — number of copies to produce.
+
+A display label is optional — attach one via `.with_name("...")`.
 
 All builder methods are **immutable** — they return a new `Target`.
 
@@ -54,23 +55,25 @@ Every target needs at least one restraint — the geometric region it
 should be packed into.
 
 ```python
-from molpack import InsideBox
+from molpack import InsideBoxRestraint
 
 water = water.with_restraint(
-    InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
+    InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
 )
 ```
 
-Five built-in restraints: `InsideBox`, `InsideSphere`, `OutsideSphere`,
-`AbovePlane`, `BelowPlane`. Stack multiple restraints with repeated
-`.with_restraint()` calls — see [Restraints](guide/restraints.md).
+Five built-in restraints: `InsideBoxRestraint`, `InsideSphereRestraint`,
+`OutsideSphereRestraint`, `AbovePlaneRestraint`, `BelowPlaneRestraint`.
+Stack multiple restraints with repeated `.with_restraint()` calls —
+see [Restraints](guide/restraints.md).
 
 ## 4. Pack
 
 ```python
 from molpack import Molpack
 
-result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
+packer = Molpack().with_tolerance(2.0).with_seed(42)
+result = packer.pack([water], max_loops=200)
 
 print(f"converged: {result.converged}")
 print(f"natoms:    {result.natoms}")
@@ -83,19 +86,23 @@ coordinates. `result.elements` is the element list in the same order.
 
 ## 5. Save
 
-`molpack` does not write files directly. Pass the result back to `molrs`:
+`molpack` does not write files directly — Frame is the canonical
+output. Hand `result.frame` (or positions/elements) to a writer:
 
 ```python
 import molrs
 
-out_frame = molrs.Frame()
+# result.frame is a dict compatible with molrs.Frame. Compose a
+# writable frame and persist:
+out = molrs.Frame()
 atoms = molrs.Block()
-atoms.insert("x", result.positions[:, 0])
-atoms.insert("y", result.positions[:, 1])
-atoms.insert("z", result.positions[:, 2])
-atoms.insert("element", result.elements)
-out_frame["atoms"] = atoms
-molrs.write_xyz("packed.xyz", out_frame)
+f = result.frame["atoms"]
+atoms.insert("x", f["x"])
+atoms.insert("y", f["y"])
+atoms.insert("z", f["z"])
+atoms.insert("element", f["element"])
+out["atoms"] = atoms
+molrs.write_xyz("packed.xyz", out)
 ```
 
 Or use numpy directly (`np.savetxt`, `.npz`, …) on `result.positions`.
@@ -104,16 +111,19 @@ Or use numpy directly (`np.savetxt`, `.npz`, …) on `result.positions`.
 
 ```python
 import molrs
-from molpack import InsideBox, Molpack, Target
+from molpack import InsideBoxRestraint, Molpack, Target
 
 frame = molrs.read_pdb("water.pdb")
 
 water = (
-    Target("water", frame, count=100)
-    .with_restraint(InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    Target(frame, count=100)
+    .with_name("water")
+    .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
-result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
+result = (
+    Molpack().with_tolerance(2.0).with_seed(42).pack([water], max_loops=200)
+)
 
 assert result.converged
 print(f"packed {result.natoms} atoms")
@@ -123,5 +133,5 @@ print(f"packed {result.natoms} atoms")
 
 - [Targets](guide/targets.md) — orientation, centering, fixed placement.
 - [Restraints](guide/restraints.md) — per-atom scoping, stacking.
-- [Packer](guide/packer.md) — all constructor and builder options.
+- [Packer](guide/packer.md) — all builder options.
 - [Examples](examples.md) — five complete Packmol workloads.

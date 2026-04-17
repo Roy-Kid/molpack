@@ -63,6 +63,11 @@ pub struct PyStepInfo {
     /// Convergence precision target.
     #[pyo3(get)]
     pub precision: F,
+    /// Per-relaxer acceptance rate this iteration, as
+    /// ``[(target_index, rate), ...]``. Empty when no relaxers are
+    /// attached.
+    #[pyo3(get)]
+    pub relaxer_acceptance: Vec<(usize, F)>,
 }
 
 impl PyStepInfo {
@@ -78,6 +83,7 @@ impl PyStepInfo {
             improvement_pct: info.improvement_pct,
             radscale: info.radscale,
             precision: info.precision,
+            relaxer_acceptance: info.relaxer_acceptance.clone(),
         }
     }
 }

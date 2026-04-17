@@ -21,12 +21,20 @@ def main() -> None:
         }
     }
 
-    water = molpack.Target("water", frame, count=100).with_restraint(
-        molpack.InsideBox([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
+    water = (
+        molpack.Target(frame, count=100)
+        .with_name("water")
+        .with_restraint(molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
     )
 
-    packer = molpack.Molpack(tolerance=2.0, precision=0.01, progress=False)
-    result = packer.pack([water], max_loops=200, seed=42)
+    packer = (
+        molpack.Molpack()
+        .with_tolerance(2.0)
+        .with_precision(0.01)
+        .with_progress(False)
+        .with_seed(42)
+    )
+    result = packer.pack([water], max_loops=200)
 
     print(f"converged = {result.converged}")
     print(f"natoms    = {result.natoms}")

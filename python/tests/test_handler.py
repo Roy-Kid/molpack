@@ -1,4 +1,4 @@
-"""Tests for Python-defined packing handlers (`Molpack.add_handler`)."""
+"""Tests for Python-defined packing handlers (``Molpack.with_handler``)."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def _two_water_frame() -> dict:
 
 
 def _packer() -> molpack.Molpack:
-    return molpack.Molpack(progress=False, maxit=5)
+    return molpack.Molpack().with_progress(False).with_inner_iterations(5)
 
 
 @dataclass
@@ -40,9 +40,7 @@ class CallLog:
         self.ntotmol = ntotmol
 
     def on_step(self, info: molpack.StepInfo) -> None:
-        self.steps.append(
-            (info.phase, info.loop_idx, info.fdist, info.frest)
-        )
+        self.steps.append((info.phase, info.loop_idx, info.fdist, info.frest))
 
     def on_finish(self) -> None:
         self.finished = True
@@ -54,10 +52,10 @@ class TestHandlerCallbacks:
         # 30 copies in a 6³ box forces the outer loop to actually
         # iterate — a too-easy setup converges during init and
         # `on_step` never fires.
-        target = molpack.Target("water", _two_water_frame(), count=30).with_restraint(
-            molpack.InsideBox([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+        target = molpack.Target(_two_water_frame(), count=30).with_restraint(
+            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
-        _packer().add_handler(log).pack([target], max_loops=5, seed=1)
+        _packer().with_handler(log).with_seed(1).pack([target], max_loops=5)
 
         assert log.started is True
         assert log.finished is True
@@ -83,13 +81,14 @@ class TestHandlerCallbacks:
                         info.improvement_pct,
                         info.radscale,
                         info.precision,
+                        info.relaxer_acceptance,
                     )
                 )
 
-        target = molpack.Target("water", _two_water_frame(), count=2).with_restraint(
-            molpack.InsideBox([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+        target = molpack.Target(_two_water_frame(), count=2).with_restraint(
+            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
-        _packer().add_handler(Grabber()).pack([target], max_loops=2, seed=1)
+        _packer().with_handler(Grabber()).with_seed(1).pack([target], max_loops=2)
 
         assert captured, "expected at least one on_step call"
         first = captured[0]
@@ -99,7 +98,9 @@ class TestHandlerCallbacks:
         assert first[3] >= 1  # total_phases
         # molecule_type is None for the final all-types phase, int otherwise
         assert first[4] is None or isinstance(first[4], int)
-        assert all(isinstance(v, float) for v in first[5:])
+        assert all(isinstance(v, float) for v in first[5:10])
+        # relaxer_acceptance is a (possibly empty) list of (int, float) tuples
+        assert isinstance(first[10], list)
 
     def test_methods_are_optional(self):
         """Handler with *no* methods must not crash."""
@@ -107,11 +108,11 @@ class TestHandlerCallbacks:
         class Empty:
             pass
 
-        target = molpack.Target("water", _two_water_frame(), count=2).with_restraint(
-            molpack.InsideBox([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+        target = molpack.Target(_two_water_frame(), count=2).with_restraint(
+            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
-        result = _packer().add_handler(Empty()).pack(
-            [target], max_loops=2, seed=1
+        result = (
+            _packer().with_handler(Empty()).with_seed(1).pack([target], max_loops=2)
         )
         assert result.natoms == 4
 
@@ -125,12 +126,10 @@ class TestHandlerEarlyStop:
                 steps_seen.append(info.loop_idx)
                 return True  # request immediate stop
 
-        target = molpack.Target("water", _two_water_frame(), count=4).with_restraint(
-            molpack.InsideBox([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
+        target = molpack.Target(_two_water_frame(), count=4).with_restraint(
+            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
         )
-        _packer().add_handler(StopAfterOne()).pack(
-            [target], max_loops=50, seed=1
-        )
+        _packer().with_handler(StopAfterOne()).with_seed(1).pack([target], max_loops=50)
 
         # The per-phase compaction loop itself runs through its handler
         # pass before checking should_stop; we just assert that we did
@@ -146,25 +145,23 @@ class TestHandlerErrorPropagation:
             def on_step(self, info: molpack.StepInfo) -> None:
                 raise ValueError("boom from handler")
 
-        target = molpack.Target("water", _two_water_frame(), count=2).with_restraint(
-            molpack.InsideBox([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+        target = molpack.Target(_two_water_frame(), count=2).with_restraint(
+            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         with pytest.raises(ValueError, match="boom from handler"):
-            _packer().add_handler(Explodes()).pack(
-                [target], max_loops=5, seed=1
-            )
+            _packer().with_handler(Explodes()).with_seed(1).pack([target], max_loops=5)
 
     def test_exception_in_on_start_is_reraised(self):
         class ExplodesEarly:
             def on_start(self, ntotat: int, ntotmol: int) -> None:
                 raise RuntimeError("boom from on_start")
 
-        target = molpack.Target("water", _two_water_frame(), count=2).with_restraint(
-            molpack.InsideBox([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+        target = molpack.Target(_two_water_frame(), count=2).with_restraint(
+            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         with pytest.raises(RuntimeError, match="boom from on_start"):
-            _packer().add_handler(ExplodesEarly()).pack(
-                [target], max_loops=5, seed=1
+            _packer().with_handler(ExplodesEarly()).with_seed(1).pack(
+                [target], max_loops=5
             )
 
 
@@ -172,11 +169,11 @@ class TestMultipleHandlers:
     def test_each_handler_receives_callbacks(self):
         log1 = CallLog()
         log2 = CallLog()
-        target = molpack.Target("water", _two_water_frame(), count=2).with_restraint(
-            molpack.InsideBox([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+        target = molpack.Target(_two_water_frame(), count=2).with_restraint(
+            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
-        _packer().add_handler(log1).add_handler(log2).pack(
-            [target], max_loops=2, seed=1
+        _packer().with_handler(log1).with_handler(log2).with_seed(1).pack(
+            [target], max_loops=2
         )
 
         assert log1.started and log2.started

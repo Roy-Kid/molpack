@@ -20,17 +20,17 @@ def _single_atom_frame() -> dict:
 
 
 def _packer() -> molpack.Molpack:
-    return molpack.Molpack(progress=False, maxit=5)
+    return molpack.Molpack().with_progress(False).with_inner_iterations(5)
 
 
 class InsideSpherePy:
-    """Reimplementation of `molpack.InsideSphere` in Python.
+    """Reimplementation of ``molpack.InsideSphereRestraint`` in Python.
 
     Penalty is quadratic in the radial overshoot, so the two-scale
-    contract says we consume `scale2`. Matches
-    `InsideSphereRestraint::fg` in `src/restraint.rs` branch-for-branch:
-    zero contribution when inside, else `scale2 * d²` with gradient
-    `2 * scale2 * (x - c)`.
+    contract says we consume ``scale2``. Matches
+    ``InsideSphereRestraint::fg`` in ``src/restraint.rs`` branch-for-branch:
+    zero contribution when inside, else ``scale2 * d²`` with gradient
+    ``2 * scale2 * (x - c)``.
     """
 
     def __init__(self, center: list[float], radius: float):
@@ -60,7 +60,7 @@ class InsideSpherePy:
 
 class TestAttachment:
     def test_duck_typed_object_accepted(self):
-        t = molpack.Target("mol", _single_atom_frame(), count=1).with_restraint(
+        t = molpack.Target(_single_atom_frame(), count=1).with_restraint(
             InsideSpherePy([0.0, 0.0, 0.0], 5.0)
         )
         assert t is not None
@@ -71,9 +71,7 @@ class TestAttachment:
                 return 0.0
 
         with pytest.raises(TypeError, match="expected a restraint"):
-            molpack.Target(
-                "mol", _single_atom_frame(), count=1
-            ).with_restraint(OnlyF())
+            molpack.Target(_single_atom_frame(), count=1).with_restraint(OnlyF())
 
     def test_missing_f_rejected(self):
         class OnlyFg:
@@ -81,9 +79,7 @@ class TestAttachment:
                 return 0.0, (0.0, 0.0, 0.0)
 
         with pytest.raises(TypeError, match="expected a restraint"):
-            molpack.Target(
-                "mol", _single_atom_frame(), count=1
-            ).with_restraint(OnlyFg())
+            molpack.Target(_single_atom_frame(), count=1).with_restraint(OnlyFg())
 
 
 class TestPackingBehavior:
@@ -91,11 +87,11 @@ class TestPackingBehavior:
         """Python restraint should keep atoms within the sphere."""
         sphere_center = np.array([0.0, 0.0, 0.0])
         radius = 6.0
-        target = molpack.Target(
-            "mol", _single_atom_frame(), count=10
-        ).with_restraint(InsideSpherePy(sphere_center.tolist(), radius))
+        target = molpack.Target(_single_atom_frame(), count=10).with_restraint(
+            InsideSpherePy(sphere_center.tolist(), radius)
+        )
 
-        result = _packer().pack([target], max_loops=80, seed=1)
+        result = _packer().with_seed(1).pack([target], max_loops=80)
 
         positions = np.asarray(result.positions)
         distances = np.linalg.norm(positions - sphere_center, axis=1)
@@ -120,10 +116,10 @@ class TestCallContract:
                 seen.append((tuple(x), float(scale), float(scale2)))
                 return 0.0, (0.0, 0.0, 0.0)
 
-        target = molpack.Target(
-            "mol", _single_atom_frame(), count=2
-        ).with_restraint(Recorder())
-        _packer().pack([target], max_loops=3, seed=1)
+        target = molpack.Target(_single_atom_frame(), count=2).with_restraint(
+            Recorder()
+        )
+        _packer().with_seed(1).pack([target], max_loops=3)
 
         assert seen, "fg was never called"
         x, scale, scale2 = seen[0]
@@ -142,11 +138,11 @@ class TestErrorPropagation:
             def fg(self, x, s, s2):
                 raise ValueError("boom from restraint")
 
-        target = molpack.Target(
-            "mol", _single_atom_frame(), count=2
-        ).with_restraint(Explodes())
+        target = molpack.Target(_single_atom_frame(), count=2).with_restraint(
+            Explodes()
+        )
         with pytest.raises(ValueError, match="boom from restraint"):
-            _packer().pack([target], max_loops=3, seed=1)
+            _packer().with_seed(1).pack([target], max_loops=3)
 
     def test_fg_wrong_return_shape_is_reraised(self):
         class WrongShape:
@@ -156,8 +152,8 @@ class TestErrorPropagation:
             def fg(self, x, s, s2):
                 return 0.0  # missing the gradient tuple
 
-        target = molpack.Target(
-            "mol", _single_atom_frame(), count=2
-        ).with_restraint(WrongShape())
+        target = molpack.Target(_single_atom_frame(), count=2).with_restraint(
+            WrongShape()
+        )
         with pytest.raises(TypeError, match="fg.* must return"):
-            _packer().pack([target], max_loops=3, seed=1)
+            _packer().with_seed(1).pack([target], max_loops=3)
