@@ -17,7 +17,7 @@ repos:
         files: ^python/
       - id: ruff
         files: ^python/
-        args: [--fix]
+        args: [--fix, --exit-non-zero-on-fix]
 
   - repo: local
     hooks:
