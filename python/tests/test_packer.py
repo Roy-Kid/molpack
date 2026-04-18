@@ -124,7 +124,7 @@ class TestTargetBuilder:
     def test_with_restraint_type_error(self):
         t = self._make_target()
         with pytest.raises(TypeError):
-            t.with_restraint("not_a_constraint")  # ty: ignore[invalid-argument-type]
+            t.with_restraint("not_a_constraint")
 
     def test_with_atom_restraint(self):
         t = self._make_two_atom_target()
