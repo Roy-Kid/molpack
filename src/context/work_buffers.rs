@@ -104,7 +104,7 @@ impl WorkBuffers {
     /// time. Complexity: O(`n_threads` × `ntotat`).
     ///
     /// Used for small `ntotat` where the rayon dispatch overhead of
-    /// [`merge_partials_parallel`] would dominate.
+    /// [`Self::merge_partials_parallel`] would dominate.
     pub fn merge_partials_serial(partials: &[Vec<[F; 3]>], out: &mut [[F; 3]]) {
         let ntotat = out.len();
         for partial in partials {
@@ -117,7 +117,7 @@ impl WorkBuffers {
         }
     }
 
-    /// Parallel counterpart to [`merge_partials_serial`]. Splits `out`
+    /// Parallel counterpart to [`Self::merge_partials_serial`]. Splits `out`
     /// into disjoint atom chunks of [`MERGE_PARALLEL_CHUNK_ATOMS`] and
     /// has each rayon task sum every partial buffer into its chunk.
     ///

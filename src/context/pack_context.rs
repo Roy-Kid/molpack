@@ -139,12 +139,12 @@ pub struct PackContext {
     /// Summary flag — `true` iff any atom has `use_short_radius` set. Lets
     /// the objective hot loop skip the short-radius branch entirely for the
     /// common case (no short-radius usage). Maintained incrementally via
-    /// setters + re-synced by [`sync_atom_props`].
+    /// setters + re-synced by [`Self::sync_atom_props`].
     pub any_short_radius: bool,
     /// Summary flag — `true` iff any atom is a fixed-structure atom. Lets
     /// the objective hot loop skip the `fixedatom[i] && fixedatom[j]`
     /// short-circuit when there are no fixed atoms. Maintained
-    /// incrementally via setters + re-synced by [`sync_atom_props`].
+    /// incrementally via setters + re-synced by [`Self::sync_atom_props`].
     pub any_fixed_atoms: bool,
     /// Incremental counter driving `any_fixed_atoms`. Private because
     /// the `any_*` flag is the observable contract; setters keep both
@@ -154,13 +154,13 @@ pub struct PackContext {
     n_short_radius: usize,
 
     /// AoS mirror of the frequently-read per-atom fields. Kept in sync
-    /// with the individual `Vec<_>`s by [`sync_atom_props`] plus the
+    /// with the individual `Vec<_>`s by [`Self::sync_atom_props`] plus the
     /// per-field setters (`set_radius`, `set_fscale`, `set_fixed_atom`,
     /// `set_use_short_radius`, `set_ibmol`, `set_ibtype`). The objective
     /// hot kernels read exclusively from here; callers mutating the
-    /// underlying `Vec<_>`s directly must call [`sync_atom_props`]
+    /// underlying `Vec<_>`s directly must call [`Self::sync_atom_props`]
     /// before the next `evaluate()`, or the debug-build invariant in
-    /// [`debug_assert_atom_props_sync`] will catch the drift.
+    /// [`Self::debug_assert_atom_props_sync`] will catch the drift.
     pub atom_props: Vec<AtomProps>,
 
     // ---- Objective function accumulators ----
@@ -259,7 +259,7 @@ pub struct PackContext {
     pub move_flag: bool,
     /// Run the pair-kernel reductions (`accumulate_pair_f`,
     /// `accumulate_pair_fg`) on rayon. Off by default — parallelism is
-    /// an explicit opt-in via [`Molpack::parallel_pair_eval`] because the
+    /// an explicit opt-in via [`Molpack::with_parallel_eval`](crate::Molpack::with_parallel_eval) because the
     /// crossover is workload-shaped and can't be inferred reliably from
     /// `active_cells.len()`. The flag is stored regardless of the
     /// `rayon` feature so the `Molpack` API stays the same; when the

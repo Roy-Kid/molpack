@@ -147,6 +147,8 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
+          # PEP 735 `--group` needs pip 25.1+; the venv ships with older pip.
+          pip install --upgrade pip
           pip install --group dev
           maturin develop --release
           pytest -v

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::error::PackError;
 
 /// Errors produced by the script module — from parsing, file loading, or
-/// the packing run triggered by [`crate::script::run`].
+/// the downstream `pack()` call invoked by a script-driven run.
 #[derive(Debug)]
 pub enum ScriptError {
     /// Parse error with line number and diagnostic message.
