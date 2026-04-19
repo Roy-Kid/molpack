@@ -30,8 +30,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install ruff + ty + type-check deps
-        run: pip install ruff ty numpy pytest typer molcrafts-molrs
+      - name: Install typecheck dep group
+        run: pip install --group typecheck
+        working-directory: molpack/python
       - name: ruff format
         run: ruff format --check .
         working-directory: molpack/python
@@ -146,7 +147,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install maturin pytest numpy molcrafts-molrs
+          pip install --group dev
           maturin develop --release
           pytest -v
         working-directory: molpack/python

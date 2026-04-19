@@ -35,3 +35,10 @@ repos:
         args: [--]
         types: [rust]
         pass_filenames: true
+
+      - id: clippy
+        name: cargo clippy (-D warnings)
+        language: system
+        entry: cargo clippy --all-targets --features cli -- -D warnings
+        types: [rust]
+        pass_filenames: false
