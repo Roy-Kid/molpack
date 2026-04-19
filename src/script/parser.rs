@@ -1,105 +1,97 @@
-//! Packmol-compatible `.inp` file parser.
+//! Parser for molpack's line-oriented `.inp` script format.
 //!
-//! Parses the line-oriented keyword format used by Packmol and maps it to
-//! [`ParsedInput`]. Unrecognised keywords are silently skipped so that
-//! future Packmol features do not break older scripts.
+//! The format mirrors the keyword-driven input Packmol has used for two
+//! decades, but the parser and types here belong to molpack and are
+//! exposed as first-class library API. Unrecognised keywords are skipped
+//! so scripts written against newer features remain readable.
 
 use std::path::PathBuf;
 
+use super::error::ScriptError;
+
 // ──────────────────────────────────────────────────────────────────────────────
-// Public types
+// Public AST
 // ──────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug)]
-pub struct ParsedInput {
-    /// Minimum atom-atom distance tolerance (Packmol `tolerance`). Default 2.0 Å.
+/// A fully parsed packing script.
+#[derive(Debug, Clone)]
+pub struct Script {
+    /// Minimum atom-atom distance tolerance (`tolerance`). Default 2.0 Å.
     pub tolerance: f64,
     /// Random seed (`seed` keyword).
     pub seed: Option<u64>,
-    /// Global format hint (`filetype` keyword). Applied to all input files when
-    /// set; otherwise format is inferred from each file's extension.
+    /// Global format hint (`filetype` keyword). When set, it overrides
+    /// per-file extension inference; otherwise each input file's format
+    /// is inferred from its extension.
     pub filetype: Option<String>,
-    /// Output file path (`output` keyword).
+    /// Output file path (`output` keyword). Required.
     pub output: PathBuf,
-    /// Maximum outer loop iterations (`nloop` keyword). Default 400.
+    /// Maximum outer-loop iterations (`nloop` keyword). Default 400.
     pub nloop: usize,
-    /// Whether to enforce minimum-distance overlap avoidance (`avoid_overlap`).
-    /// Parsed for compatibility; not yet wired to the Molpack API.
+    /// Whether to enforce minimum-distance overlap avoidance
+    /// (`avoid_overlap`). Parsed for compatibility; not yet wired to the
+    /// Molpack API.
     #[allow(dead_code)]
     pub avoid_overlap: bool,
-    pub structures: Vec<ParsedStructure>,
+    pub structures: Vec<Structure>,
 }
 
-#[derive(Debug)]
-pub struct ParsedStructure {
-    /// Path to the template molecule file.
+/// One `structure … end structure` block.
+#[derive(Debug, Clone)]
+pub struct Structure {
+    /// Template molecule file path, as written in the script (may be relative).
     pub filepath: PathBuf,
     /// Number of copies to pack.
     pub number: usize,
-    /// Restraints applied to every atom of every copy of this molecule.
-    pub mol_restraints: Vec<ParsedRestraint>,
+    /// Molecule-wide restraints (applied to every atom of every copy).
+    pub mol_restraints: Vec<RestraintSpec>,
     /// Atom-subset restraints (`atoms … end atoms` blocks).
-    pub atom_groups: Vec<ParsedAtomGroup>,
-    /// Whether `center` keyword was present.
+    pub atom_groups: Vec<AtomGroup>,
+    /// Whether the `center` keyword was present.
     pub center: bool,
     /// Fixed placement: `(position [x,y,z], euler [ex,ey,ez])`.
     pub fixed: Option<([f64; 3], [f64; 3])>,
 }
 
-#[derive(Debug)]
-pub struct ParsedAtomGroup {
-    /// Atom indices (1-based, as in Packmol).
+/// One `atoms … end atoms` sub-block.
+#[derive(Debug, Clone)]
+pub struct AtomGroup {
+    /// Atom indices as written in the script (1-based).
     pub atom_indices: Vec<usize>,
-    pub restraints: Vec<ParsedRestraint>,
+    pub restraints: Vec<RestraintSpec>,
 }
 
+/// Restraint as it appears in the script, before being mapped to a
+/// concrete `Restraint` implementation.
 #[derive(Debug, Clone)]
-pub enum ParsedRestraint {
-    InsideBox {
-        min: [f64; 3],
-        max: [f64; 3],
-    },
-    InsideSphere {
-        center: [f64; 3],
-        radius: f64,
-    },
-    OutsideSphere {
-        center: [f64; 3],
-        radius: f64,
-    },
-    /// Packmol `over plane` — atom must be above the plane.
-    AbovePlane {
-        normal: [f64; 3],
-        distance: f64,
-    },
-    /// Packmol `below plane` — atom must be below the plane.
-    BelowPlane {
-        normal: [f64; 3],
-        distance: f64,
-    },
+pub enum RestraintSpec {
+    InsideBox { min: [f64; 3], max: [f64; 3] },
+    InsideSphere { center: [f64; 3], radius: f64 },
+    OutsideSphere { center: [f64; 3], radius: f64 },
+    /// `over plane` — atom must lie above the plane.
+    AbovePlane { normal: [f64; 3], distance: f64 },
+    /// `below plane` — atom must lie below the plane.
+    BelowPlane { normal: [f64; 3], distance: f64 },
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Parser
 // ──────────────────────────────────────────────────────────────────────────────
 
-pub fn parse_input(src: &str) -> Result<ParsedInput, String> {
+/// Parse a script from its textual source.
+pub fn parse(src: &str) -> Result<Script, ScriptError> {
     let mut tolerance = 2.0_f64;
     let mut seed: Option<u64> = None;
     let mut filetype: Option<String> = None;
     let mut output: Option<PathBuf> = None;
     let mut nloop: usize = 400;
     let mut avoid_overlap = true;
-    let mut structures: Vec<ParsedStructure> = Vec::new();
+    let mut structures: Vec<Structure> = Vec::new();
 
-    // Parser state machine.
     enum State {
         TopLevel,
-        InStructure(ParsedStructure),
-        InAtoms {
-            structure: ParsedStructure,
-            group: ParsedAtomGroup,
-        },
+        InStructure(Structure),
+        InAtoms { structure: Structure, group: AtomGroup },
     }
 
     let mut state = State::TopLevel;
@@ -107,7 +99,7 @@ pub fn parse_input(src: &str) -> Result<ParsedInput, String> {
     for (lineno, raw) in src.lines().enumerate() {
         let lineno = lineno + 1;
 
-        // Strip inline comments and leading/trailing whitespace.
+        // Strip inline comments and surrounding whitespace.
         let line = match raw.find('#') {
             Some(pos) => &raw[..pos],
             None => raw,
@@ -136,16 +128,17 @@ pub fn parse_input(src: &str) -> Result<ParsedInput, String> {
                     filetype = Some(
                         tokens
                             .get(1)
-                            .ok_or_else(|| format!("line {lineno}: missing filetype value"))?
+                            .ok_or_else(|| parse_err(lineno, "missing filetype value"))?
                             .to_ascii_lowercase(),
                     );
                     State::TopLevel
                 }
                 "output" => {
-                    output =
-                        Some(PathBuf::from(tokens.get(1).ok_or_else(|| {
-                            format!("line {lineno}: missing output path")
-                        })?));
+                    output = Some(PathBuf::from(
+                        tokens
+                            .get(1)
+                            .ok_or_else(|| parse_err(lineno, "missing output path"))?,
+                    ));
                     State::TopLevel
                 }
                 "nloop" => {
@@ -161,10 +154,10 @@ pub fn parse_input(src: &str) -> Result<ParsedInput, String> {
                     State::TopLevel
                 }
                 "structure" => {
-                    let path = tokens.get(1).ok_or_else(|| {
-                        format!("line {lineno}: `structure` requires a file path")
-                    })?;
-                    State::InStructure(ParsedStructure {
+                    let path = tokens
+                        .get(1)
+                        .ok_or_else(|| parse_err(lineno, "`structure` requires a file path"))?;
+                    State::InStructure(Structure {
                         filepath: PathBuf::from(path),
                         number: 0,
                         mol_restraints: Vec::new(),
@@ -194,7 +187,6 @@ pub fn parse_input(src: &str) -> Result<ParsedInput, String> {
                     State::InStructure(s)
                 }
                 "fixed" => {
-                    // fixed x y z ex ey ez
                     let pos = parse_vec3(&tokens, 1, "fixed position", lineno)?;
                     let euler = parse_vec3(&tokens, 4, "fixed euler", lineno)?;
                     s.fixed = Some((pos, euler));
@@ -221,28 +213,25 @@ pub fn parse_input(src: &str) -> Result<ParsedInput, String> {
                     State::InStructure(s)
                 }
                 "atoms" => {
-                    // atoms <i> <j> …
                     let indices = tokens[1..]
                         .iter()
                         .map(|t| {
                             t.parse::<usize>()
-                                .map_err(|_| format!("line {lineno}: invalid atom index `{t}`"))
+                                .map_err(|_| parse_err(lineno, format!("invalid atom index `{t}`")))
                         })
                         .collect::<Result<Vec<_>, _>>()?;
                     if indices.is_empty() {
-                        return Err(format!(
-                            "line {lineno}: `atoms` requires at least one index"
-                        ));
+                        return Err(parse_err(lineno, "`atoms` requires at least one index"));
                     }
                     State::InAtoms {
                         structure: s,
-                        group: ParsedAtomGroup {
+                        group: AtomGroup {
                             atom_indices: indices,
                             restraints: Vec::new(),
                         },
                     }
                 }
-                _ => State::InStructure(s), // unknown structure keyword — skip
+                _ => State::InStructure(s),
             },
 
             // ── Inside an atoms sub-block ───────────────────────────────────
@@ -261,55 +250,39 @@ pub fn parse_input(src: &str) -> Result<ParsedInput, String> {
                 "inside" => {
                     let r = parse_inside(&tokens, lineno)?;
                     group.restraints.push(r);
-                    State::InAtoms {
-                        structure: s,
-                        group,
-                    }
+                    State::InAtoms { structure: s, group }
                 }
                 "outside" => {
                     let r = parse_outside(&tokens, lineno)?;
                     group.restraints.push(r);
-                    State::InAtoms {
-                        structure: s,
-                        group,
-                    }
+                    State::InAtoms { structure: s, group }
                 }
                 "over" | "above" => {
                     let r = parse_plane_above(&tokens, lineno)?;
                     group.restraints.push(r);
-                    State::InAtoms {
-                        structure: s,
-                        group,
-                    }
+                    State::InAtoms { structure: s, group }
                 }
                 "below" => {
                     let r = parse_plane_below(&tokens, lineno)?;
                     group.restraints.push(r);
-                    State::InAtoms {
-                        structure: s,
-                        group,
-                    }
+                    State::InAtoms { structure: s, group }
                 }
-                _ => State::InAtoms {
-                    structure: s,
-                    group,
-                },
+                _ => State::InAtoms { structure: s, group },
             },
         };
     }
 
-    // Ensure we are back at top-level (no unclosed blocks).
     match state {
-        State::InStructure(_) => return Err("unexpected EOF: unclosed `structure` block".into()),
-        State::InAtoms { .. } => return Err("unexpected EOF: unclosed `atoms` block".into()),
+        State::InStructure(_) => return Err(ScriptError::UnclosedBlock("structure")),
+        State::InAtoms { .. } => return Err(ScriptError::UnclosedBlock("atoms")),
         State::TopLevel => {}
     }
 
-    Ok(ParsedInput {
+    Ok(Script {
         tolerance,
         seed,
         filetype,
-        output: output.ok_or("missing required `output` keyword")?,
+        output: output.ok_or(ScriptError::MissingOutput)?,
         nloop,
         avoid_overlap,
         structures,
@@ -320,111 +293,105 @@ pub fn parse_input(src: &str) -> Result<ParsedInput, String> {
 // Restraint helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-fn parse_inside(tokens: &[&str], lineno: usize) -> Result<ParsedRestraint, String> {
+fn parse_inside(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptError> {
     let shape = tokens
         .get(1)
         .map(|s| s.to_ascii_lowercase())
-        .ok_or_else(|| format!("line {lineno}: `inside` requires a shape keyword"))?;
+        .ok_or_else(|| parse_err(lineno, "`inside` requires a shape keyword"))?;
     match shape.as_str() {
         "box" => {
-            // inside box xmin ymin zmin xmax ymax zmax
             let min = parse_vec3(tokens, 2, "inside box min", lineno)?;
             let max = parse_vec3(tokens, 5, "inside box max", lineno)?;
-            Ok(ParsedRestraint::InsideBox { min, max })
+            Ok(RestraintSpec::InsideBox { min, max })
         }
         "sphere" => {
-            // inside sphere cx cy cz radius
             let center = parse_vec3(tokens, 2, "inside sphere center", lineno)?;
             let radius = parse_f64(tokens, 5, "inside sphere radius", lineno)?;
-            Ok(ParsedRestraint::InsideSphere { center, radius })
+            Ok(RestraintSpec::InsideSphere { center, radius })
         }
-        _ => Err(format!(
-            "line {lineno}: unsupported `inside` shape `{shape}`"
+        _ => Err(parse_err(
+            lineno,
+            format!("unsupported `inside` shape `{shape}`"),
         )),
     }
 }
 
-fn parse_outside(tokens: &[&str], lineno: usize) -> Result<ParsedRestraint, String> {
+fn parse_outside(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptError> {
     let shape = tokens
         .get(1)
         .map(|s| s.to_ascii_lowercase())
-        .ok_or_else(|| format!("line {lineno}: `outside` requires a shape keyword"))?;
+        .ok_or_else(|| parse_err(lineno, "`outside` requires a shape keyword"))?;
     match shape.as_str() {
         "sphere" => {
-            // outside sphere cx cy cz radius
             let center = parse_vec3(tokens, 2, "outside sphere center", lineno)?;
             let radius = parse_f64(tokens, 5, "outside sphere radius", lineno)?;
-            Ok(ParsedRestraint::OutsideSphere { center, radius })
+            Ok(RestraintSpec::OutsideSphere { center, radius })
         }
-        _ => Err(format!(
-            "line {lineno}: unsupported `outside` shape `{shape}`"
+        _ => Err(parse_err(
+            lineno,
+            format!("unsupported `outside` shape `{shape}`"),
         )),
     }
 }
 
-fn parse_plane_above(tokens: &[&str], lineno: usize) -> Result<ParsedRestraint, String> {
-    // over plane nx ny nz distance
+fn parse_plane_above(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptError> {
     let normal = parse_vec3(tokens, 2, "over plane normal", lineno)?;
     let distance = parse_f64(tokens, 5, "over plane distance", lineno)?;
-    Ok(ParsedRestraint::AbovePlane { normal, distance })
+    Ok(RestraintSpec::AbovePlane { normal, distance })
 }
 
-fn parse_plane_below(tokens: &[&str], lineno: usize) -> Result<ParsedRestraint, String> {
-    // below plane nx ny nz distance
+fn parse_plane_below(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptError> {
     let normal = parse_vec3(tokens, 2, "below plane normal", lineno)?;
     let distance = parse_f64(tokens, 5, "below plane distance", lineno)?;
-    Ok(ParsedRestraint::BelowPlane { normal, distance })
+    Ok(RestraintSpec::BelowPlane { normal, distance })
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Numeric helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-fn parse_f64(tokens: &[&str], idx: usize, ctx: &str, lineno: usize) -> Result<f64, String> {
-    tokens
+fn parse_f64(tokens: &[&str], idx: usize, ctx: &str, lineno: usize) -> Result<f64, ScriptError> {
+    let tok = tokens
         .get(idx)
-        .ok_or_else(|| format!("line {lineno}: `{ctx}` — missing value at position {idx}"))?
-        .parse::<f64>()
-        .map_err(|_| {
-            format!(
-                "line {lineno}: `{ctx}` — `{}` is not a valid number",
-                tokens[idx]
-            )
-        })
+        .ok_or_else(|| parse_err(lineno, format!("`{ctx}` — missing value at position {idx}")))?;
+    tok.parse::<f64>()
+        .map_err(|_| parse_err(lineno, format!("`{ctx}` — `{tok}` is not a valid number")))
 }
 
-fn parse_u64(tokens: &[&str], idx: usize, ctx: &str, lineno: usize) -> Result<u64, String> {
-    tokens
+fn parse_u64(tokens: &[&str], idx: usize, ctx: &str, lineno: usize) -> Result<u64, ScriptError> {
+    let tok = tokens
         .get(idx)
-        .ok_or_else(|| format!("line {lineno}: `{ctx}` — missing value at position {idx}"))?
-        .parse::<u64>()
-        .map_err(|_| {
-            format!(
-                "line {lineno}: `{ctx}` — `{}` is not a valid integer",
-                tokens[idx]
-            )
-        })
+        .ok_or_else(|| parse_err(lineno, format!("`{ctx}` — missing value at position {idx}")))?;
+    tok.parse::<u64>()
+        .map_err(|_| parse_err(lineno, format!("`{ctx}` — `{tok}` is not a valid integer")))
 }
 
-fn parse_usize(tokens: &[&str], idx: usize, ctx: &str, lineno: usize) -> Result<usize, String> {
-    tokens
+fn parse_usize(tokens: &[&str], idx: usize, ctx: &str, lineno: usize) -> Result<usize, ScriptError> {
+    let tok = tokens
         .get(idx)
-        .ok_or_else(|| format!("line {lineno}: `{ctx}` — missing value at position {idx}"))?
-        .parse::<usize>()
-        .map_err(|_| {
-            format!(
-                "line {lineno}: `{ctx}` — `{}` is not a valid integer",
-                tokens[idx]
-            )
-        })
+        .ok_or_else(|| parse_err(lineno, format!("`{ctx}` — missing value at position {idx}")))?;
+    tok.parse::<usize>()
+        .map_err(|_| parse_err(lineno, format!("`{ctx}` — `{tok}` is not a valid integer")))
 }
 
-fn parse_vec3(tokens: &[&str], start: usize, ctx: &str, lineno: usize) -> Result<[f64; 3], String> {
+fn parse_vec3(
+    tokens: &[&str],
+    start: usize,
+    ctx: &str,
+    lineno: usize,
+) -> Result<[f64; 3], ScriptError> {
     Ok([
         parse_f64(tokens, start, ctx, lineno)?,
         parse_f64(tokens, start + 1, ctx, lineno)?,
         parse_f64(tokens, start + 2, ctx, lineno)?,
     ])
+}
+
+fn parse_err(lineno: usize, message: impl Into<String>) -> ScriptError {
+    ScriptError::Parse {
+        line: lineno,
+        message: message.into(),
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -453,7 +420,7 @@ structure urea.pdb
   inside box 0. 0. 0. 40. 40. 40.
 end structure
 ";
-        let inp = parse_input(src).expect("parse failed");
+        let inp = parse(src).expect("parse failed");
         assert_eq!(inp.tolerance, 2.0);
         assert_eq!(inp.seed, Some(1_234_567));
         assert_eq!(inp.filetype.as_deref(), Some("pdb"));
@@ -483,10 +450,10 @@ structure palmitoil.pdb
   end atoms
 end structure
 ";
-        let inp = parse_input(src).expect("parse failed");
+        let inp = parse(src).expect("parse failed");
         let s = &inp.structures[0];
         assert_eq!(s.number, 10);
-        assert_eq!(s.mol_restraints.len(), 1); // inside box
+        assert_eq!(s.mol_restraints.len(), 1);
         assert_eq!(s.atom_groups.len(), 2);
         assert_eq!(s.atom_groups[0].atom_indices, vec![31, 32]);
         assert_eq!(s.atom_groups[1].atom_indices, vec![1, 2]);
@@ -506,7 +473,7 @@ structure t3.pdb
   fixed 0. 20. 20. 1.57 1.57 1.57
 end structure
 ";
-        let inp = parse_input(src).expect("parse failed");
+        let inp = parse(src).expect("parse failed");
         let s = &inp.structures[0];
         assert!(s.center);
         let (pos, euler) = s.fixed.unwrap();
@@ -529,11 +496,11 @@ structure mol.pdb
   inside sphere 0. 0. 0. 20.
 end structure
 ";
-        let inp = parse_input(src).expect("parse failed");
+        let inp = parse(src).expect("parse failed");
         assert_eq!(inp.seed, Some(42));
         let s = &inp.structures[0];
         assert_eq!(s.number, 10);
-        matches!(s.mol_restraints[0], ParsedRestraint::InsideSphere { .. });
+        assert!(matches!(s.mol_restraints[0], RestraintSpec::InsideSphere { .. }));
     }
 
     #[test]
@@ -548,7 +515,34 @@ structure mol.pdb
   inside sphere 0. 0. 0. 50.
 end structure
 ";
-        let inp = parse_input(src).expect("parse failed");
+        let inp = parse(src).expect("parse failed");
         assert!(!inp.avoid_overlap);
+    }
+
+    #[test]
+    fn parse_missing_output_errors() {
+        let src = "\
+tolerance 2.0
+
+structure mol.pdb
+  number 1
+  inside sphere 0. 0. 0. 50.
+end structure
+";
+        let err = parse(src).expect_err("should fail");
+        assert!(matches!(err, ScriptError::MissingOutput));
+    }
+
+    #[test]
+    fn parse_unclosed_structure_errors() {
+        let src = "\
+output out.pdb
+
+structure mol.pdb
+  number 1
+  inside sphere 0. 0. 0. 50.
+";
+        let err = parse(src).expect_err("should fail");
+        assert!(matches!(err, ScriptError::UnclosedBlock("structure")));
     }
 }

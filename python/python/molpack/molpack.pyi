@@ -1,5 +1,6 @@
 """Type stubs for the molpack native extension (compiled from Rust via PyO3)."""
 
+import os
 from collections.abc import Sequence
 from typing import Any, Protocol, Self
 
@@ -193,6 +194,38 @@ class Molpack:
     def with_global_restraint(self, restraint: AnyRestraint | object) -> Self: ...
     def pack(self, targets: list[Target], max_loops: int = 200) -> PackResult: ...
     def __repr__(self) -> str: ...
+
+# ---------------------------------------------------------------------------
+# Script loader (`.inp` format)
+# ---------------------------------------------------------------------------
+
+class ScriptJob:
+    """Output of :func:`load_script` — a packer pre-configured from a
+    ``.inp`` script, plus its target list and output path.
+
+    Supports both attribute access (``job.packer``) and tuple
+    unpacking (``packer, targets, output, nloop = job``).
+    """
+
+    @property
+    def packer(self) -> Molpack: ...
+    @property
+    def targets(self) -> list[Target]: ...
+    @property
+    def output(self) -> str: ...
+    @property
+    def nloop(self) -> int: ...
+    def __len__(self) -> int: ...
+    def __getitem__(self, idx: int) -> Any: ...
+    def __repr__(self) -> str: ...
+
+def load_script(path: str | os.PathLike[str]) -> ScriptJob:
+    """Parse a molpack ``.inp`` script and lower it to a ready-to-run
+    packer and target list.
+
+    Relative paths inside the script (structure files, output) are
+    resolved against the script's parent directory.
+    """
 
 # ---------------------------------------------------------------------------
 # Exceptions

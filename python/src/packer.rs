@@ -142,25 +142,23 @@ impl PyPackResult {
 /// ```
 #[pyclass(name = "Molpack")]
 pub struct PyPacker {
-    precision: Option<F>,
-    tolerance: Option<F>,
-    inner_iterations: Option<usize>,
-    init_passes: Option<usize>,
-    init_box_half_size: Option<F>,
-    perturb_fraction: Option<F>,
-    random_perturb: Option<bool>,
-    perturb: Option<bool>,
-    seed: Option<u64>,
-    parallel_eval: Option<bool>,
-    progress: bool,
-    py_handlers: Vec<Py<pyo3::types::PyAny>>,
-    global_restraints: Vec<Py<pyo3::types::PyAny>>,
+    pub(crate) precision: Option<F>,
+    pub(crate) tolerance: Option<F>,
+    pub(crate) inner_iterations: Option<usize>,
+    pub(crate) init_passes: Option<usize>,
+    pub(crate) init_box_half_size: Option<F>,
+    pub(crate) perturb_fraction: Option<F>,
+    pub(crate) random_perturb: Option<bool>,
+    pub(crate) perturb: Option<bool>,
+    pub(crate) seed: Option<u64>,
+    pub(crate) parallel_eval: Option<bool>,
+    pub(crate) progress: bool,
+    pub(crate) py_handlers: Vec<Py<pyo3::types::PyAny>>,
+    pub(crate) global_restraints: Vec<Py<pyo3::types::PyAny>>,
 }
 
-#[pymethods]
-impl PyPacker {
-    #[new]
-    fn new() -> Self {
+impl Default for PyPacker {
+    fn default() -> Self {
         PyPacker {
             precision: None,
             tolerance: None,
@@ -176,6 +174,14 @@ impl PyPacker {
             py_handlers: Vec::new(),
             global_restraints: Vec::new(),
         }
+    }
+}
+
+#[pymethods]
+impl PyPacker {
+    #[new]
+    fn py_new() -> Self {
+        Self::default()
     }
 
     fn with_tolerance(&self, tolerance: NpF) -> Self {

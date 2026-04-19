@@ -96,6 +96,7 @@ mod random;
 pub mod region;
 pub mod relaxer;
 pub mod restraint;
+pub mod script;
 pub mod target;
 pub mod validation;
 

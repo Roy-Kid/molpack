@@ -19,8 +19,10 @@ from .molpack import (
     OutsideSphereRestraint,
     PackError,
     PackResult,
+    ScriptJob,
     StepInfo,
     Target,
+    load_script,
 )
 
 __all__ = [
@@ -39,6 +41,9 @@ __all__ = [
     "Molpack",
     "PackResult",
     "StepInfo",
+    # Script loader (`.inp` input)
+    "ScriptJob",
+    "load_script",
     # Duck-type protocols
     "Handler",
     "Restraint",

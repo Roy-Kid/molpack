@@ -45,6 +45,9 @@ use target::PyTarget;
 mod packer;
 use packer::{PyPackResult, PyPacker};
 
+mod script;
+use script::{PyScriptJob, load_script};
+
 #[pymodule]
 fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyAngle>()?;
@@ -61,6 +64,9 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPacker>()?;
     m.add_class::<PyPackResult>()?;
     m.add_class::<PyStepInfo>()?;
+
+    m.add_class::<PyScriptJob>()?;
+    m.add_function(wrap_pyfunction!(load_script, m)?)?;
 
     register_errors(m.py(), m)?;
 

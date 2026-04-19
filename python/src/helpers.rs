@@ -40,6 +40,20 @@ pub fn register_errors(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     Ok(())
 }
 
+/// Convert a [`molpack::script::ScriptError`] to a Python exception.
+///
+/// Packing failures surfaced through the script loader fan out to the
+/// same typed hierarchy as direct `pack()` calls; parse and I/O errors
+/// become `ValueError` and `OSError` respectively.
+pub fn script_error_to_pyerr(e: molpack::script::ScriptError) -> PyErr {
+    use molpack::script::ScriptError;
+    match e {
+        ScriptError::Pack(p) => pack_error_to_pyerr(p),
+        ScriptError::Io { .. } => pyo3::exceptions::PyOSError::new_err(e.to_string()),
+        _ => pyo3::exceptions::PyValueError::new_err(e.to_string()),
+    }
+}
+
 /// Convert a [`molpack::PackError`] to the matching typed Python exception.
 pub fn pack_error_to_pyerr(e: molpack::PackError) -> PyErr {
     let msg = e.to_string();
