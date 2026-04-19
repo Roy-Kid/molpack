@@ -105,7 +105,7 @@ fn expand_targets(targets: &[Target]) -> Vec<ExpandedMol<'_>> {
     let mut cursor = 0usize;
     let mut mol_id = 0usize;
 
-    for target in free.into_iter().chain(fixed.into_iter()) {
+    for target in free.into_iter().chain(fixed) {
         let nmols = if target.fixed_at.is_some() {
             1
         } else {
