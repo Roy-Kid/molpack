@@ -65,13 +65,28 @@ pub struct AtomGroup {
 /// concrete `Restraint` implementation.
 #[derive(Debug, Clone)]
 pub enum RestraintSpec {
-    InsideBox { min: [f64; 3], max: [f64; 3] },
-    InsideSphere { center: [f64; 3], radius: f64 },
-    OutsideSphere { center: [f64; 3], radius: f64 },
+    InsideBox {
+        min: [f64; 3],
+        max: [f64; 3],
+    },
+    InsideSphere {
+        center: [f64; 3],
+        radius: f64,
+    },
+    OutsideSphere {
+        center: [f64; 3],
+        radius: f64,
+    },
     /// `over plane` — atom must lie above the plane.
-    AbovePlane { normal: [f64; 3], distance: f64 },
+    AbovePlane {
+        normal: [f64; 3],
+        distance: f64,
+    },
     /// `below plane` — atom must lie below the plane.
-    BelowPlane { normal: [f64; 3], distance: f64 },
+    BelowPlane {
+        normal: [f64; 3],
+        distance: f64,
+    },
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -91,7 +106,10 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
     enum State {
         TopLevel,
         InStructure(Structure),
-        InAtoms { structure: Structure, group: AtomGroup },
+        InAtoms {
+            structure: Structure,
+            group: AtomGroup,
+        },
     }
 
     let mut state = State::TopLevel;
@@ -250,24 +268,39 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                 "inside" => {
                     let r = parse_inside(&tokens, lineno)?;
                     group.restraints.push(r);
-                    State::InAtoms { structure: s, group }
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
                 }
                 "outside" => {
                     let r = parse_outside(&tokens, lineno)?;
                     group.restraints.push(r);
-                    State::InAtoms { structure: s, group }
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
                 }
                 "over" | "above" => {
                     let r = parse_plane_above(&tokens, lineno)?;
                     group.restraints.push(r);
-                    State::InAtoms { structure: s, group }
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
                 }
                 "below" => {
                     let r = parse_plane_below(&tokens, lineno)?;
                     group.restraints.push(r);
-                    State::InAtoms { structure: s, group }
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
                 }
-                _ => State::InAtoms { structure: s, group },
+                _ => State::InAtoms {
+                    structure: s,
+                    group,
+                },
             },
         };
     }
@@ -366,7 +399,12 @@ fn parse_u64(tokens: &[&str], idx: usize, ctx: &str, lineno: usize) -> Result<u6
         .map_err(|_| parse_err(lineno, format!("`{ctx}` — `{tok}` is not a valid integer")))
 }
 
-fn parse_usize(tokens: &[&str], idx: usize, ctx: &str, lineno: usize) -> Result<usize, ScriptError> {
+fn parse_usize(
+    tokens: &[&str],
+    idx: usize,
+    ctx: &str,
+    lineno: usize,
+) -> Result<usize, ScriptError> {
     let tok = tokens
         .get(idx)
         .ok_or_else(|| parse_err(lineno, format!("`{ctx}` — missing value at position {idx}")))?;
@@ -500,7 +538,10 @@ end structure
         assert_eq!(inp.seed, Some(42));
         let s = &inp.structures[0];
         assert_eq!(s.number, 10);
-        assert!(matches!(s.mol_restraints[0], RestraintSpec::InsideSphere { .. }));
+        assert!(matches!(
+            s.mol_restraints[0],
+            RestraintSpec::InsideSphere { .. }
+        ));
     }
 
     #[test]

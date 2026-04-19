@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use molpack::script::{self, BuildResult, ScriptError};
 use molpack::ProgressHandler;
+use molpack::script::{self, BuildResult, ScriptError};
 
 #[derive(Parser, Debug)]
 #[command(

@@ -177,7 +177,9 @@ def pack(
     ] = None,
     seed: Annotated[
         int | None,
-        typer.Option("--seed", "-s", help="Random seed. Overrides the script's `seed` keyword."),
+        typer.Option(
+            "--seed", "-s", help="Random seed. Overrides the script's `seed` keyword."
+        ),
     ] = None,
     max_loops: Annotated[
         int | None,
