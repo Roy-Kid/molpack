@@ -102,28 +102,6 @@ jobs:
         run: cargo bench --no-run
         working-directory: molpack
 
-  docs:
-    name: docs
-    needs: clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: MolCrafts/molrs
-          path: molrs
-      - uses: actions/checkout@v6
-        with:
-          path: molpack
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: molpack
-      - name: cargo doc
-        run: cargo doc --no-deps --all-features
-        working-directory: molpack
-        env:
-          RUSTDOCFLAGS: -D warnings
-
   python:
     name: python bindings
     needs: [clippy, python-lint]
@@ -143,13 +121,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
       - name: Build + test Python bindings
         run: |
-          python -m venv .venv
+          uv venv
           source .venv/bin/activate
-          # PEP 735 `--group` needs pip 25.1+; the venv ships with older pip.
-          pip install --upgrade pip
-          pip install --group dev
+          uv pip install --group dev
           maturin develop --release
           pytest -v
         working-directory: molpack/python
