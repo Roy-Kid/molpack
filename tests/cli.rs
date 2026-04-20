@@ -1,10 +1,10 @@
 //! Integration tests for the `molpack` CLI binary.
 //!
 //! These tests compile and invoke the binary directly so they require the
-//! `filesystem` feature.  Run with:
+//! `cli` feature.  Run with:
 //!
 //! ```bash
-//! cargo test --test cli --features filesystem
+//! cargo test --test cli --features cli
 //! ```
 
 use std::path::PathBuf;

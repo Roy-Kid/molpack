@@ -3,7 +3,7 @@
 
 use crate::cell::{index_cell, setcell};
 use crate::constraints::{EvalMode, EvalOutput};
-use crate::context::PackContext;
+use crate::context::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat, eulerrmat_derivatives};
 use molrs::types::F;
 #[cfg(feature = "rayon")]
@@ -16,17 +16,137 @@ enum ExpandMode {
     FG,
 }
 
-#[cfg(feature = "rayon")]
-const PARALLEL_PAIR_CELL_THRESHOLD: usize = 64;
+/// Precomputed PBC constants so the inner pair loops can wrap without
+/// a per-axis division. `inv_length[k] = 1/length[k]` when PBC is active on
+/// axis k, else 0. `any_active` short-circuits the entire wrap in the common
+/// non-PBC workload.
+#[derive(Clone, Copy)]
+struct PbcConstants {
+    length: [F; 3],
+    inv_length: [F; 3],
+    any_active: bool,
+}
+
+#[inline(always)]
+fn pbc_constants(sys: &PackContext) -> PbcConstants {
+    let length = sys.pbc_length;
+    let mut inv_length = [0.0 as F; 3];
+    let mut any_active = false;
+    for k in 0..3 {
+        if sys.pbc_periodic[k] && length[k] > 0.0 {
+            inv_length[k] = 1.0 / length[k];
+            any_active = true;
+        }
+    }
+    PbcConstants {
+        length,
+        inv_length,
+        any_active,
+    }
+}
+
+#[inline(always)]
+fn pbc_wrap_delta(dx: F, dy: F, dz: F, pbc: &PbcConstants) -> (F, F, F) {
+    if !pbc.any_active {
+        return (dx, dy, dz);
+    }
+    (
+        dx - (dx * pbc.inv_length[0]).round() * pbc.length[0],
+        dy - (dy * pbc.inv_length[1]).round() * pbc.length[1],
+        dz - (dz * pbc.inv_length[2]).round() * pbc.length[2],
+    )
+}
+
+// Parallel pair evaluation is user-selected via
+// `Molpack::parallel_pair_eval(true)` → `PackContext::parallel_pair_eval`.
+// The library does not attempt to auto-detect when rayon pays off: the
+// crossover is workload-shaped (call frequency, work-per-call,
+// movebad proportion) rather than something inferrable from a single
+// per-pack metric like `active_cells.len()`.
+
+/// Per-atom hot-path state pulled out once before the inner `jcart` loop
+/// inside `fparc` / `gparc` / `fgparc` (and the `*_stats` rayon variants).
+///
+/// Before this type, each of those four kernels had the same 15-line
+/// prologue: read `atom_props[icart]`, derive `fixed_i`, `use_short_i`,
+/// `shrad_i`, `shscl_i`, and cache `any_fixed_atoms` / `any_short_radius`
+/// as `has_fixed` / `has_short`. Drift between the four copies would
+/// silently change kernel behaviour — centralising it here means one
+/// edit site. The struct is `#[inline(always)]`-constructed so the call
+/// compiles to the same loads the inlined prologue produced (verified
+/// by the `pair_kernel` bench — see the commit message for Fix 2).
+#[derive(Clone, Copy)]
+struct AtomHotState {
+    props: crate::context::AtomProps,
+    /// Cached `sys.any_short_radius` — guards the cold short-radius fetch.
+    has_short: bool,
+    /// Atom `i` itself is fixed — used only together with the `j`-fixed
+    /// check to short-circuit the pair.
+    fixed_i: bool,
+    /// Atom `i` itself opts into the short-radius penalty — one half of
+    /// the `use_short_i || use_short_j` gate.
+    use_short_i: bool,
+    shrad_i: F,
+    shscl_i: F,
+}
+
+impl AtomHotState {
+    #[inline(always)]
+    fn load(icart: usize, sys: &PackContext) -> Self {
+        let props = sys.atom_props[icart];
+        let has_short = sys.any_short_radius;
+        let has_fixed = sys.any_fixed_atoms;
+        let fixed_i = has_fixed && (props.flags & ATOM_FLAG_FIXED != 0);
+        let use_short_i = has_short && (props.flags & ATOM_FLAG_SHORT != 0);
+        // The short-radius `Vec`s are cold when `any_short_radius` is
+        // false, so skip the load entirely — the branch below folds away
+        // when `has_short` is a compile-time constant in the caller
+        // (rare) or branch-predicts perfectly otherwise.
+        let shrad_i = if has_short {
+            sys.short_radius[icart]
+        } else {
+            0.0
+        };
+        let shscl_i = if has_short {
+            sys.short_radius_scale[icart]
+        } else {
+            0.0
+        };
+        Self {
+            props,
+            has_short,
+            fixed_i,
+            use_short_i,
+            shrad_i,
+            shscl_i,
+        }
+    }
+}
 
 /// Compute objective function value and update `sys.xcart`.
 /// Port of `computef.f90`.
 ///
 /// `x` layout: [COM₀..COMₙ (3N)] ++ [euler₀..eulerₙ (3N)]
+///
+/// Takes the geometry-cache fast path when `x` and the cell grid are identical
+/// to the last expansion: the Cartesian rebuild and linked-cell rebuild are
+/// skipped and only the constraint + pair kernels re-run on the stored state.
+/// The packer hits this path on every outer iteration when it re-evaluates at
+/// unscaled radii after `pgencan` returns, since radius mutation does not
+/// invalidate the cache key.
 pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
+    sys.debug_assert_atom_props_sync();
     sys.increment_ncf();
     sys.fdist = 0.0;
     sys.frest = 0.0;
+
+    if matches_cached_geometry(x, sys) {
+        let mut f = accumulate_constraint_values_from_xcart(sys);
+        if !sys.init1 {
+            f += accumulate_pair_f(sys);
+        }
+        return f;
+    }
 
     if !sys.init1 {
         sys.resetcells();
@@ -47,12 +167,25 @@ pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
 
 /// Compute objective function value and gradient in one pass over geometry/state.
 /// This avoids rebuilding Cartesian coordinates and cell lists twice.
+///
+/// Takes the geometry-cache fast path when `x` and the cell grid match the
+/// last expansion — the Cartesian rebuild and linked-cell rebuild are skipped.
 pub fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
+    sys.debug_assert_atom_props_sync();
     sys.increment_ncf();
     sys.increment_ncg();
     sys.fdist = 0.0;
     sys.frest = 0.0;
     sys.work.gxcar.fill([0.0; 3]);
+
+    if matches_cached_geometry(x, sys) {
+        let mut f = accumulate_constraint_values_and_gradients_from_xcart(sys);
+        if !sys.init1 {
+            f += accumulate_pair_fg(sys);
+        }
+        project_cartesian_gradient(x, sys, g);
+        return f;
+    }
 
     if !sys.init1 {
         sys.resetcells();
@@ -72,67 +205,66 @@ pub fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
 
 /// Atom-pair distance penalty function.
 /// Port of `fparc.f90`.
+///
+/// Returns `(penalty_sum, fdist_max)`. The caller aggregates `fdist_max`
+/// across pair traversal and updates `sys.fdist` once at the end, so the
+/// inner loop keeps a data dependency on a local register instead of an
+/// `&mut PackContext` field.
+///
+/// The per-atom reads go through `sys.atom_props` — an AoS mirror that
+/// packs the ten or so hot fields into one cache line per atom (see
+/// [`AtomProps`]).
 #[inline(always)]
-fn fparc(icart: usize, first_jcart: Option<usize>, sys: &mut PackContext) -> F {
+fn fparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstants) -> (F, F) {
     let mut result = 0.0;
+    let mut local_fdist: F = 0.0;
     let mut jcart_id = first_jcart;
     let xi = sys.xcart[icart];
-    let ri = sys.radius[icart];
-    let ri_ini = sys.radius_ini[icart];
-    let fsi = sys.fscale[icart];
+    let hot = AtomHotState::load(icart, sys);
     let move_flag = sys.move_flag;
 
-    while let Some(jcart) = jcart_id {
+    while jcart_id != NONE_IDX {
+        let jcart = jcart_id as usize;
+        let next = sys.latomnext[jcart];
+        let props_j = sys.atom_props[jcart];
         // Skip same molecule
-        if sys.ibmol[icart] == sys.ibmol[jcart] && sys.ibtype[icart] == sys.ibtype[jcart] {
-            jcart_id = sys.latomnext[jcart];
+        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+            jcart_id = next;
             continue;
         }
-        // Skip two fixed atoms
-        if sys.fixedatom[icart] && sys.fixedatom[jcart] {
-            jcart_id = sys.latomnext[jcart];
+        // Skip two fixed atoms (only if the system has any at all).
+        if hot.fixed_i && (props_j.flags & ATOM_FLAG_FIXED != 0) {
+            jcart_id = next;
             continue;
         }
 
         let xj = sys.xcart[jcart];
-        let mut dx = xi[0] - xj[0];
-        let mut dy = xi[1] - xj[1];
-        let mut dz = xi[2] - xj[2];
-        if sys.pbc_length[0] > 0.0 {
-            dx -= (dx / sys.pbc_length[0]).round() * sys.pbc_length[0];
-        }
-        if sys.pbc_length[1] > 0.0 {
-            dy -= (dy / sys.pbc_length[1]).round() * sys.pbc_length[1];
-        }
-        if sys.pbc_length[2] > 0.0 {
-            dz -= (dz / sys.pbc_length[2]).round() * sys.pbc_length[2];
-        }
+        let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
         let datom = dx * dx + dy * dy + dz * dz;
-        let rsum = ri + sys.radius[jcart];
+        let rsum = hot.props.radius + props_j.radius;
         let tol = rsum * rsum;
 
         if datom < tol {
             let penalty = datom - tol;
-            result += fsi * sys.fscale[jcart] * penalty * penalty;
-            // Short radius penalty
-            if sys.use_short_radius[icart] || sys.use_short_radius[jcart] {
-                let short_rsum = sys.short_radius[icart] + sys.short_radius[jcart];
+            let scale = hot.props.fscale * props_j.fscale;
+            result += scale * penalty * penalty;
+            if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
+                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
                 let short_tol = short_rsum * short_rsum;
                 if datom < short_tol {
                     let penalty = datom - short_tol;
-                    let mut sr_scale =
-                        (sys.short_radius_scale[icart] * sys.short_radius_scale[jcart]).sqrt();
+                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
                     sr_scale *= (tol * tol) / (short_tol * short_tol);
-                    result += fsi * sys.fscale[jcart] * sr_scale * penalty * penalty;
+                    result += scale * sr_scale * penalty * penalty;
                 }
             }
         }
 
-        let rsum_ini = ri_ini + sys.radius_ini[jcart];
+        let rsum_ini = hot.props.radius_ini + props_j.radius_ini;
         let tol_ini = rsum_ini * rsum_ini;
         let violation = tol_ini - datom;
-        if violation > sys.fdist {
-            sys.fdist = violation;
+        if violation > local_fdist {
+            local_fdist = violation;
         }
         if move_flag {
             if violation > sys.fdist_atom[icart] {
@@ -143,15 +275,16 @@ fn fparc(icart: usize, first_jcart: Option<usize>, sys: &mut PackContext) -> F {
             }
         }
 
-        jcart_id = sys.latomnext[jcart];
+        jcart_id = next;
     }
 
-    result
+    (result, local_fdist)
 }
 
 /// Compute gradient `g` from current system state.
 /// Port of `computeg.f90`.
 pub fn compute_g(x: &[F], sys: &mut PackContext, g: &mut [F]) {
+    sys.debug_assert_atom_props_sync();
     sys.increment_ncg();
     // Zero Cartesian gradient
     sys.work.gxcar.fill([0.0; 3]);
@@ -195,7 +328,7 @@ fn expand_molecules(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
             continue;
         }
 
-        for imol in 0..sys.nmols[itype] {
+        for _imol in 0..sys.nmols[itype] {
             let xcm = [x[ilubar], x[ilubar + 1], x[ilubar + 2]];
             let beta = x[ilugan];
             let gama = x[ilugan + 1];
@@ -222,7 +355,7 @@ fn expand_molecules(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
                 }
 
                 if !sys.init1 {
-                    insert_atom_in_cell(icart, itype, imol, &pos, sys);
+                    insert_atom_in_cell(icart, &pos, sys);
                 }
 
                 icart += 1;
@@ -286,55 +419,115 @@ fn accumulate_constraint_gradient_from_xcart(sys: &mut PackContext) {
     }
 }
 
+/// F-only counterpart to [`accumulate_constraint_gradient_from_xcart`]. Walks
+/// `sys.xcart` (assumed current from a prior expansion) and re-applies each
+/// restraint's function value, returning the accumulated penalty. Used by the
+/// `compute_f` cache fast path when the Cartesian expansion can be skipped.
+#[inline]
+fn accumulate_constraint_values_from_xcart(sys: &mut PackContext) -> F {
+    let mut f = 0.0;
+    let mut icart = 0usize;
+
+    for itype in 0..sys.ntype {
+        if !sys.comptype[itype] {
+            icart += sys.nmols[itype] * sys.natoms[itype];
+            continue;
+        }
+
+        for _imol in 0..sys.nmols[itype] {
+            for _iatom in 0..sys.natoms[itype] {
+                let pos = sys.xcart[icart];
+                f += accumulate_constraint_value(icart, &pos, sys);
+                icart += 1;
+            }
+        }
+    }
+
+    f
+}
+
+/// Combined F+G counterpart to [`accumulate_constraint_gradient_from_xcart`].
+/// Used by the `compute_fg` cache fast path.
+#[inline]
+fn accumulate_constraint_values_and_gradients_from_xcart(sys: &mut PackContext) -> F {
+    let mut f = 0.0;
+    let mut icart = 0usize;
+
+    for itype in 0..sys.ntype {
+        if !sys.comptype[itype] {
+            icart += sys.nmols[itype] * sys.natoms[itype];
+            continue;
+        }
+
+        for _imol in 0..sys.nmols[itype] {
+            for _iatom in 0..sys.natoms[itype] {
+                let pos = sys.xcart[icart];
+                f += accumulate_constraint_value(icart, &pos, sys);
+                accumulate_constraint_gradient(icart, &pos, sys);
+                icart += 1;
+            }
+        }
+    }
+
+    f
+}
+
 #[inline(always)]
-fn insert_atom_in_cell(
-    icart: usize,
-    itype: usize,
-    imol: usize,
-    pos: &[F; 3],
-    sys: &mut PackContext,
-) {
+fn insert_atom_in_cell(icart: usize, pos: &[F; 3], sys: &mut PackContext) {
     let cell = setcell(
         pos,
         &sys.pbc_min,
         &sys.pbc_length,
         &sys.cell_length,
         &sys.ncells,
+        &sys.pbc_periodic,
     );
     let icell = index_cell(&cell, &sys.ncells);
     sys.latomnext[icart] = sys.latomfirst[icell];
-    sys.latomfirst[icell] = Some(icart);
+    sys.latomfirst[icell] = icart as u32;
 
     if sys.empty_cell[icell] {
         sys.empty_cell[icell] = false;
         sys.active_cells.push(icell);
         sys.lcellnext[icell] = sys.lcellfirst;
-        sys.lcellfirst = Some(icell);
+        sys.lcellfirst = icell as u32;
     }
 
-    sys.ibtype[icart] = itype;
-    sys.ibmol[icart] = imol;
+    // `ibtype` / `ibmol` used to be written here on every eval; they are
+    // now set once in `Molpack::pack` and mirrored into `atom_props`.
 }
 
 #[inline(always)]
 fn accumulate_pair_f(sys: &mut PackContext) -> F {
     #[cfg(feature = "rayon")]
-    if !sys.move_flag && sys.active_cells.len() >= PARALLEL_PAIR_CELL_THRESHOLD {
+    if sys.parallel_pair_eval && !sys.move_flag {
         let (f, fdist_max) = accumulate_pair_f_parallel(sys);
         sys.fdist = sys.fdist.max(fdist_max);
         return f;
     }
 
+    let pbc = pbc_constants(sys);
     let mut f = 0.0;
+    let mut fdist_local: F = 0.0;
     let mut icell_id = sys.lcellfirst;
-    while let Some(icell) = icell_id {
+    while icell_id != NONE_IDX {
+        let icell = icell_id as usize;
         let neighbors = sys.neighbor_cells_f[icell];
 
         let mut icart_id = sys.latomfirst[icell];
-        while let Some(icart) = icart_id {
-            f += fparc(icart, sys.latomnext[icart], sys);
+        while icart_id != NONE_IDX {
+            let icart = icart_id as usize;
+            let (df, dfd) = fparc(icart, sys.latomnext[icart], sys, &pbc);
+            f += df;
+            if dfd > fdist_local {
+                fdist_local = dfd;
+            }
             for &ncell in &neighbors {
-                f += fparc(icart, sys.latomfirst[ncell], sys);
+                let (df, dfd) = fparc(icart, sys.latomfirst[ncell], sys, &pbc);
+                f += df;
+                if dfd > fdist_local {
+                    fdist_local = dfd;
+                }
             }
 
             icart_id = sys.latomnext[icart];
@@ -343,11 +536,15 @@ fn accumulate_pair_f(sys: &mut PackContext) -> F {
         icell_id = sys.lcellnext[icell];
     }
 
+    if fdist_local > sys.fdist {
+        sys.fdist = fdist_local;
+    }
     f
 }
 
 #[cfg(feature = "rayon")]
 fn accumulate_pair_f_parallel(sys: &PackContext) -> (F, F) {
+    let pbc = pbc_constants(sys);
     sys.active_cells
         .par_iter()
         .map(|&icell| {
@@ -356,13 +553,15 @@ fn accumulate_pair_f_parallel(sys: &PackContext) -> (F, F) {
             let neighbors = sys.neighbor_cells_f[icell];
 
             let mut icart_id = sys.latomfirst[icell];
-            while let Some(icart) = icart_id {
-                let (f_same, fdist_same) = fparc_stats(icart, sys.latomnext[icart], sys);
+            while icart_id != NONE_IDX {
+                let icart = icart_id as usize;
+                let (f_same, fdist_same) = fparc_stats(icart, sys.latomnext[icart], sys, &pbc);
                 f += f_same;
                 fdist_max = fdist_max.max(fdist_same);
 
                 for &ncell in &neighbors {
-                    let (f_neigh, fdist_neigh) = fparc_stats(icart, sys.latomfirst[ncell], sys);
+                    let (f_neigh, fdist_neigh) =
+                        fparc_stats(icart, sys.latomfirst[ncell], sys, &pbc);
                     f += f_neigh;
                     fdist_max = fdist_max.max(fdist_neigh);
                 }
@@ -380,15 +579,18 @@ fn accumulate_pair_f_parallel(sys: &PackContext) -> (F, F) {
 
 #[inline(always)]
 fn accumulate_pair_g(sys: &mut PackContext) {
+    let pbc = pbc_constants(sys);
     let mut icell_id = sys.lcellfirst;
-    while let Some(icell) = icell_id {
+    while icell_id != NONE_IDX {
+        let icell = icell_id as usize;
         let neighbors = sys.neighbor_cells_g[icell];
 
         let mut icart_id = sys.latomfirst[icell];
-        while let Some(icart) = icart_id {
-            gparc(icart, sys.latomnext[icart], sys);
+        while icart_id != NONE_IDX {
+            let icart = icart_id as usize;
+            gparc(icart, sys.latomnext[icart], sys, &pbc);
             for &ncell in &neighbors {
-                gparc(icart, sys.latomfirst[ncell], sys);
+                gparc(icart, sys.latomfirst[ncell], sys, &pbc);
             }
 
             icart_id = sys.latomnext[icart];
@@ -400,16 +602,37 @@ fn accumulate_pair_g(sys: &mut PackContext) {
 
 #[inline(always)]
 fn accumulate_pair_fg(sys: &mut PackContext) -> F {
+    #[cfg(feature = "rayon")]
+    if sys.parallel_pair_eval && !sys.move_flag {
+        let (f, fdist_max) = accumulate_pair_fg_parallel(sys);
+        if fdist_max > sys.fdist {
+            sys.fdist = fdist_max;
+        }
+        return f;
+    }
+
+    let pbc = pbc_constants(sys);
     let mut f = 0.0;
+    let mut fdist_local: F = 0.0;
     let mut icell_id = sys.lcellfirst;
-    while let Some(icell) = icell_id {
+    while icell_id != NONE_IDX {
+        let icell = icell_id as usize;
         let neighbors = sys.neighbor_cells_g[icell];
 
         let mut icart_id = sys.latomfirst[icell];
-        while let Some(icart) = icart_id {
-            f += fgparc(icart, sys.latomnext[icart], sys);
+        while icart_id != NONE_IDX {
+            let icart = icart_id as usize;
+            let (df, dfd) = fgparc(icart, sys.latomnext[icart], sys, &pbc);
+            f += df;
+            if dfd > fdist_local {
+                fdist_local = dfd;
+            }
             for &ncell in &neighbors {
-                f += fgparc(icart, sys.latomfirst[ncell], sys);
+                let (df, dfd) = fgparc(icart, sys.latomfirst[ncell], sys, &pbc);
+                f += df;
+                if dfd > fdist_local {
+                    fdist_local = dfd;
+                }
             }
 
             icart_id = sys.latomnext[icart];
@@ -418,145 +641,201 @@ fn accumulate_pair_fg(sys: &mut PackContext) -> F {
         icell_id = sys.lcellnext[icell];
     }
 
+    if fdist_local > sys.fdist {
+        sys.fdist = fdist_local;
+    }
     f
+}
+
+/// Parallel counterpart to [`accumulate_pair_fg`]. Partitions `active_cells`
+/// into `N_threads` contiguous chunks, runs each on its own partial
+/// gradient buffer, then serially merges the buffers back into
+/// `sys.work.gxcar`. Gated on `!move_flag` (the per-atom `fdist_atom`
+/// bookkeeping is intentionally skipped).
+#[cfg(feature = "rayon")]
+fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
+    let ntotat = sys.ntotat;
+    let n_threads = rayon::current_num_threads().max(1);
+    sys.work.reset_partial_gxcar(n_threads, ntotat);
+
+    // Move partial buffers out so `sys` can be borrowed immutably across threads.
+    let mut partials = std::mem::take(&mut sys.work.partial_gxcar);
+    let pbc = pbc_constants(sys);
+    let sys_ro: &PackContext = sys;
+    let active_cells = sys_ro.active_cells.as_slice();
+    let chunk_size = active_cells.len().div_ceil(n_threads);
+
+    let (f_total, fdist_max) = partials
+        .par_iter_mut()
+        .enumerate()
+        .map(|(tidx, grad)| {
+            let start = tidx * chunk_size;
+            let end = ((tidx + 1) * chunk_size).min(active_cells.len());
+            let mut f_local: F = 0.0;
+            let mut fdist_local: F = 0.0;
+            for &icell in &active_cells[start..end] {
+                let neighbors = sys_ro.neighbor_cells_g[icell];
+                let mut icart_id = sys_ro.latomfirst[icell];
+                while icart_id != NONE_IDX {
+                    let icart = icart_id as usize;
+                    let (df, dfd) =
+                        fgparc_stats(icart, sys_ro.latomnext[icart], sys_ro, grad, &pbc);
+                    f_local += df;
+                    if dfd > fdist_local {
+                        fdist_local = dfd;
+                    }
+                    for &ncell in &neighbors {
+                        let (df, dfd) =
+                            fgparc_stats(icart, sys_ro.latomfirst[ncell], sys_ro, grad, &pbc);
+                        f_local += df;
+                        if dfd > fdist_local {
+                            fdist_local = dfd;
+                        }
+                    }
+                    icart_id = sys_ro.latomnext[icart];
+                }
+            }
+            (f_local, fdist_local)
+        })
+        .reduce(|| (0.0 as F, 0.0 as F), |a, b| (a.0 + b.0, a.1.max(b.1)));
+
+    // Merge per-thread gradients back into the main buffer. Small
+    // systems stay serial to avoid rayon dispatch overhead dominating
+    // the merge itself — the threshold is calibrated via the
+    // `partial_gradient_merge` bench.
+    if ntotat >= crate::context::work_buffers::MERGE_PARALLEL_THRESHOLD_NTOTAT {
+        crate::context::WorkBuffers::merge_partials_parallel(&partials, &mut sys.work.gxcar);
+    } else {
+        crate::context::WorkBuffers::merge_partials_serial(&partials, &mut sys.work.gxcar);
+    }
+
+    sys.work.partial_gxcar = partials;
+    (f_total, fdist_max)
 }
 
 /// Atom-pair gradient accumulation into `sys.work.gxcar`.
 /// Port of `gparc.f90`.
 #[inline(always)]
-fn gparc(icart: usize, first_jcart: Option<usize>, sys: &mut PackContext) {
+fn gparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstants) {
     let mut jcart_id = first_jcart;
-    while let Some(jcart) = jcart_id {
-        if sys.ibmol[icart] == sys.ibmol[jcart] && sys.ibtype[icart] == sys.ibtype[jcart] {
-            jcart_id = sys.latomnext[jcart];
+    let xi = sys.xcart[icart];
+    let hot = AtomHotState::load(icart, sys);
+
+    while jcart_id != NONE_IDX {
+        let jcart = jcart_id as usize;
+        let next = sys.latomnext[jcart];
+        let props_j = sys.atom_props[jcart];
+        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+            jcart_id = next;
             continue;
         }
-        if sys.fixedatom[icart] && sys.fixedatom[jcart] {
-            jcart_id = sys.latomnext[jcart];
+        if hot.fixed_i && (props_j.flags & ATOM_FLAG_FIXED != 0) {
+            jcart_id = next;
             continue;
         }
 
-        let rsum = sys.radius[icart] + sys.radius[jcart];
+        let rsum = hot.props.radius + props_j.radius;
         let tol = rsum * rsum;
-        let xi = sys.xcart[icart];
         let xj = sys.xcart[jcart];
-        let mut dx = xi[0] - xj[0];
-        let mut dy = xi[1] - xj[1];
-        let mut dz = xi[2] - xj[2];
-        if sys.pbc_length[0] > 0.0 {
-            dx -= (dx / sys.pbc_length[0]).round() * sys.pbc_length[0];
-        }
-        if sys.pbc_length[1] > 0.0 {
-            dy -= (dy / sys.pbc_length[1]).round() * sys.pbc_length[1];
-        }
-        if sys.pbc_length[2] > 0.0 {
-            dz -= (dz / sys.pbc_length[2]).round() * sys.pbc_length[2];
-        }
+        let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
         let datom = dx * dx + dy * dy + dz * dz;
 
         if datom < tol {
-            let dtemp = sys.fscale[icart] * sys.fscale[jcart] * 4.0 * (datom - tol);
+            let scale = hot.props.fscale * props_j.fscale;
+            let dtemp = scale * 4.0 * (datom - tol);
             let xdiff0 = dtemp * dx;
             let xdiff1 = dtemp * dy;
             let xdiff2 = dtemp * dz;
-            sys.work.gxcar[icart][0] += xdiff0;
-            sys.work.gxcar[icart][1] += xdiff1;
-            sys.work.gxcar[icart][2] += xdiff2;
-            sys.work.gxcar[jcart][0] -= xdiff0;
-            sys.work.gxcar[jcart][1] -= xdiff1;
-            sys.work.gxcar[jcart][2] -= xdiff2;
-            // Short radius gradient
-            if sys.use_short_radius[icart] || sys.use_short_radius[jcart] {
-                let short_rsum = sys.short_radius[icart] + sys.short_radius[jcart];
+            let gi = &mut sys.work.gxcar[icart];
+            gi[0] += xdiff0;
+            gi[1] += xdiff1;
+            gi[2] += xdiff2;
+            let gj = &mut sys.work.gxcar[jcart];
+            gj[0] -= xdiff0;
+            gj[1] -= xdiff1;
+            gj[2] -= xdiff2;
+            if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
+                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
                 let short_tol = short_rsum * short_rsum;
                 if datom < short_tol {
-                    let mut sr_scale =
-                        (sys.short_radius_scale[icart] * sys.short_radius_scale[jcart]).sqrt();
+                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
                     sr_scale *= (tol * tol) / (short_tol * short_tol);
-                    let dtemp2 = sys.fscale[icart]
-                        * sys.fscale[jcart]
-                        * 4.0
-                        * sr_scale
-                        * (datom - short_tol);
+                    let dtemp2 = scale * 4.0 * sr_scale * (datom - short_tol);
                     let xdiff0 = dtemp2 * dx;
                     let xdiff1 = dtemp2 * dy;
                     let xdiff2 = dtemp2 * dz;
-                    sys.work.gxcar[icart][0] += xdiff0;
-                    sys.work.gxcar[icart][1] += xdiff1;
-                    sys.work.gxcar[icart][2] += xdiff2;
-                    sys.work.gxcar[jcart][0] -= xdiff0;
-                    sys.work.gxcar[jcart][1] -= xdiff1;
-                    sys.work.gxcar[jcart][2] -= xdiff2;
+                    let gi = &mut sys.work.gxcar[icart];
+                    gi[0] += xdiff0;
+                    gi[1] += xdiff1;
+                    gi[2] += xdiff2;
+                    let gj = &mut sys.work.gxcar[jcart];
+                    gj[0] -= xdiff0;
+                    gj[1] -= xdiff1;
+                    gj[2] -= xdiff2;
                 }
             }
         }
 
-        jcart_id = sys.latomnext[jcart];
+        jcart_id = next;
     }
 }
 
 /// Atom-pair function and gradient accumulation into `sys.work.gxcar`.
+///
+/// Returns `(penalty_sum, fdist_max)`. Caller reduces `fdist_max` locally
+/// and writes `sys.fdist` once after the cell walk completes.
 #[inline(always)]
-fn fgparc(icart: usize, first_jcart: Option<usize>, sys: &mut PackContext) -> F {
+fn fgparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstants) -> (F, F) {
     let mut result = 0.0;
+    let mut local_fdist: F = 0.0;
     let mut jcart_id = first_jcart;
     let xi = sys.xcart[icart];
-    let ri = sys.radius[icart];
-    let ri_ini = sys.radius_ini[icart];
-    let fsi = sys.fscale[icart];
+    let hot = AtomHotState::load(icart, sys);
     let move_flag = sys.move_flag;
 
-    while let Some(jcart) = jcart_id {
-        if sys.ibmol[icart] == sys.ibmol[jcart] && sys.ibtype[icart] == sys.ibtype[jcart] {
-            jcart_id = sys.latomnext[jcart];
+    while jcart_id != NONE_IDX {
+        let jcart = jcart_id as usize;
+        let next = sys.latomnext[jcart];
+        let props_j = sys.atom_props[jcart];
+        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+            jcart_id = next;
             continue;
         }
-        if sys.fixedatom[icart] && sys.fixedatom[jcart] {
-            jcart_id = sys.latomnext[jcart];
+        if hot.fixed_i && (props_j.flags & ATOM_FLAG_FIXED != 0) {
+            jcart_id = next;
             continue;
         }
 
         let xj = sys.xcart[jcart];
-        let mut dx = xi[0] - xj[0];
-        let mut dy = xi[1] - xj[1];
-        let mut dz = xi[2] - xj[2];
-        if sys.pbc_length[0] > 0.0 {
-            dx -= (dx / sys.pbc_length[0]).round() * sys.pbc_length[0];
-        }
-        if sys.pbc_length[1] > 0.0 {
-            dy -= (dy / sys.pbc_length[1]).round() * sys.pbc_length[1];
-        }
-        if sys.pbc_length[2] > 0.0 {
-            dz -= (dz / sys.pbc_length[2]).round() * sys.pbc_length[2];
-        }
+        let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
         let datom = dx * dx + dy * dy + dz * dz;
-        let fsj = sys.fscale[jcart];
-        let rsum = ri + sys.radius[jcart];
+        let rsum = hot.props.radius + props_j.radius;
         let tol = rsum * rsum;
 
         if datom < tol {
             let penalty = datom - tol;
-            let scale = fsi * fsj;
+            let scale = hot.props.fscale * props_j.fscale;
             result += scale * penalty * penalty;
 
             let dtemp = scale * 4.0 * penalty;
             let xdiff0 = dtemp * dx;
             let xdiff1 = dtemp * dy;
             let xdiff2 = dtemp * dz;
-            sys.work.gxcar[icart][0] += xdiff0;
-            sys.work.gxcar[icart][1] += xdiff1;
-            sys.work.gxcar[icart][2] += xdiff2;
-            sys.work.gxcar[jcart][0] -= xdiff0;
-            sys.work.gxcar[jcart][1] -= xdiff1;
-            sys.work.gxcar[jcart][2] -= xdiff2;
+            let gi = &mut sys.work.gxcar[icart];
+            gi[0] += xdiff0;
+            gi[1] += xdiff1;
+            gi[2] += xdiff2;
+            let gj = &mut sys.work.gxcar[jcart];
+            gj[0] -= xdiff0;
+            gj[1] -= xdiff1;
+            gj[2] -= xdiff2;
 
-            if sys.use_short_radius[icart] || sys.use_short_radius[jcart] {
-                let short_rsum = sys.short_radius[icart] + sys.short_radius[jcart];
+            if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
+                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
                 let short_tol = short_rsum * short_rsum;
                 if datom < short_tol {
                     let short_penalty = datom - short_tol;
-                    let mut sr_scale =
-                        (sys.short_radius_scale[icart] * sys.short_radius_scale[jcart]).sqrt();
+                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
                     sr_scale *= (tol * tol) / (short_tol * short_tol);
                     let sr_pair_scale = scale * sr_scale;
                     result += sr_pair_scale * short_penalty * short_penalty;
@@ -565,21 +844,23 @@ fn fgparc(icart: usize, first_jcart: Option<usize>, sys: &mut PackContext) -> F 
                     let xdiff0 = dtemp2 * dx;
                     let xdiff1 = dtemp2 * dy;
                     let xdiff2 = dtemp2 * dz;
-                    sys.work.gxcar[icart][0] += xdiff0;
-                    sys.work.gxcar[icart][1] += xdiff1;
-                    sys.work.gxcar[icart][2] += xdiff2;
-                    sys.work.gxcar[jcart][0] -= xdiff0;
-                    sys.work.gxcar[jcart][1] -= xdiff1;
-                    sys.work.gxcar[jcart][2] -= xdiff2;
+                    let gi = &mut sys.work.gxcar[icart];
+                    gi[0] += xdiff0;
+                    gi[1] += xdiff1;
+                    gi[2] += xdiff2;
+                    let gj = &mut sys.work.gxcar[jcart];
+                    gj[0] -= xdiff0;
+                    gj[1] -= xdiff1;
+                    gj[2] -= xdiff2;
                 }
             }
         }
 
-        let rsum_ini = ri_ini + sys.radius_ini[jcart];
+        let rsum_ini = hot.props.radius_ini + props_j.radius_ini;
         let tol_ini = rsum_ini * rsum_ini;
         let violation = tol_ini - datom;
-        if violation > sys.fdist {
-            sys.fdist = violation;
+        if violation > local_fdist {
+            local_fdist = violation;
         }
         if move_flag {
             if violation > sys.fdist_atom[icart] {
@@ -590,72 +871,156 @@ fn fgparc(icart: usize, first_jcart: Option<usize>, sys: &mut PackContext) -> F 
             }
         }
 
-        jcart_id = sys.latomnext[jcart];
+        jcart_id = next;
     }
 
-    result
+    (result, local_fdist)
 }
 
+/// Parallel-friendly variant of [`fgparc`] — writes the pair gradient into
+/// an external `grad` buffer instead of `sys.work.gxcar`, so multiple rayon
+/// threads can accumulate into disjoint partial buffers and the caller
+/// merges them. `fdist_atom` bookkeeping is intentionally dropped: the
+/// parallel fast path is gated on `!move_flag`.
 #[cfg(feature = "rayon")]
 #[inline(always)]
-fn fparc_stats(icart: usize, first_jcart: Option<usize>, sys: &PackContext) -> (F, F) {
+fn fgparc_stats(
+    icart: usize,
+    first_jcart: u32,
+    sys: &PackContext,
+    grad: &mut [[F; 3]],
+    pbc: &PbcConstants,
+) -> (F, F) {
     let mut result: F = 0.0;
     let mut fdist_max: F = 0.0;
     let mut jcart_id = first_jcart;
     let xi = sys.xcart[icart];
-    let ri = sys.radius[icart];
-    let ri_ini = sys.radius_ini[icart];
-    let fsi = sys.fscale[icart];
+    let hot = AtomHotState::load(icart, sys);
 
-    while let Some(jcart) = jcart_id {
-        if sys.ibmol[icart] == sys.ibmol[jcart] && sys.ibtype[icart] == sys.ibtype[jcart] {
-            jcart_id = sys.latomnext[jcart];
+    while jcart_id != NONE_IDX {
+        let jcart = jcart_id as usize;
+        let next = sys.latomnext[jcart];
+        let props_j = sys.atom_props[jcart];
+        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+            jcart_id = next;
             continue;
         }
-        if sys.fixedatom[icart] && sys.fixedatom[jcart] {
-            jcart_id = sys.latomnext[jcart];
+        if hot.fixed_i && (props_j.flags & ATOM_FLAG_FIXED != 0) {
+            jcart_id = next;
             continue;
         }
 
         let xj = sys.xcart[jcart];
-        let mut dx = xi[0] - xj[0];
-        let mut dy = xi[1] - xj[1];
-        let mut dz = xi[2] - xj[2];
-        if sys.pbc_length[0] > 0.0 {
-            dx -= (dx / sys.pbc_length[0]).round() * sys.pbc_length[0];
-        }
-        if sys.pbc_length[1] > 0.0 {
-            dy -= (dy / sys.pbc_length[1]).round() * sys.pbc_length[1];
-        }
-        if sys.pbc_length[2] > 0.0 {
-            dz -= (dz / sys.pbc_length[2]).round() * sys.pbc_length[2];
-        }
+        let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
         let datom = dx * dx + dy * dy + dz * dz;
-        let rsum = ri + sys.radius[jcart];
+        let rsum = hot.props.radius + props_j.radius;
         let tol = rsum * rsum;
 
         if datom < tol {
             let penalty = datom - tol;
-            result += fsi * sys.fscale[jcart] * penalty * penalty;
-            if sys.use_short_radius[icart] || sys.use_short_radius[jcart] {
-                let short_rsum = sys.short_radius[icart] + sys.short_radius[jcart];
+            let scale = hot.props.fscale * props_j.fscale;
+            result += scale * penalty * penalty;
+
+            let dtemp = scale * 4.0 * penalty;
+            let xdiff0 = dtemp * dx;
+            let xdiff1 = dtemp * dy;
+            let xdiff2 = dtemp * dz;
+            grad[icart][0] += xdiff0;
+            grad[icart][1] += xdiff1;
+            grad[icart][2] += xdiff2;
+            grad[jcart][0] -= xdiff0;
+            grad[jcart][1] -= xdiff1;
+            grad[jcart][2] -= xdiff2;
+
+            if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
+                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
                 let short_tol = short_rsum * short_rsum;
                 if datom < short_tol {
-                    let penalty = datom - short_tol;
-                    let mut sr_scale =
-                        (sys.short_radius_scale[icart] * sys.short_radius_scale[jcart]).sqrt();
+                    let short_penalty = datom - short_tol;
+                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
                     sr_scale *= (tol * tol) / (short_tol * short_tol);
-                    result += fsi * sys.fscale[jcart] * sr_scale * penalty * penalty;
+                    let sr_pair_scale = scale * sr_scale;
+                    result += sr_pair_scale * short_penalty * short_penalty;
+
+                    let dtemp2 = sr_pair_scale * 4.0 * short_penalty;
+                    let xdiff0 = dtemp2 * dx;
+                    let xdiff1 = dtemp2 * dy;
+                    let xdiff2 = dtemp2 * dz;
+                    grad[icart][0] += xdiff0;
+                    grad[icart][1] += xdiff1;
+                    grad[icart][2] += xdiff2;
+                    grad[jcart][0] -= xdiff0;
+                    grad[jcart][1] -= xdiff1;
+                    grad[jcart][2] -= xdiff2;
                 }
             }
         }
 
-        let rsum_ini = ri_ini + sys.radius_ini[jcart];
+        let rsum_ini = hot.props.radius_ini + props_j.radius_ini;
         let tol_ini = rsum_ini * rsum_ini;
         let violation = tol_ini - datom;
-        fdist_max = fdist_max.max(violation);
+        if violation > fdist_max {
+            fdist_max = violation;
+        }
 
-        jcart_id = sys.latomnext[jcart];
+        jcart_id = next;
+    }
+
+    (result, fdist_max)
+}
+
+#[cfg(feature = "rayon")]
+#[inline(always)]
+fn fparc_stats(icart: usize, first_jcart: u32, sys: &PackContext, pbc: &PbcConstants) -> (F, F) {
+    let mut result: F = 0.0;
+    let mut fdist_max: F = 0.0;
+    let mut jcart_id = first_jcart;
+    let xi = sys.xcart[icart];
+    let hot = AtomHotState::load(icart, sys);
+
+    while jcart_id != NONE_IDX {
+        let jcart = jcart_id as usize;
+        let next = sys.latomnext[jcart];
+        let props_j = sys.atom_props[jcart];
+        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+            jcart_id = next;
+            continue;
+        }
+        if hot.fixed_i && (props_j.flags & ATOM_FLAG_FIXED != 0) {
+            jcart_id = next;
+            continue;
+        }
+
+        let xj = sys.xcart[jcart];
+        let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
+        let datom = dx * dx + dy * dy + dz * dz;
+        let rsum = hot.props.radius + props_j.radius;
+        let tol = rsum * rsum;
+
+        if datom < tol {
+            let penalty = datom - tol;
+            let scale = hot.props.fscale * props_j.fscale;
+            result += scale * penalty * penalty;
+            if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
+                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
+                let short_tol = short_rsum * short_rsum;
+                if datom < short_tol {
+                    let penalty = datom - short_tol;
+                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
+                    sr_scale *= (tol * tol) / (short_tol * short_tol);
+                    result += scale * sr_scale * penalty * penalty;
+                }
+            }
+        }
+
+        let rsum_ini = hot.props.radius_ini + props_j.radius_ini;
+        let tol_ini = rsum_ini * rsum_ini;
+        let violation = tol_ini - datom;
+        if violation > fdist_max {
+            fdist_max = violation;
+        }
+
+        jcart_id = next;
     }
 
     (result, fdist_max)
@@ -719,6 +1084,7 @@ fn matches_cached_geometry(x: &[F], sys: &PackContext) -> bool {
         sys.cell_length,
         sys.pbc_min,
         sys.pbc_length,
+        sys.pbc_periodic,
     )
 }
 
@@ -732,6 +1098,7 @@ fn update_cached_geometry(x: &[F], sys: &mut PackContext) {
         sys.cell_length,
         sys.pbc_min,
         sys.pbc_length,
+        sys.pbc_periodic,
     );
 }
 
@@ -895,6 +1262,7 @@ mod objective_trait_tests {
             sys.radius.fill(0.75);
             sys.radius_ini.fill(1.5);
             sys.work.radiuswork.resize(ntotat, 0.0);
+            sys.sync_atom_props();
             sys
         }
         let x: Vec<F> = Vec::new();

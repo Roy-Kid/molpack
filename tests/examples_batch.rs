@@ -23,10 +23,11 @@ fn run_case(case: ExampleCase) -> Result<(), Box<dyn std::error::Error>> {
     let out_path = out_root.join(case.output_xyz());
 
     let mut packer = Molpack::new()
-        .tolerance(2.0)
-        .precision(1e-2)
-        .add_handler(XYZHandler::new(&out_path, 10));
-    let pack_result = packer.pack(&targets, case.max_loops(), Some(case.seed()))?;
+        .with_tolerance(2.0)
+        .with_precision(1e-2)
+        .with_handler(XYZHandler::new(&out_path, 10))
+        .with_seed(case.seed());
+    let pack_result = packer.pack(&targets, case.max_loops())?;
     let coords = &pack_result.positions();
     let report = validate_from_targets(&targets, coords, 2.0, 1e-2);
 

@@ -9,7 +9,36 @@ description = "Python bindings for molpack molecular packing (Packmol port)"
 requires-python = ">=3.12"
 readme = "../README.md"
 license = "BSD-3-Clause"
-dependencies = ["numpy>=2.0"]
+dependencies = ["numpy>=2.0", "typer>=0.12"]
+
+# PEP 735 dependency groups — the single source of truth for dev-time
+# deps used by both CI jobs and local pre-commit hooks.
+#
+# Install with `pip install --group <name>` (pip 25.1+) from this directory.
+[dependency-groups]
+typecheck = [
+  "ruff",
+  "ty",
+  "typer>=0.12",
+  "numpy>=2.0",
+  "molcrafts-molrs",
+  # `ty check` walks tests/ which imports pytest.
+  "pytest",
+]
+test = [
+  "pytest",
+  "typer>=0.12",
+  "numpy>=2.0",
+  "molcrafts-molrs",
+]
+dev = [
+  {include-group = "typecheck"},
+  {include-group = "test"},
+  "maturin",
+]
+
+[project.scripts]
+molpack = "molpack.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/MolCrafts/molpack"

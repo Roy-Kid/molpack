@@ -15,6 +15,7 @@
 
 use crate::constraint::extract_restraint;
 use crate::helpers::NpF;
+use crate::types::{PyAngle, PyAxis, PyCenteringMode};
 use molpack::F;
 use molpack::target::Target;
 use pyo3::exceptions::PyValueError;
@@ -55,9 +56,7 @@ fn read_column(block: &Bound<'_, PyAny>, name: &str) -> PyResult<Vec<NpF>> {
     }
     block
         .get_item(name)
-        .map_err(|_| {
-            PyValueError::new_err(format!(r#"atoms block has no "{name}" column"#))
-        })?
+        .map_err(|_| PyValueError::new_err(format!(r#"atoms block has no "{name}" column"#)))?
         .extract()
 }
 
@@ -97,23 +96,19 @@ impl PyTarget {
     ///
     /// Parameters
     /// ----------
-    /// name : str
-    ///     Molecule name (used in diagnostics and output).
     /// frame : Frame-like
     ///     Any object with ``frame["atoms"]`` returning a block.
     ///     Supports ``molrs.Frame``, ``molpy.Frame``, and plain dicts.
     /// count : int
     ///     Number of copies to pack.
+    ///
+    /// Add a display name via :meth:`with_name`.
     #[new]
-    #[pyo3(signature = (name, frame, count))]
-    fn new(
-        name: &str,
-        frame: &Bound<'_, PyAny>,
-        count: usize,
-    ) -> PyResult<Self> {
-        let atoms = frame.get_item("atoms").map_err(|_| {
-            PyValueError::new_err(r#"frame must have an "atoms" block"#)
-        })?;
+    #[pyo3(signature = (frame, count))]
+    fn new(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Self> {
+        let atoms = frame
+            .get_item("atoms")
+            .map_err(|_| PyValueError::new_err(r#"frame must have an "atoms" block"#))?;
 
         let x: Vec<NpF> = read_column(&atoms, "x")?;
         let y: Vec<NpF> = read_column(&atoms, "y")?;
@@ -137,7 +132,6 @@ impl PyTarget {
 
         let mut target = Target::from_coords(&coords, &radii, count);
         target.elements = elements;
-        let target = target.with_name(name);
 
         Ok(PyTarget { inner: target })
     }
@@ -148,70 +142,48 @@ impl PyTarget {
         }
     }
 
-    fn with_restraint(&self, constraint: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
-        let restraint = extract_restraint(constraint)?;
+    fn with_restraint(&self, restraint: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+        let r = extract_restraint(restraint)?;
         Ok(PyTarget {
-            inner: self.inner.clone().with_restraint(restraint),
+            inner: self.inner.clone().with_restraint(r),
         })
     }
 
-    fn with_restraint_for_atoms(
+    /// Attach a restraint to selected atoms of every copy.
+    ///
+    /// ``indices`` are **0-based** (Rust/Python native). Porting from a
+    /// Packmol ``.inp`` file? Subtract 1 at the call site.
+    fn with_atom_restraint(
         &self,
         indices: Vec<usize>,
-        constraint: &Bound<'_, pyo3::types::PyAny>,
+        restraint: &Bound<'_, pyo3::types::PyAny>,
     ) -> PyResult<Self> {
         validate_atom_indices(&indices, self.inner.natoms())?;
-        let restraint = extract_restraint(constraint)?;
+        let r = extract_restraint(restraint)?;
         Ok(PyTarget {
-            inner: self
-                .inner
-                .clone()
-                .with_restraint_for_atoms(&indices, restraint),
+            inner: self.inner.clone().with_atom_restraint(&indices, r),
         })
     }
 
-    fn with_maxmove(&self, maxmove: usize) -> Self {
+    fn with_perturb_budget(&self, budget: usize) -> Self {
         PyTarget {
-            inner: self.inner.clone().with_maxmove(maxmove),
+            inner: self.inner.clone().with_perturb_budget(budget),
         }
     }
 
-    fn with_center(&self) -> Self {
+    fn with_centering(&self, mode: PyCenteringMode) -> Self {
         PyTarget {
-            inner: self.inner.clone().with_center(),
+            inner: self.inner.clone().with_centering(mode.into()),
         }
     }
 
-    fn without_centering(&self) -> Self {
+    fn with_rotation_bound(&self, axis: PyAxis, center: PyAngle, half_width: PyAngle) -> Self {
         PyTarget {
-            inner: self.inner.clone().without_centering(),
-        }
-    }
-
-    fn constrain_rotation_x(&self, center_deg: NpF, half_width_deg: NpF) -> Self {
-        PyTarget {
-            inner: self
-                .inner
-                .clone()
-                .constrain_rotation_x(center_deg, half_width_deg),
-        }
-    }
-
-    fn constrain_rotation_y(&self, center_deg: NpF, half_width_deg: NpF) -> Self {
-        PyTarget {
-            inner: self
-                .inner
-                .clone()
-                .constrain_rotation_y(center_deg, half_width_deg),
-        }
-    }
-
-    fn constrain_rotation_z(&self, center_deg: NpF, half_width_deg: NpF) -> Self {
-        PyTarget {
-            inner: self
-                .inner
-                .clone()
-                .constrain_rotation_z(center_deg, half_width_deg),
+            inner: self.inner.clone().with_rotation_bound(
+                axis.into(),
+                center.inner,
+                half_width.inner,
+            ),
         }
     }
 
@@ -221,10 +193,24 @@ impl PyTarget {
         }
     }
 
-    fn fixed_at_with_euler(&self, position: [NpF; 3], euler: [NpF; 3]) -> Self {
+    /// Apply an Euler orientation to a previously-fixed target.
+    ///
+    /// Takes a 3-tuple of :class:`Angle` — e.g.
+    /// ``(Angle.from_degrees(45), Angle.ZERO, Angle.from_degrees(90))``.
+    /// Must be called after :meth:`fixed_at`.
+    fn with_orientation(&self, orientation: (PyAngle, PyAngle, PyAngle)) -> Self {
         PyTarget {
-            inner: self.inner.clone().fixed_at_with_euler(position, euler),
+            inner: self.inner.clone().with_orientation([
+                orientation.0.inner,
+                orientation.1.inner,
+                orientation.2.inner,
+            ]),
         }
+    }
+
+    #[getter]
+    fn name(&self) -> Option<String> {
+        self.inner.name.clone()
     }
 
     #[getter]
@@ -240,6 +226,11 @@ impl PyTarget {
     #[getter]
     fn elements(&self) -> Vec<String> {
         self.inner.elements.clone()
+    }
+
+    #[getter]
+    fn radii(&self) -> Vec<F> {
+        self.inner.radii.clone()
     }
 
     #[getter]
@@ -259,9 +250,9 @@ impl PyTarget {
 
 fn validate_atom_indices(indices: &[usize], natoms: usize) -> PyResult<()> {
     for &index in indices {
-        if index == 0 || index > natoms {
+        if index >= natoms {
             return Err(PyValueError::new_err(format!(
-                "atom indices must use Packmol 1-based indexing in 1..={natoms}, got {index}",
+                "atom indices are 0-based and must be in 0..{natoms}, got {index}",
             )));
         }
     }

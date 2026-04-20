@@ -12,16 +12,18 @@ reference output for five canonical workloads.
 
 ```python
 import molrs
-from molpack import InsideBox, Molpack, Target
+from molpack import InsideBoxRestraint, Molpack, Target
 
 frame = molrs.read_pdb("water.pdb")
 
 water = (
-    Target("water", frame, count=100)
-    .with_restraint(InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    Target(frame, count=100)
+    .with_name("water")
+    .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
-result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
+packer = Molpack().with_tolerance(2.0).with_seed(42)
+result = packer.pack([water], max_loops=200)
 print(f"converged={result.converged}  natoms={result.natoms}  fdist={result.fdist:.4f}")
 ```
 
@@ -44,6 +46,7 @@ print(f"converged={result.converged}  natoms={result.natoms}  fdist={result.fdis
 - [`molcrafts-molrs`](https://pypi.org/project/molcrafts-molrs/) —
   companion package for file I/O (PDB, XYZ, …) and the `Frame` data
   model. Pass a `molrs.Frame` directly to `Target`; no manual array
-  extraction needed.
+  extraction needed. `PackResult.frame` returns a Frame-compatible
+  structure for the writer of your choice.
 
 [targets]: guide/targets.md

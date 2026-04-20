@@ -30,9 +30,12 @@ use crate::random::uniform01_core;
 /// molecule (e.g. torsion MC on a polymer backbone), while a `Restraint`
 /// adds a penalty term to the per-atom objective.
 pub trait Relaxer: Send + Sync + CloneRelaxer {
-    /// Create a stateful runner for this relaxer.
-    /// Called once at the start of `pack()`.
-    fn build(&self, ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner>;
+    /// Spawn a stateful runner for this relaxer. Called once at the
+    /// start of `pack()`. Implementations typically return a boxed
+    /// struct that owns the MC acceptance counters and other runtime
+    /// state — config (`self`) is immutable; runtime lives in the
+    /// returned runner.
+    fn spawn(&self, ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner>;
 }
 
 /// Clone-box helper for trait objects.
@@ -165,7 +168,7 @@ impl TorsionMcRelaxer {
 }
 
 impl Relaxer for TorsionMcRelaxer {
-    fn build(&self, _ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner> {
+    fn spawn(&self, _ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner> {
         Box::new(TorsionMcRelaxerRunner {
             bonds: self.bonds.clone(),
             max_delta: self.max_delta,
@@ -553,7 +556,7 @@ mod tests {
             .with_temperature(1.0)
             .with_steps(5);
 
-        let mut runner = hook.build(&coords);
+        let mut runner = hook.spawn(&coords);
         let mut rng = rand::rng();
 
         let result = runner.on_iter(&coords, 100.0, &mut |_| 50.0, &mut rng);
@@ -611,7 +614,7 @@ mod tests {
             .with_steps(5);
 
         // radius=0.0 (default), evaluate always returns 0 → all moves accepted
-        let mut runner = hook.build(&coords);
+        let mut runner = hook.spawn(&coords);
         let mut rng = rand::rng();
         let result = runner.on_iter(&coords, 0.0, &mut |_| 0.0, &mut rng);
         assert!(result.is_some());
@@ -628,7 +631,7 @@ mod tests {
             .with_temperature(0.0) // greedy: only accept improvements
             .with_steps(50);
 
-        let mut runner = hook.build(&coords);
+        let mut runner = hook.spawn(&coords);
         let mut rng = rand::rng();
 
         // Run with evaluate returning 0 — self-avoidance is the only signal.

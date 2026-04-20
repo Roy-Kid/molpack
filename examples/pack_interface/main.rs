@@ -26,7 +26,9 @@
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
-use molpack::{InsideBoxRestraint, Molpack, ProgressHandler, Target, XYZHandler};
+use molpack::{
+    Angle, CenteringMode, InsideBoxRestraint, Molpack, ProgressHandler, Target, XYZHandler,
+};
 use molrs_io::pdb::read_pdb_frame;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,30 +45,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(InsideBoxRestraint::new(
             [-20.0, 0.0, 0.0],
             [0.0, 39.0, 39.0],
+            [false; 3],
         ))
         .with_name("water");
 
     let chloro_target = Target::new(chloroform, 30)
-        .with_restraint(InsideBoxRestraint::new([0.0, 0.0, 0.0], [21.0, 39.0, 39.0]))
+        .with_restraint(InsideBoxRestraint::new(
+            [0.0, 0.0, 0.0],
+            [21.0, 39.0, 39.0],
+            [false; 3],
+        ))
         .with_name("chloroform");
 
     let t3_target = Target::new(t3, 1)
         .with_name("t3")
-        .with_center()
-        .fixed_at_with_euler([0.0, 20.0, 20.0], [1.57, 1.57, 1.57]);
+        .with_centering(CenteringMode::Center)
+        .fixed_at([0.0, 20.0, 20.0])
+        .with_orientation([
+            Angle::from_radians(1.57),
+            Angle::from_radians(1.57),
+            Angle::from_radians(1.57),
+        ]);
 
-    let mut packer = Molpack::new();
+    let mut packer = Molpack::new().with_seed(1_234_567);
     if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.add_handler(ProgressHandler::new());
+        packer = packer.with_handler(ProgressHandler::new());
     }
     if std::env::var_os("MOLRS_PACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.add_handler(XYZHandler::new(out_dir.join("interface.xyz"), 10));
+        packer = packer.with_handler(XYZHandler::new(out_dir.join("interface.xyz"), 10));
     }
 
     let targets = vec![water_target, chloro_target, t3_target];
-    packer.pack(&targets, 400, Some(1_234_567u64))?;
+    packer.pack(&targets, 400)?;
 
     Ok(())
 }

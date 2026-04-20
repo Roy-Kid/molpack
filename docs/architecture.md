@@ -13,7 +13,7 @@ molpack/
 │   ├── packer.rs           — Molpack builder + pack() driver + phase loop
 │   ├── target.rs           — Target = one molecule type + its restraints/relaxers
 │   ├── restraint.rs        — Restraint trait + 14 concrete *Restraint structs
-│   ├── region.rs           — Region trait + And/Or/Not + FromRegion
+│   ├── region.rs           — Region trait + And/Or/Not + RegionRestraint
 │   ├── relaxer.rs          — Relaxer/RelaxerRunner + TorsionMcRelaxer
 │   ├── handler.rs          — Handler trait + 4 built-in observers
 │   ├── objective.rs        — compute_f/g/fg + Objective trait
@@ -88,19 +88,19 @@ Target ----with_restraint()---          │ Vec<Arc<dyn Restraint>> ─┐
   │     │                               │                          │   bump) into
   │     ├── user structs impl Restraint │                          │   per-atom
   │     │                               │                          │   CSR pool
-  │     └── FromRegion<R>           ──  │                          ▼
+  │     └── RegionRestraint<R>      ──  │                          ▼
   │                                     │   PackContext.restraints:
   │                                     │   Vec<Arc<dyn Restraint>>
   │                                     │     +
   ├── with_relaxer(impl Relaxer)     ── │   PackContext.iratom_offsets / iratom_data
   │                                     │   (CSR: atom idx → restraint indices)
   ├── fixed_at()                        │
-  ├── constrain_rotation_*()            │   PackContext.rot_bound[][] Euler bounds
+  ├── with_rotation_bound(Axis, ..)     │   PackContext.rot_bound[][] Euler bounds
   └── count / ref_coords / radii        │   PackContext.coor / radius / nmols / natoms
 
 Molpack
-  ├── .add_handler(impl Handler)        │   Vec<Box<dyn Handler>>   (observers)
-  └── .add_restraint(impl Restraint)    │   Vec<Arc<dyn Restraint>>
+  ├── .with_handler(impl Handler)       │   Vec<Box<dyn Handler>>   (observers)
+  └── .with_global_restraint(impl R)    │   Vec<Arc<dyn Restraint>>
           (scope = global)              │   broadcast at pack() entry
 ```
 
@@ -121,9 +121,9 @@ Two important things:
 ┌─────────────────────────────────────────────────────────────────┐
 │ 1. USER ASSEMBLY                                                │
 │    Molpack::new()                                               │
-│      .tolerance(2.0).precision(0.01)                            │
-│      .add_handler(ProgressHandler::new())                       │
-│      .add_restraint(InsideBoxRestraint::new(...))  [global]     │
+│      .with_tolerance(2.0).with_precision(0.01)                  │
+│      .with_handler(ProgressHandler::new())                      │
+│      .with_global_restraint(InsideBoxRestraint::new(..., [false;3])) │
 │      .pack(&[target_a, target_b], max_loops=400, seed=42)       │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
@@ -141,7 +141,7 @@ Two important things:
 │         - cell list initialized for current PBC box             │
 │    e. initial::initial() produces starting x[0..6*ntotmol]      │
 │         layout: [com0(3), com1(3), ..., eul0(3), eul1(3), ...]  │
-│    f. handlers.on_start / on_initial                            │
+│    f. handlers.on_start / on_initialized                        │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
                                ▼
@@ -287,7 +287,7 @@ bugs — always test with ≥ 2 atoms.
 **Scope equivalence law** (spec §4):
 
 ```text
-molpack.add_restraint(r)
+molpack.with_global_restraint(r)
     ≡  for t in targets { t.with_restraint(r.clone()) }
 ```
 

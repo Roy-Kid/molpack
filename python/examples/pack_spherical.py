@@ -25,38 +25,51 @@ def main() -> None:
     lipid_frame = molrs.read_pdb(str(DATA / "palmitoil.pdb"))
 
     # 1. Inner water sphere (r = 13).
-    water_inner = molpack.Target("water_inner", water_frame, count=308).with_restraint(
-        molpack.InsideSphere(13.0, ORIGIN)
+    water_inner = (
+        molpack.Target(water_frame, count=308)
+        .with_name("water_inner")
+        .with_restraint(molpack.InsideSphereRestraint(ORIGIN, 13.0))
     )
 
-    # 2. Inner lipid layer: head atom 37 inside r=14, tail atom 5 outside r=26.
+    # 2. Inner lipid layer: head atom (0-based index 36) inside r=14,
+    # tail atom (0-based index 4) outside r=26.
     lipid_inner = (
-        molpack.Target("lipid_inner", lipid_frame, count=90)
-        .with_restraint_for_atoms([37], molpack.InsideSphere(14.0, ORIGIN))
-        .with_restraint_for_atoms([5], molpack.OutsideSphere(26.0, ORIGIN))
+        molpack.Target(lipid_frame, count=90)
+        .with_name("lipid_inner")
+        .with_atom_restraint([36], molpack.InsideSphereRestraint(ORIGIN, 14.0))
+        .with_atom_restraint([4], molpack.OutsideSphereRestraint(ORIGIN, 26.0))
     )
 
-    # 3. Outer lipid layer: tail atom 5 inside r=29, head atom 37 outside r=41.
+    # 3. Outer lipid layer: tail atom 4 inside r=29, head atom 36 outside r=41.
     lipid_outer = (
-        molpack.Target("lipid_outer", lipid_frame, count=300)
-        .with_restraint_for_atoms([5], molpack.InsideSphere(29.0, ORIGIN))
-        .with_restraint_for_atoms([37], molpack.OutsideSphere(41.0, ORIGIN))
+        molpack.Target(lipid_frame, count=300)
+        .with_name("lipid_outer")
+        .with_atom_restraint([4], molpack.InsideSphereRestraint(ORIGIN, 29.0))
+        .with_atom_restraint([36], molpack.OutsideSphereRestraint(ORIGIN, 41.0))
     )
 
     # 4. Outer water shell: inside ±47.5 box and outside sphere r=43.
     water_outer = (
-        molpack.Target("water_outer", water_frame, count=17_536)
-        .with_restraint(molpack.InsideBox([-47.5, -47.5, -47.5], [47.5, 47.5, 47.5]))
-        .with_restraint(molpack.OutsideSphere(43.0, ORIGIN))
+        molpack.Target(water_frame, count=17_536)
+        .with_name("water_outer")
+        .with_restraint(
+            molpack.InsideBoxRestraint([-47.5, -47.5, -47.5], [47.5, 47.5, 47.5])
+        )
+        .with_restraint(molpack.OutsideSphereRestraint(ORIGIN, 43.0))
     )
 
     show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
-    packer = molpack.Molpack(tolerance=2.0, precision=0.01).with_progress(show_progress)
+    packer = (
+        molpack.Molpack()
+        .with_tolerance(2.0)
+        .with_precision(0.01)
+        .with_progress(show_progress)
+        .with_seed(1_234_567)
+    )
 
     result = packer.pack(
         [water_inner, lipid_inner, lipid_outer, water_outer],
         max_loops=800,
-        seed=1_234_567,
     )
 
     print(

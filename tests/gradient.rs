@@ -20,6 +20,11 @@ fn finite_diff(x: &[F], sys: &mut PackContext, i: usize, h: F) -> F {
 }
 
 /// Build a minimal PackContext for `nmol` single-atom molecules.
+///
+/// Also assigns distinct `ibmol[icart]` values so pair-penalty kernels do
+/// not skip atom pairs as "same molecule". The prior version left every
+/// atom at `ibmol=0`, which silently made `gradient_pair_penalty` test
+/// a no-op.
 fn single_atom_system(nmol: usize) -> PackContext {
     let ntotat = nmol;
     let mut sys = PackContext::new(ntotat, nmol, 1);
@@ -32,6 +37,10 @@ fn single_atom_system(nmol: usize) -> PackContext {
     sys.radius = vec![1.0; ntotat];
     sys.radius_ini = vec![1.0; ntotat];
     sys.fscale = vec![1.0; ntotat];
+    for i in 0..ntotat {
+        sys.ibmol[i] = i;
+    }
+    sys.sync_atom_props();
     sys
 }
 
@@ -86,6 +95,7 @@ fn gradient_box_constraint() {
     sys.restraints = vec![Arc::new(InsideBoxRestraint::new(
         [0.0, 0.0, 0.0],
         [1.0, 1.0, 1.0],
+        [false; 3],
     ))];
     sys.iratom_offsets = vec![0, 1];
     sys.iratom_data = vec![0];
@@ -189,6 +199,10 @@ fn gradient_with_rotations() {
     sys.radius = vec![1.0; 4];
     sys.radius_ini = vec![1.0; 4];
     sys.fscale = vec![1.0; 4];
+    // 2 molecules × 2 atoms — atoms 0,1 belong to mol 0, atoms 2,3 to mol 1.
+    sys.ibmol = vec![0, 0, 1, 1];
+    sys.ibtype = vec![0; 4];
+    sys.sync_atom_props();
 
     sys.restraints.clear();
     sys.iratom_offsets = vec![0, 0, 0, 0, 0];
@@ -242,11 +256,14 @@ fn gradient_combined_constraint_and_pairs() {
     sys.radius = vec![1.0; 3];
     sys.radius_ini = vec![1.0; 3];
     sys.fscale = vec![1.0; 3];
+    sys.ibmol = vec![0, 1, 2];
+    sys.sync_atom_props();
 
     // Box restraint on all atoms
     sys.restraints = vec![Arc::new(InsideBoxRestraint::new(
         [0.0, 0.0, 0.0],
         [5.0, 5.0, 5.0],
+        [false; 3],
     ))];
     sys.iratom_offsets = vec![0, 1, 1, 1]; // only first atom has constraint
     sys.iratom_data = vec![0];
@@ -294,10 +311,13 @@ fn fused_function_and_gradient_matches_separate_evaluation() {
     sys.radius = vec![1.0; 4];
     sys.radius_ini = vec![1.0; 4];
     sys.fscale = vec![1.0; 4];
+    sys.ibmol = vec![0, 0, 1, 1];
+    sys.sync_atom_props();
 
     sys.restraints = vec![Arc::new(InsideBoxRestraint::new(
         [0.0, 0.0, 0.0],
         [5.0, 5.0, 5.0],
+        [false; 3],
     ))];
     sys.iratom_offsets = vec![0, 1, 1, 2, 2];
     sys.iratom_data = vec![0, 0];

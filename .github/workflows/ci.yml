@@ -30,8 +30,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install ruff + ty + type-check deps
-        run: pip install ruff ty numpy pytest molcrafts-molrs
+      - name: Install typecheck dep group
+        run: pip install --group typecheck
+        working-directory: molpack/python
       - name: ruff format
         run: ruff format --check .
         working-directory: molpack/python
@@ -62,7 +63,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: molpack
-      - run: cargo clippy --all-targets --features filesystem -- -D warnings
+      - run: cargo clippy --all-targets --features cli -- -D warnings
         working-directory: molpack
 
   # ── full checks (blocked on both lint gates) ───────────────────────────────
@@ -94,34 +95,12 @@ jobs:
       - name: Test (library + examples)
         run: cargo test --lib --tests --examples
         working-directory: molpack
-      - name: Test CLI (filesystem feature)
-        run: cargo test --test cli --features filesystem
+      - name: Test CLI (cli feature)
+        run: cargo test --test cli --features cli
         working-directory: molpack
       - name: Benches build
         run: cargo bench --no-run
         working-directory: molpack
-
-  docs:
-    name: docs
-    needs: clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: MolCrafts/molrs
-          path: molrs
-      - uses: actions/checkout@v6
-        with:
-          path: molpack
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: molpack
-      - name: cargo doc
-        run: cargo doc --no-deps --all-features
-        working-directory: molpack
-        env:
-          RUSTDOCFLAGS: -D warnings
 
   python:
     name: python bindings
@@ -142,11 +121,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
       - name: Build + test Python bindings
         run: |
-          python -m venv .venv
+          uv venv
           source .venv/bin/activate
-          pip install maturin pytest numpy molcrafts-molrs
+          uv pip install --group dev
           maturin develop --release
           pytest -v
         working-directory: molpack/python

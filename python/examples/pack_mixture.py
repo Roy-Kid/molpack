@@ -21,15 +21,23 @@ def main() -> None:
     water_frame = molrs.read_pdb(str(DATA / "water.pdb"))
     urea_frame = molrs.read_pdb(str(DATA / "urea.pdb"))
 
-    box = molpack.InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
+    box = molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
 
-    water = molpack.Target("water", water_frame, count=1000).with_restraint(box)
-    urea = molpack.Target("urea", urea_frame, count=400).with_restraint(box)
+    water = (
+        molpack.Target(water_frame, count=1000).with_name("water").with_restraint(box)
+    )
+    urea = molpack.Target(urea_frame, count=400).with_name("urea").with_restraint(box)
 
     show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
-    packer = molpack.Molpack(tolerance=2.0, precision=0.01).with_progress(show_progress)
+    packer = (
+        molpack.Molpack()
+        .with_tolerance(2.0)
+        .with_precision(0.01)
+        .with_progress(show_progress)
+        .with_seed(1_234_567)
+    )
 
-    result = packer.pack([water, urea], max_loops=400, seed=1_234_567)
+    result = packer.pack([water, urea], max_loops=400)
 
     print(
         f"converged={result.converged} natoms={result.natoms} "

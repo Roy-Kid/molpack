@@ -6,13 +6,13 @@
 //!
 //! Regions compose into boolean combinations via `And` / `Or` / `Not`
 //! (pure type algebra — zero runtime cost beyond the component evaluations).
-//! Any `Region` lifts to a soft-penalty `Restraint` via [`FromRegion`]:
+//! Any `Region` lifts to a soft-penalty `Restraint` via [`RegionRestraint`]:
 //! `penalty(x) = scale2 * max(0, signed_distance(x))²`.
 //!
 //! # Example
 //! ```
 //! use molpack::region::{InsideSphereRegion, Not, Region, RegionExt};
-//! use molpack::FromRegion;
+//! use molpack::RegionRestraint;
 //!
 //! // Spherical shell: inside outer sphere AND NOT inside inner sphere
 //! let shell = InsideSphereRegion::new([0.0; 3], 10.0)
@@ -22,7 +22,7 @@
 //! assert!(!shell.contains(&[15.0, 0.0, 0.0])); // outside outer sphere
 //!
 //! // Lift to a Restraint for packing
-//! let restraint = FromRegion(shell);
+//! let restraint = RegionRestraint(shell);
 //! ```
 //!
 //! Direction-3 rule (spec §0 bullet 9): `Region` is a **separate trait**
@@ -38,13 +38,21 @@ use crate::restraint::Restraint;
 // Core trait
 // ============================================================================
 
-/// Axis-aligned bounding box, used as an optimization hint for cell-list
-/// setup. Optional (default `None`).
+/// Axis-aligned bounding box (AABB), used as an optimization hint for
+/// cell-list setup. Optional (default `None`).
 #[derive(Debug, Clone, Copy)]
-pub struct BBox {
+pub struct Aabb {
     pub min: [F; 3],
     pub max: [F; 3],
 }
+
+/// Deprecated legacy name for [`Aabb`]. Will be removed in the next
+/// release.
+#[deprecated(
+    since = "0.2.0",
+    note = "Renamed to `Aabb` — the standard abbreviation for axis-aligned bounding box."
+)]
+pub type BBox = Aabb;
 
 /// Geometric predicate with signed-distance function.
 pub trait Region: Send + Sync + std::fmt::Debug {
@@ -77,7 +85,7 @@ pub trait Region: Send + Sync + std::fmt::Debug {
 
     /// Axis-aligned bounding box of the region. Used as an initialization
     /// hint; default `None` is always safe.
-    fn bounding_box(&self) -> Option<BBox> {
+    fn bounding_box(&self) -> Option<Aabb> {
         None
     }
 }
@@ -170,12 +178,18 @@ pub trait RegionExt: Region + Sized {
     fn not(self) -> Not<Self> {
         Not(self)
     }
+
+    /// Lift this region into a soft-penalty [`Restraint`]. Equivalent
+    /// to wrapping in [`RegionRestraint`] manually.
+    fn into_restraint(self) -> RegionRestraint<Self> {
+        RegionRestraint(self)
+    }
 }
 
 impl<R: Region + Sized> RegionExt for R {}
 
 // ============================================================================
-// FromRegion — lift any Region to a quadratic-exterior-penalty Restraint
+// RegionRestraint — lift any Region to a quadratic-exterior-penalty Restraint
 // ============================================================================
 
 /// Wraps a `Region` as a soft-penalty `Restraint` with quadratic
@@ -192,20 +206,28 @@ impl<R: Region + Sized> RegionExt for R {}
 /// # Example
 /// ```
 /// use molpack::region::{InsideSphereRegion, RegionExt};
-/// use molpack::{FromRegion, Restraint};
+/// use molpack::{RegionRestraint, Restraint};
 ///
 /// let shell = InsideSphereRegion::new([0.0; 3], 10.0)
 ///     .and(InsideSphereRegion::new([0.0; 3], 5.0).not());
-/// let restraint = FromRegion(shell);
+/// let restraint = RegionRestraint(shell);
 /// // At x=(7,0,0) the shell is satisfied → f == 0
 /// assert_eq!(restraint.f(&[7.0, 0.0, 0.0], 1.0, 1.0), 0.0);
 /// // At x=(15,0,0) we are outside the outer sphere → f > 0
 /// assert!(restraint.f(&[15.0, 0.0, 0.0], 1.0, 1.0) > 0.0);
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct FromRegion<R: Region>(pub R);
+pub struct RegionRestraint<R: Region>(pub R);
 
-impl<R: Region + 'static> Restraint for FromRegion<R> {
+/// Deprecated legacy name for [`RegionRestraint`]. Will be removed in
+/// the next release.
+#[deprecated(
+    since = "0.2.0",
+    note = "Renamed to `RegionRestraint` — `From` was meaningless as a type name."
+)]
+pub type FromRegion<R> = RegionRestraint<R>;
+
+impl<R: Region + 'static> Restraint for RegionRestraint<R> {
     fn f(&self, x: &[F; 3], _scale: F, scale2: F) -> F {
         let d = self.0.signed_distance(x);
         let v = d.max(0.0);
@@ -287,8 +309,8 @@ impl Region for InsideBoxRegion {
         g
     }
 
-    fn bounding_box(&self) -> Option<BBox> {
-        Some(BBox {
+    fn bounding_box(&self) -> Option<Aabb> {
+        Some(Aabb {
             min: self.min,
             max: self.max,
         })
@@ -332,10 +354,10 @@ impl Region for InsideSphereRegion {
         }
     }
 
-    fn bounding_box(&self) -> Option<BBox> {
+    fn bounding_box(&self) -> Option<Aabb> {
         let r = self.radius;
         let c = self.center;
-        Some(BBox {
+        Some(Aabb {
             min: [c[0] - r, c[1] - r, c[2] - r],
             max: [c[0] + r, c[1] + r, c[2] + r],
         })
@@ -495,19 +517,19 @@ mod tests {
 
     #[test]
     fn from_region_penalty_zero_inside() {
-        let r = FromRegion(InsideSphereRegion::new([0.0; 3], 5.0));
+        let r = RegionRestraint(InsideSphereRegion::new([0.0; 3], 5.0));
         assert_eq!(r.f(&[0.0, 0.0, 0.0], 1.0, 1.0), 0.0);
     }
 
     #[test]
     fn from_region_penalty_positive_outside() {
-        let r = FromRegion(InsideSphereRegion::new([0.0; 3], 5.0));
+        let r = RegionRestraint(InsideSphereRegion::new([0.0; 3], 5.0));
         assert!(r.f(&[10.0, 0.0, 0.0], 1.0, 1.0) > 0.0);
     }
 
     #[test]
     fn from_region_gradient_matches_finite_diff() {
-        let r = FromRegion(
+        let r = RegionRestraint(
             InsideBoxRegion::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
                 .and(Not(InsideSphereRegion::new([5.0, 5.0, 5.0], 2.0))),
         );
@@ -546,7 +568,7 @@ mod tests {
 
     #[test]
     fn gradient_accumulates_not_overwrite() {
-        let r = FromRegion(InsideSphereRegion::new([0.0; 3], 1.0));
+        let r = RegionRestraint(InsideSphereRegion::new([0.0; 3], 1.0));
         let mut g = [100.0; 3];
         let _ = r.fg(&[2.0, 0.0, 0.0], 1.0, 1.0, &mut g);
         assert!(g[0] > 100.0, "should accumulate");

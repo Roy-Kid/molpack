@@ -11,15 +11,36 @@ fn in_box(x: F, pbc_min: F, pbc_length: F) -> F {
 }
 
 /// Compute cell index (0-based) for a given position along one axis.
+///
+/// When `periodic` is `true` the coordinate is wrapped into
+/// `[pbc_min, pbc_min + pbc_length)` before indexing; when `false`,
+/// positions outside the box are clamped to the nearest edge cell
+/// (so atoms drifting past the confinement still land in a valid cell).
 /// Port of Fortran `setcell`.
 #[inline]
-pub fn axis_cell(x: F, pbc_min: F, pbc_length: F, cell_length: F, ncells: usize) -> usize {
-    let xt = in_box(x, pbc_min, pbc_length);
-    let idx = ((xt - pbc_min) / cell_length).floor() as usize;
-    idx.min(ncells - 1)
+pub fn axis_cell(
+    x: F,
+    pbc_min: F,
+    pbc_length: F,
+    cell_length: F,
+    ncells: usize,
+    periodic: bool,
+) -> usize {
+    let xt = if periodic {
+        in_box(x, pbc_min, pbc_length)
+    } else {
+        x
+    };
+    let raw = ((xt - pbc_min) / cell_length).floor();
+    if raw < 0.0 {
+        0
+    } else {
+        (raw as usize).min(ncells - 1)
+    }
 }
 
-/// Compute the 3D cell indices (0-based) for a position.
+/// Compute the 3D cell indices (0-based) for a position, honoring
+/// per-axis periodicity.
 #[inline(always)]
 pub fn setcell(
     pos: &[F; 3],
@@ -27,11 +48,33 @@ pub fn setcell(
     pbc_length: &[F; 3],
     cell_length: &[F; 3],
     ncells: &[usize; 3],
+    periodic: &[bool; 3],
 ) -> [usize; 3] {
     [
-        axis_cell(pos[0], pbc_min[0], pbc_length[0], cell_length[0], ncells[0]),
-        axis_cell(pos[1], pbc_min[1], pbc_length[1], cell_length[1], ncells[1]),
-        axis_cell(pos[2], pbc_min[2], pbc_length[2], cell_length[2], ncells[2]),
+        axis_cell(
+            pos[0],
+            pbc_min[0],
+            pbc_length[0],
+            cell_length[0],
+            ncells[0],
+            periodic[0],
+        ),
+        axis_cell(
+            pos[1],
+            pbc_min[1],
+            pbc_length[1],
+            cell_length[1],
+            ncells[1],
+            periodic[1],
+        ),
+        axis_cell(
+            pos[2],
+            pbc_min[2],
+            pbc_length[2],
+            cell_length[2],
+            ncells[2],
+            periodic[2],
+        ),
     ]
 }
 
@@ -59,13 +102,13 @@ pub fn cell_ind(idx: isize, ncells: usize) -> usize {
     idx.rem_euclid(ncells as isize) as usize
 }
 
-/// Compute PBC-corrected difference vector.
+/// Compute PBC-corrected difference vector with per-axis wrapping.
 /// Port of `delta_vector` from `pbc.f90`.
 #[inline]
-pub fn delta_vector(xi: &[F; 3], xj: &[F; 3], pbc_length: &[F; 3]) -> [F; 3] {
+pub fn delta_vector(xi: &[F; 3], xj: &[F; 3], pbc_length: &[F; 3], periodic: &[bool; 3]) -> [F; 3] {
     let mut d = [xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2]];
     for k in 0..3 {
-        if pbc_length[k] > 0.0 {
+        if periodic[k] {
             d[k] -= (d[k] / pbc_length[k]).round() * pbc_length[k];
         }
     }

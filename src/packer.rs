@@ -73,12 +73,6 @@ const MOVEFRAC: F = 0.05;
 /// `radius(i) = dism/2.d0` (packmol.f90 line 283).
 const DEFAULT_TOLERANCE: F = 2.0;
 
-#[derive(Debug, Clone, Copy)]
-struct PBCBox {
-    min: [F; 3],
-    max: [F; 3],
-}
-
 /// The packer.
 pub struct Molpack {
     handlers: Vec<Box<dyn Handler>>,
@@ -92,19 +86,23 @@ pub struct Molpack {
     /// Atom radii = `tolerance / 2`.
     tolerance: F,
     /// GENCAN inner iterations (`maxit` keyword).
-    maxit: usize,
+    inner_iterations: usize,
     /// Initialization outer loops (`nloop0` keyword). `None` means Packmol default (20*ntype).
-    nloop0: Option<usize>,
+    init_passes: Option<usize>,
     /// Maximum system half-size used in initial restmol stage (`sidemax` keyword).
-    sidemax: F,
-    /// Fraction of molecules moved by movebad (`movefrac` keyword).
-    movefrac: F,
-    /// Packmol `movebadrandom` toggle.
-    movebadrandom: bool,
-    /// Packmol `disable_movebad` toggle (main loop only).
-    disable_movebad: bool,
-    /// User-defined periodic box, matching Packmol `pbc` input semantics.
-    pbc: Option<PBCBox>,
+    init_box_half_size: F,
+    /// Fraction of molecules perturbed when packing stalls (Packmol's `movefrac`).
+    perturb_fraction: F,
+    /// Randomize perturbation target selection (Packmol's `movebadrandom`).
+    random_perturb: bool,
+    /// Master switch for the stall-perturbation heuristic (inverts Packmol's
+    /// `disable_movebad`: `true` = perturb enabled, `false` = disabled).
+    perturb: bool,
+    /// Seed for the internal RNG. Default `0` (deterministic).
+    seed: u64,
+    /// Run the pair-kernel reductions on rayon. Off by default: see
+    /// [`with_parallel_eval`][Self::with_parallel_eval].
+    parallel_eval: bool,
 }
 
 impl Default for Molpack {
@@ -114,11 +112,14 @@ impl Default for Molpack {
 }
 
 impl Molpack {
-    /// Create a packer with no handlers.
-    /// Add handlers via [`add_handler`][Self::add_handler]:
-    /// [`ProgressHandler`][crate::ProgressHandler],
-    /// [`EarlyStopHandler`][crate::EarlyStopHandler],
-    /// [`XYZHandler`][crate::XYZHandler], etc.
+    /// Create a packer with default settings and no handlers.
+    ///
+    /// All tuning knobs are set via `with_*` methods below; they all have
+    /// defensible defaults, so `Molpack::new().pack(&targets, max_loops)`
+    /// is a valid invocation. The one argument that has no default is
+    /// `max_loops` — it depends on system size and convergence difficulty,
+    /// so it lives on the terminal [`pack`][Self::pack] call, not on the
+    /// builder.
     pub fn new() -> Self {
         Self {
             handlers: Vec::new(),
@@ -126,113 +127,131 @@ impl Molpack {
             precision: PRECISION,
             discale: DISCALE,
             tolerance: DEFAULT_TOLERANCE,
-            maxit: GENCAN_MAXIT,
-            nloop0: None,
-            sidemax: SIDEMAX,
-            movefrac: MOVEFRAC,
-            movebadrandom: false,
-            disable_movebad: false,
-            pbc: None,
+            inner_iterations: GENCAN_MAXIT,
+            init_passes: None,
+            init_box_half_size: SIDEMAX,
+            perturb_fraction: MOVEFRAC,
+            random_perturb: false,
+            perturb: true,
+            seed: 0,
+            parallel_eval: false,
         }
     }
 
-    pub fn add_handler(mut self, h: impl Handler + 'static) -> Self {
+    /// Append a progress handler. Multiple handlers compose in call order.
+    pub fn with_handler(mut self, h: impl Handler + 'static) -> Self {
         self.handlers.push(Box::new(h));
         self
     }
 
-    /// Attach a **global** restraint — applied to every atom of every
+    /// Append a **global** restraint — applied to every atom of every
     /// target at `pack()` time.
     ///
-    /// Semantic equivalence (spec §4 "Scope 等价律"):
+    /// Semantic equivalence (scope law):
     /// ```text
-    /// molpack.add_restraint(r)
+    /// molpack.with_global_restraint(r)
     ///   ≡ for each target: target.with_restraint(r.clone())
     /// ```
     ///
     /// Implementation mirrors the equivalence — no separate "global
     /// restraint" storage path in `PackContext`; the restraint is cloned
     /// into each target's `molecule_restraints` when `pack()` is invoked.
-    pub fn add_restraint(mut self, r: impl Restraint + 'static) -> Self {
+    pub fn with_global_restraint(mut self, r: impl Restraint + 'static) -> Self {
         self.global_restraints.push(Arc::new(r));
         self
     }
 
-    pub fn precision(mut self, p: F) -> Self {
+    /// Convergence precision for `fdist` and `frest` (default `0.01`).
+    pub fn with_precision(mut self, p: F) -> Self {
         self.precision = p;
         self
     }
 
-    /// Set the minimum atom-atom distance tolerance (Packmol's `tolerance`/`dism`).
-    /// Atom radii are set to `tolerance / 2`. Default: 2.0 Å.
-    pub fn tolerance(mut self, t: F) -> Self {
+    /// Minimum atom-atom distance tolerance (default `2.0 Å`).
+    /// Atom radii are set to `tolerance / 2`.
+    pub fn with_tolerance(mut self, t: F) -> Self {
         self.tolerance = t;
         self
     }
 
-    /// Set GENCAN inner iteration count (`maxit` keyword).
-    pub fn maxit(mut self, maxit: usize) -> Self {
-        self.maxit = maxit;
+    /// GENCAN inner iteration count (default `20`; Packmol `maxit`).
+    pub fn with_inner_iterations(mut self, n: usize) -> Self {
+        self.inner_iterations = n;
         self
     }
 
-    /// Set initialization outer loop count (`nloop0` keyword).
-    /// `0` restores Packmol default (`20 * ntype`).
-    pub fn nloop0(mut self, nloop0: usize) -> Self {
-        self.nloop0 = if nloop0 == 0 { None } else { Some(nloop0) };
+    /// Initialization outer-loop passes (Packmol `nloop0`).
+    /// `0` restores the Packmol default of `20 * ntype`.
+    pub fn with_init_passes(mut self, n: usize) -> Self {
+        self.init_passes = if n == 0 { None } else { Some(n) };
         self
     }
 
-    /// Set initial global half-size (`sidemax` keyword).
-    pub fn sidemax(mut self, sidemax: F) -> Self {
-        self.sidemax = sidemax;
+    /// Maximum half-size of the initial placement box (default `1000.0`;
+    /// Packmol `sidemax`).
+    pub fn with_init_box_half_size(mut self, f: F) -> Self {
+        self.init_box_half_size = f;
         self
     }
 
-    /// Set movebad move fraction (`movefrac` keyword).
-    pub fn movefrac(mut self, movefrac: F) -> Self {
-        self.movefrac = movefrac;
+    /// Fraction of molecules re-sampled when packing stalls (default `0.05`;
+    /// Packmol `movefrac`).
+    pub fn with_perturb_fraction(mut self, f: F) -> Self {
+        self.perturb_fraction = f;
         self
     }
 
-    /// Enable/disable Packmol `movebadrandom`.
-    pub fn movebadrandom(mut self, enabled: bool) -> Self {
-        self.movebadrandom = enabled;
+    /// Randomize perturbation target selection (default `false`;
+    /// Packmol `movebadrandom`).
+    pub fn with_random_perturb(mut self, enabled: bool) -> Self {
+        self.random_perturb = enabled;
         self
     }
 
-    /// Enable/disable Packmol `disable_movebad` (main loop gate).
-    pub fn disable_movebad(mut self, disabled: bool) -> Self {
-        self.disable_movebad = disabled;
+    /// Enable the stall-perturbation heuristic (default `true`;
+    /// inverts Packmol's `disable_movebad`). Pass `false` to disable.
+    pub fn with_perturb(mut self, enabled: bool) -> Self {
+        self.perturb = enabled;
         self
     }
 
-    /// Set periodic box boundaries, equivalent to Packmol `pbc xmin ymin zmin xmax ymax zmax`.
-    pub fn pbc(mut self, min: [F; 3], max: [F; 3]) -> Self {
-        self.pbc = Some(PBCBox { min, max });
+    /// Seed for the internal RNG (default `0` — deterministic).
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
         self
     }
 
-    /// Set periodic box lengths with origin at zero.
-    /// Equivalent to Packmol input `pbc 0.0 0.0 0.0 lx ly lz`.
-    pub fn pbc_box(mut self, lengths: [F; 3]) -> Self {
-        self.pbc = Some(PBCBox {
-            min: [0.0, 0.0, 0.0],
-            max: lengths,
-        });
+    /// Run the pair-kernel reductions on rayon worker threads (default
+    /// `false`).
+    ///
+    /// Parallelism is opt-in because the crossover where rayon pays off
+    /// is **workload-shaped, not size-shaped** — the per-call parallel
+    /// speedup measured on isolated `compute_fg` doesn't predict
+    /// end-to-end `Molpack::pack` wall clock (task-dispatch overhead
+    /// accumulates across thousands of calls per pack; the perturbation
+    /// pass skips the parallel path entirely; real workloads often
+    /// *regress* even when `active_cells.len()` clears any naive
+    /// threshold). The user knows their workload shape; the library
+    /// doesn't.
+    ///
+    /// Compile with `--features rayon` for this flag to have any
+    /// effect. Without the feature the pair kernel is serial
+    /// unconditionally and this setting is silently ignored.
+    pub fn with_parallel_eval(mut self, enabled: bool) -> Self {
+        self.parallel_eval = enabled;
         self
     }
 
     /// Run the packing.
     ///
+    /// `max_loops` is the outer iteration budget; it is positional
+    /// because there is no defensible default (the right value depends
+    /// on system size and convergence difficulty). Every other knob
+    /// lives on the builder.
+    ///
     /// Returns a [`PackResult`] containing the final atom positions and
     /// convergence information (`fdist`, `frest`, `converged`).
-    pub fn pack(
-        &mut self,
-        targets: &[Target],
-        max_loops: usize,
-        seed: Option<u64>,
-    ) -> Result<PackResult, PackError> {
+    pub fn pack(&mut self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError> {
         if targets.is_empty() {
             return Err(PackError::NoTargets);
         }
@@ -261,21 +280,13 @@ impl Molpack {
                 .collect();
             &broadcast_targets
         };
-        if let Some(pbc) = self.pbc {
-            let length = [
-                pbc.max[0] - pbc.min[0],
-                pbc.max[1] - pbc.min[1],
-                pbc.max[2] - pbc.min[2],
-            ];
-            if length.iter().any(|&v| v <= 0.0) {
-                return Err(PackError::InvalidPBCBox {
-                    min: pbc.min,
-                    max: pbc.max,
-                });
-            }
-        }
+        // Derive the system periodic box by scanning every restraint on
+        // every target for an override of `Restraint::periodic_box`. At
+        // most one periodic box may be declared per run; multiple
+        // declarations must agree exactly (bounds + per-axis flags).
+        let pbc = derive_periodic_box(targets)?;
 
-        let mut rng = SmallRng::seed_from_u64(seed.unwrap_or(0));
+        let mut rng = SmallRng::seed_from_u64(self.seed);
 
         // Split into free and fixed targets
         let free_targets: Vec<&Target> = targets.iter().filter(|t| t.fixed_at.is_none()).collect();
@@ -318,12 +329,12 @@ impl Molpack {
             coor.extend_from_slice(reference_coords(target));
             cum_atoms += target.natoms();
 
-            maxmove_per_type[itype] = target.maxmove.unwrap_or(target.count);
+            maxmove_per_type[itype] = target.perturb_budget.unwrap_or(target.count);
             for k in 0..3 {
-                if let Some((center_rad, half_width_rad)) = target.constrain_rotation[k] {
+                if let Some((center, half_width)) = target.rotation_bound[k] {
                     sys.constrain_rot[itype][k] = true;
-                    sys.rot_bound[itype][k][0] = center_rad;
-                    sys.rot_bound[itype][k][1] = half_width_rad;
+                    sys.rot_bound[itype][k][0] = center.radians();
+                    sys.rot_bound[itype][k][1] = half_width.radians();
                 }
             }
         }
@@ -338,25 +349,33 @@ impl Molpack {
         }
         sys.coor = coor;
 
-        // Assign radii and element symbols.
+        // Assign radii, element symbols, and per-atom (itype, imol) tags.
         // Packmol uses `radius = tolerance/2` for ALL atoms (packmol.f90 line 283:
         //   `radius(i) = dism/2.d0`), not VdW radii from the PDB file.
+        // `ibtype` / `ibmol` are derivable from position in the sequential
+        // atom layout, so we set them here once instead of having
+        // `insert_atom_in_cell` rewrite the same constants on every eval.
         let atom_radius = self.tolerance / 2.0;
         let mut icart = 0usize;
-        for target in free_targets.iter() {
-            for _imol in 0..target.count {
+        for (itype, target) in free_targets.iter().enumerate() {
+            for imol in 0..target.count {
                 for iatom in 0..target.natoms() {
                     sys.radius[icart] = atom_radius;
                     sys.radius_ini[icart] = atom_radius;
+                    sys.ibtype[icart] = itype;
+                    sys.ibmol[icart] = imol;
                     sys.elements[icart] = Element::by_symbol(&target.elements[iatom]);
                     icart += 1;
                 }
             }
         }
-        for target in fixed_targets.iter() {
+        for (fi, target) in fixed_targets.iter().enumerate() {
+            let itype = ntype + fi;
             for iatom in 0..target.natoms() {
                 sys.radius[icart] = atom_radius;
                 sys.radius_ini[icart] = atom_radius;
+                sys.ibtype[icart] = itype;
+                sys.ibmol[icart] = 0;
                 sys.elements[icart] = Element::by_symbol(&target.elements[iatom]);
                 icart += 1;
             }
@@ -408,7 +427,11 @@ impl Molpack {
         let mut fixed_icart = free_atoms;
         for target in fixed_targets.iter() {
             let fp = target.fixed_at.as_ref().unwrap();
-            let (v1, v2, v3) = eulerfixed(fp.euler[0], fp.euler[1], fp.euler[2]);
+            let (v1, v2, v3) = eulerfixed(
+                fp.orientation[0].radians(),
+                fp.orientation[1].radians(),
+                fp.orientation[2].radians(),
+            );
             let ref_coords = reference_coords(target);
             for ref_coord in ref_coords.iter().take(target.natoms()) {
                 let pos = compcart(&fp.position, ref_coord, &v1, &v2, &v3);
@@ -417,6 +440,14 @@ impl Molpack {
                 fixed_icart += 1;
             }
         }
+        // Populate the AoS `atom_props` mirror from the individual per-atom
+        // Vecs now that every hot-loop field is finalized. `sync_atom_props`
+        // also refreshes the `any_fixed_atoms` / `any_short_radius`
+        // summary flags used by the hot-loop fast paths.
+        sys.sync_atom_props();
+        // Plumb the builder's opt-in parallel flag through to the
+        // objective kernels.
+        sys.parallel_pair_eval = self.parallel_eval;
 
         // Write constant columns (element, mol_id) into the output frame.
         // These don't change during optimization; positions are added at the end.
@@ -432,21 +463,20 @@ impl Molpack {
 
         // Run initialization
         sys.ntotmol = ntotmol_free;
-        let pbc = self.pbc.map(|b| (b.min, b.max));
-        let nloop0 = self.nloop0.unwrap_or(20 * ntype);
+        let init_passes = self.init_passes.unwrap_or(20 * ntype);
         let movebad_cfg = MoveBadConfig {
-            movefrac: self.movefrac,
+            movefrac: self.perturb_fraction,
             maxmove_per_type: &maxmove_per_type,
-            movebadrandom: self.movebadrandom,
-            gencan_maxit: self.maxit,
+            movebadrandom: self.random_perturb,
+            gencan_maxit: self.inner_iterations,
         };
         initial(
             &mut x,
             &mut sys,
             self.precision,
             self.discale,
-            self.sidemax,
-            nloop0,
+            self.init_box_half_size,
+            init_passes,
             pbc,
             &movebad_cfg,
             &mut rng,
@@ -454,7 +484,7 @@ impl Molpack {
 
         // Notify handlers: initialization complete, xcart is valid
         for h in self.handlers.iter_mut() {
-            h.on_initial(&sys);
+            h.on_initialized(&sys);
         }
 
         // Build relaxer runners from target relaxers (RelaxerRunner carries mutable MC state).
@@ -467,15 +497,15 @@ impl Molpack {
                 let base = sys.idfirst[i];
                 let na = sys.natoms[i];
                 let ref_slice = &sys.coor[base..base + na];
-                let runners = t.relaxers.iter().map(|r| r.build(ref_slice)).collect();
+                let runners = t.relaxers.iter().map(|r| r.spawn(ref_slice)).collect();
                 (i, runners)
             })
             .collect();
 
         // max_loops controls the outer loop count, matching Packmol's `nloop` parameter.
         let gencan_params = GencanParams {
-            maxit: self.maxit,
-            maxfc: self.maxit * 10,
+            maxit: self.inner_iterations,
+            maxfc: self.inner_iterations * 10,
             iprint: 0,
             ..Default::default()
         };
@@ -506,7 +536,7 @@ impl Molpack {
                 max_loops,
                 self.discale,
                 self.precision,
-                self.disable_movebad,
+                !self.perturb,
                 &movebad_cfg,
                 &gencan_params,
                 &mut sys,
@@ -557,10 +587,52 @@ impl Molpack {
     }
 }
 
+/// Resolved periodic-box spec: `(min, max, periodic_flags)`. Shared by
+/// `derive_periodic_box` and its callers.
+type PeriodicSpec = ([F; 3], [F; 3], [bool; 3]);
+
+/// Scan every restraint on every target for a `Restraint::periodic_box`
+/// override. Returns `Ok(None)` if no restraint declares one, `Ok(Some(...))`
+/// if exactly one unique declaration exists (duplicates with identical
+/// bounds + flags are allowed — they come from `with_global_restraint`
+/// broadcast and from two targets sharing the same restraint object).
+/// Returns `Err(ConflictingPeriodicBoxes)` when two declarations disagree
+/// and `Err(InvalidPBCBox)` if the declared box has a non-positive extent
+/// on any axis.
+fn derive_periodic_box(targets: &[Target]) -> Result<Option<PeriodicSpec>, PackError> {
+    let mut found: Option<PeriodicSpec> = None;
+    for target in targets {
+        let restraints = target
+            .molecule_restraints
+            .iter()
+            .chain(target.atom_restraints.iter().map(|(_, r)| r));
+        for r in restraints {
+            if let Some(candidate) = r.periodic_box() {
+                let (min, max, _periodic) = candidate;
+                let length = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+                if length.iter().any(|&v| v <= 0.0) {
+                    return Err(PackError::InvalidPBCBox { min, max });
+                }
+                match found {
+                    None => found = Some(candidate),
+                    Some(existing) if existing == candidate => {}
+                    Some(existing) => {
+                        return Err(PackError::ConflictingPeriodicBoxes {
+                            first: existing,
+                            second: candidate,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(found)
+}
+
 fn reference_coords(target: &Target) -> &[[F; 3]] {
     match target.centering {
         CenteringMode::Center => &target.ref_coords,
-        CenteringMode::None => &target.input_coords,
+        CenteringMode::Off => &target.input_coords,
         CenteringMode::Auto => {
             if target.fixed_at.is_some() {
                 &target.input_coords
@@ -586,12 +658,14 @@ fn reference_coords(target: &Target) -> &[[F; 3]] {
 pub fn evaluate_unscaled(sys: &mut PackContext, xwork: &[F]) -> (F, F, F) {
     sys.work.radiuswork.copy_from_slice(&sys.radius);
     for i in 0..sys.ntotat {
-        sys.radius[i] = sys.radius_ini[i];
+        sys.set_radius(i, sys.radius_ini[i]);
     }
     let f_total = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
     let fdist = sys.fdist;
     let frest = sys.frest;
-    sys.radius.copy_from_slice(&sys.work.radiuswork);
+    for i in 0..sys.ntotat {
+        sys.set_radius(i, sys.work.radiuswork[i]);
+    }
     (f_total, fdist, frest)
 }
 
@@ -717,7 +791,7 @@ pub fn run_iteration(
     *fimp_prev = fimp;
 
     if !handlers.is_empty() {
-        let hook_acceptance: Vec<(usize, F)> = relaxer_runners
+        let relaxer_acceptance: Vec<(usize, F)> = relaxer_runners
             .iter()
             .flat_map(|(itype, runners)| runners.iter().map(move |r| (*itype, r.acceptance_rate())))
             .collect();
@@ -731,7 +805,7 @@ pub fn run_iteration(
             improvement_pct: fimp,
             radscale: *radscale,
             precision,
-            hook_acceptance,
+            relaxer_acceptance,
         };
         for h in handlers.iter_mut() {
             h.on_step(&step_info, sys);
@@ -766,7 +840,8 @@ pub fn run_iteration(
     if *radscale > 1.0 && (fimp < 2.0 || (fdist < precision && fimp < 10.0)) {
         *radscale = (0.9 * *radscale).max(1.0);
         for i in 0..sys.ntotat {
-            sys.radius[i] = sys.radius_ini[i].max(0.9 * sys.radius[i]);
+            let new_r = sys.radius_ini[i].max(0.9 * sys.radius[i]);
+            sys.set_radius(i, new_r);
         }
     }
 
@@ -859,7 +934,7 @@ pub fn run_phase(
     // Packmol resets radscale = discale at the START of each phase.
     let mut radscale = discale;
     for icart in 0..sys.ntotat {
-        sys.radius[icart] = discale * sys.radius_ini[icart];
+        sys.set_radius(icart, discale * sys.radius_ini[icart]);
     }
 
     // Get working x vector (compact for per-type, full for all-type)

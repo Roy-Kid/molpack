@@ -7,28 +7,75 @@ use crate::relaxer::Relaxer;
 use crate::restraint::Restraint;
 use molrs::types::F;
 
+/// Cartesian axis selector used in `Target::with_rotation_bound` and
+/// other API surfaces that need to name an axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+/// Angular quantity stored internally as radians.
+///
+/// Constructors make the unit explicit at the call site:
+/// `Angle::from_degrees(30.0)` vs `Angle::from_radians(FRAC_PI_6)`.
+/// Implements `Copy` — pass by value, no `&`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Angle(F);
+
+impl Angle {
+    /// Zero rotation.
+    pub const ZERO: Self = Self(0.0);
+
+    pub const fn from_radians(rad: F) -> Self {
+        Self(rad)
+    }
+
+    pub fn from_degrees(deg: F) -> Self {
+        Self(deg * (std::f64::consts::PI as F) / 180.0)
+    }
+
+    pub const fn radians(self) -> F {
+        self.0
+    }
+
+    pub fn degrees(self) -> F {
+        self.0 * 180.0 / (std::f64::consts::PI as F)
+    }
+}
+
 /// Centering behavior for structure coordinates.
 ///
 /// Packmol semantics:
 /// - `Auto`: free molecules are centered; fixed molecules are not centered.
 /// - `Center`: force centering.
-/// - `None`: keep input coordinates unchanged.
+/// - `Off`: keep input coordinates unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CenteringMode {
     #[default]
     Auto,
     Center,
-    None,
+    Off,
 }
 
-/// Fixed molecule placement (Euler angles in "human" convention + translation).
+/// Fixed-molecule placement: translation + Euler orientation.
 #[derive(Debug, Clone)]
-pub struct FixedPlacement {
-    /// Translation vector [x, y, z].
+pub struct Placement {
+    /// Translation vector `[x, y, z]`.
     pub position: [F; 3],
-    /// Euler angles [beta, gama, teta] in the `eulerfixed` convention (x/y/z rotations).
-    pub euler: [F; 3],
+    /// Euler rotations around x / y / z in the `eulerfixed` convention,
+    /// stored as [`Angle`] triples.
+    pub orientation: [Angle; 3],
 }
+
+/// Deprecated legacy name for [`Placement`]. Will be removed in the
+/// next release.
+#[deprecated(
+    since = "0.2.0",
+    note = "Renamed to `Placement` — the `Fixed` prefix is redundant now that the constructor name carries the semantic."
+)]
+pub type FixedPlacement = Placement;
 
 /// Describes one type of molecule to be packed.
 #[derive(Debug, Clone)]
@@ -52,15 +99,16 @@ pub struct Target {
     /// Each entry holds the 0-based atom indices (converted from Packmol's
     /// 1-based convention at registration time) and the restraint applied to them.
     pub atom_restraints: Vec<(Vec<usize>, Arc<dyn Restraint>)>,
-    /// Optional structure-level limit for movebad (`maxmove` in Packmol).
-    pub maxmove: Option<usize>,
+    /// Optional structure-level limit for the perturbation heuristic
+    /// (Packmol's `maxmove`).
+    pub perturb_budget: Option<usize>,
     /// Centering policy.
     pub centering: CenteringMode,
-    /// Rotation constraints in Euler variable order:
-    /// [beta(y), gama(z), teta(x)] => (center_rad, half_width_rad).
-    pub constrain_rotation: [Option<(F, F)>; 3],
-    /// If Some, this molecule is fixed (one copy, placed at the given location).
-    pub fixed_at: Option<FixedPlacement>,
+    /// Rotation bounds in Euler variable order
+    /// `[beta(y), gama(z), teta(x)]` as `(center, half_width)` [`Angle`] pairs.
+    pub rotation_bound: [Option<(Angle, Angle)>; 3],
+    /// If `Some`, this molecule is fixed (one copy, placed at the given location).
+    pub fixed_at: Option<Placement>,
     /// Per-target in-loop relaxers (e.g. torsion MC). Called in order each iteration.
     pub relaxers: Vec<Box<dyn Relaxer>>,
 }
@@ -108,9 +156,9 @@ impl Target {
             name: None,
             molecule_restraints: Vec::new(),
             atom_restraints: Vec::new(),
-            maxmove: None,
+            perturb_budget: None,
             centering: CenteringMode::Auto,
-            constrain_rotation: [None, None, None],
+            rotation_bound: [None, None, None],
             fixed_at: None,
             relaxers: Vec::new(),
         }
@@ -131,16 +179,13 @@ impl Target {
     ///
     /// # Atom indexing
     ///
-    /// Indices follow **Packmol's 1-based convention**: atom `1` is the first
-    /// atom in the PDB/XYZ file. They are converted to 0-based internally.
-    /// For example, `&[1, 2, 3]` selects the first three atoms.
-    pub fn with_restraint_for_atoms(
-        mut self,
-        indices: &[usize],
-        r: impl Restraint + 'static,
-    ) -> Self {
-        let zero_indexed: Vec<usize> = indices.iter().map(|&i| i.saturating_sub(1)).collect();
-        self.atom_restraints.push((zero_indexed, Arc::new(r)));
+    /// Indices are **0-based**, matching Rust convention: atom `0` is
+    /// the first atom in the PDB/XYZ file. For example, `&[0, 1, 2]`
+    /// selects the first three atoms. If you are porting from a Packmol
+    /// `.inp` file (which uses 1-based indices), subtract 1 at the
+    /// call site.
+    pub fn with_atom_restraint(mut self, indices: &[usize], r: impl Restraint + 'static) -> Self {
+        self.atom_restraints.push((indices.to_vec(), Arc::new(r)));
         self
     }
 
@@ -159,56 +204,68 @@ impl Target {
         self
     }
 
-    /// Set structure-level `maxmove` for movebad heuristic.
-    pub fn with_maxmove(mut self, maxmove: usize) -> Self {
-        self.maxmove = Some(maxmove);
+    /// Structure-level budget for the perturbation heuristic
+    /// (Packmol's `maxmove`). Defaults to `count` when unset.
+    pub fn with_perturb_budget(mut self, n: usize) -> Self {
+        self.perturb_budget = Some(n);
         self
     }
 
-    /// Equivalent to Packmol `center` keyword for this structure.
-    pub fn with_center(mut self) -> Self {
-        self.centering = CenteringMode::Center;
+    /// Set the centering policy.
+    ///
+    /// - [`CenteringMode::Auto`] (default): free molecules centered,
+    ///   fixed molecules kept in place.
+    /// - [`CenteringMode::Center`]: always center.
+    /// - [`CenteringMode::Off`]: keep input coordinates unchanged.
+    pub fn with_centering(mut self, mode: CenteringMode) -> Self {
+        self.centering = mode;
         self
     }
 
-    /// Keep input coordinates unchanged (disable automatic centering).
-    pub fn without_centering(mut self) -> Self {
-        self.centering = CenteringMode::None;
-        self
-    }
-
-    /// Equivalent to Packmol `constrain_rotation x center delta` (degrees).
-    pub fn constrain_rotation_x(mut self, center_deg: F, half_width_deg: F) -> Self {
-        self.constrain_rotation[2] = Some((deg_to_rad(center_deg), deg_to_rad(half_width_deg)));
-        self
-    }
-
-    /// Equivalent to Packmol `constrain_rotation y center delta` (degrees).
-    pub fn constrain_rotation_y(mut self, center_deg: F, half_width_deg: F) -> Self {
-        self.constrain_rotation[0] = Some((deg_to_rad(center_deg), deg_to_rad(half_width_deg)));
-        self
-    }
-
-    /// Equivalent to Packmol `constrain_rotation z center delta` (degrees).
-    pub fn constrain_rotation_z(mut self, center_deg: F, half_width_deg: F) -> Self {
-        self.constrain_rotation[1] = Some((deg_to_rad(center_deg), deg_to_rad(half_width_deg)));
+    /// Rotation bound on a single Euler axis, analogous to Packmol's
+    /// `constrain_rotation <axis> <center> <delta>`. Arguments are
+    /// [`Angle`] values — `Angle::from_degrees(30.0)` or
+    /// `Angle::from_radians(FRAC_PI_6)`.
+    pub fn with_rotation_bound(mut self, axis: Axis, center: Angle, half_width: Angle) -> Self {
+        let idx = match axis {
+            // Internal index order follows Packmol's Euler variable order
+            // `[beta(y), gama(z), teta(x)]`.
+            Axis::Y => 0,
+            Axis::Z => 1,
+            Axis::X => 2,
+        };
+        self.rotation_bound[idx] = Some((center, half_width));
         self
     }
 
     /// Fix this molecule at a specific position with zero rotation.
+    ///
+    /// Forces `count` to 1 — a fixed molecule is by definition a single
+    /// copy. Pair with [`with_orientation`][Self::with_orientation] if
+    /// a non-zero Euler orientation is needed.
     pub fn fixed_at(mut self, position: [F; 3]) -> Self {
-        self.fixed_at = Some(FixedPlacement {
+        assert!(
+            self.count <= 1,
+            "fixed_at() requires count <= 1, got count = {}. \
+             A fixed target is a single placed copy.",
+            self.count
+        );
+        self.fixed_at = Some(Placement {
             position,
-            euler: [0.0, 0.0, 0.0],
+            orientation: [Angle::ZERO; 3],
         });
         self.count = 1;
         self
     }
 
-    /// Fix this molecule at a specific position and Euler orientation.
-    pub fn fixed_at_with_euler(mut self, position: [F; 3], euler: [F; 3]) -> Self {
-        self.fixed_at = Some(FixedPlacement { position, euler });
-        self.count = 1;
+    /// Set the Euler orientation of a previously-fixed target. Must be
+    /// called after [`fixed_at`][Self::fixed_at]; panics otherwise.
+    pub fn with_orientation(mut self, orientation: [Angle; 3]) -> Self {
+        let placement = self.fixed_at.as_mut().expect(
+            "with_orientation() requires a prior .fixed_at(pos) call — \
+             orientation is only meaningful on fixed targets",
+        );
+        placement.orientation = orientation;
         self
     }
 
@@ -234,8 +291,4 @@ fn geometric_center(coords: &[[F; 3]]) -> (F, F, F) {
     let cy = coords.iter().map(|p| p[1]).sum::<F>() / n;
     let cz = coords.iter().map(|p| p[2]).sum::<F>() / n;
     (cx, cy, cz)
-}
-
-fn deg_to_rad(v: F) -> F {
-    v * (std::f64::consts::PI as F) / 180.0
 }

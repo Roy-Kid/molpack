@@ -10,10 +10,9 @@ Bondi (1964) table.
 ```python
 from molpack import Target
 
-target = Target(name, frame, count)
+target = Target(frame, count)
 ```
 
-- `name`  — label used in diagnostics and output.
 - `frame` — any object with `frame["atoms"]` returning a block.
   Supported sources:
 
@@ -25,6 +24,12 @@ target = Target(name, frame, count)
   | plain dict | `"element"` | `[]` |
 
 - `count` — number of copies to produce.
+
+A display label is optional:
+
+```python
+target = Target(frame, count).with_name("water")
+```
 
 Plain dict example (no I/O library needed):
 
@@ -39,34 +44,33 @@ frame = {
         "element": ["O", "H", "H"],
     }
 }
-water = Target("water", frame, count=100)
+water = Target(frame, count=100).with_name("water")
 ```
 
 ## Read-only properties
 
 ```python
+target.name        # Optional[str]
 target.natoms      # number of template atoms
 target.count       # requested copies
 target.elements    # list[str]
+target.radii       # list[float]
 target.is_fixed    # True if placement is frozen (see below)
 ```
 
 All builder methods are **immutable** — they return a new `Target`.
 
-## Renaming
-
-```python
-target = target.with_name("water")   # update label after construction
-```
-
 ## Centering
 
-By default the template is re-centered on its mean position before
-packing (Packmol convention). Control explicitly:
+The default is [`CenteringMode.AUTO`][molpack.CenteringMode] — free
+targets are centered on their geometric center before packing; fixed
+targets are kept in place. Override explicitly:
 
 ```python
-target = target.with_center()        # force centering on
-target = target.without_centering()  # keep template origin
+from molpack import CenteringMode
+
+target = target.with_centering(CenteringMode.CENTER)  # always center
+target = target.with_centering(CenteringMode.OFF)     # keep input coords
 ```
 
 ## Fixed placement
@@ -74,10 +78,19 @@ target = target.without_centering()  # keep template origin
 Pin a target at a specific location (e.g. a reference protein):
 
 ```python
+from molpack import Angle
+
 target = target.fixed_at([10.0, 20.0, 30.0])
-target = target.fixed_at_with_euler(
-    position=[10.0, 20.0, 30.0],
-    euler=[0.0, 1.57, 0.0],          # radians
+
+# optional Euler orientation — three Angle values in Packmol's
+# eulerfixed convention
+target = (
+    target.fixed_at([10.0, 20.0, 30.0])
+    .with_orientation((
+        Angle.from_degrees(0.0),
+        Angle.from_radians(1.57),
+        Angle.ZERO,
+    ))
 )
 ```
 
@@ -86,22 +99,32 @@ distance exclusion against other species.
 
 ## Rotation bounds
 
-Restrict the rotational search window about each axis (degrees):
+Restrict the rotational search window about each axis:
 
 ```python
-target = target.constrain_rotation_x(center_deg=0.0,  half_width_deg=15.0)
-target = target.constrain_rotation_y(center_deg=90.0, half_width_deg=10.0)
-target = target.constrain_rotation_z(center_deg=0.0,  half_width_deg=5.0)
+from molpack import Angle, Axis
+
+target = (
+    target
+    .with_rotation_bound(Axis.X, Angle.from_degrees(0.0),  Angle.from_degrees(15.0))
+    .with_rotation_bound(Axis.Y, Angle.from_degrees(90.0), Angle.from_degrees(10.0))
+    .with_rotation_bound(Axis.Z, Angle.from_degrees(0.0),  Angle.from_degrees(5.0))
+)
 ```
+
+`Angle` makes units explicit: use `Angle.from_degrees(...)` or
+`Angle.from_radians(...)` — raw floats are rejected.
 
 ## Attaching restraints
 
 ### All atoms of the target
 
 ```python
-from molpack import InsideBox
+from molpack import InsideBoxRestraint
 
-target = target.with_restraint(InsideBox([0, 0, 0], [40, 40, 40]))
+target = target.with_restraint(
+    InsideBoxRestraint([0, 0, 0], [40, 40, 40])
+)
 ```
 
 Stack multiple restraints by calling `.with_restraint()` again:
@@ -109,32 +132,33 @@ Stack multiple restraints by calling `.with_restraint()` again:
 ```python
 target = (
     target
-    .with_restraint(InsideBox([0, 0, 0], [40, 40, 40]))
-    .with_restraint(OutsideSphere(5.0, [20, 20, 20]))
+    .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
+    .with_restraint(OutsideSphereRestraint([20, 20, 20], 5.0))
 )
 ```
 
 ### A subset of atoms
 
 ```python
-from molpack import AbovePlane, BelowPlane
+from molpack import AbovePlaneRestraint, BelowPlaneRestraint
 
-target = target.with_restraint_for_atoms(
-    [31, 32],                          # 1-based Packmol atom indices
-    BelowPlane([0.0, 0.0, 1.0], 2.0),
+target = target.with_atom_restraint(
+    [30, 31],                                     # 0-based Rust-native indices
+    BelowPlaneRestraint([0.0, 0.0, 1.0], 2.0),
 )
 ```
 
-!!! note "1-based indexing"
-    `with_restraint_for_atoms` uses Packmol's 1-based atom indices.
-    Passing `0` or an index `> natoms` raises `ValueError`.
+!!! note "0-based indexing"
+    `with_atom_restraint` uses **0-based** indices, matching Rust
+    convention. If you are porting from a Packmol `.inp` file (which
+    uses 1-based indices), subtract 1 at the call site.
 
 ## Per-target solver budget
 
-Override the maximum optimizer iterations for this target:
+Override the maximum perturbation budget for this target:
 
 ```python
-target = target.with_maxmove(50)  # default: derived from molecule size
+target = target.with_perturb_budget(50)  # default: derived from count
 ```
 
 Useful when one species is significantly harder to place than the rest.

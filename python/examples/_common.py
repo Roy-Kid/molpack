@@ -3,7 +3,7 @@
 Provides a minimal PDB loader for cases where ``molrs`` is unavailable.
 When ``molrs`` is installed, prefer ``molrs.read_pdb(path)`` directly —
 the returned ``Frame`` can be passed straight to
-``molpack.Target(name, frame, count)``.
+``molpack.Target(frame, count)``.
 """
 
 from __future__ import annotations

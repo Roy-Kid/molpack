@@ -40,6 +40,7 @@ fn build_snapshot() -> Snapshot {
     sys.radius.fill(0.75);
     sys.radius_ini.fill(1.5);
     sys.work.radiuswork.resize(ntotat, 0.0);
+    sys.sync_atom_props();
     let x: Vec<F> = Vec::new();
     let swap = SwapState::init(&x, &sys);
     let ws = GencanWorkspace::new();

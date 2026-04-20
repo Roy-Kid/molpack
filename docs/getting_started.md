@@ -12,13 +12,13 @@ Packmol, making it a drop-in replacement for the command-line workflow.
 ### Installing
 
 ```bash
-cargo install molcrafts-molpack --features filesystem
+cargo install molcrafts-molpack --features cli
 ```
 
 Or build from source:
 
 ```bash
-cargo build --release --bin molpack --features filesystem
+cargo build --release --bin molpack --features cli
 ```
 
 ### Running a script
@@ -143,12 +143,13 @@ let water_radii = [1.52, 1.20, 1.20];
 
 let target = Target::from_coords(&water_positions, &water_radii, 100)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3]));
+    .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
 
 let result = Molpack::new()
-    .tolerance(2.0)
-    .precision(0.01)
-    .pack(&[target], 200, Some(42))?;
+    .with_tolerance(2.0)
+    .with_precision(0.01)
+    .with_seed(42)
+    .pack(&[target], 200)?;
 
 println!("converged = {}, natoms = {}", result.converged, result.natoms());
 # Ok::<(), molpack::PackError>(())
@@ -158,10 +159,11 @@ Arguments to [`Molpack::pack`](crate::Molpack::pack):
 
 - `&[Target]` — one entry per molecule type.
 - `max_loops: usize` — outer-iteration budget per phase.
-- `seed: Option<u64>` — pass `Some(n)` for reproducible placements.
 
-Returns a [`PackResult`](crate::PackResult) with the output coordinates
-as a `molrs::Frame` plus convergence diagnostics.
+Seed and every other tuning knob live on the builder (`.with_seed(n)`,
+`.with_tolerance(t)` etc.). Returns a [`PackResult`](crate::PackResult)
+with the output coordinates as a `molrs::Frame` plus convergence
+diagnostics.
 
 ## Restraint scopes
 
@@ -174,17 +176,18 @@ same [`Restraint`](crate::Restraint) trait underneath.
 # use molpack::{InsideBoxRestraint, Target};
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 let target = Target::from_coords(pos, rad, 100)
-    .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3]));
+    .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
 ```
 
 **Per-target, atom subset** — restrict to specific atoms of every
-molecule copy (1-based indexing, Packmol convention):
+molecule copy (0-based, Rust convention — if you are porting from a
+Packmol `.inp` file, subtract 1):
 
 ```rust,no_run
 # use molpack::{BelowPlaneRestraint, Target};
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 let target = Target::from_coords(pos, rad, 100)
-    .with_restraint_for_atoms(&[1, 2], BelowPlaneRestraint::new([0.0, 0.0, 1.0], 5.0));
+    .with_atom_restraint(&[0, 1], BelowPlaneRestraint::new([0.0, 0.0, 1.0], 5.0));
 ```
 
 **Global, all targets** — broadcast. Semantically equivalent to
@@ -196,13 +199,14 @@ calling `with_restraint` on every target:
 # let t_a = Target::from_coords(pos, rad, 100);
 # let t_b = Target::from_coords(pos, rad, 100);
 let result = Molpack::new()
-    .add_restraint(InsideSphereRestraint::new([20.0; 3], 30.0))
-    .pack(&[t_a, t_b], 200, Some(42))?;
+    .with_global_restraint(InsideSphereRestraint::new([20.0; 3], 30.0))
+    .with_seed(42)
+    .pack(&[t_a, t_b], 200)?;
 # Ok::<(), molpack::PackError>(())
 ```
 
-The scope-equivalence law is formal: `molpack.add_restraint(r)` is
-implemented as `for t in targets { t.with_restraint(r.clone()) }`.
+The scope-equivalence law is formal: `molpack.with_global_restraint(r)`
+is implemented as `for t in targets { t.with_restraint(r.clone()) }`.
 There is no separate "global-restraint" storage path.
 
 ## Handlers (progress observation)
@@ -213,12 +217,12 @@ trajectory output, or early-stop logic. Built-ins:
 ```rust,no_run
 # use molpack::{EarlyStopHandler, InsideBoxRestraint, Molpack, ProgressHandler, Target, XYZHandler};
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
-# let target = Target::from_coords(pos, rad, 100).with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3]));
+# let target = Target::from_coords(pos, rad, 100).with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
 let mut packer = Molpack::new()
-    .add_handler(ProgressHandler::new())
-    .add_handler(XYZHandler::new("traj.xyz", /* every = */ 10))
-    .add_handler(EarlyStopHandler::new(/* threshold = */ 1e-4));
-# let _ = packer.pack(&[target], 200, Some(42));
+    .with_handler(ProgressHandler::new())
+    .with_handler(XYZHandler::new("traj.xyz", /* every = */ 10))
+    .with_handler(EarlyStopHandler::new(/* threshold = */ 1e-4));
+# let _ = packer.with_seed(42).pack(&[target], 200);
 ```
 
 Write your own — see the [`extending`](crate::extending) module.
@@ -244,18 +248,34 @@ let target = Target::from_coords(pos, rad, 1)  // relaxers require count == 1
 
 ## Free versus periodic boundary
 
-Free boundary is the default. For PBC:
+Free boundary is the default. Periodic boundaries are declared **on
+the `InsideBoxRestraint` itself** — the third argument is a per-axis
+`[bool; 3]` marking which axes wrap:
 
 ```rust,no_run
-# use molpack::Molpack;
-let packer = Molpack::new()
-    .pbc_box([30.0, 30.0, 30.0]);              // origin at zero
-// or
-let packer = Molpack::new()
-    .pbc([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]);  // explicit min / max
+# use molpack::{InsideBoxRestraint, Target};
+# let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
+// Fully-periodic (Packmol-style 3D PBC):
+let target = Target::from_coords(pos, rad, 100).with_restraint(
+    InsideBoxRestraint::new([0.0; 3], [30.0; 3], [true; 3]),
+);
 ```
 
-Zero-length axes return [`PackError::InvalidPBCBox`](crate::PackError).
+Slab geometries with only some axes wrapping (e.g. X/Y periodic
+membrane, Z confined):
+
+```rust,no_run
+# use molpack::{InsideBoxRestraint, Target};
+# let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
+let target = Target::from_coords(pos, rad, 100).with_restraint(
+    InsideBoxRestraint::new([0.0; 3], [30.0; 3], [true, true, false]),
+);
+```
+
+The packer derives the system PBC by scanning restraints. Zero-length
+axes return [`PackError::InvalidPBCBox`](crate::PackError); two
+restraints declaring *different* periodic boxes return
+[`PackError::ConflictingPeriodicBoxes`](crate::PackError).
 
 ## Running the canonical examples
 

@@ -19,22 +19,30 @@ name = "molpack"
 [dependencies]
 # Path deps are for local development; `version` fields are used by
 # `cargo publish` to resolve against the crates.io registry.
-molrs = { path = "../molrs/molrs-core", version = "0.0.8", package = "molcrafts-molrs-core", default-features = false }
-molrs_io = { path = "../molrs/molrs-io", version = "0.0.8", package = "molcrafts-molrs-io" }
+#
+# Library-required:
+molrs = { path = "../molrs/molrs-core", version = "0.0.12", package = "molcrafts-molrs-core", default-features = false }
+molrs_io = { path = "../molrs/molrs-io", version = "0.0.12", package = "molcrafts-molrs-io", default-features = false }
 rand = "0.9"
 ndarray = "0.17"
 log = "0.4"
-env_logger = "0.11"
+
+# Opt-in parallelism:
 rayon = { version = "1.11", optional = true }
-clap = { version = "4", features = ["derive"] }
+
+# CLI-only:
+clap = { version = "4", features = ["derive"], optional = true }
 
 [features]
 default = []
 rayon = ["dep:rayon", "molrs/rayon"]
-filesystem = ["molrs_io/filesystem"]
+# Enables the `molpack` binary and its integration tests.
+cli = ["dep:clap"]
 
 [dev-dependencies]
 criterion = "0.5"
+# Used by the example programs under `examples/`.
+env_logger = "0.11"
 
 [[bench]]
 name = "pack_end_to_end"
@@ -56,15 +64,24 @@ harness = false
 name = "objective_dispatch"
 harness = false
 
+[[bench]]
+name = "pair_kernel"
+harness = false
+
+[[bench]]
+name = "partial_gradient_merge"
+harness = false
+required-features = ["rayon"]
+
 [[bin]]
 name = "molpack"
 path = "src/bin/molpack/main.rs"
-required-features = ["filesystem"]
+required-features = ["cli"]
 
 [[test]]
 name = "cli"
 path = "tests/cli.rs"
-required-features = ["filesystem"]
+required-features = ["cli"]
 
 [profile.release]
 lto = "thin"

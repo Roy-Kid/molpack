@@ -40,17 +40,18 @@ The `pack_mixture.py` example reproduces Packmol's classic `mixture.inp`:
 
 ```python
 import molrs
-from molpack import InsideBox, Molpack, Target
+from molpack import InsideBoxRestraint, Molpack, Target
 
 water_frame = molrs.read_pdb("water.pdb")
 urea_frame  = molrs.read_pdb("urea.pdb")
 
-box = InsideBox([0, 0, 0], [40, 40, 40])
+box = InsideBoxRestraint([0, 0, 0], [40, 40, 40])
 
-water = Target("water", water_frame, count=1000).with_restraint(box)
-urea  = Target("urea",  urea_frame,  count=400).with_restraint(box)
+water = Target(water_frame, count=1000).with_name("water").with_restraint(box)
+urea  = Target(urea_frame,  count=400).with_name("urea").with_restraint(box)
 
-result = Molpack().pack([water, urea], max_loops=400, seed=1_234_567)
+packer = Molpack().with_tolerance(2.0).with_seed(1_234_567)
+result = packer.pack([water, urea], max_loops=400)
 print(f"converged={result.converged}  natoms={result.natoms}")
 ```
 
@@ -58,7 +59,7 @@ print(f"converged={result.converged}  natoms={result.natoms}")
 
 ```python
 import numpy as np
-from molpack import InsideBox, Molpack, Target
+from molpack import InsideBoxRestraint, Molpack, Target
 
 frame = {
     "atoms": {
@@ -69,9 +70,10 @@ frame = {
     }
 }
 
-water = Target("water", frame, count=100).with_restraint(
-    InsideBox([0, 0, 0], [30, 30, 30])
+water = Target(frame, count=100).with_name("water").with_restraint(
+    InsideBoxRestraint([0, 0, 0], [30, 30, 30])
 )
-result = Molpack(tolerance=2.0, progress=False).pack([water], max_loops=200, seed=42)
+packer = Molpack().with_tolerance(2.0).with_progress(False).with_seed(42)
+result = packer.pack([water], max_loops=200)
 print(f"converged={result.converged}  natoms={result.natoms}")
 ```

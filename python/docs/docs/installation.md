@@ -26,13 +26,15 @@ pip install molcrafts-molpack molcrafts-molrs
 
 ```python
 import molrs
-from molpack import InsideBox, Molpack, Target
+from molpack import InsideBoxRestraint, Molpack, Target
 
 frame = molrs.read_pdb("water.pdb")
-water = Target("water", frame, count=100).with_restraint(
-    InsideBox([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
+water = (
+    Target(frame, count=100)
+    .with_name("water")
+    .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
-result = Molpack().pack([water], max_loops=200, seed=42)
+result = Molpack().with_seed(42).pack([water], max_loops=200)
 ```
 
 `molpack` also accepts plain Python dicts-of-dicts, so `molcrafts-molrs`
@@ -54,7 +56,6 @@ This builds against the local `molpack` Rust crate under `../`.
 ## Verification
 
 ```python
-import numpy as np
 from molpack import Molpack, Target
 
 frame = {
@@ -63,6 +64,6 @@ frame = {
         "element": ["O"],
     }
 }
-target = Target("mol", frame, count=1)
-print(target)  # Target(natoms=1, count=1, name="mol")
+target = Target(frame, count=1).with_name("mol")
+print(target)  # Target(natoms=1, count=1, name=Some("mol"))
 ```

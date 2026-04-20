@@ -37,8 +37,8 @@ fn bench_case(c: &mut Criterion, case: ExampleCase) {
         b.iter_batched(
             || build_targets(case, &base).expect("build targets"),
             |targets| {
-                let mut packer = Molpack::new();
-                std::hint::black_box(packer.pack(&targets, max_loops, Some(seed)).expect("pack"));
+                let mut packer = Molpack::new().with_seed(seed);
+                std::hint::black_box(packer.pack(&targets, max_loops).expect("pack"));
             },
             BatchSize::PerIteration,
         );

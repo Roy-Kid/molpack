@@ -15,7 +15,7 @@ Part of the [molrs](https://github.com/MolCrafts/molrs) toolkit.
 **CLI**
 
 ```bash
-cargo install molcrafts-molpack --features filesystem
+cargo install molcrafts-molpack --features cli
 ```
 
 **Rust library**
@@ -86,11 +86,12 @@ let radii = [1.52, 1.20, 1.20];
 
 let target = Target::from_coords(&positions, &radii, 100)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3]));
+    .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
 
 let result = Molpack::new()
-    .tolerance(2.0)
-    .pack(&[target], 200, Some(42))?;
+    .with_tolerance(2.0)
+    .with_seed(42)
+    .pack(&[target], 200)?;
 ```
 
 **Python**

@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let water = read_pdb_frame(base.join("water.pdb"))?;
     let urea = read_pdb_frame(base.join("urea.pdb"))?;
 
-    let box_restraint = InsideBoxRestraint::cube_from_origin([0.0, 0.0, 0.0], 40.0);
+    let box_restraint = InsideBoxRestraint::cube_from_origin([0.0, 0.0, 0.0], 40.0, [false; 3]);
 
     let water_target = Target::new(water, 1000)
         .with_restraint(box_restraint)
@@ -44,18 +44,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(box_restraint)
         .with_name("urea");
 
-    let mut packer = Molpack::new();
+    let mut packer = Molpack::new().with_seed(1_234_567);
     if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.add_handler(ProgressHandler::new());
+        packer = packer.with_handler(ProgressHandler::new());
     }
     if std::env::var_os("MOLRS_PACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.add_handler(XYZHandler::new(out_dir.join("mixture.xyz"), 10));
+        packer = packer.with_handler(XYZHandler::new(out_dir.join("mixture.xyz"), 10));
     }
 
     let targets = vec![water_target, urea_target];
-    packer.pack(&targets, 400, Some(1_234_567u64))?;
+    packer.pack(&targets, 400)?;
 
     Ok(())
 }

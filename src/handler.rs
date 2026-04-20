@@ -59,8 +59,8 @@ pub struct StepInfo {
     pub radscale: F,
     /// Convergence precision target.
     pub precision: F,
-    /// Hook acceptance rates: `(type_index, acceptance_rate)`.
-    pub hook_acceptance: Vec<(usize, F)>,
+    /// Relaxer acceptance rates: `(type_index, acceptance_rate)`.
+    pub relaxer_acceptance: Vec<(usize, F)>,
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
@@ -73,7 +73,7 @@ pub trait Handler: Send {
 
     /// Called once after initialization completes, with valid `xcart` positions.
     /// Use this to write the initial conformation (e.g. [`XYZHandler`]).
-    fn on_initial(&mut self, _sys: &PackContext) {}
+    fn on_initialized(&mut self, _sys: &PackContext) {}
 
     /// Called after each outer optimization loop iteration.
     fn on_step(&mut self, info: &StepInfo, sys: &PackContext);
@@ -194,7 +194,7 @@ impl XYZHandler {
 }
 
 impl Handler for XYZHandler {
-    fn on_initial(&mut self, sys: &PackContext) {
+    fn on_initialized(&mut self, sys: &PackContext) {
         self.mol_ids = compute_mol_ids(sys);
     }
 
@@ -232,7 +232,7 @@ impl Handler for ProgressHandler {
         eprintln!("Packing {ntotmol} molecules ({ntotat} atoms)...");
     }
 
-    fn on_initial(&mut self, sys: &PackContext) {
+    fn on_initialized(&mut self, sys: &PackContext) {
         let elapsed = self.start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
         eprintln!(
             "  Initializing... done ({:.1}s)  overlap: {:.4e}  constraints: {:.4e}",
@@ -330,7 +330,7 @@ impl Default for EarlyStopHandler {
 }
 
 impl Handler for EarlyStopHandler {
-    fn on_initial(&mut self, _sys: &PackContext) {
+    fn on_initialized(&mut self, _sys: &PackContext) {
         self.prev_violation = F::INFINITY;
         self.stall_count = 0;
         self.stop = false;

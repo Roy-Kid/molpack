@@ -1,28 +1,28 @@
-//! `molpack` — Packmol-compatible molecular packing CLI.
+//! `molpack` — molecular packing CLI.
 //!
 //! Usage:
 //!   molpack [INPUT]            # read from file
-//!   molpack < input.inp        # read from stdin (Packmol-compatible)
+//!   molpack < input.inp        # read from stdin
 //!   cat input.inp | molpack    # pipe
-
-mod io;
-mod parser;
-mod runner;
 
 use std::io::Read;
 use std::path::PathBuf;
 
 use clap::Parser;
 
+use molpack::ProgressHandler;
+use molpack::script::{self, BuildResult, ScriptError};
+
 #[derive(Parser, Debug)]
 #[command(
     name = "molpack",
     version,
-    about = "Packmol-compatible molecular packing (molpack)",
+    about = "Molecular packing CLI (molpack)",
     long_about = "\
-Pack molecules into a simulation box using a Packmol-compatible .inp script.\n\
-Supports all Packmol restraint types plus additional input formats via molrs-io\n\
-(SDF/MOL, LAMMPS dump, LAMMPS data) beyond Packmol's PDB/XYZ.\n\
+Pack molecules into a simulation box from a molpack `.inp` script.\n\
+Accepts the full `.inp` keyword set plus additional input formats via\n\
+molrs-io (SDF/MOL, LAMMPS dump, LAMMPS data) alongside the standard\n\
+PDB and XYZ.\n\
 \n\
 Examples:\n\
   molpack mixture.inp\n\
@@ -30,16 +30,13 @@ Examples:\n\
   cat mixture.inp | molpack"
 )]
 struct Args {
-    /// Path to the .inp input file. Reads from stdin when omitted.
+    /// Path to the .inp script. Reads from stdin when omitted.
     input: Option<PathBuf>,
 }
 
 fn main() {
     let args = Args::parse();
 
-    // Determine base directory for resolving relative paths in the .inp file.
-    // When a file argument is given, paths are relative to its parent directory.
-    // When reading from stdin, paths are relative to the current working directory.
     let (src, base_dir) = match args.input {
         Some(ref path) => {
             let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
@@ -67,13 +64,44 @@ fn main() {
         }
     };
 
-    let parsed = parser::parse_input(&src).unwrap_or_else(|e| {
-        eprintln!("Parse error: {e}");
-        std::process::exit(1);
-    });
-
-    runner::run(parsed, &base_dir).unwrap_or_else(|e| {
+    if let Err(e) = run(&src, &base_dir) {
         eprintln!("Error: {e}");
         std::process::exit(1);
-    });
+    }
+}
+
+fn run(src: &str, base_dir: &std::path::Path) -> Result<(), ScriptError> {
+    let script_ast = script::parse(src)?;
+    let BuildResult {
+        mut packer,
+        targets,
+        output,
+        nloop,
+    } = script_ast.build(base_dir)?;
+
+    // Attach the progress handler only for the CLI; the library stays headless.
+    packer = packer.with_handler(ProgressHandler::new());
+
+    let result = packer.pack(&targets, nloop)?;
+
+    println!(
+        "Packing complete — converged: {}, fdist: {:.6}, frest: {:.6}, natoms: {}",
+        result.converged,
+        result.fdist,
+        result.frest,
+        result.natoms()
+    );
+
+    if !result.converged {
+        eprintln!(
+            "Warning: packing did not fully converge (fdist={:.6}, frest={:.6}). \
+             Consider increasing `nloop` or adjusting restraints.",
+            result.fdist, result.frest
+        );
+    }
+
+    script::write_frame(&output, &result.frame)?;
+    println!("Output written to: {}", output.display());
+
+    Ok(())
 }

@@ -13,6 +13,7 @@ from pathlib import Path
 import molrs
 
 import molpack
+from molpack import CenteringMode
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE.parent.parent / "examples" / "pack_solvprotein"
@@ -24,26 +25,42 @@ def main() -> None:
     sodium_frame = molrs.read_pdb(str(DATA / "sodium.pdb"))
     chloride_frame = molrs.read_pdb(str(DATA / "chloride.pdb"))
 
-    sphere = molpack.InsideSphere(50.0, [0.0, 0.0, 0.0])
+    sphere = molpack.InsideSphereRestraint([0.0, 0.0, 0.0], 50.0)
 
     protein = (
-        molpack.Target("protein", protein_frame, count=1)
-        .with_center()
+        molpack.Target(protein_frame, count=1)
+        .with_name("protein")
+        .with_centering(CenteringMode.CENTER)
         .fixed_at([0.0, 0.0, 0.0])
     )
-    water = molpack.Target("water", water_frame, count=1000).with_restraint(sphere)
-    sodium = molpack.Target("sodium", sodium_frame, count=30).with_restraint(sphere)
-    chloride = molpack.Target("chloride", chloride_frame, count=20).with_restraint(
-        sphere
+    water = (
+        molpack.Target(water_frame, count=1000)
+        .with_name("water")
+        .with_restraint(sphere)
+    )
+    sodium = (
+        molpack.Target(sodium_frame, count=30)
+        .with_name("sodium")
+        .with_restraint(sphere)
+    )
+    chloride = (
+        molpack.Target(chloride_frame, count=20)
+        .with_name("chloride")
+        .with_restraint(sphere)
     )
 
     show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
-    packer = molpack.Molpack(tolerance=2.0, precision=0.01).with_progress(show_progress)
+    packer = (
+        molpack.Molpack()
+        .with_tolerance(2.0)
+        .with_precision(0.01)
+        .with_progress(show_progress)
+        .with_seed(1_234_567)
+    )
 
     result = packer.pack(
         [protein, water, sodium, chloride],
         max_loops=800,
-        seed=1_234_567,
     )
 
     print(

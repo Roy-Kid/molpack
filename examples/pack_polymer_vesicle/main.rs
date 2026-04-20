@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 use molpack::{
     InsideBoxRestraint, InsideSphereRestraint, Molpack, OutsideSphereRestraint, ProgressHandler,
-    Target, TorsionMcHook, XYZHandler,
+    Target, TorsionMcRelaxer, XYZHandler,
 };
 use molrs::element::Element;
 use molrs::hydrogens::add_hydrogens;
@@ -307,7 +307,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for i in 0..n_chains {
         let (graph, coords, radii, elements) = polyethylene_chain(n_carbons, 1.54, &mut rng);
 
-        let hook = TorsionMcHook::new(&graph)
+        let hook = TorsionMcRelaxer::new(&graph)
             .with_self_avoidance(0.75)
             .with_temperature(0.5)
             .with_steps(20)
@@ -325,14 +325,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Inner lipid leaflet
     let lipid_inner = Target::new(lipid.clone(), 90)
-        .with_restraint_for_atoms(&[37], InsideSphereRestraint::new(origin, 14.0))
-        .with_restraint_for_atoms(&[5], OutsideSphereRestraint::new(origin, 26.0))
+        .with_atom_restraint(&[36], InsideSphereRestraint::new(origin, 14.0))
+        .with_atom_restraint(&[4], OutsideSphereRestraint::new(origin, 26.0))
         .with_name("lipid_inner");
 
     // Outer lipid leaflet
     let lipid_outer = Target::new(lipid, 300)
-        .with_restraint_for_atoms(&[5], InsideSphereRestraint::new(origin, 29.0))
-        .with_restraint_for_atoms(&[37], OutsideSphereRestraint::new(origin, 41.0))
+        .with_atom_restraint(&[4], InsideSphereRestraint::new(origin, 29.0))
+        .with_atom_restraint(&[36], OutsideSphereRestraint::new(origin, 41.0))
         .with_name("lipid_outer");
 
     // Outer water shell (reduced count for faster demo)
@@ -340,6 +340,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(InsideBoxRestraint::new(
             [-47.5, -47.5, -47.5],
             [47.5, 47.5, 47.5],
+            [false; 3],
         ))
         .with_restraint(OutsideSphereRestraint::new(origin, 43.0))
         .with_name("water_outer");
@@ -351,15 +352,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Pack ────────────────────────────────────────────────────────────
     let out_dir = PathBuf::from(file!()).parent().unwrap().to_path_buf();
 
-    let mut packer = Molpack::new();
+    let mut packer = Molpack::new().with_seed(42);
     if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.add_handler(ProgressHandler::new());
+        packer = packer.with_handler(ProgressHandler::new());
     }
     if std::env::var_os("MOLRS_PACK_EXAMPLE_XYZ").is_some() {
-        packer = packer.add_handler(XYZHandler::new(out_dir.join("polymer_vesicle.xyz"), 10));
+        packer = packer.with_handler(XYZHandler::new(out_dir.join("polymer_vesicle.xyz"), 10));
     }
 
-    let result = packer.pack(&targets, 500, Some(42))?;
+    let result = packer.pack(&targets, 500)?;
 
     eprintln!(
         "Done — {} atoms, converged={}, fdist={:.2e}, frest={:.2e}",
