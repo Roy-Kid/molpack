@@ -19,8 +19,8 @@ name = "molpack"
 [dependencies]
 # Path deps are for local development; `version` fields are used by
 # `cargo publish` to resolve against the crates.io registry.
-molrs = { path = "../molrs/molrs-core", version = "0.0.8", package = "molcrafts-molrs-core", default-features = false }
-molrs_io = { path = "../molrs/molrs-io", version = "0.0.8", package = "molcrafts-molrs-io" }
+molrs = { path = "../molrs/molrs-core", version = "0.0.12", package = "molcrafts-molrs-core", default-features = false }
+molrs_io = { path = "../molrs/molrs-io", version = "0.0.12", package = "molcrafts-molrs-io" }
 rand = "0.9"
 ndarray = "0.17"
 log = "0.4"
