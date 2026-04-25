@@ -76,6 +76,48 @@ fn exits_nonzero_on_parse_error() {
     assert!(!out.status.success());
 }
 
+#[test]
+fn exits_nonzero_on_unknown_top_level_keyword() {
+    // Regression: the parser used to silently drop unknown top-level
+    // keywords, so an ignored `pbc` burnt 42 GB of RAM on a cell grid
+    // of ~10⁸ cells. The CLI now surfaces unknown keywords as an
+    // error, exits non-zero, and mentions the offending token.
+    let bad_inp = "\
+tolerance 2.0
+output /tmp/x.pdb
+wibble 1 2 3
+
+structure mol.pdb
+  number 1
+  inside box 0. 0. 0. 20. 20. 20.
+end structure
+";
+    let out = Command::new(bin_path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            child
+                .stdin
+                .as_mut()
+                .unwrap()
+                .write_all(bad_inp.as_bytes())?;
+            child.wait_with_output()
+        })
+        .expect("run");
+    assert!(
+        !out.status.success(),
+        "CLI should exit non-zero on unknown keyword"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("wibble"),
+        "expected the offending keyword to appear in stderr, got: {stderr}"
+    );
+}
+
 // ── smoke tests (run actual packing on canonical examples) ──────────────────
 
 /// Pack the mixture example and verify the output file is created.
@@ -120,6 +162,56 @@ fn smoke_pack_mixture() {
 
     // Clean up.
     let _ = std::fs::remove_file(&out_path);
+}
+
+/// Regression: a script with only a `pbc` directive and no `inside`
+/// restraint must pack in O(seconds). Before the parser fix, `pbc`
+/// was silently dropped and the packer fell back to a 2000 Å cell
+/// grid (~10⁸ cells, 42 GB). With `pbc` wired through, the cell grid
+/// is sized from the PBC box and the job finishes immediately.
+#[test]
+fn smoke_pack_pbc_only_finishes_quickly() {
+    let dir = example_dir("pack_mixture");
+    let out_path = dir.join("_ci_pbc_only.pdb");
+    let _ = std::fs::remove_file(&out_path);
+
+    let inp = format!(
+        "tolerance 2.0\nseed 1234567\nfiletype pdb\noutput {}\n\
+         pbc 30.0 30.0 30.0\n\n\
+         structure water.pdb\n  number 10\nend structure\n",
+        out_path.display()
+    );
+
+    let start = std::time::Instant::now();
+    let out = Command::new(bin_path())
+        .current_dir(&dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            child.stdin.as_mut().unwrap().write_all(inp.as_bytes())?;
+            child.wait_with_output()
+        })
+        .expect("run molpack");
+    let elapsed = start.elapsed();
+
+    let _ = std::fs::remove_file(&out_path);
+
+    assert!(
+        out.status.success(),
+        "molpack exited {:?}\nstderr: {}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // Previously this configuration hung indefinitely allocating cells.
+    // Giving ourselves a generous 30 s ceiling still catches a regression
+    // without being flaky on a loaded CI runner.
+    assert!(
+        elapsed.as_secs() < 30,
+        "pbc-only pack should finish fast; took {elapsed:?}"
+    );
 }
 
 /// Verify file-argument mode resolves paths relative to the .inp directory.

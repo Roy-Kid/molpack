@@ -11,6 +11,14 @@ use crate::error::PackError;
 pub enum ScriptError {
     /// Parse error with line number and diagnostic message.
     Parse { line: usize, message: String },
+    /// An unrecognised keyword appeared where a known one was expected.
+    /// Unlike a generic parse error, this carries the offending token and
+    /// the context block so error messages can suggest fixes.
+    UnknownKeyword {
+        line: usize,
+        keyword: String,
+        context: &'static str,
+    },
     /// Script is missing a required `output` keyword.
     MissingOutput,
     /// Script contains zero `structure` blocks.
@@ -27,6 +35,17 @@ impl fmt::Display for ScriptError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Parse { line, message } => write!(f, "line {line}: {message}"),
+            Self::UnknownKeyword {
+                line,
+                keyword,
+                context,
+            } => write!(
+                f,
+                "line {line}: unknown keyword `{keyword}` in {context}. \
+                 Silently dropping it risks wrong semantics (e.g. \
+                 `pbc` that was ignored blew the cell grid); if this \
+                 keyword should be accepted, add it to the parser",
+            ),
             Self::MissingOutput => write!(f, "missing required `output` keyword"),
             Self::NoStructures => write!(f, "no `structure` blocks found in script"),
             Self::UnclosedBlock(kind) => write!(f, "unexpected EOF: unclosed `{kind}` block"),

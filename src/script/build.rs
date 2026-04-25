@@ -38,6 +38,9 @@ impl Script {
         if let Some(seed) = self.seed {
             packer = packer.with_seed(seed);
         }
+        if let Some(pbc) = self.pbc {
+            packer = packer.with_periodic_box(pbc.min, pbc.max);
+        }
 
         let targets: Vec<Target> = self
             .structures
