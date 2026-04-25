@@ -153,6 +153,9 @@ pub struct PyPacker {
     pub(crate) seed: Option<u64>,
     pub(crate) parallel_eval: Option<bool>,
     pub(crate) progress: bool,
+    /// Global periodic-boundary box — `(min, max)` in Å. Every axis is
+    /// treated as periodic.
+    pub(crate) periodic_box: Option<([F; 3], [F; 3])>,
     pub(crate) py_handlers: Vec<Py<pyo3::types::PyAny>>,
     pub(crate) global_restraints: Vec<Py<pyo3::types::PyAny>>,
 }
@@ -171,6 +174,7 @@ impl Default for PyPacker {
             seed: None,
             parallel_eval: None,
             progress: false,
+            periodic_box: None,
             py_handlers: Vec::new(),
             global_restraints: Vec::new(),
         }
@@ -211,6 +215,15 @@ impl PyPacker {
     fn with_init_box_half_size(&self, half_size: NpF) -> Self {
         let mut cloned = self.clone_fields();
         cloned.init_box_half_size = Some(half_size);
+        cloned
+    }
+
+    /// Declare a global periodic-boundary box (Packmol ``pbc``). Every
+    /// axis is periodic. See :meth:`Molpack.with_periodic_box` in the
+    /// Rust API for the full semantics.
+    fn with_periodic_box(&self, min: [NpF; 3], max: [NpF; 3]) -> Self {
+        let mut cloned = self.clone_fields();
+        cloned.periodic_box = Some((min, max));
         cloned
     }
 
@@ -307,6 +320,9 @@ impl PyPacker {
         if let Some(v) = self.parallel_eval {
             packer = packer.with_parallel_eval(v);
         }
+        if let Some((min, max)) = self.periodic_box {
+            packer = packer.with_periodic_box(min, max);
+        }
 
         for gr in &self.global_restraints {
             let shared = extract_restraint(gr.bind(py))?;
@@ -363,6 +379,7 @@ impl PyPacker {
             seed: self.seed,
             parallel_eval: self.parallel_eval,
             progress: self.progress,
+            periodic_box: self.periodic_box,
             py_handlers: self.py_handlers.iter().map(|h| h.clone_ref(py)).collect(),
             global_restraints: self
                 .global_restraints

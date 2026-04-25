@@ -31,4 +31,4 @@ mod parser;
 pub use build::BuildResult;
 pub use error::ScriptError;
 pub use io::{read_frame, write_frame};
-pub use parser::{AtomGroup, RestraintSpec, Script, Structure, parse};
+pub use parser::{AtomGroup, PbcSpec, RestraintSpec, Script, Structure, parse};

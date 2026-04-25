@@ -2,8 +2,11 @@
 //!
 //! The format mirrors the keyword-driven input Packmol has used for two
 //! decades, but the parser and types here belong to molpack and are
-//! exposed as first-class library API. Unrecognised keywords are skipped
-//! so scripts written against newer features remain readable.
+//! exposed as first-class library API. Unrecognised keywords are a
+//! hard error: silently dropping them risks wrong semantics (e.g., an
+//! ignored `pbc` directive that leaves the packer guessing a box size
+//! from the initial random placement, blowing the cell grid to
+//! gigabytes of RAM).
 
 use std::path::PathBuf;
 
@@ -33,7 +36,24 @@ pub struct Script {
     /// Molpack API.
     #[allow(dead_code)]
     pub avoid_overlap: bool,
+    /// Periodic-boundary box (`pbc` keyword). When set, it seeds the
+    /// packer's cell grid so the initial ±`sidemax` random placement
+    /// never drives `ncells` to anything astronomical.
+    pub pbc: Option<PbcSpec>,
     pub structures: Vec<Structure>,
+}
+
+/// Periodic-boundary box declared at the top level via `pbc`.
+///
+/// Packmol accepts two forms (`getinp.f90`):
+/// - `pbc X Y Z`                           → `min = [0,0,0]`, `max = [X,Y,Z]`
+/// - `pbc X0 Y0 Z0  X1 Y1 Z1`              → `min = [X0,Y0,Z0]`, `max = [X1,Y1,Z1]`
+///
+/// Both forms declare periodicity on every axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PbcSpec {
+    pub min: [f64; 3],
+    pub max: [f64; 3],
 }
 
 /// One `structure … end structure` block.
@@ -101,6 +121,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
     let mut output: Option<PathBuf> = None;
     let mut nloop: usize = 400;
     let mut avoid_overlap = true;
+    let mut pbc: Option<PbcSpec> = None;
     let mut structures: Vec<Structure> = Vec::new();
 
     enum State {
@@ -171,6 +192,10 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                     avoid_overlap = val != "no" && val != "false" && val != "0";
                     State::TopLevel
                 }
+                "pbc" => {
+                    pbc = Some(parse_pbc(&tokens, lineno)?);
+                    State::TopLevel
+                }
                 "structure" => {
                     let path = tokens
                         .get(1)
@@ -184,7 +209,9 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                         fixed: None,
                     })
                 }
-                _ => State::TopLevel, // unknown top-level keyword — skip
+                _ => {
+                    return Err(unknown_keyword(lineno, &keyword, "top-level"));
+                }
             },
 
             // ── Inside a structure block ────────────────────────────────────
@@ -249,7 +276,9 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                         },
                     }
                 }
-                _ => State::InStructure(s),
+                _ => {
+                    return Err(unknown_keyword(lineno, &keyword, "structure block"));
+                }
             },
 
             // ── Inside an atoms sub-block ───────────────────────────────────
@@ -297,10 +326,9 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                         group,
                     }
                 }
-                _ => State::InAtoms {
-                    structure: s,
-                    group,
-                },
+                _ => {
+                    return Err(unknown_keyword(lineno, &keyword, "atoms block"));
+                }
             },
         };
     }
@@ -318,6 +346,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
         output: output.ok_or(ScriptError::MissingOutput)?,
         nloop,
         avoid_overlap,
+        pbc,
         structures,
     })
 }
@@ -379,6 +408,48 @@ fn parse_plane_below(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, Sc
     Ok(RestraintSpec::BelowPlane { normal, distance })
 }
 
+/// Parse `pbc` in either the 3-value (`pbc X Y Z`) or 6-value
+/// (`pbc X0 Y0 Z0  X1 Y1 Z1`) form — matching packmol `getinp.f90`
+/// lines 175-191.
+fn parse_pbc(tokens: &[&str], lineno: usize) -> Result<PbcSpec, ScriptError> {
+    // tokens[0] == "pbc"; the remaining tokens carry the numeric payload.
+    match tokens.len() - 1 {
+        3 => {
+            let size = parse_vec3(tokens, 1, "pbc box size", lineno)?;
+            if size.iter().any(|&v| v <= 0.0) {
+                return Err(parse_err(
+                    lineno,
+                    format!("`pbc` box length must be positive on every axis; got {size:?}"),
+                ));
+            }
+            Ok(PbcSpec {
+                min: [0.0; 3],
+                max: size,
+            })
+        }
+        6 => {
+            let min = parse_vec3(tokens, 1, "pbc min", lineno)?;
+            let max = parse_vec3(tokens, 4, "pbc max", lineno)?;
+            for k in 0..3 {
+                if max[k] <= min[k] {
+                    return Err(parse_err(
+                        lineno,
+                        format!(
+                            "`pbc` max must exceed min on every axis; axis {k}: min={}, max={}",
+                            min[k], max[k]
+                        ),
+                    ));
+                }
+            }
+            Ok(PbcSpec { min, max })
+        }
+        n => Err(parse_err(
+            lineno,
+            format!("`pbc` expects 3 or 6 numeric values, got {n}"),
+        )),
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Numeric helpers
 // ──────────────────────────────────────────────────────────────────────────────
@@ -429,6 +500,14 @@ fn parse_err(lineno: usize, message: impl Into<String>) -> ScriptError {
     ScriptError::Parse {
         line: lineno,
         message: message.into(),
+    }
+}
+
+fn unknown_keyword(lineno: usize, keyword: &str, context: &'static str) -> ScriptError {
+    ScriptError::UnknownKeyword {
+        line: lineno,
+        keyword: keyword.to_string(),
+        context,
     }
 }
 
@@ -585,5 +664,114 @@ structure mol.pdb
 ";
         let err = parse(src).expect_err("should fail");
         assert!(matches!(err, ScriptError::UnclosedBlock("structure")));
+    }
+
+    #[test]
+    fn parse_pbc_three_values() {
+        let src = "\
+tolerance 2.0
+output out.pdb
+pbc 100.0 80.0 60.0
+
+structure mol.pdb
+  number 1
+end structure
+";
+        let inp = parse(src).expect("parse failed");
+        let pbc = inp.pbc.expect("pbc should be set");
+        assert_eq!(pbc.min, [0.0, 0.0, 0.0]);
+        assert_eq!(pbc.max, [100.0, 80.0, 60.0]);
+    }
+
+    #[test]
+    fn parse_pbc_six_values() {
+        let src = "\
+tolerance 2.0
+output out.pdb
+pbc -50.0 -40.0 -30.0  50.0 40.0 30.0
+
+structure mol.pdb
+  number 1
+end structure
+";
+        let inp = parse(src).expect("parse failed");
+        let pbc = inp.pbc.expect("pbc should be set");
+        assert_eq!(pbc.min, [-50.0, -40.0, -30.0]);
+        assert_eq!(pbc.max, [50.0, 40.0, 30.0]);
+    }
+
+    #[test]
+    fn parse_pbc_rejects_bad_arity() {
+        let src = "\
+output out.pdb
+pbc 100.0 80.0
+
+structure mol.pdb
+  number 1
+end structure
+";
+        let err = parse(src).expect_err("should fail");
+        assert!(matches!(err, ScriptError::Parse { .. }));
+    }
+
+    #[test]
+    fn parse_pbc_rejects_non_positive_extent() {
+        let src = "\
+output out.pdb
+pbc 100.0 0.0 60.0
+
+structure mol.pdb
+  number 1
+end structure
+";
+        let err = parse(src).expect_err("should fail");
+        assert!(matches!(err, ScriptError::Parse { .. }));
+    }
+
+    #[test]
+    fn parse_unknown_top_level_keyword_errors() {
+        // Regression: parser used to silently drop unknown top-level
+        // keywords, which caused `pbc` to be dropped and drove the cell
+        // grid to ~10⁸ cells at pack time.
+        let src = "\
+output out.pdb
+wibble 1 2 3
+
+structure mol.pdb
+  number 1
+end structure
+";
+        let err = parse(src).expect_err("should fail");
+        match err {
+            ScriptError::UnknownKeyword {
+                keyword, context, ..
+            } => {
+                assert_eq!(keyword, "wibble");
+                assert_eq!(context, "top-level");
+            }
+            other => panic!("expected UnknownKeyword, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_unknown_keyword_inside_structure_errors() {
+        let src = "\
+output out.pdb
+
+structure mol.pdb
+  number 1
+  nonsense foo
+end structure
+";
+        let err = parse(src).expect_err("should fail");
+        match err {
+            ScriptError::UnknownKeyword {
+                keyword, context, ..
+            } => {
+                assert_eq!(keyword, "nonsense");
+                assert_eq!(context, "structure block");
+            }
+            other => panic!("expected UnknownKeyword, got {other:?}"),
+        }
     }
 }

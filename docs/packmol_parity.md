@@ -20,6 +20,16 @@
   - `outside sphere`
   - `above/below plane`
   - fixed molecule placement
+- Global periodicity:
+  - `pbc X Y Z` and `pbc X0 Y0 Z0  X1 Y1 Z1` as in Packmol `getinp.f90`
+    — wired through to the packer's cell grid so Phase 1 never
+    allocates a grid for the fallback ±`sidemax` placement box.
+- Script parser strictness:
+  - Packmol's `getinp.f90` rejects unknown top-level keywords via an
+    explicit allow-list; molpack mirrors that posture — the parser
+    returns `ScriptError::UnknownKeyword` rather than silently
+    dropping tokens, because a dropped `pbc` caused a 42 GB cell-grid
+    allocation before the fix.
 - Determinism:
   - Explicit seed support; same seed used for Packmol and molpack comparison runs.
 

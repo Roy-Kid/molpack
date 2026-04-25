@@ -141,6 +141,74 @@ fn conflicting_periodic_boxes_rejected() {
     );
 }
 
+// ── PBC via packer-level with_periodic_box ─────────────────────────────────
+
+#[test]
+fn with_periodic_box_caps_cell_grid() {
+    // Regression: without a PBC declaration *and* without an inside
+    // restraint, the packer used to fall back to inferring a box from
+    // the ±sidemax initial placement, driving the cell grid to ~10⁸
+    // cells (42 GB RAM, effectively hanging). `with_periodic_box`
+    // bypasses that fallback even when no restraint declares a box.
+    let (coords, radii) = single_atom();
+    let target = Target::from_coords(&coords, &radii, 4); // no restraints at all
+    let result = Molpack::new()
+        .with_seed(42)
+        .with_periodic_box([0.0; 3], [30.0; 3])
+        .pack(&[target], 2);
+    assert!(
+        result.is_ok(),
+        "expected pack to return quickly under a 30 Å periodic box, got: {result:?}"
+    );
+    assert_eq!(result.unwrap().natoms(), 4);
+}
+
+#[test]
+fn with_periodic_box_and_restraint_agree() {
+    // Packer-level PBC plus an InsideBoxRestraint declaring exactly
+    // the same box is fine — derive_periodic_box sees matching
+    // declarations and accepts the run.
+    let target = Target::from_coords(&water_positions(), &water_radii(), 2).with_restraint(
+        InsideBoxRestraint::new([0.0, 0.0, 0.0], [30.0, 30.0, 30.0], [true; 3]),
+    );
+    let result = Molpack::new()
+        .with_seed(42)
+        .with_periodic_box([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
+        .pack(&[target], 2);
+    assert!(result.is_ok(), "expected agreement, got: {result:?}");
+    assert_eq!(result.unwrap().natoms(), 6);
+}
+
+#[test]
+fn with_periodic_box_conflicts_with_restraint() {
+    // Packer-level PBC that disagrees with a restraint-level periodic
+    // box on bounds → ConflictingPeriodicBoxes.
+    let target = Target::from_coords(&water_positions(), &water_radii(), 1)
+        .with_restraint(InsideBoxRestraint::new([0.0; 3], [30.0; 3], [true; 3]));
+    let result = Molpack::new()
+        .with_seed(42)
+        .with_periodic_box([0.0; 3], [40.0; 3])
+        .pack(&[target], 2);
+    assert!(
+        matches!(result, Err(PackError::ConflictingPeriodicBoxes { .. })),
+        "expected ConflictingPeriodicBoxes, got: {result:?}"
+    );
+}
+
+#[test]
+fn with_periodic_box_rejects_zero_extent() {
+    let (coords, radii) = single_atom();
+    let target = Target::from_coords(&coords, &radii, 1);
+    let result = Molpack::new()
+        .with_seed(42)
+        .with_periodic_box([0.0; 3], [10.0, 0.0, 10.0])
+        .pack(&[target], 2);
+    assert!(
+        matches!(result, Err(PackError::InvalidPBCBox { .. })),
+        "expected InvalidPBCBox, got: {result:?}"
+    );
+}
+
 // ── error cases ────────────────────────────────────────────────────────────
 
 #[test]

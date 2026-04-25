@@ -103,6 +103,12 @@ pub struct Molpack {
     /// Run the pair-kernel reductions on rayon. Off by default: see
     /// [`with_parallel_eval`][Self::with_parallel_eval].
     parallel_eval: bool,
+    /// Global periodic-boundary box, as set by
+    /// [`with_periodic_box`][Self::with_periodic_box] (Packmol `pbc`
+    /// keyword). When both this and a restraint-declared PBC are
+    /// present, they must match exactly or `pack()` returns
+    /// [`PackError::ConflictingPeriodicBoxes`].
+    periodic_box: Option<PeriodicSpec>,
 }
 
 impl Default for Molpack {
@@ -135,6 +141,7 @@ impl Molpack {
             perturb: true,
             seed: 0,
             parallel_eval: false,
+            periodic_box: None,
         }
     }
 
@@ -191,6 +198,21 @@ impl Molpack {
     /// Packmol `sidemax`).
     pub fn with_init_box_half_size(mut self, f: F) -> Self {
         self.init_box_half_size = f;
+        self
+    }
+
+    /// Declare a global periodic-boundary box (Packmol `pbc`). Every axis
+    /// is treated as periodic. When set, the packer's cell grid is built
+    /// from `max - min`, bypassing the fallback that derives a box from
+    /// post-Phase-1 atom positions — which can be ±`sidemax` wide when
+    /// the script has no spatial constraints and drives `ncells` to
+    /// 10⁸+ cells.
+    ///
+    /// If any restraint also declares a `periodic_box()`, the two must
+    /// match exactly (bounds + flags) or `pack()` returns
+    /// [`PackError::ConflictingPeriodicBoxes`].
+    pub fn with_periodic_box(mut self, min: [F; 3], max: [F; 3]) -> Self {
+        self.periodic_box = Some((min, max, [true; 3]));
         self
     }
 
@@ -280,11 +302,32 @@ impl Molpack {
                 .collect();
             &broadcast_targets
         };
-        // Derive the system periodic box by scanning every restraint on
-        // every target for an override of `Restraint::periodic_box`. At
-        // most one periodic box may be declared per run; multiple
-        // declarations must agree exactly (bounds + per-axis flags).
-        let pbc = derive_periodic_box(targets)?;
+        // Derive the system periodic box from two independent sources:
+        //   1. `Molpack::with_periodic_box` — global PBC (script `pbc`).
+        //   2. `Restraint::periodic_box` — per-restraint declarations,
+        //      e.g. `InsideBoxRestraint` with any axis marked periodic.
+        //
+        // The two must not disagree; if both are present they must
+        // match exactly (same bounds, same per-axis flags). Validate
+        // the global PBC extent here since `derive_periodic_box`
+        // already does this for restraint-sourced boxes.
+        if let Some((min, max, _)) = self.periodic_box {
+            let length = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+            if length.iter().any(|&v| v <= 0.0) {
+                return Err(PackError::InvalidPBCBox { min, max });
+            }
+        }
+        let pbc = match (self.periodic_box, derive_periodic_box(targets)?) {
+            (None, derived) => derived,
+            (Some(global), None) => Some(global),
+            (Some(global), Some(derived)) if global == derived => Some(global),
+            (Some(global), Some(derived)) => {
+                return Err(PackError::ConflictingPeriodicBoxes {
+                    first: global,
+                    second: derived,
+                });
+            }
+        };
 
         let mut rng = SmallRng::seed_from_u64(self.seed);
 

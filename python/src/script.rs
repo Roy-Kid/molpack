@@ -98,6 +98,9 @@ pub fn load_script(py: Python<'_>, path: PathBuf) -> PyResult<PyScriptJob> {
     let mut packer = PyPacker::default();
     packer.tolerance = Some(script_ast.tolerance);
     packer.seed = script_ast.seed;
+    if let Some(pbc) = script_ast.pbc {
+        packer.periodic_box = Some((pbc.min, pbc.max));
+    }
 
     let targets: Vec<PyTarget> = built
         .targets

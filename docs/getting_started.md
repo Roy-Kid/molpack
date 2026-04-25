@@ -45,6 +45,7 @@ seed 42                # random seed for reproducibility (optional)
 filetype pdb           # input format for all structure files (optional)
 output packed.pdb      # output file; format inferred from extension
 nloop 400              # max outer-loop iterations (default 400)
+pbc 40.0 40.0 40.0     # optional: fully-periodic box [0,0,0]..[40,40,40]
 
 # One block per molecule type
 structure water.pdb
@@ -57,6 +58,24 @@ structure urea.pdb
   inside box 0. 0. 0. 40. 40. 40.
 end structure
 ```
+
+**`pbc` keyword** — declares a fully-periodic box (every axis wraps),
+matching Packmol's `pbc`. Two forms are accepted:
+
+- `pbc X Y Z` — `min = [0, 0, 0]`, `max = [X, Y, Z]`
+- `pbc X0 Y0 Z0  X1 Y1 Z1` — explicit `min`/`max`
+
+When a script sets `pbc`, the packer's cell grid is built directly from
+that box. Without either a `pbc` directive or an `inside`-style
+restraint the packer falls back to inferring a box from the initial
+random placement (half-width defaults to 1000 Å), which drives the cell
+grid to tens of millions of cells — so always give the packer a
+spatial constraint.
+
+**Unknown keywords are rejected.** The parser returns a
+[`ScriptError::UnknownKeyword`](crate::script::ScriptError) rather than
+silently dropping them — a silent `pbc` drop used to burn 40+ GB of
+RAM before the packer even started.
 
 **Restraint keywords** (all Packmol restraint types are supported):
 
@@ -248,14 +267,23 @@ let target = Target::from_coords(pos, rad, 1)  // relaxers require count == 1
 
 ## Free versus periodic boundary
 
-Free boundary is the default. Periodic boundaries are declared **on
-the `InsideBoxRestraint` itself** — the third argument is a per-axis
-`[bool; 3]` marking which axes wrap:
+Free boundary is the default. There are two ways to declare PBC:
+
+**On the packer** (fully periodic box, equivalent to the script's
+`pbc` keyword):
+
+```rust,no_run
+# use molpack::Molpack;
+let packer = Molpack::new().with_periodic_box([0.0; 3], [30.0; 3]);
+```
+
+**On an `InsideBoxRestraint`** (per-axis control, e.g. for slab
+geometries):
 
 ```rust,no_run
 # use molpack::{InsideBoxRestraint, Target};
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
-// Fully-periodic (Packmol-style 3D PBC):
+// Fully-periodic (Packmol-style 3D PBC) via a restraint:
 let target = Target::from_coords(pos, rad, 100).with_restraint(
     InsideBoxRestraint::new([0.0; 3], [30.0; 3], [true; 3]),
 );
@@ -272,10 +300,11 @@ let target = Target::from_coords(pos, rad, 100).with_restraint(
 );
 ```
 
-The packer derives the system PBC by scanning restraints. Zero-length
-axes return [`PackError::InvalidPBCBox`](crate::PackError); two
-restraints declaring *different* periodic boxes return
-[`PackError::ConflictingPeriodicBoxes`](crate::PackError).
+When a `pack()` call resolves PBC from both a packer-level
+`with_periodic_box` **and** a restraint-level declaration, the two
+must match exactly (bounds + per-axis flags) or
+[`PackError::ConflictingPeriodicBoxes`](crate::PackError) is returned.
+Zero-length axes return [`PackError::InvalidPBCBox`](crate::PackError).
 
 ## Running the canonical examples
 

@@ -99,6 +99,68 @@ class TestReproducibility:
 
 
 @pytest.mark.integration
+class TestPeriodicBox:
+    """Packer-level PBC and script `pbc` keyword integration."""
+
+    def test_with_periodic_box_without_restraint(self, water_frame):
+        # Regression: before the parser/plumbing fix, a target with no
+        # spatial restraint fell back to a 2000 Å inferred box and
+        # allocated ~10⁸ cells. With `with_periodic_box` in place the
+        # cell grid is sized directly from the PBC box.
+        target = molpack.Target(water_frame, count=5).with_name("water")
+        result = (
+            _packer()
+            .with_seed(42)
+            .with_periodic_box((0.0, 0.0, 0.0), (20.0, 20.0, 20.0))
+            .pack([target], max_loops=50)
+        )
+        assert result.natoms == 5 * water_frame["atoms"].nrows
+
+    def test_conflicting_packer_and_restraint_pbc(self, water_frame):
+        # Packer-level PBC of 30 Å conflicts with restraint-level PBC
+        # of 40 Å → ConflictingPeriodicBoxesError.
+        target = (
+            molpack.Target(water_frame, count=1)
+            .with_name("water")
+            .with_restraint(
+                molpack.InsideBoxRestraint(
+                    [0.0, 0.0, 0.0],
+                    [40.0, 40.0, 40.0],
+                    periodic=(True, True, True),
+                )
+            )
+        )
+        with pytest.raises(molpack.ConflictingPeriodicBoxesError):
+            (
+                _packer()
+                .with_seed(42)
+                .with_periodic_box((0.0, 0.0, 0.0), (30.0, 30.0, 30.0))
+                .pack([target], max_loops=10)
+            )
+
+    def test_load_script_wires_pbc_to_packer(self, tmp_path):
+        # `load_script` must surface a script-level `pbc` directive as
+        # packer-level PBC so a pbc-only script (no `inside`) finishes
+        # in seconds instead of hanging on a ~10⁸-cell grid.
+        water_pdb = DATA_ROOT / "pack_mixture" / "water.pdb"
+        out_pdb = tmp_path / "out.pdb"
+        script_path = tmp_path / "pbc_only.inp"
+        script_path.write_text(
+            "tolerance 2.0\n"
+            "seed 1234567\n"
+            "filetype pdb\n"
+            f"output {out_pdb}\n"
+            "pbc 25.0 25.0 25.0\n\n"
+            f"structure {water_pdb}\n"
+            "  number 8\n"
+            "end structure\n"
+        )
+        job = molpack.load_script(script_path)
+        result = job.packer.with_progress(False).pack(job.targets, max_loops=job.nloop)
+        assert result.natoms == 8 * 3  # water.pdb = 3 atoms/molecule
+
+
+@pytest.mark.integration
 class TestCompositeRestraints:
     def test_box_and_outside_sphere(self, water_frame):
         target = (
