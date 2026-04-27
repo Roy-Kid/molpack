@@ -7,11 +7,19 @@ copyright = "Copyright &copy; 2026 MolCrafts"
 
 nav = [
   { "Home" = "index.md" },
-  { "Getting started" = "getting_started.md" },
-  { "Concepts" = "concepts.md" },
-  { "Architecture" = "architecture.md" },
-  { "Extending" = "extending.md" },
-  { "Packmol parity" = "packmol_parity.md" },
+  { "Get Started" = [
+    "install.md",
+    "getting_started.md",
+  ] },
+  { "Guide" = [
+    "concepts.md",
+    "examples.md",
+    "packmol_parity.md",
+  ] },
+  { "Internals" = [
+    "architecture.md",
+    "extending.md",
+  ] },
 ]
 
 [project.theme]
@@ -30,6 +38,8 @@ features = [
   "navigation.instant.prefetch",
   "navigation.path",
   "navigation.sections",
+  "navigation.tabs",
+  "navigation.tabs.sticky",
   "navigation.top",
   "navigation.tracking",
   "search.highlight",

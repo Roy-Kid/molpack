@@ -46,6 +46,41 @@ pub(crate) fn vdw_radius_for(element: &str) -> NpF {
     }
 }
 
+/// Build a [`Target`] from any frame-like Python object plus a copy count.
+///
+/// Used by both [`PyTarget::new`] and the script loader so they share one
+/// duck-typed extraction path. The frame may be a [`molrs.Frame`] (block
+/// columns via `.view(name)`), a `molpy.Frame`, or a plain dict.
+pub(crate) fn target_from_frame(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Target> {
+    let atoms = frame
+        .get_item("atoms")
+        .map_err(|_| PyValueError::new_err(r#"frame must have an "atoms" block"#))?;
+
+    let x: Vec<NpF> = read_column(&atoms, "x")?;
+    let y: Vec<NpF> = read_column(&atoms, "y")?;
+    let z: Vec<NpF> = read_column(&atoms, "z")?;
+    let elements: Vec<String> = read_element_column(&atoms)?;
+
+    let n = x.len();
+    if y.len() != n || z.len() != n || elements.len() != n {
+        return Err(PyValueError::new_err(
+            "x, y, z, and element arrays must all have the same length",
+        ));
+    }
+
+    let coords: Vec<[F; 3]> = x
+        .iter()
+        .zip(y.iter())
+        .zip(z.iter())
+        .map(|((xi, yi), zi)| [*xi, *yi, *zi])
+        .collect();
+    let radii: Vec<F> = elements.iter().map(|e| vdw_radius_for(e)).collect();
+
+    let mut target = Target::from_coords(&coords, &radii, count);
+    target.elements = elements;
+    Ok(target)
+}
+
 /// Read a numeric column from an atoms block.
 ///
 /// Tries `block.view(name)` first (``molrs.Block``), then ``block[name]``
@@ -106,34 +141,9 @@ impl PyTarget {
     #[new]
     #[pyo3(signature = (frame, count))]
     fn new(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Self> {
-        let atoms = frame
-            .get_item("atoms")
-            .map_err(|_| PyValueError::new_err(r#"frame must have an "atoms" block"#))?;
-
-        let x: Vec<NpF> = read_column(&atoms, "x")?;
-        let y: Vec<NpF> = read_column(&atoms, "y")?;
-        let z: Vec<NpF> = read_column(&atoms, "z")?;
-        let elements: Vec<String> = read_element_column(&atoms)?;
-
-        let n = x.len();
-        if y.len() != n || z.len() != n || elements.len() != n {
-            return Err(PyValueError::new_err(
-                "x, y, z, and element arrays must all have the same length",
-            ));
-        }
-
-        let coords: Vec<[F; 3]> = x
-            .iter()
-            .zip(y.iter())
-            .zip(z.iter())
-            .map(|((xi, yi), zi)| [*xi, *yi, *zi])
-            .collect();
-        let radii: Vec<F> = elements.iter().map(|e| vdw_radius_for(e)).collect();
-
-        let mut target = Target::from_coords(&coords, &radii, count);
-        target.elements = elements;
-
-        Ok(PyTarget { inner: target })
+        Ok(PyTarget {
+            inner: target_from_frame(frame, count)?,
+        })
     }
 
     fn with_name(&self, name: &str) -> Self {

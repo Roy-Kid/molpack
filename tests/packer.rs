@@ -209,6 +209,95 @@ fn with_periodic_box_rejects_zero_extent() {
     );
 }
 
+/// PBC with a shifted origin (`pbc X0 Y0 Z0  X1 Y1 Z1` script form,
+/// `with_periodic_box(min, max)` API form). Verifies that:
+///
+/// 1. The packer accepts asymmetric, non-origin-anchored PBC bounds.
+/// 2. Every packed atom lands inside the shifted reference image.
+/// 3. Pairwise distances respect the minimum-image convention — i.e.
+///    no two inter-molecule atom pairs are closer than `tolerance`
+///    once we wrap their separation through the PBC.
+///
+/// Before this test, the 6-value `pbc` script form (commit 19e150f) had
+/// no end-to-end coverage at the *numerical* layer — only parser-level
+/// arity checks. A regression in `with_periodic_box`'s min-image wrap
+/// inside the pair kernel would silently let atoms overlap across the
+/// wrap boundary without tripping any test.
+#[test]
+fn pbc_shifted_origin_box_packs_within_bounds() {
+    let min = [-10.0, -15.0, -20.0];
+    let max = [20.0, 15.0, 10.0];
+    let target = Target::from_coords(&water_positions(), &water_radii(), 4)
+        .with_restraint(InsideBoxRestraint::new(min, max, [true; 3]));
+    let tolerance: F = 2.0;
+    let result = Molpack::new()
+        .with_tolerance(tolerance)
+        .with_seed(0xCAFE)
+        .with_periodic_box(min, max)
+        .pack(&[target], 5)
+        .expect("shifted-origin PBC pack should succeed");
+
+    assert_eq!(result.natoms(), 12, "expected 4 waters × 3 atoms");
+
+    let positions = result.positions();
+    let extent = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+    let half = [extent[0] * 0.5, extent[1] * 0.5, extent[2] * 0.5];
+
+    // (1) Every atom inside the shifted reference image (allow a
+    // small tolerance — the soft-confining penalty on non-periodic
+    // axes leaves things a bit inside, but periodic axes wrap so
+    // anything past the bound is in another image).
+    let slack: F = 1e-3;
+    for (i, p) in positions.iter().enumerate() {
+        for k in 0..3 {
+            assert!(
+                p[k] >= min[k] - slack && p[k] <= max[k] + slack,
+                "atom {i} axis {k} = {} out of [{}, {}]",
+                p[k],
+                min[k],
+                max[k]
+            );
+        }
+    }
+
+    // (2) Pairwise minimum-image distances on inter-molecule pairs
+    // (atoms 0..3 = mol 0, 3..6 = mol 1, …) must respect the
+    // tolerance. We allow a small slack so the optimizer's
+    // `precision` setting can leave a residual.
+    let mol_of = |a: usize| a / 3;
+    let mut min_dist: F = F::INFINITY;
+    for i in 0..positions.len() {
+        for j in (i + 1)..positions.len() {
+            if mol_of(i) == mol_of(j) {
+                continue;
+            }
+            let mut dx = positions[i][0] - positions[j][0];
+            let mut dy = positions[i][1] - positions[j][1];
+            let mut dz = positions[i][2] - positions[j][2];
+            // Minimum-image wrap on each axis.
+            if dx.abs() > half[0] {
+                dx -= dx.signum() * extent[0];
+            }
+            if dy.abs() > half[1] {
+                dy -= dy.signum() * extent[1];
+            }
+            if dz.abs() > half[2] {
+                dz -= dz.signum() * extent[2];
+            }
+            let d = (dx * dx + dy * dy + dz * dz).sqrt();
+            if d < min_dist {
+                min_dist = d;
+            }
+        }
+    }
+    // 1e-2 matches the default Molpack `precision` floor for
+    // distance-violation reporting.
+    assert!(
+        min_dist >= tolerance - 1e-2,
+        "min-image inter-mol distance {min_dist} < tolerance {tolerance}"
+    );
+}
+
 // ── error cases ────────────────────────────────────────────────────────────
 
 #[test]

@@ -160,3 +160,75 @@ fn compute_fg_small_system_parallel_matches_serial() {
         assert!((a - b).abs() < 1e-10, "g mismatch: {a} vs {b}");
     }
 }
+
+// ── pack-level parity: full Molpack::pack run, serial vs parallel ──────────
+
+/// The kernel-level tests above lock in `compute_fg` parity, but the
+/// *full* pack driver layers gencan, relaxer, movebad, RNG sampling, and
+/// handler IO on top. A subtle drift inside any of those that depends
+/// on the parallel branch (e.g. an evaluation-order dependency in the
+/// movebad heuristic) would not surface in `compute_fg` alone. This
+/// test exercises a complete `Molpack::pack` run twice — same seed,
+/// same targets — once serial and once with `parallel_pair_eval(true)`,
+/// and asserts that the final atom coordinates agree to within
+/// `1e-10`. Bit-exactness across rayon merge order is not guaranteed,
+/// so we use an absolute tolerance rather than `==`.
+///
+/// Small workload (3 waters in a 30 Å box, 5 outer loops) keeps this
+/// fast enough to live in the default tier (< 200 ms).
+#[test]
+fn pack_seed_parity_serial_vs_parallel() {
+    use molpack::{InsideBoxRestraint, Molpack, Target};
+
+    fn build_target() -> Target {
+        let positions = vec![[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
+        let radii = vec![1.52, 1.20, 1.20];
+        Target::from_coords(&positions, &radii, 3).with_restraint(InsideBoxRestraint::new(
+            [0.0, 0.0, 0.0],
+            [30.0, 30.0, 30.0],
+            [false; 3],
+        ))
+    }
+
+    const SEED: u64 = 0xA11CE;
+    const MAX_LOOPS: usize = 5;
+
+    let serial = Molpack::new()
+        .with_seed(SEED)
+        .with_parallel_eval(false)
+        .pack(&[build_target()], MAX_LOOPS)
+        .expect("serial pack failed");
+
+    let parallel = Molpack::new()
+        .with_seed(SEED)
+        .with_parallel_eval(true)
+        .pack(&[build_target()], MAX_LOOPS)
+        .expect("parallel pack failed");
+
+    assert_eq!(
+        serial.natoms(),
+        parallel.natoms(),
+        "atom count diverged: {} serial vs {} parallel",
+        serial.natoms(),
+        parallel.natoms()
+    );
+
+    let s = serial.positions();
+    let p = parallel.positions();
+    let mut max_err: F = 0.0;
+    for (i, (a, b)) in s.iter().zip(p.iter()).enumerate() {
+        for k in 0..3 {
+            let err = (a[k] - b[k]).abs();
+            if err > max_err {
+                max_err = err;
+            }
+            assert!(
+                err < 1e-10,
+                "atom {i} axis {k}: serial={} parallel={} err={err}",
+                a[k],
+                b[k]
+            );
+        }
+    }
+    eprintln!("pack_seed_parity: max coord diff = {max_err:e}");
+}

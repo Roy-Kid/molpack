@@ -2,33 +2,46 @@
 //! a configured [`Molpack`](crate::Molpack) plus a list of
 //! [`Target`](crate::Target)s.
 //!
-//! Typical use from a frontend (CLI, PyO3 binding, embedding host):
+//! Two front-end shapes are supported:
 //!
-//! ```no_run
-//! use std::path::Path;
-//! use molpack::script;
+//! - **Native (feature `io`)** — [`Script::build`] reads template files
+//!   via molrs-io and returns a ready-to-run [`BuildResult`]:
 //!
-//! let src = std::fs::read_to_string("mixture.inp")?;
-//! let script = script::parse(&src)?;
-//! let built = script.build(Path::new("."))?;
+//!   ```ignore
+//!   use std::path::Path;
+//!   use molpack::script;
 //!
-//! let result = built.packer.pack(&built.targets, built.nloop)?;
-//! script::write_frame(&built.output, &result.frame)?;
-//! # Ok::<(), Box<dyn std::error::Error>>(())
-//! ```
+//!   let src = std::fs::read_to_string("mixture.inp")?;
+//!   let script = script::parse(&src)?;
+//!   let built = script.build(Path::new("."))?;
 //!
-//! The module intentionally keeps parsing, lowering, and I/O separate
-//! so embedders can intercept any stage — e.g. mutate the parsed
-//! [`Script`] before `build`, attach a custom
-//! [`Handler`](crate::Handler) to the packer, or route output through
-//! a different writer.
+//!   let result = built.packer.pack(&built.targets, built.nloop)?;
+//!   script::write_frame(&built.output, &result.frame)?;
+//!   # Ok::<(), Box<dyn std::error::Error>>(())
+//!   ```
+//!
+//! - **Embedding hosts (any feature set)** — [`Script::lower`] returns
+//!   a [`ScriptPlan`] with file paths resolved but unread. The caller
+//!   loads each [`StructurePlan::filepath`] with its own frame loader,
+//!   builds a [`Target`], and stamps restraints via
+//!   [`StructurePlan::apply`]. This is what the PyO3 wheel uses, so it
+//!   does not have to statically link molrs-io.
+//!
+//! Parsing, lowering, and I/O are kept separate so embedders can
+//! intercept any stage — e.g. mutate the parsed [`Script`] before
+//! `lower`, attach a custom [`Handler`](crate::Handler) to the packer,
+//! or route output through a different writer.
 
 mod build;
 mod error;
+#[cfg(feature = "io")]
 mod io;
 mod parser;
 
+#[cfg(feature = "io")]
 pub use build::BuildResult;
+pub use build::{ScriptPlan, StructurePlan};
 pub use error::ScriptError;
+#[cfg(feature = "io")]
 pub use io::{read_frame, write_frame};
 pub use parser::{AtomGroup, PbcSpec, RestraintSpec, Script, Structure, parse};

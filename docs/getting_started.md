@@ -6,20 +6,9 @@ individual types on the crate landing page for full details.
 
 ## CLI
 
-The `molpack` binary accepts the same `.inp` script format as the original
-Packmol, making it a drop-in replacement for the command-line workflow.
-
-### Installing
-
-```bash
-cargo install molcrafts-molpack --features cli
-```
-
-Or build from source:
-
-```bash
-cargo build --release --bin molpack --features cli
-```
+The `molpack` binary accepts the same `.inp` script format as the
+original Packmol, making it a drop-in replacement for the command-line
+workflow. See [Install](install.md) for setup.
 
 ### Running a script
 
@@ -141,14 +130,12 @@ molpack examples/pack_spherical/spherical.inp
 
 ---
 
-## Adding the dependency
+## Rust library
 
-```toml
-[dependencies]
-molcrafts-molpack = "0.0"
-```
+Add the dependency (see [Install](install.md) for the full toolchain).
+Then write a packing job in code.
 
-## First pack: one molecule type in a box
+### First pack: one molecule type in a box
 
 ```rust,no_run
 use molpack::{InsideBoxRestraint, Molpack, Target};
@@ -331,39 +318,45 @@ under `out/`.
 
 ## Python bindings
 
-A PyO3 binding ships in the same repository under `python/`:
+A PyO3 binding ships under `python/`:
 
 ```bash
-pip install molcrafts-molpack
+pip install molcrafts-molpack molcrafts-molrs
 ```
 
 ```python
-import numpy as np
-from molpack import Target, Packer, InsideBox
+import molrs
+from molpack import InsideBoxRestraint, Molpack, Target
 
-target = (
-    Target.from_coords(positions, radii, count=100, elements=["O", "H", "H"])
+frame = molrs.read_pdb("water.pdb")
+
+water = (
+    Target(frame, count=100)
     .with_name("water")
-    .with_restraint(InsideBox([0, 0, 0], [40, 40, 40]))
+    .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
 )
-result = Packer(tolerance=2.0).pack([target], max_loops=200, seed=42)
+result = (
+    Molpack()
+    .with_tolerance(2.0)
+    .with_seed(42)
+    .pack([water], max_loops=200)
+)
 ```
 
-The Python API mirrors the Rust builder surface one-for-one. See
-[`python/docs/`](https://github.com/MolCrafts/molpack/tree/master/python/docs)
-for the [Zensical](https://zensical.org/)-generated reference site,
-and [`python/examples/`](https://github.com/MolCrafts/molpack/tree/master/python/examples)
-for Python ports of the five canonical Packmol workloads.
+The Python API mirrors the Rust builder surface one-for-one. The
+binding is I/O-free — use
+[`molcrafts-molrs`](https://pypi.org/project/molcrafts-molrs/) (or any
+Frame-compatible loader) to read templates, and write `result.frame`
+back out with the same library.
 
-Note that unlike the Rust API, the Python binding is I/O-free: use
-[`molcrafts-molrs`](https://pypi.org/project/molcrafts-molrs/) (or
-any PDB reader) to load templates and then hand numpy arrays to
-`Target.from_coords`.
+The standalone Python documentation site lives under
+[`python/docs/`](https://github.com/MolCrafts/molpack/tree/master/python/docs);
+runnable examples are in
+[`python/examples/`](https://github.com/MolCrafts/molpack/tree/master/python/examples).
 
 ## Where to go next
 
-- [`concepts`](crate::concepts) — the key abstractions in one place.
-- [`architecture`](crate::architecture) — system design, lifecycle,
-  hot path.
-- [`extending`](crate::extending) — tutorials for writing your own
-  `Restraint` / `Region` / `Handler` / `Relaxer`.
+- [Concepts](concepts.md) — the abstractions in one place.
+- [Architecture](architecture.md) — system design, data flow, loops, hot path.
+- [Extending](extending.md) — write your own `Restraint` / `Region` /
+  `Handler` / `Relaxer`.

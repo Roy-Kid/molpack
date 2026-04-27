@@ -197,17 +197,15 @@ against synthetic test problems will interact with it.
 
 ## Scope equivalence law
 
-Formal statement (spec §4):
-
 ```text
 molpack.with_global_restraint(r)
     ≡  for t in targets { t.with_restraint(r.clone()) }
 ```
 
 There is no separate "global-restraint" storage path in `PackContext`.
-The broadcast happens inside `pack()`; clones each target and pushes
-the global restraints into its `molecule_restraints` via
-`Arc::clone` (refcount bump, not a deep copy).
+The broadcast happens inside `pack()`; each target receives an
+`Arc::clone` of every global restraint (refcount bump, not a deep
+copy).
 
 Per-atom-subset scope is a method-argument pair
 `(indices: &[usize], restraint: impl Restraint)`, not a wrapper

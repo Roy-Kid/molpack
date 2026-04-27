@@ -21,8 +21,11 @@ name = "molpack"
 # `cargo publish` to resolve against the crates.io registry.
 #
 # Library-required:
-molrs = { path = "../molrs/molrs-core", version = "0.0.12", package = "molcrafts-molrs-core", default-features = false }
-molrs_io = { path = "../molrs/molrs-io", version = "0.0.12", package = "molcrafts-molrs-io", default-features = false }
+molrs = { path = "../molrs/molrs-core", version = "0.0.14", package = "molcrafts-molrs-core", default-features = false }
+# Only required when the `io` (or `cli`) feature is enabled. Front-ends that
+# bring their own frame loader — notably the PyO3 wheel, which delegates to
+# molrs's Python bindings — opt out and avoid the static-link cost.
+molrs_io = { path = "../molrs/molrs-io", version = "0.0.14", package = "molcrafts-molrs-io", default-features = false, optional = true }
 rand = "0.9"
 ndarray = "0.17"
 log = "0.4"
@@ -36,8 +39,12 @@ clap = { version = "4", features = ["derive"], optional = true }
 [features]
 default = []
 rayon = ["dep:rayon", "molrs/rayon"]
+# Pulls in molrs-io for the built-in script loader, example programs, and the
+# molpack CLI. PyO3 / WASM front-ends typically leave this off and provide
+# their own frame loader through `Script::lower` + `Target::from_frame_parts`.
+io = ["dep:molrs_io"]
 # Enables the `molpack` binary and its integration tests.
-cli = ["dep:clap"]
+cli = ["dep:clap", "io"]
 
 [dev-dependencies]
 criterion = "0.5"
@@ -82,6 +89,49 @@ required-features = ["cli"]
 name = "cli"
 path = "tests/cli.rs"
 required-features = ["cli"]
+
+# Uses the `cases` example harness, which reads PDB files via molrs-io.
+[[test]]
+name = "examples_batch"
+path = "tests/examples_batch.rs"
+required-features = ["io"]
+
+# Example programs all read PDB files via molrs-io directly, so they need
+# the `io` feature on. Run with `cargo run --example <name> --features io`.
+[[example]]
+name = "pack_mixture"
+path = "examples/pack_mixture/main.rs"
+required-features = ["io"]
+
+[[example]]
+name = "pack_bilayer"
+path = "examples/pack_bilayer/main.rs"
+required-features = ["io"]
+
+[[example]]
+name = "pack_interface"
+path = "examples/pack_interface/main.rs"
+required-features = ["io"]
+
+[[example]]
+name = "pack_solvprotein"
+path = "examples/pack_solvprotein/main.rs"
+required-features = ["io"]
+
+[[example]]
+name = "pack_spherical"
+path = "examples/pack_spherical/main.rs"
+required-features = ["io"]
+
+[[example]]
+name = "pack_polymer_vesicle"
+path = "examples/pack_polymer_vesicle/main.rs"
+required-features = ["io"]
+
+[[example]]
+name = "mc_fold_chain"
+path = "examples/mc_fold_chain/main.rs"
+required-features = ["io"]
 
 [profile.release]
 lto = "thin"

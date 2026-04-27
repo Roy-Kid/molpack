@@ -63,7 +63,6 @@ impl Restraint for PlaneTether {
               - self.offset;
         0.5 * self.k * d * d
     }
-
     fn fg(&self, pos: &[F; 3], scale: F, scale2: F, g: &mut [F; 3]) -> F {
         let d = self.normal[0] * pos[0]
               + self.normal[1] * pos[1]
@@ -104,7 +103,6 @@ fn plane_tether_gradient_matches_fd() {
     let x = [1.0, 2.0, 7.0];
     let mut g = [0.0; 3];
     let _ = r.fg(&x, 1.0, 1.0, &mut g);
-
     let h: F = 1e-5;
     for k in 0..3 {
         let mut xp = x; xp[k] += h;
@@ -162,7 +160,6 @@ impl Region for ConeRegion {
     fn contains(&self, x: &[F; 3]) -> bool {
         self.signed_distance(x) <= 0.0
     }
-
     fn signed_distance(&self, x: &[F; 3]) -> F {
         let dx = x[0] - self.apex[0];
         let dy = x[1] - self.apex[1];
@@ -336,7 +333,6 @@ impl RelaxerRunner for JiggleRunner {
         let mut best = coords.to_vec();
         let mut best_f = f_current;
         let mut accepted_any = false;
-
         for _ in 0..self.steps {
             let dx = (rng.next_u32() as f64 / u32::MAX as f64 * 2.0 - 1.0) * self.max_delta;
             let dy = (rng.next_u32() as f64 / u32::MAX as f64 * 2.0 - 1.0) * self.max_delta;
@@ -353,10 +349,8 @@ impl RelaxerRunner for JiggleRunner {
                 accepted_any = true;
             }
         }
-
         if accepted_any { Some(best) } else { None }
     }
-
     fn acceptance_rate(&self) -> F {
         if self.total == 0 { 0.0 } else { self.accepted as F / self.total as F }
     }
@@ -422,25 +416,16 @@ cargo bench --bench run_phase
 cargo bench --bench objective_dispatch
 ```
 
-Gates (spec §10):
+Performance gates:
 
 | Scope | Hard | Soft |
 |---|---|---|
 | Per-fn microbench | ≤ +1% | ≤ 0% |
 | Caller microbench (includes indirection) | ≤ +2% | ≤ +1% |
-| `pack_end_to_end` (phase-end alarm) | ≤ +10% | ≤ +5% |
+| `pack_end_to_end` | ≤ +10% | ≤ +5% |
 
-Cross the soft gate → attach a flamegraph + one-paragraph root-cause
-note. Cross the hard gate → tighten the change or roll back.
-
-**Extract-bench pattern** (hot-path refactors only):
-
-1. `#[cfg(bench)] #[inline(never)] fn F_sentinel(...)` with the
-   pre-extraction body.
-2. Microbench of the extracted fn + caller.
-3. Extract in the same commit.
-4. Delete the sentinel at the end of the NEXT refactor cycle
-   (not sooner).
+Cross the soft gate → attach a flamegraph and a one-paragraph
+root-cause note. Cross the hard gate → tighten the change or roll back.
 
 ## Common pitfalls
 
@@ -467,16 +452,14 @@ note. Cross the hard gate → tighten the change or roll back.
 
 ## Contributing flow
 
-1. Open `.claude/specs/molpack-plugin-arch.md` — find the closest
-   checklist entry. If none, propose a spec edit first.
-2. Write a failing test.
-3. Implement until it passes.
-4. Run the full gate:
+1. Write a failing test.
+2. Implement until it passes.
+3. Run the full gate:
    ```bash
    cargo test --all-features
    cargo clippy -- -D warnings
    cargo fmt --all --check
    ```
-5. Hot-path changes: run the relevant microbench + `pack_end_to_end`
-   before and after. Attach numbers to the PR.
-6. Update the spec's Commit log section.
+4. Hot-path changes: run the relevant microbench plus
+   `cargo bench --bench pack_end_to_end -- mixture` before and after.
+   Attach numbers to the PR.

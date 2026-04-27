@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-core"
-version = "0.0.12"
+version = "0.0.14"
 dependencies = [
  "libm",
  "ndarray",
@@ -488,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-io"
-version = "0.0.12"
+version = "0.0.14"
 dependencies = [
  "flate2",
  "molcrafts-molrs-core",

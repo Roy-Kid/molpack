@@ -528,7 +528,14 @@ impl Restraint for OutsideSphereRestraint {
 // ============================================================================
 
 /// Packmol kind 9 — quadratic penalty forcing atom outside ellipsoid.
-/// Note: Fortran source does NOT multiply by `scale2` for kind 9.
+///
+/// Both `f` and `fg` apply the `scale2` factor — `f` previously omitted
+/// it (a transcription artefact of the original Fortran-port comment),
+/// which left `f` and `fg` 100× out of phase at the default
+/// `scale2 = 0.01` and made the optimizer's gradient look 100× flatter
+/// than the function value reported. The `scale2` factor here matches
+/// the documented "quadratic penalty group" convention (kinds 4 / 5 /
+/// 8 / 9 / 12 / 13) and the sister kind-5 [`InsideEllipsoidRestraint`].
 #[derive(Debug, Clone, Copy)]
 pub struct OutsideEllipsoidRestraint {
     pub center: [F; 3],
@@ -547,7 +554,7 @@ impl OutsideEllipsoidRestraint {
 }
 
 impl Restraint for OutsideEllipsoidRestraint {
-    fn f(&self, pos: &[F; 3], _scale: F, _scale2: F) -> F {
+    fn f(&self, pos: &[F; 3], _scale: F, scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let c = self.center;
         let ax = self.axes;
@@ -556,7 +563,7 @@ impl Restraint for OutsideEllipsoidRestraint {
         let a3 = (z - c[2]).powi(2) / ax[2].powi(2);
         let w = a1 + a2 + a3 - self.exponent.powi(2);
         let v = w.min(0.0);
-        v * v
+        scale2 * v * v
     }
 
     fn fg(&self, pos: &[F; 3], scale: F, scale2: F, g: &mut [F; 3]) -> F {

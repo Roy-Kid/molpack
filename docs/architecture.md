@@ -1,338 +1,336 @@
 # Architecture
 
-Developer-oriented view of the crate's structure, data flow, and
-internal invariants. Read [`concepts`](crate::concepts) first for the
-abstractions this chapter assumes.
+Developer-oriented view of the crate. Read [`concepts`](crate::concepts)
+first for the abstractions this chapter assumes.
+
+This page covers four things, in order:
+
+1. [Module map](#module-map) — where everything lives
+2. [Data flow](#data-flow) — how values travel from user input to packed frame
+3. [Algorithms](#algorithms) — pseudo-code for the three nested loops
+4. [Hot path](#hot-path-objective-evaluation) — what one objective evaluation does
+5. [Invariants and conventions](#invariants-and-conventions) — load-bearing rules
 
 ## Module map
 
 ```text
-molpack/
-├── src/
-│   ├── lib.rs              — public re-exports + doc modules
-│   ├── packer.rs           — Molpack builder + pack() driver + phase loop
-│   ├── target.rs           — Target = one molecule type + its restraints/relaxers
-│   ├── restraint.rs        — Restraint trait + 14 concrete *Restraint structs
-│   ├── region.rs           — Region trait + And/Or/Not + RegionRestraint
-│   ├── relaxer.rs          — Relaxer/RelaxerRunner + TorsionMcRelaxer
-│   ├── handler.rs          — Handler trait + 4 built-in observers
-│   ├── objective.rs        — compute_f/g/fg + Objective trait
-│   ├── context/            — PackContext (single owner of mutable state)
-│   ├── constraints/        — EvalMode/EvalOutput + Constraints ZST facade
-│   ├── gencan/             — GENCAN optimizer (pgencan/tn_ls/spg/cg)
-│   ├── initial.rs          — initial placement + swap state
-│   ├── movebad.rs          — movebad heuristic (perturb worst molecules)
-│   ├── euler.rs            — Euler angle ↔ rotation matrix
-│   ├── cell.rs             — cell-list indexing
-│   ├── frame.rs            — PackContext ↔ molrs::Frame
-│   ├── validation.rs       — post-pack correctness check
-│   ├── cases.rs            — ExampleCase enum for 5 canonical examples
-│   ├── numerics.rs, error.rs, random.rs
-│   └── api/                — builder-style facade (thin)
-├── tests/                  — 7 integration test files
-├── benches/                — 5 criterion benches
-├── examples/               — 5 canonical + 2 ad-hoc demos
-└── docs/                   — this documentation
+src/
+├── lib.rs              public re-exports + rustdoc chapters
+├── packer.rs           Molpack builder + pack() driver + phase / iteration loops
+├── target.rs           Target — molecule type + per-molecule restraints
+├── restraint.rs        Restraint trait + 14 concrete *Restraint structs
+├── region.rs           Region trait + And/Or/Not + RegionRestraint
+├── relaxer.rs          Relaxer / RelaxerRunner + TorsionMcRelaxer
+├── handler.rs          Handler trait + 4 built-in observers
+├── objective.rs        compute_f / compute_g / compute_fg + Objective impl
+├── context/            PackContext = single owner of mutable packing state
+│   ├── pack_context.rs
+│   ├── model.rs        immutable topology + inputs
+│   ├── state.rs        mutable per-iteration state
+│   └── work_buffers.rs scratch arrays (xcart, gxcar, …)
+├── constraints/        EvalMode / EvalOutput facade
+├── gencan/             bound-constrained quasi-Newton optimizer
+│   ├── mod.rs          pgencan / gencan / tn_linesearch
+│   ├── cg.rs           conjugate-gradient inner solve
+│   └── spg.rs          spectral projected gradient fallback
+├── initial.rs          initial random placement + restmol pre-fit
+├── movebad.rs          worst-molecule perturbation heuristic
+├── euler.rs            Euler angles ↔ rotation matrices
+├── cell.rs             cell-list neighbor lookup
+├── frame.rs            PackContext ↔ molrs::Frame conversions
+├── validation.rs       post-pack correctness check
+├── script/             .inp parser + lowering to Targets
+├── api/                builder facade re-exports
+└── bin/molpack/        CLI front-end (cli feature)
 ```
 
-## Module dependency graph
+### Dependency direction
 
 ```text
-                    ┌───────┐
-                    │ lib.rs│  (public re-exports + doc landing page)
-                    └───┬───┘
-                        │
-                    ┌───┴────────────────────────────────┐
-                    │        packer.rs  (driver)         │
-                    │   Molpack, pack(), run_phase,      │
-                    │   run_iteration, evaluate_unscaled │
-                    └─┬────┬─────┬──────┬──────┬─────────┘
-                      │    │     │      │      │
-            ┌─────────┘    │     │      │      └──────────┐
-            │          ┌───┘     │      └───┐             │
-            ▼          ▼         ▼          ▼             ▼
-       ┌────────┐ ┌────────┐ ┌─────────┐ ┌─────────┐ ┌────────┐
-       │ target │ │ initial│ │ gencan/ │ │ movebad │ │handler │
-       └───┬────┘ └───┬────┘ └────┬────┘ └────┬────┘ └────────┘
-           │          │           │           │
-     ┌─────┴──────┐   │           │           │
-     ▼            ▼   │           │           │
- ┌────────┐  ┌────────┴┐ ┌────────┴─────────────────────┐
- │restraint│ │ relaxer │ │  context/PackContext          │
- │   +     │ │  +      │ │   ModelData / RuntimeState /  │
- │ region  │ │TorsionMc│ │   WorkBuffers                 │
- └────────┘  └─────────┘ └──┬────────────────────────────┘
+                       lib.rs
+                          │
+                       packer.rs  (driver — depends on everything below)
+                          │
+       ┌──────────┬──────┴──────┬──────────┬──────────┐
+       ▼          ▼             ▼          ▼          ▼
+    target     initial        gencan     movebad    handler
+       │          │             │          │
+       │          └────────┐    │          │
+       ▼                   ▼    ▼          ▼
+ restraint + region    context/PackContext
                             │
                             ▼
-                      ┌────────────┐
-                      │ objective  │◄───── constraints/ (EvalMode facade)
-                      │   .rs      │
-                      │ (hot path) │
-                      └────────────┘
+                       objective.rs   ← hot path
+                            │
+                            └── constraints/  (EvalMode facade)
 ```
 
-Ordering rule: `target.rs` / `restraint.rs` / `region.rs` are pure
-data types with no dependencies on the driver. The `packer.rs` driver
-depends on everything downstream. `objective.rs` is the narrow waist
-through which all per-atom work flows.
+`target` / `restraint` / `region` are pure data — no driver imports.
+`packer` is the only module that imports everything else. `objective`
+is the narrow waist through which all per-atom work flows.
 
-## Core-type relationships
+## Data flow
 
 ```text
-User space                              │ Crate internals
-                                        │
-Target ----with_restraint()---          │ Vec<Arc<dyn Restraint>> ─┐
-  │                                     │                          │
-  │                                     │                          │  Arc::clone
-  │     ┌── 14 *Restraint structs ──    │                          │  (refcount
-  │     │                               │                          │   bump) into
-  │     ├── user structs impl Restraint │                          │   per-atom
-  │     │                               │                          │   CSR pool
-  │     └── RegionRestraint<R>      ──  │                          ▼
-  │                                     │   PackContext.restraints:
-  │                                     │   Vec<Arc<dyn Restraint>>
-  │                                     │     +
-  ├── with_relaxer(impl Relaxer)     ── │   PackContext.iratom_offsets / iratom_data
-  │                                     │   (CSR: atom idx → restraint indices)
-  ├── fixed_at()                        │
-  ├── with_rotation_bound(Axis, ..)     │   PackContext.rot_bound[][] Euler bounds
-  └── count / ref_coords / radii        │   PackContext.coor / radius / nmols / natoms
+USER INPUTS                 ─→  Target / Molpack builders
+  Frame, count, restraints,
+  handlers, tolerance, seed
+                            ─→  pack() entry
+                                a. broadcast global → per-target restraints
+                                b. snapshot every Target
+                                c. build PackContext
+                                     ModelData (immutable topology)
+                                     RuntimeState (x, coor, radius)
+                                     WorkBuffers (xcart, gxcar, scratch)
+                                d. flatten restraints → CSR pool
+                                e. initial placement → x[0..6·ntotmol]
 
-Molpack
-  ├── .with_handler(impl Handler)       │   Vec<Box<dyn Handler>>   (observers)
-  └── .with_global_restraint(impl R)    │   Vec<Arc<dyn Restraint>>
-          (scope = global)              │   broadcast at pack() entry
+PER-ITERATION                ─→  evaluate(x, mode, &mut g)
+  GENCAN reads x,                  → expand_molecules: x → xcart
+  reads f / g via                  → restraint penalties per atom
+  &mut dyn Objective              → cell list + pair penalties
+                                  → project gradient back: gxcar → g
+                                  returns f_total, fdist, frest
+
+OUTPUT                       ─→  PackResult
+                                  positions (Frame),
+                                  converged, fdist, frest,
+                                  per-phase report
 ```
 
-Two important things:
+Three rules govern this flow:
 
-1. **`PackContext` is the single owner of mutable state.** Everything
-   else either reads from it, borrows `&mut` exclusively, or reads a
-   snapshot. GENCAN, movebad, handlers, and the phase driver all take
-   `&mut PackContext`.
-2. **`Arc<dyn Restraint>` for polymorphic storage.** Cheap clone
-   (refcount bump) into the CSR pool. The hot path
-   (`objective.rs::accumulate_constraint_value/gradient`) does one
-   virtual call per restraint per atom.
+- **`PackContext` owns mutable state.** GENCAN, movebad, handlers, and the
+  phase driver all take `&mut PackContext` (writers) or `&PackContext`
+  (observers). No other module owns mutable state across iterations.
+- **`Arc<dyn Restraint>` for polymorphic storage.** Cheap clone (refcount
+  bump) into the per-atom CSR pool. The hot path does one virtual call
+  per restraint per atom.
+- **GENCAN is decoupled.** `gencan/pgencan` takes `&mut dyn Objective`,
+  not `&mut PackContext`. Synthetic objectives (Rosenbrock, Booth, Beale)
+  exercise the optimizer in isolation.
 
-## Lifecycle of `pack()`
+### Coordinate layout
+
+The optimizer variable vector `x` packs centers of mass and Euler angles:
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. USER ASSEMBLY                                                │
-│    Molpack::new()                                               │
-│      .with_tolerance(2.0).with_precision(0.01)                  │
-│      .with_handler(ProgressHandler::new())                      │
-│      .with_global_restraint(InsideBoxRestraint::new(..., [false;3])) │
-│      .pack(&[target_a, target_b], max_loops=400, seed=42)       │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 2. PACK SETUP (packer.rs::pack)                                 │
-│    a. Validate inputs (non-empty, non-zero atoms, valid PBC)    │
-│    b. BROADCAST Molpack.global_restraints into each Target's    │
-│       molecule_restraints via Arc::clone (scope equivalence)    │
-│    c. Split targets into free / fixed                           │
-│    d. Build PackContext with:                                   │
-│         - flat restraints pool (Vec<Arc<dyn Restraint>>)        │
-│         - CSR iratom_offsets/iratom_data per atom               │
-│         - fixed atom positions via eulerfixed()                 │
-│         - cell list initialized for current PBC box             │
-│    e. initial::initial() produces starting x[0..6*ntotmol]      │
-│         layout: [com0(3), com1(3), ..., eul0(3), eul1(3), ...]  │
-│    f. handlers.on_start / on_initialized                        │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 3. PHASE LOOP    for phase in 0..=ntype:                        │
-│                                                                 │
-│   phase <  ntype : PER-TYPE PRE-COMPACTION                      │
-│       comptype[i] = (i == phase)  — optimize only this type     │
-│                                                                 │
-│   phase == ntype : ALL-TYPES MAIN LOOP (terminal phase)         │
-│       comptype[i] = true for every i                            │
-│                                                                 │
-│   Each iteration of run_phase() does:                           │
-│      ┌──────────────────────────────────────────────────────┐   │
-│      │ handlers.on_phase_start(info)                        │   │
-│      │ swap in per-type state; reset radscale → discale     │   │
-│      │ precision short-circuit (unscaled evaluate first)    │   │
-│      │                                                      │   │
-│      │ for loop_idx in 0..max_loops:                        │   │
-│      │    run_iteration():                                  │   │
-│      │       [movebad if enabled]                           │   │
-│      │       for (type, runners) in relaxers:               │   │
-│      │         runners.on_iter(&ref_coords, f, &mut fn)     │   │
-│      │       pgencan(x, &mut sys, params, precision)        │   │
-│      │       evaluate_unscaled(&mut sys, xwork)             │   │
-│      │       compute fimp = %Δf; radscale decay             │   │
-│      │       handlers.on_step(step_info, sys)               │   │
-│      │       if converged: return Converged                 │   │
-│      │       if should_stop: return EarlyStop               │   │
-│      │                                                      │   │
-│      │ handlers.on_phase_end(info, report) [default no-op]  │   │
-│      └──────────────────────────────────────────────────────┘   │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 4. FINALIZE                                                     │
-│    a. init_xcart_from_x() — expand variables → Cartesian coords │
-│    b. handlers.on_finish(sys)                                   │
-│    c. context_to_frame(sys) — build output molrs::Frame         │
-│    d. return PackResult { frame, converged, fdist, frest, ... } │
-└─────────────────────────────────────────────────────────────────┘
+x = [com₀(3), com₁(3), …, comₙ(3),  eul₀(3), eul₁(3), …, eulₙ(3)]
+length = 6 · ntotmol
 ```
 
-Key invariants:
-
-- `comptype[i]` gates which molecule types contribute to the
-  objective in the current phase.
-- `radscale` starts at `discale` (default 1.1) and decays toward 1.0
-  — inflates atomic radii at start of phase, then shrinks to real
-  tolerance.
-- `precision` is the convergence threshold on both `fdist`
-  (inter-molecule overlap) and `frest` (restraint violation).
-
-## Hot path: one `evaluate()` call
-
-Called O(10³–10⁴) times per `pack()` run. Performance lives here.
+Cartesian atom positions `xcart: Vec<[F; 3]>` of length `ntotat` are
+expanded each evaluation:
 
 ```text
-pgencan → tn_ls (line search) → PackContext::evaluate(x, mode, g)
-                                       │
-                                       │   FOnly           → compute_f
-                                       │   GradientOnly    → compute_g
-                                       │   FAndGradient    → compute_fg
-                                       │   RestMol         → compute_fg
-                                       ▼
-                   ┌───────────────────────────────────────────┐
-                   │ objective.rs — compute_f / g / fg         │
-                   │                                           │
-                   │  1. expand_molecules():                   │
-                   │       for type t, mol m, atom a:          │
-                   │         com + eulerrmat(angles) · ref     │
-                   │         → xcart[icart] = rotated position │
-                   │                                           │
-                   │  2. accumulate_constraint_value/gradient: │
-                   │       for each atom icart:                │
-                   │         range = iratom_offsets[icart]     │
-                   │                 ..offsets[icart+1]         │
-                   │         for &irest in iratom_data[range]: │
-                   │           sys.restraints[irest]           │
-                   │             .f / .fg(pos, s, s2)          │
-                   │         accumulate f_total, frest         │
-                   │         accumulate grad into gxcar[icart] │
-                   │                                           │
-                   │  3. insert_atom_in_cell():                │
-                   │       place icart into latomfirst[icell]  │
-                   │       linked-list (cell list build)       │
-                   │                                           │
-                   │  4. accumulate_pair_f/_fg_parallel:       │
-                   │       for each non-empty cell:            │
-                   │         for each neighbor cell (13):      │
-                   │           for each (i, j) pair:           │
-                   │             d = pbc_distance(xi, xj)      │
-                   │             penalty = (σ − d)² if d < σ   │
-                   │           → f_pair, grad_pair[i, j]       │
-                   │                                           │
-                   │  5. project_cartesian_gradient():         │
-                   │       for each atom a in molecule m:      │
-                   │         grad_com   += gxcar[icart]        │
-                   │         grad_euler += Jᵀ · gxcar[icart]   │
-                   │         (J = ∂xcart/∂euler)               │
-                   │                                           │
-                   │  return EvalOutput { f_total, fdist,frest}│
-                   └───────────────────────────────────────────┘
+xcart[icart_for(i, m, a)] = com_m + R(eul_m) · ref_coords[i, a]
 ```
 
-Performance notes:
+where `i` is molecule type, `m` is copy index, `a` is atom index.
 
-- Steps 1–3 are O(N_atoms); step 4 is
-  O(N_atoms × avg_neighbors) ≈ O(N_atoms × 32).
-- Step 4 is `rayon`-parallelized per cell
-  (`accumulate_pair_fg_parallel`).
-- `Arc<dyn Restraint>` in step 2 does a virtual call per restraint.
-  Measured cost post-Phase-B: +0.22% e2e vs pre-refactor — well under
-  the +5% soft gate. If this ever regresses, a crate-private
-  `PackedRestraint` tagged-union fast path is queued in the spec.
-- `Cell<f64>` would not be `Sync`; the parallel reduction in step 4
-  uses `AtomicU64` with `f64::to_bits` / `f64::from_bits` shims.
+## Algorithms
+
+Three nested loops drive the packer.
+
+### Outer: `pack()` (one call)
+
+```text
+fn pack(targets, max_loops):
+    validate inputs (non-empty, valid PBC, atoms > 0)
+    broadcast Molpack.global_restraints → each target's molecule_restraints
+    split targets into free / fixed
+    build PackContext
+    run init_passes of restmol():        // geometric pre-fit, no pair kernel
+        for each free target type:
+            place molecules randomly inside their restraints
+            relax restraint penalties only
+    handlers.on_start, handlers.on_initialized
+    for phase in 0 ..= ntype:
+        if phase < ntype:
+            comptype[i] := (i == phase)  // PER-TYPE pre-compaction
+        else:
+            comptype[i] := true          // ALL-TYPES main phase
+        report := run_phase(phase, max_loops, …)
+        if report.error_phase: break
+    handlers.on_finish
+    build PackResult { frame, converged, fdist, frest, per-phase reports }
+```
+
+Why per-type pre-compaction first: if every type optimizes simultaneously
+from a random start, cross-type interference traps the solver in shallow
+minima. Compacting one type at a time inside its own restraint volume
+gives the all-types phase a much better seed.
+
+### Middle: `run_phase` (one phase)
+
+```text
+fn run_phase(phase_id, max_loops):
+    handlers.on_phase_start(phase_info)
+    radscale := discale            // start with inflated radii (default 1.1)
+    relax_runners := build relaxer runners for this phase
+    // Quick-exit: if the unscaled objective is already below precision,
+    // skip the whole phase.
+    if evaluate_unscaled(sys, x).below(precision): return Converged
+    for loop_idx in 0 .. max_loops:
+        result := run_iteration(loop_idx, radscale, relax_runners)
+        radscale := decay(radscale)            // → 1.0 over the phase
+        handlers.on_step(step_info, sys)
+        if result.converged: return Converged
+        if handlers.should_stop(): return EarlyStop
+    return MaxLoops
+```
+
+`radscale` starts at `discale` (1.1) and decays toward 1.0 over the
+phase. This soft-starts the pair penalty: the optimizer first sees
+slightly oversized atoms (easier to push apart) and tightens to true
+tolerance as the phase progresses.
+
+### Inner: `run_iteration` (one outer step)
+
+```text
+fn run_iteration(loop_idx, radscale, runners):
+    // 1. Movebad — relocate the K worst molecules.
+    if movebad enabled:
+        identify atoms with largest restraint + pair penalty
+        perturb their COM/Euler within init_box_half_size
+    // 2. Relaxers — update reference geometry per type (count == 1 only).
+    for (type, runner) in runners:
+        runner.on_iter(ref_coords, f_current, &mut evaluate, rng)
+        if accepted: write back new ref_coords
+    // 3. GENCAN — bound-constrained quasi-Newton solve.
+    pgencan(x, &mut sys, params, precision)
+        // Internally: tn_linesearch → CG inner solve → SPG fallback,
+        // each step calls sys.evaluate(x, mode, g).
+    // 4. Convergence check on the unscaled objective.
+    f_unscaled := evaluate_unscaled(sys, x)
+    fimp := percentage improvement vs previous loop
+    converged := fdist < precision AND frest < precision
+    return { converged, fimp, fdist, frest }
+```
+
+GENCAN itself runs three nested solvers:
+
+```text
+pgencan: project x onto bounds, then call gencan
+gencan:  truncated-Newton outer; calls tn_linesearch
+tn_ls:   conjugate-gradient line search; SPG fallback if CG stalls
+```
+
+Each leaf step calls `sys.evaluate(x, mode, &mut g)` — the hot path.
+
+## Hot path: objective evaluation
+
+`PackContext::evaluate` is invoked O(10³–10⁴) times per `pack()` run.
+Performance lives here.
+
+```text
+evaluate(x, mode, g) dispatches by mode:
+    FOnly        → compute_f
+    GradientOnly → compute_g
+    FAndGradient → compute_fg
+    RestMol      → compute_fg (init phase, pair kernel skipped)
+```
+
+`compute_fg` is the canonical path — it does five steps:
+
+```text
+1. expand_molecules(x):
+       for each molecule type t, copy m, atom a:
+         xcart[icart] := com_t,m + R(eul_t,m) · ref_coords[t, a]
+
+2. accumulate_constraint_value_and_gradient (per atom icart):
+       range := iratom_offsets[icart] .. iratom_offsets[icart + 1]
+       for &irest in iratom_data[range]:
+           f += sys.restraints[irest].fg(xcart[icart], scale, scale2,
+                                          &mut grad_xcart[icart])
+       // Linear penalties consume `scale`; quadratic consume `scale2`.
+
+3. insert_atom_in_cell (per atom):
+       linked-list bucket atoms into cells
+       cell side ≈ 2 × max_radius × radscale
+
+4. accumulate_pair_fg (or _parallel under rayon):
+       for each non-empty cell c:
+         for each neighbor cell c′ in 13-cell stencil:
+           for each (i ∈ c, j ∈ c′):
+             d  := pbc_distance(xi, xj)
+             σ  := (rᵢ + rⱼ) · radscale
+             if d < σ:
+                 penalty := (σ − d)²
+                 grad_xcart[i] += d penalty / d xi
+                 grad_xcart[j] += d penalty / d xj
+
+5. project_cartesian_gradient:
+       for each molecule m, atom a:
+         g_com[m]   += grad_xcart[icart]
+         g_euler[m] += Jᵀ(eul_m, ref_a) · grad_xcart[icart]
+       // J = ∂xcart/∂eul, derived once per molecule from R(eul).
+```
+
+Cost breakdown: steps 1–3 are O(N_atoms); step 4 is
+O(N_atoms × neighbor_avg) ≈ O(N_atoms × 32) and dominates wall time on
+realistic workloads. Step 4 is the rayon parallelization point
+(`accumulate_pair_fg_parallel`), reducing into per-atom gradient slots
+via `AtomicU64` (since `Cell<f64>` is not `Sync`).
+
+The `Arc<dyn Restraint>` virtual call in step 2 measured at +0.22% e2e
+versus the prior monomorphic dispatch — well inside the perf budget.
 
 ## Invariants and conventions
 
-**Gradient convention.** `Restraint::fg` accumulates the TRUE
-gradient (∂penalty/∂x) INTO `g` with `+=`. Optimizer negates for
-descent.
+**Gradient accumulation.** `Restraint::fg` accumulates the true
+gradient (∂penalty/∂x) into `g` with `+=`. Optimizer negates for descent.
+Multiple restraints may touch one atom, so never overwrite.
 
-**Two-scale contract.** Linear penalties (kinds 2/3/6/7/10/11)
-consume `scale`; quadratic penalties (kinds 4/5/8/9/12/13/14/15)
-consume `scale2`. Each `impl Restraint` picks one internally.
+**Two-scale contract.** Linear penalties (Packmol kinds 2/3/6/7/10/11)
+consume `scale`; quadratic penalties (kinds 4/5/8/9/12/13/14/15) consume
+`scale2`. Each `impl Restraint` picks one internally.
 
-**Rotation convention.** `apply_scaled_step` uses LEFT multiplication
-`R_new = δR · R_old`. Single-atom tests cannot detect LEFT/RIGHT
-bugs — always test with ≥ 2 atoms.
+**Rotation convention.** `R_new = δR · R_old` (LEFT multiplication).
+Single-atom tests cannot detect LEFT/RIGHT bugs — always test with
+≥ 2 atoms.
 
-**Coordinate layout.** GENCAN variable vector `x` is
-`[com0(3), com1(3), ..., eul0(3), eul1(3), ...]` of length
-`6 * ntotmol`. Cartesian coords `xcart` are `Vec<[F; 3]>` of length
+**Coordinate layout.** GENCAN's `x` is `[com₀..n, eul₀..n]` of length
+`6·ntotmol`. Cartesian atom positions `xcart` are `Vec<[F; 3]>` of length
 `ntotat`.
 
-**Thread safety.** All trait objects are `Send + Sync`.
-`Cell<f64>` is NOT `Sync` — internal interior mutability uses
-`AtomicU64`.
+**Thread safety.** All trait objects are `Send + Sync`. Interior
+mutability inside parallel reductions uses `AtomicU64` with
+`f64::to_bits` / `f64::from_bits` — `Cell<f64>` is not `Sync`.
 
-**Scope equivalence law** (spec §4):
+**Scope equivalence.**
 
 ```text
 molpack.with_global_restraint(r)
-    ≡  for t in targets { t.with_restraint(r.clone()) }
+  ≡  for t in targets: t.with_restraint(r.clone())
 ```
 
-No separate global-restraint storage path in `PackContext` — the
-broadcast at `pack()` entry IS the implementation.
+There is no separate global-restraint storage path. The broadcast at
+`pack()` entry is the implementation.
 
-## Design decisions
+**Restraint vs Constraint.** Packmol implements all 15 "constraints" as
+soft penalties. Naming reflects mechanism, not user intent → `Restraint`.
 
-- **Restraint vs Constraint.** Packmol implements all 15 "constraints"
-  as soft penalties. Name reflects mechanism, not user intent →
-  `Restraint`. A `Constraint` trait is reserved for future hard
-  constraint work.
-- **Direction-3 extension pattern.** User plugins and built-ins must
-  be type-equal. Earlier drafts used a tagged-union
-  `BuiltinConstraint { kind, params[9] }` blob exposed publicly — this
-  created second-class citizenship for user types. Phase B.0 replaced
-  this with 15 independent concrete structs. Internal AoS fast-path
-  (if ever needed for perf) stays `pub(crate)` behind a `try_pack()`
-  hook.
-- **Arc over Box.** `Vec<Arc<dyn Restraint>>` instead of
-  `Vec<Box<dyn Restraint>>` so packer init can clone restraints
-  cheaply (refcount bump) into the per-atom CSR pool.
-- **Objective trait.** GENCAN takes `&mut dyn Objective`, not
-  `&mut PackContext`. This decouples the optimizer from the packing
-  state — it can be tested against synthetic objectives (Rosenbrock /
-  Booth / Beale) without the full packing pipeline.
-- **Three-phase schedule.** Per-type compaction before the final
-  all-types phase is a Packmol-essential heuristic: it prevents early
-  phases from getting trapped by cross-type interference.
-- **`init1` short-circuit.** `PackContext.init1` is a bool that skips
-  the pair-kernel step during geometric pre-fitting — the initial
-  phase only needs to push atoms into their regions, pair overlaps
-  are ignored until the main loop.
+**Direction-3 extension pattern.** Every extension trait follows the
+same shape: public trait, N concrete `pub struct` impls, user types
+`impl Trait` identically. No `Builtin*` / `Native*` wrappers in the
+public API.
 
-## Cheatsheet: where to look for specific behavior
+**`init1` short-circuit.** Set during the initial geometric pre-fit.
+Skips the pair kernel — the restraint-only objective is enough to get
+atoms into their regions before pair conflicts matter.
 
-| Question | File : function |
+## Cheatsheet
+
+| Question | Where to look |
 |---|---|
-| How is a restraint's penalty computed for one atom? | `restraint.rs::*::f` / `*::fg` |
-| Where does the global `add_restraint` broadcast happen? | `packer.rs::pack` (top of function) |
-| How are per-atom restraints indexed into the pool? | `packer.rs::pack` (CSR build loop) |
-| What does the GENCAN variable vector look like? | `initial.rs::init_xcart_from_x` |
-| How do Euler angles become Cartesian positions? | `euler.rs::compcart` / `eulerrmat` |
+| How is one restraint's penalty computed for one atom? | `restraint.rs::*::f` / `*::fg` |
+| Where does `with_global_restraint` broadcast? | `packer.rs::pack` (top of fn) |
+| Where is the per-atom CSR pool built? | `packer.rs::pack` (CSR build loop) |
+| How are `x` ↔ Cartesian coords expanded? | `objective.rs::expand_molecules`, `euler.rs::eulerrmat` |
 | Where is the pair-overlap kernel? | `objective.rs::accumulate_pair_fg_parallel` |
+| What does the initial pre-fit do? | `initial.rs::initial`, `initial.rs::restmol` |
 | How is precision-based termination tested? | `gencan/mod.rs::packmolprecision` |
 | What does `movebad` do? | `movebad.rs::movebad` |
 | How is torsion MC wired in? | `relaxer.rs::TorsionMcRelaxer::on_iter` |
-| Where does periodic boundary wrap? | `context/pack_context.rs::pbc_distance` |
+| Where does periodic boundary wrap apply? | `context/pack_context.rs::pbc_distance` |

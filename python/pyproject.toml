@@ -9,7 +9,7 @@ description = "Python bindings for molpack molecular packing (Packmol port)"
 requires-python = ">=3.12"
 readme = "../README.md"
 license = "BSD-3-Clause"
-dependencies = ["numpy>=2.0", "typer>=0.12"]
+dependencies = ["numpy>=2.0", "typer>=0.12", "molcrafts-molrs"]
 
 # PEP 735 dependency groups — the single source of truth for dev-time
 # deps used by both CI jobs and local pre-commit hooks.

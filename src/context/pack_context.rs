@@ -860,7 +860,12 @@ mod atom_props_tests {
     /// Should one ever be reintroduced and fail to re-sync, the
     /// debug-build invariant must catch it. This test flips the flag
     /// directly on the `Vec<bool>` and confirms the assertion panics.
+    ///
+    /// Gated on `debug_assertions` because the underlying invariant is
+    /// a `debug_assert!` — release builds compile it out and the
+    /// `#[should_panic]` would never fire.
     #[test]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "atom_props")]
     fn debug_invariant_catches_direct_fixedatom_write() {
         let mut sys = tiny_ctx(2);
@@ -869,6 +874,7 @@ mod atom_props_tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "atom_props")]
     fn debug_invariant_catches_direct_fscale_write() {
         let mut sys = tiny_ctx(2);

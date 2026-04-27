@@ -106,11 +106,9 @@ class SphereRestraint:
     def __init__(self, center, radius):
         self.c = np.asarray(center)
         self.r = radius
-
     def f(self, x, scale, scale2):
         d = np.linalg.norm(np.asarray(x) - self.c) - self.r
         return scale2 * d * d if d > 0 else 0.0
-
     def fg(self, x, scale, scale2):
         rel = np.asarray(x) - self.c
         d = float(np.linalg.norm(rel))

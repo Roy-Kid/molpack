@@ -98,15 +98,21 @@ let result = Molpack::new()
 
 ```python
 import molrs
-from molpack import InsideBox, Molpack, Target
+from molpack import InsideBoxRestraint, Molpack, Target
 
 frame = molrs.read_pdb("water.pdb")
 
 water = (
-    Target("water", frame, count=100)
-    .with_restraint(InsideBox([0, 0, 0], [40, 40, 40]))
+    Target(frame, count=100)
+    .with_name("water")
+    .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
 )
-result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
+result = (
+    Molpack()
+    .with_tolerance(2.0)
+    .with_seed(42)
+    .pack([water], max_loops=200)
+)
 ```
 
 ## Examples
@@ -131,9 +137,15 @@ cargo bench --bench pack_end_to_end -- mixture                          # e2e be
 
 ## Documentation
 
-- **Rust** — `cargo doc --open` or [docs.rs](https://docs.rs/molcrafts-molpack)
+- **Site** — [molcrafts.github.io/molpack](https://molcrafts.github.io/molpack/)
+- **Rust API** — `cargo doc --open` or [docs.rs](https://docs.rs/molcrafts-molpack)
 - **Python** — [`python/docs/`](./python/docs/)
-- **Concepts, architecture, extending** — rustdoc chapters (`molpack::concepts`, `molpack::architecture`, `molpack::extending`)
+
+The site has four top-level tabs: **Home**, **Get Started** (install,
+getting started), **Guide** (concepts, examples, Packmol parity), and
+**Internals** (architecture, extending). The same long-form chapters
+are embedded in the rustdoc as `molpack::getting_started`,
+`molpack::concepts`, `molpack::architecture`, and `molpack::extending`.
 
 ## Contributing
 

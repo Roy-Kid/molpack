@@ -1,69 +1,79 @@
-# molpack Behavior Parity with Packmol
+# Packmol parity
 
-## Scope
-- Alignment target: `/Users/roykid/work/packmol` source behavior.
-- Practical acceptance scope: 5 production-size examples:
-`pack_mixture`, `pack_bilayer`, `pack_interface`, `pack_solvprotein`, `pack_spherical`.
+molpack tracks the original Packmol's behavior (`L. Martínez et al.,
+J. Comput. Chem. 2009`). Coordinates are not byte-identical with the
+same seed, but functional equivalence is enforced on five canonical
+workloads.
 
-## Packmol Behaviors Matched
-- Objective structure:
-  - Geometric restraint penalties (`comprest`/`gwalls` equivalent).
-  - Minimum-distance conflict penalty (`computef`/`fparc` equivalent).
-- Optimization workflow:
-  - Initialization with constraint-only fitting (`initial`/`restmol`/`swaptype` flow).
-  - Main phased optimization (per-type then all-types).
-  - `movebad` heuristic and radius scaling schedule.
-  - GENCAN/SPG/CG loop and precision gate (`fdist`/`frest` style convergence).
-- Constraint semantics used by the 5 examples:
-  - `inside box`
-  - `inside sphere`
-  - `outside sphere`
-  - `above/below plane`
-  - fixed molecule placement
-- Global periodicity:
-  - `pbc X Y Z` and `pbc X0 Y0 Z0  X1 Y1 Z1` as in Packmol `getinp.f90`
-    — wired through to the packer's cell grid so Phase 1 never
-    allocates a grid for the fallback ±`sidemax` placement box.
-- Script parser strictness:
-  - Packmol's `getinp.f90` rejects unknown top-level keywords via an
-    explicit allow-list; molpack mirrors that posture — the parser
-    returns `ScriptError::UnknownKeyword` rather than silently
-    dropping tokens, because a dropped `pbc` caused a 42 GB cell-grid
-    allocation before the fix.
-- Determinism:
-  - Explicit seed support; same seed used for Packmol and molpack comparison runs.
+## What is matched
 
-## How Alignment is Verified
+**Objective structure**
 
-### 1. Batch Example Validation
-- Test file: `molpack/tests/examples_batch.rs`
-- Runs all 5 examples (expensive test, marked `#[ignore]`).
-- Validates:
-  - atom count consistency with expanded target specs
-  - molecule-count consistency
-  - XYZ output format sanity (first-line atom count)
-  - quantified violation metrics under tolerance/precision
+- Geometric restraint penalties — equivalent of `comprest` / `gwalls`.
+- Minimum-distance overlap penalty — equivalent of `computef` /
+  `fparc`.
 
-### 2. Packmol vs molpack Timing + Metrics
-- Command:
+**Optimization workflow**
+
+- Initialization with constraint-only fitting (`initial` / `restmol` /
+  `swaptype`).
+- Phased main optimization — per-type pre-compaction, then all-types.
+- `movebad` heuristic for stalled molecules.
+- Radius-scaling (`radscale`) decay across each phase.
+- GENCAN / SPG / CG inner solver chain.
+- Precision gate on `fdist` (overlap) and `frest` (restraint
+  violation).
+
+**Restraint vocabulary used by the canonical examples**
+
+- `inside box`, `inside sphere`, `outside sphere`
+- `above plane` / `below plane`
+- fixed molecule placement
+
+**Periodicity**
+
+- `pbc X Y Z` and `pbc X0 Y0 Z0  X1 Y1 Z1`, mirroring Packmol's
+  `getinp.f90`. The packer's cell grid is built directly from the
+  declared box.
+
+**Script parser strictness**
+
+- Unknown top-level keywords are rejected via
+  `ScriptError::UnknownKeyword`. A silently dropped `pbc` previously
+  triggered a 42 GB cell-grid allocation — strict parsing prevents
+  that class of failure.
+
+**Determinism**
+
+- Explicit seeds; identical seed values are used for paired Packmol
+  vs molpack runs in the regression suite.
+
+## Verification
+
+### Batch example validation
+
+`tests/examples_batch.rs` runs all five canonical workloads. Marked
+`#[ignore]` because the run is expensive — invoke explicitly:
+
 ```bash
-cargo run --release --release --bin compare_examples
+cargo test -p molcrafts-molpack --release --test examples_batch -- --ignored
 ```
-- Output tables:
-  - `example | packmol_time_s | molpack_time_s | ratio`
-  - violation metrics table for both tools:
-    - `max_distance_violation`
-    - `max_constraint_penalty`
-    - `violating_pairs`
-    - `violating_atoms`
-- Tool exits non-zero if:
-  - any side fails validation
-  - any example ratio is `> 1.5`
 
-## Unavoidable Differences
-- Coordinates are not expected to be byte-identical to Packmol even with same seed.
-- Acceptance basis is functional equivalence:
-  - same constraints enforced
-  - same conflict criteria class
-  - same tolerance/precision magnitude
-  - quantified violation metrics remain valid and comparable
+The test asserts:
+
+- atom and molecule counts match the expanded target specs;
+- XYZ output is structurally sound;
+- quantified violation metrics stay within tolerance / precision.
+
+### Violation metrics
+
+Each side reports `max_distance_violation`, `max_constraint_penalty`,
+`violating_pairs`, and `violating_atoms`. Both packers must satisfy the
+same thresholds.
+
+## Accepted differences
+
+- Packed coordinates are not bit-identical with Packmol even at the
+  same seed.
+- Acceptance is functional: same restraints, same conflict criteria,
+  same magnitude of tolerance / precision, comparable violation metrics.

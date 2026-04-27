@@ -73,11 +73,17 @@
 //! ## Feature flags
 //!
 //! - `rayon` — opt into the parallel evaluator (also forwards to `molrs-core`).
-//! - `cli` — build the `molpack` binary and its integration tests (pulls in `clap`).
+//! - `io` — pull in molrs-io so [`script::Script::build`] can read PDB / SDF /
+//!   XYZ / LAMMPS files directly. PyO3 / WASM / embedding hosts that bring
+//!   their own loader leave this off and use [`script::Script::lower`] with
+//!   [`script::StructurePlan::apply`] instead.
+//! - `cli` — build the `molpack` binary and its integration tests (pulls in
+//!   `clap` and implies `io`).
 //!
 //! Precision is fixed at `f64` via `molrs::types::F`.
 
 pub mod api;
+#[cfg(feature = "io")]
 pub mod cases;
 pub mod cell;
 pub mod constraints;
@@ -100,6 +106,7 @@ pub mod script;
 pub mod target;
 pub mod validation;
 
+#[cfg(feature = "io")]
 pub use cases::{ExampleCase, build_targets, example_dir_from_manifest, render_packmol_input};
 pub use context::PackContext;
 pub use error::PackError;
