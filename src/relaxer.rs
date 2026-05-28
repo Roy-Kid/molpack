@@ -246,7 +246,7 @@ struct TorsionMcRelaxerRunner {
 
 /// Compute intra-molecular self-avoidance penalty.
 ///
-/// Uses the same quartic form as the packer's `fparc`: `(d² - cutoff²)²` when
+/// Uses the same quartic form as the packer's `pair_f_atom`: `(d² - cutoff²)²` when
 /// `d < cutoff`. This ensures intra-molecular overlap penalties have comparable
 /// magnitude to inter-molecular penalties, preventing the optimizer from trading
 /// self-intersection for inter-molecular gains.
@@ -270,7 +270,7 @@ pub fn self_avoidance_penalty(
             let dz = coords[i][2] - coords[j][2];
             let dist_sq = dx * dx + dy * dy + dz * dz;
             if dist_sq < cutoff_sq {
-                // Quartic form matching packer's fparc: (d² - r²)²
+                // Quartic form matching packer's pair_f_atom: (d² - r²)²
                 let gap = dist_sq - cutoff_sq; // negative when overlapping
                 penalty += gap * gap;
             }
@@ -294,6 +294,7 @@ impl RelaxerRunner for TorsionMcRelaxerRunner {
 
         let use_sa = self.self_avoidance_radius > 0.0;
 
+        let n = coords.len();
         let mut best = coords.to_vec();
         let mut best_f = if use_sa {
             f_current
@@ -301,6 +302,7 @@ impl RelaxerRunner for TorsionMcRelaxerRunner {
         } else {
             f_current
         };
+        let mut trial = vec![[0.0 as F; 3]; n];
         let mut any_accepted = false;
 
         for _ in 0..self.steps {
@@ -308,7 +310,7 @@ impl RelaxerRunner for TorsionMcRelaxerRunner {
             let bond = &self.bonds[bond_idx];
             let delta = (rng_f(rng) * 2.0 - 1.0) * self.max_delta;
 
-            let mut trial = best.clone();
+            trial.copy_from_slice(&best);
             rotate_around_bond(&mut trial, bond, delta);
             recenter(&mut trial);
 
@@ -326,7 +328,7 @@ impl RelaxerRunner for TorsionMcRelaxerRunner {
             };
 
             if metropolis_accept(f_trial, best_f, self.temperature, rng) {
-                best = trial;
+                best.copy_from_slice(&trial);
                 best_f = f_trial;
                 self.accepts += 1;
                 any_accepted = true;

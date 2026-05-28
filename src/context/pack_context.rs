@@ -32,7 +32,7 @@ pub const NONE_IDX: u32 = u32::MAX;
 
 /// Compact AoS view of every atom's **hot** pair-kernel inputs.
 ///
-/// The pair kernel in `objective::fparc` / `gparc` / `fgparc` reads the
+/// The pair kernel in `objective::pair_f_atom` / `pair_g_atom` / `pair_fg_atom` reads the
 /// molecule identity, radii, `fscale`, and a flag byte every time it
 /// looks at another atom. Scattering those across seven separate `Vec<_>`s
 /// turns each visit into seven independent cache-line fetches. Packing
@@ -193,7 +193,7 @@ pub struct PackContext {
 
     // ---- Rotation constraints (Packmol constrain_rotation) ----
     /// Rotation constraint flags per free type in Euler variable order
-    /// [beta(y), gama(z), teta(x)].
+    /// [euler_beta(y), euler_gamma(z), euler_theta(x)].
     pub constrain_rot: Vec<[bool; 3]>,
     /// Rotation bounds per free type and Euler variable:
     /// [center_rad, half_width_rad].

@@ -55,13 +55,15 @@ impl SwapState {
     pub fn set_type(&self, itype: usize, sys: &mut PackContext) -> Vec<F> {
         // Byte-offsets in xfull for this type's COM/euler variables
         // (Packmol swaptype.f90 action 1, with 0-based indexing)
-        let ilubar_start: usize = sys.nmols[0..itype].iter().sum::<usize>() * 3;
-        let ilugan_start: usize = self.ntotmol_full * 3 + ilubar_start;
+        let x_com_offset_start: usize = sys.nmols[0..itype].iter().sum::<usize>() * 3;
+        let x_euler_offset_start: usize = self.ntotmol_full * 3 + x_com_offset_start;
         let nm = sys.nmols[itype];
 
         let mut xtype = vec![0.0 as F; nm * 6];
-        xtype[..nm * 3].copy_from_slice(&self.xfull[ilubar_start..ilubar_start + nm * 3]);
-        xtype[nm * 3..nm * 6].copy_from_slice(&self.xfull[ilugan_start..ilugan_start + nm * 3]);
+        xtype[..nm * 3]
+            .copy_from_slice(&self.xfull[x_com_offset_start..x_com_offset_start + nm * 3]);
+        xtype[nm * 3..nm * 6]
+            .copy_from_slice(&self.xfull[x_euler_offset_start..x_euler_offset_start + nm * 3]);
 
         // Reduce ntotmol + set comptype
         sys.ntotmol = nm;
@@ -74,12 +76,14 @@ impl SwapState {
 
     /// action=2: save per-type results back into xfull.
     pub fn save_type(&mut self, itype: usize, xtype: &[F], sys: &PackContext) {
-        let ilubar_start: usize = sys.nmols[0..itype].iter().sum::<usize>() * 3;
-        let ilugan_start: usize = self.ntotmol_full * 3 + ilubar_start;
+        let x_com_offset_start: usize = sys.nmols[0..itype].iter().sum::<usize>() * 3;
+        let x_euler_offset_start: usize = self.ntotmol_full * 3 + x_com_offset_start;
         let nm = sys.nmols[itype];
 
-        self.xfull[ilubar_start..ilubar_start + nm * 3].copy_from_slice(&xtype[..nm * 3]);
-        self.xfull[ilugan_start..ilugan_start + nm * 3].copy_from_slice(&xtype[nm * 3..nm * 6]);
+        self.xfull[x_com_offset_start..x_com_offset_start + nm * 3]
+            .copy_from_slice(&xtype[..nm * 3]);
+        self.xfull[x_euler_offset_start..x_euler_offset_start + nm * 3]
+            .copy_from_slice(&xtype[nm * 3..nm * 6]);
     }
 
     /// action=3: restore full x and ntotmol.
@@ -173,8 +177,9 @@ impl Drop for RestmolScope<'_> {
 /// Run a single-molecule GENCAN solve (restmol).
 /// Port of `restmol.f90`.
 ///
-/// `ilubar` is the offset in `x` for the COM of this molecule.
-/// Euler angles are at `x[ilubar + ntotmol*3 ..]`.
+/// `x_com_offset` (Packmol: `ilubar`) is the offset in `x` for the COM of
+/// this molecule. Euler angles are at `x[x_com_offset + ntotmol*3 ..]`
+/// (that base offset is Packmol's `ilugan`, here `x_euler_offset`).
 ///
 /// - `solve = false`: evaluate constraint function only (no optimization).
 /// - `solve = true`: run GENCAN to minimize constraint violations.
@@ -183,7 +188,7 @@ impl Drop for RestmolScope<'_> {
 #[allow(clippy::too_many_arguments)]
 pub fn restmol(
     itype: usize,
-    ilubar: usize,
+    x_com_offset: usize,
     x: &mut [F],
     sys: &mut PackContext,
     precision: F,
@@ -191,14 +196,14 @@ pub fn restmol(
     solve: bool,
     workspace: &mut GencanWorkspace,
 ) {
-    let ilugan_offset = sys.ntotmol * 3;
+    let x_euler_offset = sys.ntotmol * 3;
     let mut xmol = vec![0.0 as F; 6];
-    xmol[0] = x[ilubar];
-    xmol[1] = x[ilubar + 1];
-    xmol[2] = x[ilubar + 2];
-    xmol[3] = x[ilubar + ilugan_offset];
-    xmol[4] = x[ilubar + ilugan_offset + 1];
-    xmol[5] = x[ilubar + ilugan_offset + 2];
+    xmol[0] = x[x_com_offset];
+    xmol[1] = x[x_com_offset + 1];
+    xmol[2] = x[x_com_offset + 2];
+    xmol[3] = x[x_com_offset + x_euler_offset];
+    xmol[4] = x[x_com_offset + x_euler_offset + 1];
+    xmol[5] = x[x_com_offset + x_euler_offset + 2];
 
     {
         let mut scope = RestmolScope::enter(sys, itype);
@@ -216,12 +221,12 @@ pub fn restmol(
         }
     }
 
-    x[ilubar] = xmol[0];
-    x[ilubar + 1] = xmol[1];
-    x[ilubar + 2] = xmol[2];
-    x[ilubar + ilugan_offset] = xmol[3];
-    x[ilubar + ilugan_offset + 1] = xmol[4];
-    x[ilubar + ilugan_offset + 2] = xmol[5];
+    x[x_com_offset] = xmol[0];
+    x[x_com_offset + 1] = xmol[1];
+    x[x_com_offset + 2] = xmol[2];
+    x[x_com_offset + x_euler_offset] = xmol[3];
+    x[x_com_offset + x_euler_offset + 1] = xmol[4];
+    x[x_com_offset + x_euler_offset + 2] = xmol[5];
     // sys.frest retains the value from the restmol compute_f
 }
 
@@ -358,18 +363,21 @@ pub fn initial(
         t0.elapsed().as_secs_f64()
     );
     {
-        let mut ilubar = 0usize;
-        let mut ilugan = sys.ntotmol * 3;
+        let mut x_com_offset = 0usize;
+        let mut x_euler_offset = sys.ntotmol * 3;
         for itype in 0..sys.ntype {
             for _imol in 0..sys.nmols[itype] {
-                x[ilubar] = sys.sizemin[0] + uniform01(rng) * (sys.sizemax[0] - sys.sizemin[0]);
-                x[ilubar + 1] = sys.sizemin[1] + uniform01(rng) * (sys.sizemax[1] - sys.sizemin[1]);
-                x[ilubar + 2] = sys.sizemin[2] + uniform01(rng) * (sys.sizemax[2] - sys.sizemin[2]);
-                x[ilugan] = random_angle_for_type(itype, 0, sys, rng);
-                x[ilugan + 1] = random_angle_for_type(itype, 1, sys, rng);
-                x[ilugan + 2] = random_angle_for_type(itype, 2, sys, rng);
-                ilubar += 3;
-                ilugan += 3;
+                x[x_com_offset] =
+                    sys.sizemin[0] + uniform01(rng) * (sys.sizemax[0] - sys.sizemin[0]);
+                x[x_com_offset + 1] =
+                    sys.sizemin[1] + uniform01(rng) * (sys.sizemax[1] - sys.sizemin[1]);
+                x[x_com_offset + 2] =
+                    sys.sizemin[2] + uniform01(rng) * (sys.sizemax[2] - sys.sizemin[2]);
+                x[x_euler_offset] = random_angle_for_type(itype, 0, sys, rng);
+                x[x_euler_offset + 1] = random_angle_for_type(itype, 1, sys, rng);
+                x[x_euler_offset + 2] = random_angle_for_type(itype, 2, sys, rng);
+                x_com_offset += 3;
+                x_euler_offset += 3;
             }
         }
     }
@@ -586,7 +594,7 @@ pub fn initial(
         sys.ntotmol
     );
     {
-        let mut ilubar = 0usize;
+        let mut x_com_offset = 0usize;
         for itype in 0..sys.ntype {
             let cm_lo = cm_min_per_type[itype];
             let cm_hi = cm_max_per_type[itype];
@@ -611,12 +619,12 @@ pub fn initial(
                     let rx: F = uniform01(rng);
                     let ry: F = uniform01(rng);
                     let rz: F = uniform01(rng);
-                    x[ilubar] = cm_lo[0] + rx * (cm_hi[0] - cm_lo[0]);
-                    x[ilubar + 1] = cm_lo[1] + ry * (cm_hi[1] - cm_lo[1]);
-                    x[ilubar + 2] = cm_lo[2] + rz * (cm_hi[2] - cm_lo[2]);
+                    x[x_com_offset] = cm_lo[0] + rx * (cm_hi[0] - cm_lo[0]);
+                    x[x_com_offset + 1] = cm_lo[1] + ry * (cm_hi[1] - cm_lo[1]);
+                    x[x_com_offset + 2] = cm_lo[2] + rz * (cm_hi[2] - cm_lo[2]);
                     restmol(
                         itype,
-                        ilubar,
+                        x_com_offset,
                         x,
                         sys,
                         precision,
@@ -626,7 +634,7 @@ pub fn initial(
                     );
                     fmol = sys.frest;
                 }
-                ilubar += 3;
+                x_com_offset += 3;
             }
             log::debug!(
                 "[{:.3}s]   type {itype} placement done",
@@ -639,13 +647,13 @@ pub fn initial(
     // Packmol initial.f90 lines 431-458
     log::debug!("[{:.3}s] setting random angles", t0.elapsed().as_secs_f64());
     {
-        let mut ilugan = sys.ntotmol * 3;
+        let mut x_euler_offset = sys.ntotmol * 3;
         for itype in 0..sys.ntype {
             for _imol in 0..sys.nmols[itype] {
-                x[ilugan] = random_angle_for_type(itype, 0, sys, rng);
-                x[ilugan + 1] = random_angle_for_type(itype, 1, sys, rng);
-                x[ilugan + 2] = random_angle_for_type(itype, 2, sys, rng);
-                ilugan += 3;
+                x[x_euler_offset] = random_angle_for_type(itype, 0, sys, rng);
+                x[x_euler_offset + 1] = random_angle_for_type(itype, 1, sys, rng);
+                x[x_euler_offset + 2] = random_angle_for_type(itype, 2, sys, rng);
+                x_euler_offset += 3;
             }
         }
     }
@@ -705,17 +713,17 @@ fn random_angle_for_type(itype: usize, axis: usize, sys: &PackContext, rng: &mut
 
 /// Initialize xcart from x (COM + Euler angles).
 pub fn init_xcart_from_x(x: &[F], sys: &mut PackContext) {
-    let mut ilubar = 0usize;
-    let mut ilugan = sys.ntotmol * 3;
+    let mut x_com_offset = 0usize;
+    let mut x_euler_offset = sys.ntotmol * 3;
     let mut icart = 0usize;
 
     for itype in 0..sys.ntype {
         for _imol in 0..sys.nmols[itype] {
-            let xcm = [x[ilubar], x[ilubar + 1], x[ilubar + 2]];
-            let beta = x[ilugan];
-            let gama = x[ilugan + 1];
-            let teta = x[ilugan + 2];
-            let (v1, v2, v3) = eulerrmat(beta, gama, teta);
+            let xcm = [x[x_com_offset], x[x_com_offset + 1], x[x_com_offset + 2]];
+            let euler_beta = x[x_euler_offset];
+            let euler_gamma = x[x_euler_offset + 1];
+            let euler_theta = x[x_euler_offset + 2];
+            let (v1, v2, v3) = eulerrmat(euler_beta, euler_gamma, euler_theta);
 
             let idatom_base = sys.idfirst[itype];
             for iatom in 0..sys.natoms[itype] {
@@ -729,8 +737,8 @@ pub fn init_xcart_from_x(x: &[F], sys: &mut PackContext) {
                 icart += 1;
             }
 
-            ilugan += 3;
-            ilubar += 3;
+            x_euler_offset += 3;
+            x_com_offset += 3;
         }
     }
 }

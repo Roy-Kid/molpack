@@ -123,34 +123,38 @@ pub fn movebad(
             .collect();
 
         for &(ibad_mol, igood_mol) in &move_pairs {
-            let ilubar_bad = (mol_base + ibad_mol) * 3;
-            let ilugan_bad = ntotmol * 3 + (mol_base + ibad_mol) * 3;
-            let ilubar_good = (mol_base + igood_mol) * 3;
-            let ilugan_good = ntotmol * 3 + (mol_base + igood_mol) * 3;
+            let x_com_offset_bad = (mol_base + ibad_mol) * 3;
+            let x_euler_offset_bad = ntotmol * 3 + (mol_base + ibad_mol) * 3;
+            let x_com_offset_good = (mol_base + igood_mol) * 3;
+            let x_euler_offset_good = ntotmol * 3 + (mol_base + igood_mol) * 3;
 
             let dmax = sys.dmax[itype];
             if cfg.movebadrandom {
-                x[ilubar_bad] = sys.sizemin[0] + uniform01(rng) * (sys.sizemax[0] - sys.sizemin[0]);
-                x[ilubar_bad + 1] =
+                x[x_com_offset_bad] =
+                    sys.sizemin[0] + uniform01(rng) * (sys.sizemax[0] - sys.sizemin[0]);
+                x[x_com_offset_bad + 1] =
                     sys.sizemin[1] + uniform01(rng) * (sys.sizemax[1] - sys.sizemin[1]);
-                x[ilubar_bad + 2] =
+                x[x_com_offset_bad + 2] =
                     sys.sizemin[2] + uniform01(rng) * (sys.sizemax[2] - sys.sizemin[2]);
             } else {
                 // Move bad molecule near good molecule with random perturbation.
-                x[ilubar_bad] = x[ilubar_good] - 0.3 * dmax + 0.6 * uniform01(rng) * dmax;
-                x[ilubar_bad + 1] = x[ilubar_good + 1] - 0.3 * dmax + 0.6 * uniform01(rng) * dmax;
-                x[ilubar_bad + 2] = x[ilubar_good + 2] - 0.3 * dmax + 0.6 * uniform01(rng) * dmax;
+                x[x_com_offset_bad] =
+                    x[x_com_offset_good] - 0.3 * dmax + 0.6 * uniform01(rng) * dmax;
+                x[x_com_offset_bad + 1] =
+                    x[x_com_offset_good + 1] - 0.3 * dmax + 0.6 * uniform01(rng) * dmax;
+                x[x_com_offset_bad + 2] =
+                    x[x_com_offset_good + 2] - 0.3 * dmax + 0.6 * uniform01(rng) * dmax;
             }
 
             // Copy angles from good molecule
-            x[ilugan_bad] = x[ilugan_good];
-            x[ilugan_bad + 1] = x[ilugan_good + 1];
-            x[ilugan_bad + 2] = x[ilugan_good + 2];
+            x[x_euler_offset_bad] = x[x_euler_offset_good];
+            x[x_euler_offset_bad + 1] = x[x_euler_offset_good + 1];
+            x[x_euler_offset_bad + 2] = x[x_euler_offset_good + 2];
 
             // Fit the moved molecule into constraints
             restmol(
                 itype,
-                ilubar_bad,
+                x_com_offset_bad,
                 x,
                 sys,
                 precision,

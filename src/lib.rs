@@ -68,7 +68,7 @@
 //! | Relaxer trait + built-in | [`Relaxer`], [`RelaxerRunner`], [`TorsionMcRelaxer`] (aliased to `TorsionMcHook`) |
 //! | Errors | [`PackError`] |
 //! | Validation | [`validate_from_targets`], [`ValidationReport`], [`ViolationMetrics`] |
-//! | Examples harness | [`ExampleCase`], [`build_targets`], [`example_dir_from_manifest`], [`render_packmol_input`] |
+//! | Examples harness | [`ExampleCase`], [`build_targets`], [`example_dir_from_manifest`], [`render_molpack_input`] |
 //!
 //! ## Feature flags
 //!
@@ -85,7 +85,7 @@
 pub mod api;
 #[cfg(feature = "io")]
 pub mod cases;
-pub mod cell;
+pub(crate) mod cell;
 pub mod constraints;
 pub mod context;
 pub mod error;
@@ -107,7 +107,7 @@ pub mod target;
 pub mod validation;
 
 #[cfg(feature = "io")]
-pub use cases::{ExampleCase, build_targets, example_dir_from_manifest, render_packmol_input};
+pub use cases::{ExampleCase, build_targets, example_dir_from_manifest, render_molpack_input};
 pub use context::PackContext;
 pub use error::PackError;
 pub use frame::{compute_mol_ids, context_to_frame, finalize_frame, frame_to_coords};

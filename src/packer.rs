@@ -29,9 +29,11 @@ use crate::target::{CenteringMode, Target};
 pub struct PackResult {
     /// Atoms frame with x, y, z (f32), element (String), mol_id (i64).
     pub frame: molrs::Frame,
-    /// Maximum inter-molecular distance violation at termination.
+    /// Maximum inter-molecular distance violation at termination. The name
+    /// is Packmol's (`fdist`); kept as-is because it is public API.
     pub fdist: F,
-    /// Maximum constraint violation at termination.
+    /// Maximum constraint (restraint) violation at termination. The name is
+    /// Packmol's (`frest`); kept as-is because it is public API.
     pub frest: F,
     /// Whether the packing converged (`fdist < precision && frest < precision`).
     pub converged: bool,
@@ -72,6 +74,13 @@ const MOVEFRAC: F = 0.05;
 /// Atom radii are set to `tolerance / 2` for all atoms, matching Packmol's
 /// `radius(i) = dism/2.d0` (packmol.f90 line 283).
 const DEFAULT_TOLERANCE: F = 2.0;
+/// `movebad` fires once the radii are full-size (`radscale == 1.0`) and the
+/// previous iteration's percentage improvement has dropped to this threshold
+/// or below — i.e. the loop has nearly stalled (packmol.f90 line 815).
+const MOVEBAD_FIMP_THRESHOLD: F = 10.0;
+/// Symmetric clamp on the percentage-improvement metric `fimp`
+/// (packmol.f90 lines 848-849: `fimp ∈ [-99.99, 99.99]`).
+const FIMP_CLAMP: F = 99.99;
 
 /// The packer.
 pub struct Molpack {
@@ -767,7 +776,7 @@ pub fn run_iteration(
     // movebad: Packmol triggers when radscale==1.0 AND fimp<=10.0
     // (packmol.f90 line 815). fimp here is from the PREVIOUS iteration.
     // After movebad, reset flast to the post-movebad f (Packmol line 821).
-    if !disable_movebad && *radscale == 1.0 && *fimp_prev <= 10.0 {
+    if !disable_movebad && *radscale == 1.0 && *fimp_prev <= MOVEBAD_FIMP_THRESHOLD {
         movebad(xwork, sys, precision, movebad_cfg, rng, gencan_workspace);
         // Reset flast to the post-movebad f value so fimp is measured
         // relative to movebad's starting point.
@@ -785,16 +794,20 @@ pub fn run_iteration(
         let na = sys.natoms[*itype];
 
         for runner in runners.iter_mut() {
-            let saved: Vec<[F; 3]> = sys.coor[base..base + na].to_vec();
+            // Reuse gencan_workspace buffer to avoid per-iteration allocation.
+            let snap = &mut gencan_workspace.coords_snapshot;
+            snap.resize(na, [0.0 as F; 3]);
+            snap.copy_from_slice(&sys.coor[base..base + na]);
+            let saved: &[[F; 3]] = snap;
             let f_before = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
 
             let result = runner.on_iter(
-                &saved,
+                saved,
                 f_before,
                 &mut |trial: &[[F; 3]]| {
                     sys.coor[base..base + na].copy_from_slice(trial);
                     let f = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
-                    sys.coor[base..base + na].copy_from_slice(&saved);
+                    sys.coor[base..base + na].copy_from_slice(saved);
                     f
                 },
                 rng,
@@ -829,7 +842,7 @@ pub fn run_iteration(
         F::INFINITY
     };
     // Packmol lines 848-849: clamp to [-99.99, 99.99]
-    fimp = fimp.clamp(-99.99, 99.99);
+    fimp = fimp.clamp(-FIMP_CLAMP, FIMP_CLAMP);
     *flast = fx_unscaled;
     *fimp_prev = fimp;
 
