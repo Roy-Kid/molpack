@@ -7,7 +7,7 @@
 //! below stay in the tree as future-regression guards.
 //!
 //! Setup: empty-molecule PackContext. With `ntype=0` / `ntotmol=0` the
-//! body's handler-loop / comptype-loop / xwork alloc / evaluate /
+//! body's handler-loop / is_type_active-loop / xwork alloc / evaluate /
 //! precision short-circuit still execute on empty vectors — this
 //! measures **function-call boundary cost** (indirection, inlining) on
 //! a trivial body. Full-workload benchmarking lives in

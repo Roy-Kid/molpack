@@ -32,7 +32,7 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
     sys.nmols = vec![n_mols];
     sys.natoms = vec![atoms_per_mol];
     sys.idfirst = vec![0];
-    sys.comptype = vec![true; ntype];
+    sys.is_type_active = vec![true; ntype];
     sys.constrain_rot = vec![[false; 3]; ntype];
     sys.rot_bound = vec![[[0.0; 2]; 3]; ntype];
 
@@ -48,8 +48,8 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
     for imol in 0..n_mols {
         for iatom in 0..atoms_per_mol {
             let icart = imol * atoms_per_mol + iatom;
-            sys.ibtype[icart] = 0;
-            sys.ibmol[icart] = imol;
+            sys.atom_type_idx[icart] = 0;
+            sys.atom_mol_idx[icart] = imol;
         }
     }
 
@@ -156,15 +156,15 @@ fn sys_template_clone(src: &PackContext) -> PackContext {
     dst.nmols = src.nmols.clone();
     dst.natoms = src.natoms.clone();
     dst.idfirst = src.idfirst.clone();
-    dst.comptype = src.comptype.clone();
+    dst.is_type_active = src.is_type_active.clone();
     dst.constrain_rot = src.constrain_rot.clone();
     dst.rot_bound = src.rot_bound.clone();
     dst.coor = src.coor.clone();
     dst.radius = src.radius.clone();
     dst.radius_ini = src.radius_ini.clone();
     dst.fscale = src.fscale.clone();
-    dst.ibtype = src.ibtype.clone();
-    dst.ibmol = src.ibmol.clone();
+    dst.atom_type_idx = src.atom_type_idx.clone();
+    dst.atom_mol_idx = src.atom_mol_idx.clone();
     dst.fixedatom = src.fixedatom.clone();
     dst.iratom_offsets = src.iratom_offsets.clone();
     dst.iratom_data = src.iratom_data.clone();

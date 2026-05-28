@@ -28,7 +28,7 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
     sys.nmols = vec![n_mols];
     sys.natoms = vec![atoms_per_mol];
     sys.idfirst = vec![0];
-    sys.comptype = vec![true; ntype];
+    sys.is_type_active = vec![true; ntype];
     sys.constrain_rot = vec![[false; 3]; ntype];
     sys.rot_bound = vec![[[0.0; 2]; 3]; ntype];
     sys.coor = vec![[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
@@ -39,8 +39,8 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
     for imol in 0..n_mols {
         for iatom in 0..atoms_per_mol {
             let icart = imol * atoms_per_mol + iatom;
-            sys.ibtype[icart] = 0;
-            sys.ibmol[icart] = imol;
+            sys.atom_type_idx[icart] = 0;
+            sys.atom_mol_idx[icart] = imol;
         }
     }
     sys.iratom_offsets = vec![0; ntotat + 1];

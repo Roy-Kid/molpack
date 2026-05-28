@@ -233,14 +233,16 @@ fn pair_f_atom(
     let mut jcart_id = first_jcart;
     let xi = sys.xcart[icart];
     let hot = AtomHotState::load(icart, sys);
-    let move_flag = sys.move_flag;
+    let selective_repack_mode = sys.selective_repack_mode;
 
     while jcart_id != NONE_IDX {
         let jcart = jcart_id as usize;
         let next = sys.latomnext[jcart];
         let props_j = sys.atom_props[jcart];
         // Skip same molecule
-        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+        if hot.props.atom_mol_idx == props_j.atom_mol_idx
+            && hot.props.atom_type_idx == props_j.atom_type_idx
+        {
             jcart_id = next;
             continue;
         }
@@ -278,7 +280,7 @@ fn pair_f_atom(
         if violation > local_fdist {
             local_fdist = violation;
         }
-        if move_flag {
+        if selective_repack_mode {
             if violation > sys.fdist_atom[icart] {
                 sys.fdist_atom[icart] = violation;
             }
@@ -335,7 +337,7 @@ fn expand_molecules(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
 
     // Packmol computef/computeg loop only over free types (1..ntype).
     for itype in 0..sys.ntype {
-        if !sys.comptype[itype] {
+        if !sys.is_type_active[itype] {
             icart += sys.nmols[itype] * sys.natoms[itype];
             continue;
         }
@@ -392,7 +394,7 @@ fn accumulate_constraint_value(icart: usize, pos: &[F; 3], sys: &mut PackContext
     if fplus > sys.frest {
         sys.frest = fplus;
     }
-    if sys.move_flag {
+    if sys.selective_repack_mode {
         sys.frest_atom[icart] += fplus;
     }
     fplus
@@ -416,7 +418,7 @@ fn accumulate_constraint_gradient_from_xcart(sys: &mut PackContext) {
     let mut icart = 0usize;
 
     for itype in 0..sys.ntype {
-        if !sys.comptype[itype] {
+        if !sys.is_type_active[itype] {
             icart += sys.nmols[itype] * sys.natoms[itype];
             continue;
         }
@@ -441,7 +443,7 @@ fn accumulate_constraint_values_from_xcart(sys: &mut PackContext) -> F {
     let mut icart = 0usize;
 
     for itype in 0..sys.ntype {
-        if !sys.comptype[itype] {
+        if !sys.is_type_active[itype] {
             icart += sys.nmols[itype] * sys.natoms[itype];
             continue;
         }
@@ -466,7 +468,7 @@ fn accumulate_constraint_values_and_gradients_from_xcart(sys: &mut PackContext) 
     let mut icart = 0usize;
 
     for itype in 0..sys.ntype {
-        if !sys.comptype[itype] {
+        if !sys.is_type_active[itype] {
             icart += sys.nmols[itype] * sys.natoms[itype];
             continue;
         }
@@ -505,14 +507,14 @@ fn insert_atom_in_cell(icart: usize, pos: &[F; 3], sys: &mut PackContext) {
         sys.lcellfirst = icell as u32;
     }
 
-    // `ibtype` / `ibmol` used to be written here on every eval; they are
+    // `atom_type_idx` / `atom_mol_idx` used to be written here on every eval; they are
     // now set once in `Molpack::pack` and mirrored into `atom_props`.
 }
 
 #[inline(always)]
 fn accumulate_pair_f(sys: &mut PackContext) -> F {
     #[cfg(feature = "rayon")]
-    if sys.parallel_pair_eval && !sys.move_flag {
+    if sys.parallel_pair_eval && !sys.selective_repack_mode {
         let (f, fdist_max) = accumulate_pair_f_parallel(sys);
         sys.fdist = sys.fdist.max(fdist_max);
         return f;
@@ -616,7 +618,7 @@ fn accumulate_pair_g(sys: &mut PackContext) {
 #[inline(always)]
 fn accumulate_pair_fg(sys: &mut PackContext) -> F {
     #[cfg(feature = "rayon")]
-    if sys.parallel_pair_eval && !sys.move_flag {
+    if sys.parallel_pair_eval && !sys.selective_repack_mode {
         let (f, fdist_max) = accumulate_pair_fg_parallel(sys);
         if fdist_max > sys.fdist {
             sys.fdist = fdist_max;
@@ -663,7 +665,7 @@ fn accumulate_pair_fg(sys: &mut PackContext) -> F {
 /// Parallel counterpart to [`accumulate_pair_fg`]. Partitions `active_cells`
 /// into `N_threads` contiguous chunks, runs each on its own partial
 /// gradient buffer, then serially merges the buffers back into
-/// `sys.work.gxcar`. Gated on `!move_flag` (the per-atom `fdist_atom`
+/// `sys.work.gxcar`. Gated on `!selective_repack_mode` (the per-atom `fdist_atom`
 /// bookkeeping is intentionally skipped).
 #[cfg(feature = "rayon")]
 fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
@@ -743,7 +745,9 @@ fn pair_g_atom(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcC
         let jcart = jcart_id as usize;
         let next = sys.latomnext[jcart];
         let props_j = sys.atom_props[jcart];
-        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+        if hot.props.atom_mol_idx == props_j.atom_mol_idx
+            && hot.props.atom_type_idx == props_j.atom_type_idx
+        {
             jcart_id = next;
             continue;
         }
@@ -814,13 +818,15 @@ fn pair_fg_atom(
     let mut jcart_id = first_jcart;
     let xi = sys.xcart[icart];
     let hot = AtomHotState::load(icart, sys);
-    let move_flag = sys.move_flag;
+    let selective_repack_mode = sys.selective_repack_mode;
 
     while jcart_id != NONE_IDX {
         let jcart = jcart_id as usize;
         let next = sys.latomnext[jcart];
         let props_j = sys.atom_props[jcart];
-        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+        if hot.props.atom_mol_idx == props_j.atom_mol_idx
+            && hot.props.atom_type_idx == props_j.atom_type_idx
+        {
             jcart_id = next;
             continue;
         }
@@ -885,7 +891,7 @@ fn pair_fg_atom(
         if violation > local_fdist {
             local_fdist = violation;
         }
-        if move_flag {
+        if selective_repack_mode {
             if violation > sys.fdist_atom[icart] {
                 sys.fdist_atom[icart] = violation;
             }
@@ -904,7 +910,7 @@ fn pair_fg_atom(
 /// an external `grad` buffer instead of `sys.work.gxcar`, so multiple rayon
 /// threads can accumulate into disjoint partial buffers and the caller
 /// merges them. `fdist_atom` bookkeeping is intentionally dropped: the
-/// parallel fast path is gated on `!move_flag`.
+/// parallel fast path is gated on `!selective_repack_mode`.
 #[cfg(feature = "rayon")]
 #[inline(always)]
 fn pair_fg_atom_parallel(
@@ -924,7 +930,9 @@ fn pair_fg_atom_parallel(
         let jcart = jcart_id as usize;
         let next = sys.latomnext[jcart];
         let props_j = sys.atom_props[jcart];
-        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+        if hot.props.atom_mol_idx == props_j.atom_mol_idx
+            && hot.props.atom_type_idx == props_j.atom_type_idx
+        {
             jcart_id = next;
             continue;
         }
@@ -1010,7 +1018,9 @@ fn pair_f_atom_parallel(
         let jcart = jcart_id as usize;
         let next = sys.latomnext[jcart];
         let props_j = sys.atom_props[jcart];
-        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+        if hot.props.atom_mol_idx == props_j.atom_mol_idx
+            && hot.props.atom_type_idx == props_j.atom_type_idx
+        {
             jcart_id = next;
             continue;
         }
@@ -1062,7 +1072,7 @@ fn project_cartesian_gradient(x: &[F], sys: &mut PackContext, g: &mut [F]) {
     let mut icart = 0usize;
 
     for itype in 0..sys.ntype {
-        if !sys.comptype[itype] {
+        if !sys.is_type_active[itype] {
             icart += sys.nmols[itype] * sys.natoms[itype];
             continue;
         }
@@ -1106,7 +1116,7 @@ fn project_cartesian_gradient(x: &[F], sys: &mut PackContext, g: &mut [F]) {
 fn matches_cached_geometry(x: &[F], sys: &PackContext) -> bool {
     sys.work.matches_cached_geometry(
         x,
-        &sys.comptype,
+        &sys.is_type_active,
         sys.init1,
         sys.ncells,
         sys.cell_length,
@@ -1120,7 +1130,7 @@ fn matches_cached_geometry(x: &[F], sys: &PackContext) -> bool {
 fn update_cached_geometry(x: &[F], sys: &mut PackContext) {
     sys.work.update_cached_geometry(
         x,
-        &sys.comptype,
+        &sys.is_type_active,
         sys.init1,
         sys.ncells,
         sys.cell_length,
@@ -1249,7 +1259,7 @@ impl Objective for PackContext {
         u.fill(1.0e20);
         let mut i = n / 2;
         for itype in 0..self.ntype {
-            if !self.comptype[itype] {
+            if !self.is_type_active[itype] {
                 continue;
             }
             for _imol in 0..self.nmols[itype] {

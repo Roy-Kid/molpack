@@ -1,7 +1,7 @@
 #![allow(clippy::needless_range_loop)]
 //! Tests for the geometry cache fast path in `compute_f` / `compute_fg` /
 //! `compute_g`. The cache is hit when the caller evaluates at the same `x`
-//! (and identical comptype / cell grid) as the previous call — in that case
+//! (and identical is_type_active / cell grid) as the previous call — in that case
 //! the Cartesian expansion and cell-list rebuild are skipped and only the
 //! pair / constraint kernels re-run on the stored state.
 //!
@@ -30,13 +30,13 @@ fn mixed_system() -> (PackContext, Vec<F>) {
     sys.nmols = vec![3];
     sys.natoms = vec![1];
     sys.idfirst = vec![0];
-    sys.comptype = vec![true];
+    sys.is_type_active = vec![true];
     sys.coor = vec![[0.0, 0.0, 0.0]];
 
     sys.radius = vec![1.0; 3];
     sys.radius_ini = vec![1.0; 3];
     sys.fscale = vec![1.0; 3];
-    sys.ibmol = vec![0, 1, 2];
+    sys.atom_mol_idx = vec![0, 1, 2];
     sys.sync_atom_props();
 
     sys.restraints = vec![Arc::new(InsideBoxRestraint::new(
@@ -206,23 +206,23 @@ fn radii_swap_between_fg_and_f_cached_matches_fresh() {
     assert_eq!(sys_a.frest.to_bits(), sys_b.frest.to_bits());
 }
 
-// ── move_flag path must stay on the slow path ─────────────────────────────
+// ── selective_repack_mode path must stay on the slow path ─────────────────────────────
 //
-// When `move_flag` is true (during movebad), per-atom `fdist_atom` /
+// When `selective_repack_mode` is true (during movebad), per-atom `fdist_atom` /
 // `frest_atom` are accumulated inside the pair / constraint kernels. Running
 // the cache path a second time would double-count; so cache must be bypassed
-// whenever `move_flag` is set.
+// whenever `selective_repack_mode` is set.
 
 #[test]
 fn move_flag_true_bypasses_cache() {
     let (mut sys, x) = mixed_system();
 
-    // Warm the cache at normal (move_flag=false) state.
+    // Warm the cache at normal (selective_repack_mode=false) state.
     let _ = compute_f(&x, &mut sys);
     assert!(sys.work.cached_geometry_valid);
 
-    // Now turn on move_flag and reset per-atom trackers.
-    sys.move_flag = true;
+    // Now turn on selective_repack_mode and reset per-atom trackers.
+    sys.selective_repack_mode = true;
     sys.fdist_atom.iter_mut().for_each(|v| *v = 0.0);
     sys.frest_atom.iter_mut().for_each(|v| *v = 0.0);
     let _ = compute_f(&x, &mut sys);
@@ -233,7 +233,7 @@ fn move_flag_true_bypasses_cache() {
     let (mut sys2, _) = mixed_system();
     force_cache_miss(&mut sys2);
     let _ = compute_f(&x, &mut sys2);
-    sys2.move_flag = true;
+    sys2.selective_repack_mode = true;
     sys2.fdist_atom.iter_mut().for_each(|v| *v = 0.0);
     sys2.frest_atom.iter_mut().for_each(|v| *v = 0.0);
     force_cache_miss(&mut sys2);
@@ -248,14 +248,14 @@ fn move_flag_true_bypasses_cache() {
         assert_eq!(
             a.to_bits(),
             b.to_bits(),
-            "fdist_atom[{i}] mismatch under move_flag: {a} vs {b}"
+            "fdist_atom[{i}] mismatch under selective_repack_mode: {a} vs {b}"
         );
     }
     for (i, (&a, &b)) in frest_move_a.iter().zip(sys2.frest_atom.iter()).enumerate() {
         assert_eq!(
             a.to_bits(),
             b.to_bits(),
-            "frest_atom[{i}] mismatch under move_flag: {a} vs {b}"
+            "frest_atom[{i}] mismatch under selective_repack_mode: {a} vs {b}"
         );
     }
 }

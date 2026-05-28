@@ -51,7 +51,7 @@ impl SwapState {
     /// action=1: set up reduced x for `itype` only.
     ///
     /// Returns the compact x vector (length = `nmols[itype]` * 6).
-    /// Also updates `sys.ntotmol` and `sys.comptype`.
+    /// Also updates `sys.ntotmol` and `sys.is_type_active`.
     pub fn set_type(&self, itype: usize, sys: &mut PackContext) -> Vec<F> {
         // Byte-offsets in xfull for this type's COM/euler variables
         // (Packmol swaptype.f90 action 1, with 0-based indexing)
@@ -65,10 +65,10 @@ impl SwapState {
         xtype[nm * 3..nm * 6]
             .copy_from_slice(&self.xfull[x_euler_offset_start..x_euler_offset_start + nm * 3]);
 
-        // Reduce ntotmol + set comptype
+        // Reduce ntotmol + set is_type_active
         sys.ntotmol = nm;
         for i in 0..sys.ntype_with_fixed {
-            sys.comptype[i] = i >= sys.ntype || i == itype;
+            sys.is_type_active[i] = i >= sys.ntype || i == itype;
         }
 
         xtype
@@ -92,7 +92,7 @@ impl SwapState {
         x.copy_from_slice(&self.xfull);
         sys.ntotmol = self.ntotmol_full;
         for i in 0..sys.ntype_with_fixed {
-            sys.comptype[i] = true;
+            sys.is_type_active[i] = true;
         }
     }
 }
@@ -131,7 +131,7 @@ struct RestmolScope<'a> {
     itype: usize,
     ntotmol: usize,
     nmols_itype: usize,
-    comptype: Vec<bool>,
+    is_type_active: Vec<bool>,
     init1: bool,
 }
 
@@ -140,7 +140,7 @@ impl<'a> RestmolScope<'a> {
         let saved = Self {
             ntotmol: sys.ntotmol,
             nmols_itype: sys.nmols[itype],
-            comptype: sys.comptype.clone(),
+            is_type_active: sys.is_type_active.clone(),
             init1: sys.init1,
             itype,
             sys,
@@ -153,7 +153,7 @@ impl<'a> RestmolScope<'a> {
         // (Packmol restmol.f90 line 34: only nmols(itype) = 1, others unchanged.)
         saved.sys.nmols[itype] = 1;
         for i in 0..saved.sys.ntype_with_fixed {
-            saved.sys.comptype[i] = i == itype;
+            saved.sys.is_type_active[i] = i == itype;
         }
         saved.sys.init1 = true; // constraint-only, no cell list
 
@@ -169,7 +169,7 @@ impl Drop for RestmolScope<'_> {
     fn drop(&mut self) {
         self.sys.ntotmol = self.ntotmol;
         self.sys.nmols[self.itype] = self.nmols_itype;
-        self.sys.comptype.clone_from(&self.comptype);
+        self.sys.is_type_active.clone_from(&self.is_type_active);
         self.sys.init1 = self.init1;
     }
 }
@@ -313,12 +313,12 @@ pub fn initial(
     let t0 = Instant::now();
     let mut workspace = GencanWorkspace::new();
 
-    sys.move_flag = false;
+    sys.selective_repack_mode = false;
     sys.init1 = false;
     sys.lcellfirst = NONE_IDX;
 
     for i in 0..sys.ntype_with_fixed {
-        sys.comptype[i] = true;
+        sys.is_type_active[i] = true;
     }
 
     // Packmol initial.f90 line 50-51

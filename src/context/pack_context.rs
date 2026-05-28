@@ -42,7 +42,7 @@ pub const NONE_IDX: u32 = u32::MAX;
 ///
 /// Layout (40 bytes, natural 8-byte alignment — two atoms fit 80 bytes,
 /// i.e. ~1.25 cache lines so most pair visits hit a single line):
-/// - `ibmol, ibtype` — 2 × u32 (8 bytes) — same-molecule skip.
+/// - `atom_mol_idx, atom_type_idx` — 2 × u32 (8 bytes) — same-molecule skip.
 /// - `fscale, radius, radius_ini` — 3 × F (24 bytes) — distance kernel.
 /// - `flags` — u32 (4 bytes) — `ATOM_FLAG_FIXED`, `ATOM_FLAG_SHORT`.
 /// - private padding — u32 (4 bytes) to keep the struct multiple of 8.
@@ -53,8 +53,10 @@ pub const NONE_IDX: u32 = u32::MAX;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AtomProps {
-    pub ibmol: u32,
-    pub ibtype: u32,
+    /// Packmol: `ibmol`.
+    pub atom_mol_idx: u32,
+    /// Packmol: `ibtype`.
+    pub atom_type_idx: u32,
     pub fscale: F,
     pub radius: F,
     pub radius_ini: F,
@@ -156,7 +158,7 @@ pub struct PackContext {
     /// AoS mirror of the frequently-read per-atom fields. Kept in sync
     /// with the individual `Vec<_>`s by [`Self::sync_atom_props`] plus the
     /// per-field setters (`set_radius`, `set_fscale`, `set_fixed_atom`,
-    /// `set_use_short_radius`, `set_ibmol`, `set_ibtype`). The objective
+    /// `set_use_short_radius`, `set_atom_mol_idx`, `set_atom_type_idx`). The objective
     /// hot kernels read exclusively from here; callers mutating the
     /// underlying `Vec<_>`s directly must call [`Self::sync_atom_props`]
     /// before the next `evaluate()`, or the debug-build invariant in
@@ -209,14 +211,14 @@ pub struct PackContext {
     pub iratom_data: Vec<RestraintRef>,
 
     // ---- Cell list bookkeeping ----
-    /// Type index per atom: `ibtype[icart]` (0-based type index).
-    pub ibtype: Vec<usize>,
-    /// Molecule index within its type: `ibmol[icart]` (0-based).
-    pub ibmol: Vec<usize>,
+    /// Type index per atom (0-based). Packmol: `ibtype`.
+    pub atom_type_idx: Vec<usize>,
+    /// Molecule index within its type (0-based). Packmol: `ibmol`.
+    pub atom_mol_idx: Vec<usize>,
     /// Is this a fixed atom?
     pub fixedatom: Vec<bool>,
-    /// Is this type being computed in the current iteration?
-    pub comptype: Vec<bool>,
+    /// Is this type being computed in the current iteration? Packmol: `comptype`.
+    pub is_type_active: Vec<bool>,
 
     // ---- Cell geometry ----
     pub ncells: [usize; 3],
@@ -255,8 +257,8 @@ pub struct PackContext {
     // ---- State flags ----
     /// If true, skip pair-distance computations (constraints only during init).
     pub init1: bool,
-    /// If true, accumulate per-atom fdist/frest (movebad mode).
-    pub move_flag: bool,
+    /// If true, accumulate per-atom fdist/frest (movebad mode). Packmol: `move`.
+    pub selective_repack_mode: bool,
     /// Run the pair-kernel reductions (`accumulate_pair_f`,
     /// `accumulate_pair_fg`) on rayon. Off by default — parallelism is
     /// an explicit opt-in via [`Molpack::with_parallel_eval`](crate::Molpack::with_parallel_eval) because the
@@ -333,10 +335,10 @@ impl PackContext {
             restraints: Vec::new(),
             iratom_offsets: vec![0; ntotat + 1],
             iratom_data: Vec::new(),
-            ibtype: vec![0; ntotat],
-            ibmol: vec![0; ntotat],
+            atom_type_idx: vec![0; ntotat],
+            atom_mol_idx: vec![0; ntotat],
             fixedatom: vec![false; ntotat],
-            comptype: vec![true; ntype],
+            is_type_active: vec![true; ntype],
             ncells,
             cell_length: [1.0; 3],
             pbc_length: [1.0; 3],
@@ -353,7 +355,7 @@ impl PackContext {
             neighbor_cells_f: vec![[0; 13]; ncell_total],
             neighbor_cells_g: vec![[0; 13]; ncell_total],
             init1: false,
-            move_flag: false,
+            selective_repack_mode: false,
             parallel_pair_eval: false,
             scale: 1.0,
             scale2: 0.01,
@@ -471,8 +473,8 @@ impl PackContext {
                 flags |= ATOM_FLAG_SHORT;
             }
             self.atom_props[i] = AtomProps {
-                ibmol: self.ibmol[i] as u32,
-                ibtype: self.ibtype[i] as u32,
+                atom_mol_idx: self.atom_mol_idx[i] as u32,
+                atom_type_idx: self.atom_type_idx[i] as u32,
                 flags,
                 _padding: 0,
                 fscale: self.fscale[i],
@@ -559,21 +561,21 @@ impl PackContext {
         self.any_short_radius = self.n_short_radius > 0;
     }
 
-    /// Update `ibmol[i]` and the matching mirror field.
+    /// Update `atom_mol_idx[i]` and the matching mirror field.
     #[inline]
-    pub fn set_ibmol(&mut self, i: usize, value: usize) {
-        self.ibmol[i] = value;
+    pub fn set_atom_mol_idx(&mut self, i: usize, value: usize) {
+        self.atom_mol_idx[i] = value;
         if i < self.atom_props.len() {
-            self.atom_props[i].ibmol = value as u32;
+            self.atom_props[i].atom_mol_idx = value as u32;
         }
     }
 
-    /// Update `ibtype[i]` and the matching mirror field.
+    /// Update `atom_type_idx[i]` and the matching mirror field.
     #[inline]
-    pub fn set_ibtype(&mut self, i: usize, value: usize) {
-        self.ibtype[i] = value;
+    pub fn set_atom_type_idx(&mut self, i: usize, value: usize) {
+        self.atom_type_idx[i] = value;
         if i < self.atom_props.len() {
-            self.atom_props[i].ibtype = value as u32;
+            self.atom_props[i].atom_type_idx = value as u32;
         }
     }
 
@@ -615,13 +617,13 @@ impl PackContext {
                 n_short += 1;
             }
             assert_eq!(
-                ap.ibmol, self.ibmol[i] as u32,
-                "atom_props[{i}].ibmol drift: mirror={} vec={}",
-                ap.ibmol, self.ibmol[i]
+                ap.atom_mol_idx, self.atom_mol_idx[i] as u32,
+                "atom_props[{i}].atom_mol_idx drift: mirror={} vec={}",
+                ap.atom_mol_idx, self.atom_mol_idx[i]
             );
             assert_eq!(
-                ap.ibtype, self.ibtype[i] as u32,
-                "atom_props[{i}].ibtype drift"
+                ap.atom_type_idx, self.atom_type_idx[i] as u32,
+                "atom_props[{i}].atom_type_idx drift"
             );
             assert_eq!(
                 ap.fscale, self.fscale[i],
@@ -713,8 +715,8 @@ mod atom_props_tests {
     fn tiny_ctx(ntotat: usize) -> PackContext {
         let mut sys = PackContext::new(ntotat, ntotat, 1);
         for i in 0..ntotat {
-            sys.ibmol[i] = i;
-            sys.ibtype[i] = 0;
+            sys.atom_mol_idx[i] = i;
+            sys.atom_type_idx[i] = 0;
             sys.radius[i] = 1.0;
             sys.radius_ini[i] = 1.0;
             sys.fscale[i] = 1.0;
@@ -735,8 +737,8 @@ mod atom_props_tests {
     #[test]
     fn sync_atom_props_populates_mirror_and_flags() {
         let mut sys = PackContext::new(3, 3, 1);
-        sys.ibmol = vec![10, 20, 30];
-        sys.ibtype = vec![1, 2, 3];
+        sys.atom_mol_idx = vec![10, 20, 30];
+        sys.atom_type_idx = vec![1, 2, 3];
         sys.fscale = vec![0.5, 0.25, 0.125];
         sys.radius = vec![1.1, 2.2, 3.3];
         sys.radius_ini = vec![1.0, 2.0, 3.0];
@@ -745,8 +747,8 @@ mod atom_props_tests {
         sys.sync_atom_props();
 
         for i in 0..3 {
-            assert_eq!(sys.atom_props[i].ibmol, sys.ibmol[i] as u32);
-            assert_eq!(sys.atom_props[i].ibtype, sys.ibtype[i] as u32);
+            assert_eq!(sys.atom_props[i].atom_mol_idx, sys.atom_mol_idx[i] as u32);
+            assert_eq!(sys.atom_props[i].atom_type_idx, sys.atom_type_idx[i] as u32);
             assert_eq!(sys.atom_props[i].fscale, sys.fscale[i]);
             assert_eq!(sys.atom_props[i].radius, sys.radius[i]);
             assert_eq!(sys.atom_props[i].radius_ini, sys.radius_ini[i]);
@@ -844,14 +846,14 @@ mod atom_props_tests {
     }
 
     #[test]
-    fn set_ibmol_and_set_ibtype_keep_mirror_in_sync() {
+    fn set_atom_mol_idx_and_set_atom_type_idx_keep_mirror_in_sync() {
         let mut sys = tiny_ctx(3);
-        sys.set_ibmol(1, 42);
-        assert_eq!(sys.ibmol[1], 42);
-        assert_eq!(sys.atom_props[1].ibmol, 42);
-        sys.set_ibtype(2, 7);
-        assert_eq!(sys.ibtype[2], 7);
-        assert_eq!(sys.atom_props[2].ibtype, 7);
+        sys.set_atom_mol_idx(1, 42);
+        assert_eq!(sys.atom_mol_idx[1], 42);
+        assert_eq!(sys.atom_props[1].atom_mol_idx, 42);
+        sys.set_atom_type_idx(2, 7);
+        assert_eq!(sys.atom_type_idx[2], 7);
+        assert_eq!(sys.atom_props[2].atom_type_idx, 7);
         sys.debug_assert_atom_props_sync();
     }
 

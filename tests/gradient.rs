@@ -24,9 +24,9 @@ fn finite_diff(x: &[F], sys: &mut PackContext, i: usize, h: F) -> F {
 
 /// Build a minimal PackContext for `nmol` single-atom molecules.
 ///
-/// Also assigns distinct `ibmol[icart]` values so pair-penalty kernels do
+/// Also assigns distinct `atom_mol_idx[icart]` values so pair-penalty kernels do
 /// not skip atom pairs as "same molecule". The prior version left every
-/// atom at `ibmol=0`, which silently made `gradient_pair_penalty` test
+/// atom at `atom_mol_idx=0`, which silently made `gradient_pair_penalty` test
 /// a no-op.
 fn single_atom_system(nmol: usize) -> PackContext {
     let ntotat = nmol;
@@ -35,13 +35,13 @@ fn single_atom_system(nmol: usize) -> PackContext {
     sys.nmols = vec![nmol];
     sys.natoms = vec![1];
     sys.idfirst = vec![0];
-    sys.comptype = vec![true];
+    sys.is_type_active = vec![true];
     sys.coor = vec![[0.0, 0.0, 0.0]];
     sys.radius = vec![1.0; ntotat];
     sys.radius_ini = vec![1.0; ntotat];
     sys.fscale = vec![1.0; ntotat];
     for i in 0..ntotat {
-        sys.ibmol[i] = i;
+        sys.atom_mol_idx[i] = i;
     }
     sys.sync_atom_props();
     sys
@@ -365,15 +365,15 @@ fn gradient_with_rotations() {
     sys.nmols = vec![2];
     sys.natoms = vec![2];
     sys.idfirst = vec![0];
-    sys.comptype = vec![true];
+    sys.is_type_active = vec![true];
     sys.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
 
     sys.radius = vec![1.0; 4];
     sys.radius_ini = vec![1.0; 4];
     sys.fscale = vec![1.0; 4];
     // 2 molecules × 2 atoms — atoms 0,1 belong to mol 0, atoms 2,3 to mol 1.
-    sys.ibmol = vec![0, 0, 1, 1];
-    sys.ibtype = vec![0; 4];
+    sys.atom_mol_idx = vec![0, 0, 1, 1];
+    sys.atom_type_idx = vec![0; 4];
     sys.sync_atom_props();
 
     sys.restraints.clear();
@@ -422,13 +422,13 @@ fn gradient_combined_constraint_and_pairs() {
     sys.nmols = vec![3];
     sys.natoms = vec![1];
     sys.idfirst = vec![0];
-    sys.comptype = vec![true];
+    sys.is_type_active = vec![true];
     sys.coor = vec![[0.0, 0.0, 0.0]];
 
     sys.radius = vec![1.0; 3];
     sys.radius_ini = vec![1.0; 3];
     sys.fscale = vec![1.0; 3];
-    sys.ibmol = vec![0, 1, 2];
+    sys.atom_mol_idx = vec![0, 1, 2];
     sys.sync_atom_props();
 
     // Box restraint on all atoms
@@ -477,13 +477,13 @@ fn fused_function_and_gradient_matches_separate_evaluation() {
     sys.nmols = vec![2];
     sys.natoms = vec![2];
     sys.idfirst = vec![0];
-    sys.comptype = vec![true];
+    sys.is_type_active = vec![true];
     sys.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
 
     sys.radius = vec![1.0; 4];
     sys.radius_ini = vec![1.0; 4];
     sys.fscale = vec![1.0; 4];
-    sys.ibmol = vec![0, 0, 1, 1];
+    sys.atom_mol_idx = vec![0, 0, 1, 1];
     sys.sync_atom_props();
 
     sys.restraints = vec![Arc::new(InsideBoxRestraint::new(

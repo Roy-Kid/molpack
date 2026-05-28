@@ -360,8 +360,8 @@ impl Molpack {
         let mut sys = PackContext::new(ntotat, ntotmol_free, ntype);
         sys.ntype_with_fixed = ntype_with_fixed;
         sys.nfixedat = ntotat_fixed;
-        // comptype is initialized with size ntype; resize to include fixed types
-        sys.comptype = vec![true; ntype_with_fixed];
+        // is_type_active is initialized with size ntype; resize to include fixed types
+        sys.is_type_active = vec![true; ntype_with_fixed];
 
         // Fill nmols, natoms, idfirst for free types
         let mut cum_atoms = 0usize;
@@ -404,7 +404,7 @@ impl Molpack {
         // Assign radii, element symbols, and per-atom (itype, imol) tags.
         // Packmol uses `radius = tolerance/2` for ALL atoms (packmol.f90 line 283:
         //   `radius(i) = dism/2.d0`), not VdW radii from the PDB file.
-        // `ibtype` / `ibmol` are derivable from position in the sequential
+        // `atom_type_idx` / `atom_mol_idx` are derivable from position in the sequential
         // atom layout, so we set them here once instead of having
         // `insert_atom_in_cell` rewrite the same constants on every eval.
         let atom_radius = self.tolerance / 2.0;
@@ -414,8 +414,8 @@ impl Molpack {
                 for iatom in 0..target.natoms() {
                     sys.radius[icart] = atom_radius;
                     sys.radius_ini[icart] = atom_radius;
-                    sys.ibtype[icart] = itype;
-                    sys.ibmol[icart] = imol;
+                    sys.atom_type_idx[icart] = itype;
+                    sys.atom_mol_idx[icart] = imol;
                     sys.elements[icart] = Element::by_symbol(&target.elements[iatom]);
                     icart += 1;
                 }
@@ -426,8 +426,8 @@ impl Molpack {
             for iatom in 0..target.natoms() {
                 sys.radius[icart] = atom_radius;
                 sys.radius_ini[icart] = atom_radius;
-                sys.ibtype[icart] = itype;
-                sys.ibmol[icart] = 0;
+                sys.atom_type_idx[icart] = itype;
+                sys.atom_mol_idx[icart] = 0;
                 sys.elements[icart] = Element::by_symbol(&target.elements[iatom]);
                 icart += 1;
             }
@@ -618,7 +618,7 @@ impl Molpack {
 
         // Rebuild final xcart from x (all types active)
         for itype in 0..ntype_with_fixed {
-            sys.comptype[itype] = true;
+            sys.is_type_active[itype] = true;
         }
         sys.ntotmol = ntotmol_free;
         init_xcart_from_x(&x, &mut sys);
@@ -907,7 +907,7 @@ pub fn run_iteration(
 /// Outcome of one outer-loop phase in `pack()`.
 ///
 /// Pulled out of `pack()` in phase A.4.2 to isolate the outer per-phase scaffold
-/// (handler phase-start notification, comptype reconfiguration, radii reset,
+/// (handler phase-start notification, is_type_active reconfiguration, radii reset,
 /// swap setup, pre-loop precision short-circuit, inner GENCAN loop, swap
 /// restore / xwork-back copy). `Continue` means the outer phase loop should
 /// proceed; `Converged` means the all-type phase converged and the outer loop
@@ -921,7 +921,7 @@ pub enum PhaseOutcome {
 /// Run one phase of the main packing loop (per-type or all-type).
 ///
 /// Matches the outer `for phase in 0..=ntype` body of Packmol `app/packmol.f90`
-/// lines 740-990 (the swaptype / comptype dance bracketing the GENCAN inner
+/// lines 740-990 (the swaptype / is_type_active dance bracketing the GENCAN inner
 /// loop). For a per-type phase (`phase < ntype`), `xwork` is a compact
 /// `nmols[phase] * 6`-element slice produced by `SwapState::set_type`; for the
 /// all-type phase (`phase == ntype`), `xwork` is a full `6 * ntotmol_free`
@@ -968,9 +968,9 @@ pub fn run_phase(
         h.on_phase_start(&phase_info);
     }
 
-    // Set comptype for this phase
+    // Set is_type_active for this phase
     for itype in 0..ntype_with_fixed {
-        sys.comptype[itype] = if is_all {
+        sys.is_type_active[itype] = if is_all {
             true
         } else {
             itype >= ntype || itype == phase

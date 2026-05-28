@@ -36,19 +36,19 @@ pub fn movebad(
     // Compute f with move flag to collect per-atom scores.
     // Packmol keeps radius=radius_ini during the whole movebad routine and restores
     // the working radii only at the end (heuristics.f90 lines 45-47 and 145-147).
-    sys.move_flag = true;
+    sys.selective_repack_mode = true;
     sys.work.radiuswork.copy_from_slice(&sys.radius);
     for i in 0..sys.ntotat {
         sys.set_radius(i, sys.radius_ini[i]);
     }
     sys.evaluate(x, EvalMode::FOnly, None);
-    sys.move_flag = false;
+    sys.selective_repack_mode = false;
 
     let ntotmol = sys.ntotmol;
 
     let mut icart_offset = 0usize;
     for itype in 0..sys.ntype {
-        if !sys.comptype[itype] {
+        if !sys.is_type_active[itype] {
             icart_offset += sys.nmols[itype] * sys.natoms[itype];
             continue;
         }
@@ -95,7 +95,7 @@ pub fn movebad(
         flash1(fmol, mflash, &mut sys.work.flash_ind, &mut sys.work.flash_l);
 
         // Molecule offset in x for this type.
-        // Matches Packmol heuristics.f90 lines 105-108:
+        // Matches Packmol heuristics.f90 lines 105-108 (Packmol: `comptype`):
         //   if(comptype(i)) imol = imol + nmols(i)  [only for i < itype]
         // Only ACTIVE types contribute to the offset.
         // In Phase 1 (compact x, one type active), all earlier types are inactive
@@ -104,7 +104,7 @@ pub fn movebad(
         let mol_base: usize = {
             let mut base = 0usize;
             for it in 0..itype {
-                if sys.comptype[it] {
+                if sys.is_type_active[it] {
                     base += sys.nmols[it];
                 }
             }

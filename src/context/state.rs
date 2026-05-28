@@ -37,8 +37,8 @@ pub struct RuntimeStateMut<'a> {
 
 impl<'a> RuntimeStateMut<'a> {
     #[inline]
-    pub fn set_move_flag(&mut self, enabled: bool) {
-        self.ctx.move_flag = enabled;
+    pub fn set_selective_repack_mode(&mut self, enabled: bool) {
+        self.ctx.selective_repack_mode = enabled;
     }
 
     #[inline]
