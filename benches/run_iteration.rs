@@ -17,7 +17,7 @@ use molpack::gencan::{GencanParams, GencanWorkspace};
 use molpack::handler::{Handler, PhaseInfo};
 use molpack::initial::SwapState;
 use molpack::movebad::MoveBadConfig;
-use molpack::packer::{IterOutcome, run_iteration};
+use molpack::packer::{IterOutcome, IterationConfig, IterationState, run_iteration};
 use molpack::relaxer::RelaxerRunner;
 use molpack::{F, PackContext};
 use rand::SeedableRng;
@@ -80,25 +80,28 @@ fn bench_fn(c: &mut Criterion) {
         b.iter_batched(
             build_snapshot,
             |(mut sys, mut x, mut swap, mut ws, mut runners, mut handlers, mut rng)| {
-                let mut flast = 0.0_f64;
-                let mut fimp_prev = F::INFINITY;
-                let mut radscale = 1.0_f64;
+                let cfg = IterationConfig {
+                    max_loops: 10,
+                    is_all: true,
+                    phase: 0,
+                    phase_info: pi,
+                    precision: 0.01,
+                    disable_movebad: true,
+                    movebad_cfg: &mb,
+                    gencan_params: &gp,
+                };
+                let mut state = IterationState {
+                    loop_idx: 0,
+                    flast: 0.0_f64,
+                    fimp_prev: F::INFINITY,
+                    radscale: 1.0_f64,
+                };
                 let out = run_iteration(
-                    0,
-                    10,
-                    true,
-                    0,
-                    pi,
-                    0.01,
-                    true,
-                    &mb,
-                    &gp,
+                    cfg,
+                    &mut state,
                     &mut sys,
                     &mut x,
                     &mut swap,
-                    &mut flast,
-                    &mut fimp_prev,
-                    &mut radscale,
                     &mut runners,
                     &mut handlers,
                     &mut ws,
@@ -125,26 +128,29 @@ fn bench_caller(c: &mut Criterion) {
         b.iter_batched(
             build_snapshot,
             |(mut sys, mut x, mut swap, mut ws, mut runners, mut handlers, mut rng)| {
-                let mut flast = 0.0_f64;
-                let mut fimp_prev = F::INFINITY;
-                let mut radscale = 1.0_f64;
                 let mut converged = false;
+                let cfg = IterationConfig {
+                    max_loops: 10,
+                    is_all: true,
+                    phase: 0,
+                    phase_info: pi,
+                    precision: 0.01,
+                    disable_movebad: true,
+                    movebad_cfg: &mb,
+                    gencan_params: &gp,
+                };
+                let mut state = IterationState {
+                    loop_idx: 0,
+                    flast: 0.0_f64,
+                    fimp_prev: F::INFINITY,
+                    radscale: 1.0_f64,
+                };
                 let out = run_iteration(
-                    0,
-                    10,
-                    true,
-                    0,
-                    pi,
-                    0.01,
-                    true,
-                    &mb,
-                    &gp,
+                    cfg,
+                    &mut state,
                     &mut sys,
                     &mut x,
                     &mut swap,
-                    &mut flast,
-                    &mut fimp_prev,
-                    &mut radscale,
                     &mut runners,
                     &mut handlers,
                     &mut ws,

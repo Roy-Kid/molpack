@@ -708,17 +708,37 @@ fn reference_coords(target: &Target) -> &[[F; 3]] {
 /// Pulled out of `pack()` in phase A.4.1 to de-duplicate three inline copies
 /// of the same swap-evaluate-restore dance (Packmol `computef` emulation).
 pub fn evaluate_unscaled(sys: &mut PackContext, xwork: &[F]) -> (F, F, F) {
-    sys.work.radiuswork.copy_from_slice(&sys.radius);
-    for i in 0..sys.ntotat {
-        sys.set_radius(i, sys.radius_ini[i]);
+    let guard = UnscaledRadii::enter(sys);
+    let f_total = guard.sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
+    (f_total, guard.sys.fdist, guard.sys.frest)
+    // `guard` drops here, restoring the scaled radii even on early return/panic.
+}
+
+/// RAII guard that swaps every atom's radius to its unscaled value
+/// (`radius_ini`) for the duration of an evaluation, then restores the scaled
+/// radii on drop. The originals are stashed in `work.radiuswork`. Using a guard
+/// (rather than an explicit restore pass) keeps the swap balanced even if the
+/// evaluation returns early or panics.
+struct UnscaledRadii<'a> {
+    sys: &'a mut PackContext,
+}
+
+impl<'a> UnscaledRadii<'a> {
+    fn enter(sys: &'a mut PackContext) -> Self {
+        sys.work.radiuswork.copy_from_slice(&sys.radius);
+        for i in 0..sys.ntotat {
+            sys.set_radius(i, sys.radius_ini[i]);
+        }
+        Self { sys }
     }
-    let f_total = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
-    let fdist = sys.fdist;
-    let frest = sys.frest;
-    for i in 0..sys.ntotat {
-        sys.set_radius(i, sys.work.radiuswork[i]);
+}
+
+impl Drop for UnscaledRadii<'_> {
+    fn drop(&mut self) {
+        for i in 0..self.sys.ntotat {
+            self.sys.set_radius(i, self.sys.work.radiuswork[i]);
+        }
     }
-    (f_total, fdist, frest)
 }
 
 /// Outcome of one main-loop iteration inside a packing phase.
@@ -733,6 +753,34 @@ pub enum IterOutcome {
     Continue,
     Converged,
     EarlyStop,
+}
+
+/// Read-only configuration for one packing iteration — fixed for the whole
+/// phase. Bundled so [`run_iteration`] takes a handful of arguments instead of
+/// a long positional list.
+#[derive(Clone, Copy)]
+pub struct IterationConfig<'a> {
+    pub max_loops: usize,
+    /// `true` for the final all-type phase, `false` for a per-type phase.
+    pub is_all: bool,
+    pub phase: usize,
+    pub phase_info: PhaseInfo,
+    pub precision: F,
+    pub disable_movebad: bool,
+    pub movebad_cfg: &'a MoveBadConfig<'a>,
+    pub gencan_params: &'a GencanParams,
+}
+
+/// Mutable scalar state threaded across a phase's inner loop (Packmol carries
+/// these as loose `gencanloop` locals: `loop`, `flast`, `fimp`, `radscale`).
+pub struct IterationState {
+    pub loop_idx: usize,
+    /// Unscaled objective at the previous iteration (Packmol `flast`).
+    pub flast: F,
+    /// Previous-iteration percentage improvement (Packmol `fimp`); gates movebad.
+    pub fimp_prev: F,
+    /// Current radius scale factor (Packmol `radscale`).
+    pub radscale: F,
 }
 
 /// Run one iteration of a packing phase's main loop.
@@ -753,34 +801,35 @@ pub enum IterOutcome {
 /// iterations.
 #[allow(clippy::too_many_arguments)]
 pub fn run_iteration(
-    loop_idx: usize,
-    max_loops: usize,
-    is_all: bool,
-    phase: usize,
-    phase_info: PhaseInfo,
-    precision: F,
-    disable_movebad: bool,
-    movebad_cfg: &MoveBadConfig,
-    gencan_params: &GencanParams,
+    cfg: IterationConfig,
+    state: &mut IterationState,
     sys: &mut PackContext,
     xwork: &mut [F],
     swap: &mut SwapState,
-    flast: &mut F,
-    fimp_prev: &mut F,
-    radscale: &mut F,
     relaxer_runners: &mut Vec<(usize, Vec<Box<dyn RelaxerRunner>>)>,
     handlers: &mut [Box<dyn Handler>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
 ) -> IterOutcome {
+    let IterationConfig {
+        max_loops,
+        is_all,
+        phase,
+        phase_info,
+        precision,
+        disable_movebad,
+        movebad_cfg,
+        gencan_params,
+    } = cfg;
+    let loop_idx = state.loop_idx;
     // movebad: Packmol triggers when radscale==1.0 AND fimp<=10.0
     // (packmol.f90 line 815). fimp here is from the PREVIOUS iteration.
     // After movebad, reset flast to the post-movebad f (Packmol line 821).
-    if !disable_movebad && *radscale == 1.0 && *fimp_prev <= MOVEBAD_FIMP_THRESHOLD {
+    if !disable_movebad && state.radscale == 1.0 && state.fimp_prev <= MOVEBAD_FIMP_THRESHOLD {
         movebad(xwork, sys, precision, movebad_cfg, rng, gencan_workspace);
         // Reset flast to the post-movebad f value so fimp is measured
         // relative to movebad's starting point.
-        *flast = evaluate_unscaled(sys, xwork).0;
+        state.flast = evaluate_unscaled(sys, xwork).0;
     }
 
     // Relaxer MC block: run per-target relaxers between movebad and pgencan.
@@ -834,8 +883,8 @@ pub fn run_iteration(
 
     // fimp: percentage improvement in unscaled f from last iteration
     // Packmol line 846: if(flast>0) fimp = -100*(fx-flast)/flast
-    let mut fimp = if *flast > 0.0 {
-        -100.0 * (fx_unscaled - *flast) / *flast
+    let mut fimp = if state.flast > 0.0 {
+        -100.0 * (fx_unscaled - state.flast) / state.flast
     } else if fx_unscaled < objective_small_floor() {
         100.0 // already converged
     } else {
@@ -843,8 +892,8 @@ pub fn run_iteration(
     };
     // Packmol lines 848-849: clamp to [-99.99, 99.99]
     fimp = fimp.clamp(-FIMP_CLAMP, FIMP_CLAMP);
-    *flast = fx_unscaled;
-    *fimp_prev = fimp;
+    state.flast = fx_unscaled;
+    state.fimp_prev = fimp;
 
     if !handlers.is_empty() {
         let relaxer_acceptance: Vec<(usize, F)> = relaxer_runners
@@ -859,7 +908,7 @@ pub fn run_iteration(
             fdist,
             frest,
             improvement_pct: fimp,
-            radscale: *radscale,
+            radscale: state.radscale,
             precision,
             relaxer_acceptance,
         };
@@ -878,7 +927,7 @@ pub fn run_iteration(
         res.f,
         fdist,
         frest,
-        *radscale,
+        state.radscale,
         fimp,
         sys.ncf(),
         sys.ncg(),
@@ -893,8 +942,8 @@ pub fn run_iteration(
 
     // Radii reduction schedule (Packmol lines 940-948):
     //   if (fdist<precision && fimp<10%) || fimp<2%: reduce radscale
-    if *radscale > 1.0 && (fimp < 2.0 || (fdist < precision && fimp < 10.0)) {
-        *radscale = (0.9 * *radscale).max(1.0);
+    if state.radscale > 1.0 && (fimp < 2.0 || (fdist < precision && fimp < 10.0)) {
+        state.radscale = (0.9 * state.radscale).max(1.0);
         for i in 0..sys.ntotat {
             let new_r = sys.radius_ini[i].max(0.9 * sys.radius[i]);
             sys.set_radius(i, new_r);
@@ -988,7 +1037,6 @@ pub fn run_phase(
 
     // Compact x to this type (action=1) or restore full x (all-type phase)
     // Packmol resets radscale = discale at the START of each phase.
-    let mut radscale = discale;
     for icart in 0..sys.ntotat {
         sys.set_radius(icart, discale * sys.radius_ini[icart]);
     }
@@ -1019,32 +1067,36 @@ pub fn run_phase(
         }
     }
 
-    // Initialize flast = unscaled f before gencanloop
-    // (Packmol lines 796-803: compute bestf/flast with unscaled radii)
-    let mut flast = evaluate_unscaled(sys, &xwork).0;
-
-    // fimp from previous iteration — used for movebad gate (Packmol packmol.f90 line 798).
-    // Initialized to 1e99 so movebad is NOT called on the first iteration.
-    let mut fimp_prev = F::INFINITY;
+    // Iteration config is fixed for the whole phase; iteration state evolves.
+    // Packmol resets radscale = discale at the START of each phase; flast is
+    // the unscaled f before gencanloop (lines 796-803); fimp_prev starts at
+    // +inf so movebad is NOT called on the first iteration (line 798).
+    let cfg = IterationConfig {
+        max_loops,
+        is_all,
+        phase,
+        phase_info,
+        precision,
+        disable_movebad,
+        movebad_cfg,
+        gencan_params,
+    };
+    let mut state = IterationState {
+        loop_idx: 0,
+        flast: evaluate_unscaled(sys, &xwork).0,
+        fimp_prev: F::INFINITY,
+        radscale: discale,
+    };
     let mut converged_inner = false;
 
     for loop_idx in 0..max_loops {
+        state.loop_idx = loop_idx;
         let outcome = run_iteration(
-            loop_idx,
-            max_loops,
-            is_all,
-            phase,
-            phase_info,
-            precision,
-            disable_movebad,
-            movebad_cfg,
-            gencan_params,
+            cfg,
+            &mut state,
             sys,
             &mut xwork,
             swap,
-            &mut flast,
-            &mut fimp_prev,
-            &mut radscale,
             relaxer_runners,
             handlers,
             gencan_workspace,
