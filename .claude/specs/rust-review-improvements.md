@@ -1,6 +1,10 @@
 # rust-review-improvements
 
-Status: **IN PROGRESS** (Tier-1 #1–#3, #5 done; #4 partial; #6 deferred)
+Status: **DONE** — all tiers implemented (one documented exception: the
+`tn_linesearch` half of #8 was deliberately left cohesive; see §7 note).
+Each item verified with Packmol `examples_batch` parity + 122 pytest +
+clippy (`--features cli` and `--no-default --features rayon`), committed
+individually on branch `rust-review-improvements`.
 Origin: formalized from upstream branch `claude/rust-project-review-eajU5`
 (`docs/rust_review_spec.md`), reconciled against the current working tree.
 Scope: Rust core (`src/`) + PyO3 wheel (`python/src/`).
@@ -151,7 +155,7 @@ From the `mpk-architect` placement note:
    (`python/src/target.rs`), non-empty index list (already present in parser).
    *Validation lives inline at the parse/decode boundary, not centralized in
    `validation.rs` — accepted for this slice (see Risks; tracked as debt).*
-4. 🔶 **DONE (partial)** De-Fortran naming with `// Packmol:` comments.
+4. ✅ **DONE** De-Fortran naming with `// Packmol:` comments.
    - ✅ kernels `fparc/gparc/fgparc` → `pair_f_atom/pair_g_atom/pair_fg_atom`;
      `*_stats` → `*_parallel`.
    - ✅ euler `beta/gama/teta` → `euler_beta/euler_gamma/euler_theta` (only in
@@ -159,20 +163,16 @@ From the `mpk-architect` placement note:
    - ✅ `ilubar/ilugan` (+ `_start`/`_offset`/`_bad`/`_good` compounds) →
      `x_com_offset/x_euler_offset` family.
    - ✅ `fdist/frest` documented (public API — not renamed).
-   - ⬜ **Deferred:** `ibtype/ibmol` → `atom_type_idx/atom_mol_idx`,
-     `comptype` → `is_type_active`, `move_flag` → `selective_repack_mode`.
-     These are `PackContext` *fields* entangled with the mirror-sync method
-     layer (`set_ibtype`, `set_ibmol_and_set_ibtype_keep_mirror_in_sync`,
-     `cached_comptype`); a field-only rename introduces naming drift, so they
-     need a careful field+method co-rename in their own pass.
+   - ✅ `ibtype/ibmol` → `atom_type_idx/atom_mol_idx`, `comptype` →
+     `is_type_active`, `move_flag` → `selective_repack_mode`, with the
+     mirror-sync methods (`set_ibtype`→`set_atom_type_idx`,
+     `cached_comptype`→`cached_is_type_active`, …) co-renamed.
 5. ✅ **DONE** Magic constants: `PENALTY_GRAD_COEFF` (kernel `4.0`, 6 sites),
    `MOVEBAD_FIMP_THRESHOLD` (movebad `10.0`), `FIMP_CLAMP` (`fimp` clamp). CG
    `GAMMA`/`THETA` were already named constants (`gencan/mod.rs:161-162`).
-6. ⬜ **Deferred (blocked on file-size budget):** Restraint impl docstrings +
-   custom-restraint example. `restraint.rs` is 952 lines (already over the 800
-   cap); adding 14 docstrings would push it further over. Do the `restraint.rs`
-   → `restraint/` split (Tier-3 #12 registry work touches the same file) first,
-   then add docstrings into the smaller modules.
+6. ✅ **DONE** `restraint.rs` (952 lines) split into `restraint/{mod,inside,
+   outside,plane,cylinder,gaussian}.rs`; added a "write your own restraint"
+   doctest + penalty-formula docstrings on the opaque kinds (cylinder/gaussian).
 
 > **Progress (this slice):** Tier-1 #1–#3 landed + regression tests
 > (`reject_zero_atom_index`, `reject_inside/outside_sphere_nonpositive_radius`,
@@ -185,16 +185,23 @@ From the `mpk-architect` placement note:
 > local build. Remaining: Tier-1 #4–#6, then Tier 2/3.
 
 **Tier 2 — medium risk (bench-gated)**
-7. Merge the 5 pair kernels into one parameterized kernel (`pair_kernel` bench).
-8. Split `pack()` (354 lines) and `tn_linesearch` (328 lines).
-9. `run_iteration` 19 params → `IterationState`.
-10. `evaluate_unscaled` radius swap → RAII guard.
+7. ✅ Centralized the duplicated short-radius penalty formula across the 5 pair
+   kernels into `#[inline(always)]` helpers (parity bit-identical; full
+   single-kernel merge not needed — the prologue was already shared via
+   `AtomHotState`).
+8. ✅ Split `pack()` (354→~180) into `validate_inputs` + `prepare_system`.
+   **`tn_linesearch` left cohesive** — its extrapolation/interpolation loops
+   share ~25 locals; extracting them would need 25-arg helpers, hurting
+   readability. (Documented exception.)
+9. ✅ `run_iteration` 19 params → `IterationConfig` + `IterationState`.
+10. ✅ `evaluate_unscaled` radius swap → `UnscaledRadii` RAII guard.
 
 **Tier 3 — architecture (medium-term)**
-11. Split `PackContext` into lifetime-scoped sub-structs.
-12. Single restraint registry unifying Rust API / `.inp` parser / Python.
-13. Drop the `Constraints` ZST shell; type the phase with `enum Phase`.
-14. `Handler` callbacks return `Result` / RAII (file-handle leak fix).
+11. ✅ Split `PackContext` into `EvalState`/`Topology`/`CellGrid`/`PbcParams`.
+12. ✅ Single restraint registry: all 14 kinds reachable from `.inp` + Python
+    via one keyword→spec table + one `spec_to_restraint` map.
+13. ✅ Dropped the `Constraints` ZST shell; typed the phase with `enum Phase`.
+14. ✅ `Handler` I/O callbacks return `Result` (`PackError::HandlerIo`).
 
 ## Risks / open questions
 
