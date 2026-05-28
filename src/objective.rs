@@ -16,6 +16,30 @@ use rayon::prelude::*;
 /// `gparc.f90` / `fparc.f90`.
 const PENALTY_GRAD_COEFF: F = 4.0;
 
+/// Squared sum of the two atoms' short radii (the short-radius overlap
+/// threshold). Centralised so the formula lives in one place instead of being
+/// copied into each pair kernel (review §3.1).
+#[inline(always)]
+fn short_radius_tol(hot: &AtomHotState, sys: &PackContext, jcart: usize) -> F {
+    let short_rsum = hot.shrad_i + sys.short_radius[jcart];
+    short_rsum * short_rsum
+}
+
+/// Short-radius penalty scale factor — Packmol's `gscale2` weighting that
+/// rescales the secondary penalty so it dominates only at very short range.
+/// Centralised from the five pair kernels (review §3.1).
+#[inline(always)]
+fn short_radius_scale(
+    hot: &AtomHotState,
+    sys: &PackContext,
+    jcart: usize,
+    tol: F,
+    short_tol: F,
+) -> F {
+    let s = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
+    s * (tol * tol) / (short_tol * short_tol)
+}
+
 #[derive(Clone, Copy)]
 enum ExpandMode {
     F,
@@ -263,12 +287,10 @@ fn pair_f_atom(
             let scale = hot.props.fscale * props_j.fscale;
             result += scale * penalty * penalty;
             if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
-                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
-                let short_tol = short_rsum * short_rsum;
+                let short_tol = short_radius_tol(&hot, sys, jcart);
                 if datom < short_tol {
                     let penalty = datom - short_tol;
-                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
-                    sr_scale *= (tol * tol) / (short_tol * short_tol);
+                    let sr_scale = short_radius_scale(&hot, sys, jcart, tol, short_tol);
                     result += scale * sr_scale * penalty * penalty;
                 }
             }
@@ -777,11 +799,9 @@ fn pair_g_atom(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcC
             gj[1] -= xdiff1;
             gj[2] -= xdiff2;
             if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
-                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
-                let short_tol = short_rsum * short_rsum;
+                let short_tol = short_radius_tol(&hot, sys, jcart);
                 if datom < short_tol {
-                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
-                    sr_scale *= (tol * tol) / (short_tol * short_tol);
+                    let sr_scale = short_radius_scale(&hot, sys, jcart, tol, short_tol);
                     let dtemp2 = scale * PENALTY_GRAD_COEFF * sr_scale * (datom - short_tol);
                     let xdiff0 = dtemp2 * dx;
                     let xdiff1 = dtemp2 * dy;
@@ -860,12 +880,10 @@ fn pair_fg_atom(
             gj[2] -= xdiff2;
 
             if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
-                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
-                let short_tol = short_rsum * short_rsum;
+                let short_tol = short_radius_tol(&hot, sys, jcart);
                 if datom < short_tol {
                     let short_penalty = datom - short_tol;
-                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
-                    sr_scale *= (tol * tol) / (short_tol * short_tol);
+                    let sr_scale = short_radius_scale(&hot, sys, jcart, tol, short_tol);
                     let sr_pair_scale = scale * sr_scale;
                     result += sr_pair_scale * short_penalty * short_penalty;
 
@@ -964,12 +982,10 @@ fn pair_fg_atom_parallel(
             grad[jcart][2] -= xdiff2;
 
             if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
-                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
-                let short_tol = short_rsum * short_rsum;
+                let short_tol = short_radius_tol(&hot, sys, jcart);
                 if datom < short_tol {
                     let short_penalty = datom - short_tol;
-                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
-                    sr_scale *= (tol * tol) / (short_tol * short_tol);
+                    let sr_scale = short_radius_scale(&hot, sys, jcart, tol, short_tol);
                     let sr_pair_scale = scale * sr_scale;
                     result += sr_pair_scale * short_penalty * short_penalty;
 
@@ -1040,12 +1056,10 @@ fn pair_f_atom_parallel(
             let scale = hot.props.fscale * props_j.fscale;
             result += scale * penalty * penalty;
             if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
-                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
-                let short_tol = short_rsum * short_rsum;
+                let short_tol = short_radius_tol(&hot, sys, jcart);
                 if datom < short_tol {
                     let penalty = datom - short_tol;
-                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
-                    sr_scale *= (tol * tol) / (short_tol * short_tol);
+                    let sr_scale = short_radius_scale(&hot, sys, jcart, tol, short_tol);
                     result += scale * sr_scale * penalty * penalty;
                 }
             }
