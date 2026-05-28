@@ -603,7 +603,7 @@ impl Molpack {
 
         // Notify handlers: initialization complete, xcart is valid
         for h in self.handlers.iter_mut() {
-            h.on_initialized(&sys);
+            h.on_initialized(&sys)?;
         }
         // max_loops controls the outer loop count, matching Packmol's `nloop` parameter.
         let gencan_params = GencanParams {
@@ -652,7 +652,7 @@ impl Molpack {
                 &mut self.handlers,
                 &mut gencan_workspace,
                 &mut rng,
-            );
+            )?;
             match outcome {
                 PhaseOutcome::Continue => {}
                 PhaseOutcome::Converged => {
@@ -679,7 +679,7 @@ impl Molpack {
 
         // Notify handlers of final state
         for h in self.handlers.iter_mut() {
-            h.on_finish(&sys);
+            h.on_finish(&sys)?;
         }
 
         // Finalize frame: write positions into frame, move it out (zero-copy)
@@ -864,7 +864,7 @@ pub fn run_iteration(
     handlers: &mut [Box<dyn Handler>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
-) -> IterOutcome {
+) -> Result<IterOutcome, PackError> {
     let IterationConfig {
         max_loops,
         is_all,
@@ -967,12 +967,12 @@ pub fn run_iteration(
             relaxer_acceptance,
         };
         for h in handlers.iter_mut() {
-            h.on_step(&step_info, sys);
+            h.on_step(&step_info, sys)?;
         }
 
         if handlers.iter().any(|h| h.should_stop()) {
             log::debug!("  Early stop requested at loop {loop_idx}");
-            return IterOutcome::EarlyStop;
+            return Ok(IterOutcome::EarlyStop);
         }
     }
 
@@ -991,7 +991,7 @@ pub fn run_iteration(
     // Check convergence
     if fdist < precision && frest < precision {
         log::debug!("  Converged at phase {phase} loop {loop_idx}");
-        return IterOutcome::Converged;
+        return Ok(IterOutcome::Converged);
     }
 
     // Radii reduction schedule (Packmol lines 940-948):
@@ -1004,7 +1004,7 @@ pub fn run_iteration(
         }
     }
 
-    IterOutcome::Continue
+    Ok(IterOutcome::Continue)
 }
 
 /// Outcome of one outer-loop phase in `pack()`.
@@ -1069,7 +1069,7 @@ pub fn run_phase(
     handlers: &mut [Box<dyn Handler>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
-) -> PhaseOutcome {
+) -> Result<PhaseOutcome, PackError> {
     let is_all = matches!(phase, Phase::AllTypes);
     // Inside the body `phase` is the type index; the all-type phase uses the
     // sentinel index `ntype` (guarded everywhere by `is_all`).
@@ -1132,10 +1132,10 @@ pub fn run_phase(
         if !is_all {
             swap.save_type(phase, &xwork, sys);
             swap.restore(x, sys);
-            return PhaseOutcome::Continue;
+            return Ok(PhaseOutcome::Continue);
         } else {
             x.clone_from(&xwork);
-            return PhaseOutcome::Converged;
+            return Ok(PhaseOutcome::Converged);
         }
     }
 
@@ -1173,7 +1173,7 @@ pub fn run_phase(
             handlers,
             gencan_workspace,
             rng,
-        );
+        )?;
         match outcome {
             IterOutcome::Continue => {}
             IterOutcome::Converged => {
@@ -1190,13 +1190,13 @@ pub fn run_phase(
         // save_type was called inside the loop; restore full x now.
         // Per-type convergence does NOT exit the outer phase loop.
         swap.restore(x, sys);
-        PhaseOutcome::Continue
+        Ok(PhaseOutcome::Continue)
     } else {
         x.clone_from(&xwork);
         if converged_inner {
-            PhaseOutcome::Converged
+            Ok(PhaseOutcome::Converged)
         } else {
-            PhaseOutcome::Continue
+            Ok(PhaseOutcome::Continue)
         }
     }
 }

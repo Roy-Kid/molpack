@@ -21,6 +21,10 @@ pub enum PackError {
         first: ([F; 3], [F; 3], [bool; 3]),
         second: ([F; 3], [F; 3], [bool; 3]),
     },
+    /// A [`Handler`](crate::Handler) callback failed — typically a trajectory
+    /// writer hitting an I/O error. Surfaced from `pack()` instead of being
+    /// swallowed.
+    HandlerIo(String),
 }
 
 impl fmt::Display for PackError {
@@ -44,6 +48,7 @@ impl fmt::Display for PackError {
                 "Conflicting periodic boxes declared by restraints: {first:?} vs {second:?}. \
                  At most one periodic InsideBoxRestraint is allowed per packing run."
             ),
+            PackError::HandlerIo(msg) => write!(f, "Handler callback failed: {msg}"),
         }
     }
 }

@@ -106,7 +106,8 @@ fn bench_fn(c: &mut Criterion) {
                     &mut handlers,
                     &mut ws,
                     &mut rng,
-                );
+                )
+                .expect("run_iteration");
                 std::hint::black_box(out);
             },
             BatchSize::SmallInput,
@@ -155,7 +156,8 @@ fn bench_caller(c: &mut Criterion) {
                     &mut handlers,
                     &mut ws,
                     &mut rng,
-                );
+                )
+                .expect("run_iteration");
                 match out {
                     IterOutcome::Continue => {}
                     IterOutcome::Converged | IterOutcome::EarlyStop => {

@@ -90,7 +90,8 @@ fn bench_fn(c: &mut Criterion) {
                     &mut handlers,
                     &mut ws,
                     &mut rng,
-                );
+                )
+                .expect("run_phase");
                 std::hint::black_box(out);
             },
             BatchSize::SmallInput,
@@ -131,7 +132,8 @@ fn bench_caller(c: &mut Criterion) {
                         &mut handlers,
                         &mut ws,
                         &mut rng,
-                    );
+                    )
+                    .expect("run_phase");
                     match out {
                         PhaseOutcome::Continue => {}
                         PhaseOutcome::Converged => {
