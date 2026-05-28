@@ -86,7 +86,6 @@ pub mod api;
 #[cfg(feature = "io")]
 pub mod cases;
 pub(crate) mod cell;
-pub mod constraints;
 pub mod context;
 pub mod error;
 pub mod euler;

@@ -1,7 +1,7 @@
 //! Spectral Projected Gradient line search.
 //! Port of `spgls` from `gencan.f`.
 
-use crate::constraints::EvalMode;
+use crate::context::EvalMode;
 use crate::objective::Objective;
 use molrs::types::F;
 

@@ -14,7 +14,7 @@
 //! never fires when `precision = 0.0`; gencan then has to converge on its
 //! own gpsupn / maxit criterion.
 
-use molpack::constraints::{EvalMode, EvalOutput};
+use molpack::context::{EvalMode, EvalOutput};
 use molpack::gencan::{GencanParams, GencanWorkspace, gencan, pgencan};
 use molpack::objective::Objective;
 use molrs::types::F;

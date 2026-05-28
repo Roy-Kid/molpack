@@ -16,7 +16,7 @@ use molrs::types::F;
 use std::time::Instant;
 
 use crate::cell::{index_cell, setcell};
-use crate::constraints::EvalMode;
+use crate::context::EvalMode;
 use crate::context::{NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat};
 use crate::gencan::{GencanParams, GencanWorkspace, pgencan};

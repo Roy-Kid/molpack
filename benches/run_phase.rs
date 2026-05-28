@@ -18,7 +18,7 @@ use molpack::gencan::{GencanParams, GencanWorkspace};
 use molpack::handler::Handler;
 use molpack::initial::SwapState;
 use molpack::movebad::MoveBadConfig;
-use molpack::packer::{PhaseOutcome, run_phase};
+use molpack::packer::{Phase, PhaseOutcome, run_phase};
 use molpack::relaxer::RelaxerRunner;
 use molpack::{F, PackContext};
 use rand::SeedableRng;
@@ -73,7 +73,7 @@ fn bench_fn(c: &mut Criterion) {
             build_snapshot,
             |(mut sys, mut x, mut swap, mut ws, mut runners, mut handlers, mut rng)| {
                 let out = run_phase(
-                    0,
+                    Phase::PerType(0),
                     0,
                     0,
                     1,
@@ -112,7 +112,7 @@ fn bench_caller(c: &mut Criterion) {
             build_snapshot,
             |(mut sys, mut x, mut swap, mut ws, mut runners, mut handlers, mut rng)| {
                 let mut converged = false;
-                for phase in 0..=0usize {
+                for phase in [Phase::PerType(0)] {
                     let out = run_phase(
                         phase,
                         0,

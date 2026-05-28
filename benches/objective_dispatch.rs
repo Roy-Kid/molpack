@@ -27,7 +27,7 @@
 //! body cost.
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use molpack::constraints::EvalMode;
+use molpack::context::EvalMode;
 use molpack::objective::Objective;
 use molpack::{F, PackContext};
 

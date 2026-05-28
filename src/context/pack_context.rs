@@ -3,11 +3,12 @@
 use std::sync::Arc;
 
 use crate::cell::{cell_ind, icell_to_cell, index_cell};
-use crate::constraints::{Constraints, EvalMode, EvalOutput};
+use crate::objective::{compute_f, compute_fg, compute_g};
 use crate::restraint::Restraint;
 use molrs::Element;
 use molrs::types::F;
 
+use super::eval::{EvalMode, EvalOutput};
 use super::model::ModelData;
 use super::state::{RuntimeState, RuntimeStateMut};
 use super::work_buffers::WorkBuffers;
@@ -113,9 +114,6 @@ const NEIGHBOR_OFFSETS_G: [(isize, isize, isize); 13] = [
 /// Full runtime context for one packing execution.
 /// All arrays are 0-based; Fortran 1-based arrays are shifted by -1.
 pub struct PackContext {
-    // ---- Constraints facade ----
-    pub constraints: Constraints,
-
     // ---- Atom Cartesian coordinates (updated every function evaluation) ----
     /// Current Cartesian positions: `xcart[icart]` = `[x, y, z]`. Size: ntotat.
     pub xcart: Vec<[F; 3]>,
@@ -303,7 +301,6 @@ impl PackContext {
             "ntotat={ntotat} must fit in u32 (< NONE_IDX)"
         );
         Self {
-            constraints: Constraints,
             xcart: vec![[0.0; 3]; ntotat],
             elements: vec![None; ntotat],
             coor: Vec::new(),
@@ -390,8 +387,31 @@ impl PackContext {
     /// Unified constraints evaluation entrypoint.
     #[inline]
     pub fn evaluate(&mut self, x: &[F], mode: EvalMode, gradient: Option<&mut [F]>) -> EvalOutput {
-        let constraints = self.constraints;
-        constraints.evaluate(x, self, mode, gradient)
+        let mut f_total = 0.0;
+        match mode {
+            EvalMode::FOnly => {
+                f_total = compute_f(x, self);
+            }
+            EvalMode::GradientOnly => {
+                if let Some(g) = gradient {
+                    compute_g(x, self, g);
+                } else {
+                    debug_assert!(false, "GradientOnly mode requires gradient buffer");
+                }
+            }
+            EvalMode::FAndGradient | EvalMode::RestMol => {
+                if let Some(g) = gradient {
+                    f_total = compute_fg(x, self, g);
+                } else {
+                    debug_assert!(false, "FAndGradient/RestMol mode requires gradient buffer");
+                }
+            }
+        }
+        EvalOutput {
+            f_total,
+            fdist_max: self.fdist,
+            frest_max: self.frest,
+        }
     }
 
     /// Resize cell list arrays after ncells is set.

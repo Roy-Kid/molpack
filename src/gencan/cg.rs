@@ -1,7 +1,7 @@
 //! Conjugate Gradient inner solver for the Truncated Newton direction.
 //! Exact algorithmic port of `cg` from `gencan.f`.
 
-use crate::constraints::EvalMode;
+use crate::context::EvalMode;
 use crate::numerics::{near_zero_norm_floor, positive_norm_floor, residual_small_floor};
 use crate::objective::Objective;
 use molrs::types::F;

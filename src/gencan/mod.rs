@@ -6,7 +6,7 @@ use molrs::types::F;
 pub mod cg;
 pub mod spg;
 
-use crate::constraints::EvalMode;
+use crate::context::EvalMode;
 use crate::numerics::{numeric_controls, positive_norm_floor};
 use crate::objective::Objective;
 

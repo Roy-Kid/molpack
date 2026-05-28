@@ -2,8 +2,8 @@
 //! Exact port of `computef.f90`, `computeg.f90`, `fparc.f90`, `gparc.f90`.
 
 use crate::cell::{index_cell, setcell};
-use crate::constraints::{EvalMode, EvalOutput};
 use crate::context::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackContext};
+use crate::context::{EvalMode, EvalOutput};
 use crate::euler::{compcart, eulerrmat, eulerrmat_derivatives};
 use molrs::types::F;
 #[cfg(feature = "rayon")]

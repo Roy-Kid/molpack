@@ -1,7 +1,7 @@
 //! movebad heuristic and flashsort.
 //! Port of `heuristics.f90` and `flashsort.f90`.
 
-use crate::constraints::EvalMode;
+use crate::context::EvalMode;
 use crate::context::PackContext;
 use crate::gencan::GencanWorkspace;
 use crate::initial::restmol;

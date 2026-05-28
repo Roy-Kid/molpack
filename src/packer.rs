@@ -8,7 +8,7 @@ use molrs::types::F;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-use crate::constraints::EvalMode;
+use crate::context::EvalMode;
 use crate::context::PackContext;
 use crate::error::PackError;
 use crate::euler::{compcart, eulerfixed};
@@ -579,7 +579,10 @@ impl Molpack {
 
         let total_phases = ntype + 1;
 
-        for phase in 0..=(ntype) {
+        for phase in (0..ntype)
+            .map(Phase::PerType)
+            .chain(std::iter::once(Phase::AllTypes))
+        {
             let outcome = run_phase(
                 phase,
                 ntype,
@@ -961,6 +964,18 @@ pub fn run_iteration(
 /// restore / xwork-back copy). `Continue` means the outer phase loop should
 /// proceed; `Converged` means the all-type phase converged and the outer loop
 /// should break.
+/// Which phase of the outer packing loop is running. Packmol iterates
+/// `phase = 0..=ntype`: the first `ntype` are single-type pre-fit phases and
+/// the final one packs all types together. Replaces a bare `phase == ntype`
+/// sentinel comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    /// Pre-fit phase for a single molecule type (0-based type index).
+    PerType(usize),
+    /// Final phase packing all types together.
+    AllTypes,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PhaseOutcome {
     Continue,
@@ -986,7 +1001,7 @@ pub enum PhaseOutcome {
 /// converged on its own (Packmol lets the all-type phase decide).
 #[allow(clippy::too_many_arguments)]
 pub fn run_phase(
-    phase: usize,
+    phase: Phase,
     ntype: usize,
     ntype_with_fixed: usize,
     total_phases: usize,
@@ -1004,7 +1019,13 @@ pub fn run_phase(
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
 ) -> PhaseOutcome {
-    let is_all = phase == ntype;
+    let is_all = matches!(phase, Phase::AllTypes);
+    // Inside the body `phase` is the type index; the all-type phase uses the
+    // sentinel index `ntype` (guarded everywhere by `is_all`).
+    let phase = match phase {
+        Phase::PerType(i) => i,
+        Phase::AllTypes => ntype,
+    };
 
     let phase_info = PhaseInfo {
         phase,
