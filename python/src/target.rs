@@ -52,6 +52,9 @@ pub(crate) fn vdw_radius_for(element: &str) -> NpF {
 /// duck-typed extraction path. The frame may be a [`molrs.Frame`] (block
 /// columns via `.view(name)`), a `molpy.Frame`, or a plain dict.
 pub(crate) fn target_from_frame(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Target> {
+    if count == 0 {
+        return Err(PyValueError::new_err("count must be ≥ 1"));
+    }
     let atoms = frame
         .get_item("atoms")
         .map_err(|_| PyValueError::new_err(r#"frame must have an "atoms" block"#))?;

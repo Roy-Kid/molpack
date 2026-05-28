@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 
 use super::error::ScriptError;
+use super::restraint_parse::{parse_inside, parse_outside, parse_plane_above, parse_plane_below};
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Public AST
@@ -261,8 +262,16 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                     let indices = tokens[1..]
                         .iter()
                         .map(|t| {
-                            t.parse::<usize>()
-                                .map_err(|_| parse_err(lineno, format!("invalid atom index `{t}`")))
+                            let idx = t.parse::<usize>().map_err(|_| {
+                                parse_err(lineno, format!("invalid atom index `{t}`"))
+                            })?;
+                            if idx < 1 {
+                                return Err(parse_err(
+                                    lineno,
+                                    format!("atom index `{t}` must be ≥ 1 (indices are 1-based)"),
+                                ));
+                            }
+                            Ok(idx)
                         })
                         .collect::<Result<Vec<_>, _>>()?;
                     if indices.is_empty() {
@@ -355,59 +364,6 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
 // Restraint helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-fn parse_inside(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptError> {
-    let shape = tokens
-        .get(1)
-        .map(|s| s.to_ascii_lowercase())
-        .ok_or_else(|| parse_err(lineno, "`inside` requires a shape keyword"))?;
-    match shape.as_str() {
-        "box" => {
-            let min = parse_vec3(tokens, 2, "inside box min", lineno)?;
-            let max = parse_vec3(tokens, 5, "inside box max", lineno)?;
-            Ok(RestraintSpec::InsideBox { min, max })
-        }
-        "sphere" => {
-            let center = parse_vec3(tokens, 2, "inside sphere center", lineno)?;
-            let radius = parse_f64(tokens, 5, "inside sphere radius", lineno)?;
-            Ok(RestraintSpec::InsideSphere { center, radius })
-        }
-        _ => Err(parse_err(
-            lineno,
-            format!("unsupported `inside` shape `{shape}`"),
-        )),
-    }
-}
-
-fn parse_outside(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptError> {
-    let shape = tokens
-        .get(1)
-        .map(|s| s.to_ascii_lowercase())
-        .ok_or_else(|| parse_err(lineno, "`outside` requires a shape keyword"))?;
-    match shape.as_str() {
-        "sphere" => {
-            let center = parse_vec3(tokens, 2, "outside sphere center", lineno)?;
-            let radius = parse_f64(tokens, 5, "outside sphere radius", lineno)?;
-            Ok(RestraintSpec::OutsideSphere { center, radius })
-        }
-        _ => Err(parse_err(
-            lineno,
-            format!("unsupported `outside` shape `{shape}`"),
-        )),
-    }
-}
-
-fn parse_plane_above(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptError> {
-    let normal = parse_vec3(tokens, 2, "over plane normal", lineno)?;
-    let distance = parse_f64(tokens, 5, "over plane distance", lineno)?;
-    Ok(RestraintSpec::AbovePlane { normal, distance })
-}
-
-fn parse_plane_below(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptError> {
-    let normal = parse_vec3(tokens, 2, "below plane normal", lineno)?;
-    let distance = parse_f64(tokens, 5, "below plane distance", lineno)?;
-    Ok(RestraintSpec::BelowPlane { normal, distance })
-}
-
 /// Parse `pbc` in either the 3-value (`pbc X Y Z`) or 6-value
 /// (`pbc X0 Y0 Z0  X1 Y1 Z1`) form — matching packmol `getinp.f90`
 /// lines 175-191.
@@ -454,7 +410,12 @@ fn parse_pbc(tokens: &[&str], lineno: usize) -> Result<PbcSpec, ScriptError> {
 // Numeric helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-fn parse_f64(tokens: &[&str], idx: usize, ctx: &str, lineno: usize) -> Result<f64, ScriptError> {
+pub(super) fn parse_f64(
+    tokens: &[&str],
+    idx: usize,
+    ctx: &str,
+    lineno: usize,
+) -> Result<f64, ScriptError> {
     let tok = tokens
         .get(idx)
         .ok_or_else(|| parse_err(lineno, format!("`{ctx}` — missing value at position {idx}")))?;
@@ -483,7 +444,7 @@ fn parse_usize(
         .map_err(|_| parse_err(lineno, format!("`{ctx}` — `{tok}` is not a valid integer")))
 }
 
-fn parse_vec3(
+pub(super) fn parse_vec3(
     tokens: &[&str],
     start: usize,
     ctx: &str,
@@ -496,7 +457,7 @@ fn parse_vec3(
     ])
 }
 
-fn parse_err(lineno: usize, message: impl Into<String>) -> ScriptError {
+pub(super) fn parse_err(lineno: usize, message: impl Into<String>) -> ScriptError {
     ScriptError::Parse {
         line: lineno,
         message: message.into(),
@@ -574,6 +535,57 @@ end structure
         assert_eq!(s.atom_groups.len(), 2);
         assert_eq!(s.atom_groups[0].atom_indices, vec![31, 32]);
         assert_eq!(s.atom_groups[1].atom_indices, vec![1, 2]);
+    }
+
+    #[test]
+    fn reject_zero_atom_index() {
+        let src = "\
+output out.xyz
+structure water.pdb
+  number 10
+  inside box 0. 0. 0. 40. 40. 40.
+  atoms 0
+    below plane 0. 0. 1. 2.
+  end atoms
+end structure
+";
+        let err = parse(src).expect_err("`atoms 0` must be rejected (indices are 1-based)");
+        assert!(
+            err.to_string().contains("1-based") || err.to_string().contains("≥ 1"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn reject_inside_sphere_nonpositive_radius() {
+        let src = "\
+output out.xyz
+structure water.pdb
+  number 10
+  inside sphere 0. 0. 0. 0.
+end structure
+";
+        let err = parse(src).expect_err("inside sphere radius must be > 0");
+        assert!(
+            err.to_string().contains("radius"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn reject_outside_sphere_nonpositive_radius() {
+        let src = "\
+output out.xyz
+structure water.pdb
+  number 10
+  outside sphere 0. 0. 0. -1.
+end structure
+";
+        let err = parse(src).expect_err("outside sphere radius must be > 0");
+        assert!(
+            err.to_string().contains("radius"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

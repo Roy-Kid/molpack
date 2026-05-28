@@ -103,6 +103,13 @@ class TestMolpackErrorPaths:
         with pytest.raises(molpack.InvalidPBCBoxError):
             packer.pack([target], max_loops=10)
 
+    def test_zero_count_target_raises_value_error(self):
+        # A target asking for zero copies is rejected at construction.
+        positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
+        frame = _make_frame(positions, ["X"])
+        with pytest.raises(ValueError):
+            molpack.Target(frame, 0)
+
     def test_pack_error_is_runtime_error_subclass(self):
         assert issubclass(molpack.NoTargetsError, molpack.PackError)
         assert issubclass(molpack.PackError, RuntimeError)

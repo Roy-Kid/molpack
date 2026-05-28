@@ -167,6 +167,8 @@ fn apply_mol_restraint(target: Target, r: &RestraintSpec) -> Target {
 
 fn apply_atom_group(mut target: Target, group: &AtomGroup) -> Target {
     // Script indices are 1-based; Target::with_atom_restraint expects 0-based.
+    // The parser already rejects indices < 1 (see `parse` atom-block handling),
+    // so `- 1` cannot underflow here; `saturating_sub` is belt-and-braces.
     let zero_indexed: Vec<usize> = group
         .atom_indices
         .iter()

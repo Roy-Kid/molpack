@@ -37,6 +37,7 @@ mod error;
 #[cfg(feature = "io")]
 mod io;
 mod parser;
+mod restraint_parse;
 
 #[cfg(feature = "io")]
 pub use build::BuildResult;

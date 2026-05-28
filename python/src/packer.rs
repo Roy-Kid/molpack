@@ -17,6 +17,7 @@ use molpack::handler::ProgressHandler;
 use molpack::packer::{Molpack, PackResult};
 use numpy::IntoPyArray;
 use numpy::PyArray2;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -32,12 +33,13 @@ pub struct PyPackResult {
 impl PyPackResult {
     /// Packed atom positions as a numpy array of shape ``(N, 3)``.
     #[getter]
-    fn positions<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<NpF>> {
+    fn positions<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<NpF>>> {
         let pos = self.inner.positions();
         let n = pos.len();
         let flat: Vec<F> = pos.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
-        let arr = ndarray::Array2::from_shape_vec((n, 3), flat).expect("positions shape");
-        arr.into_pyarray(py)
+        let arr = ndarray::Array2::from_shape_vec((n, 3), flat)
+            .map_err(|e| PyValueError::new_err(format!("malformed positions array: {e}")))?;
+        Ok(arr.into_pyarray(py))
     }
 
     /// Packed frame as a dict compatible with ``molrs.Frame``.
@@ -52,14 +54,20 @@ impl PyPackResult {
             .inner
             .frame
             .get("atoms")
-            .expect("frame has no 'atoms' block");
+            .ok_or_else(|| PyValueError::new_err("packed frame has no 'atoms' block"))?;
 
-        let x = atoms_block.get_float("x").expect("no 'x' column");
-        let y = atoms_block.get_float("y").expect("no 'y' column");
-        let z = atoms_block.get_float("z").expect("no 'z' column");
+        let x = atoms_block
+            .get_float("x")
+            .ok_or_else(|| PyValueError::new_err("packed frame has no 'x' column"))?;
+        let y = atoms_block
+            .get_float("y")
+            .ok_or_else(|| PyValueError::new_err("packed frame has no 'y' column"))?;
+        let z = atoms_block
+            .get_float("z")
+            .ok_or_else(|| PyValueError::new_err("packed frame has no 'z' column"))?;
         let elements: Vec<String> = atoms_block
             .get_string("element")
-            .expect("no 'element' column")
+            .ok_or_else(|| PyValueError::new_err("packed frame has no 'element' column"))?
             .iter()
             .cloned()
             .collect();
@@ -85,14 +93,18 @@ impl PyPackResult {
     }
 
     #[getter]
-    fn elements(&self) -> Vec<String> {
-        let atoms = self.inner.frame.get("atoms").expect("no atoms block");
-        atoms
+    fn elements(&self) -> PyResult<Vec<String>> {
+        let atoms = self
+            .inner
+            .frame
+            .get("atoms")
+            .ok_or_else(|| PyValueError::new_err("packed frame has no 'atoms' block"))?;
+        Ok(atoms
             .get_string("element")
-            .expect("no element column")
+            .ok_or_else(|| PyValueError::new_err("packed frame has no 'element' column"))?
             .iter()
             .cloned()
-            .collect()
+            .collect())
     }
 
     #[getter]

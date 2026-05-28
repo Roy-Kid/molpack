@@ -7,7 +7,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- `.inp` parser now rejects `atoms 0` (atom indices are 1-based) and `inside`/
+  `outside sphere` with `radius <= 0`; Python `Target`/`Packer` reject
+  `count == 0`. Previously these were silently accepted (`atoms 0` mapped to the
+  wrong atom; a non-positive radius fed nonsense into the distance math).
+
 ### Fixed
+- Python `PackResult.positions`/`frame`/`elements` now raise `ValueError` on a
+  malformed packed frame instead of panicking (which aborted the interpreter at
+  the FFI boundary).
 - `OutsideEllipsoidRestraint` (Packmol kind 9): `f` now multiplies the squared
   penalty by `scale2`, matching `fg`'s gradient and the documented "quadratic
   penalty group" convention. The previous transcription left `f` and `fg`
