@@ -60,6 +60,35 @@ impl PackResult {
     }
 }
 
+/// Validate packing inputs at the boundary: at least one target, and no
+/// empty molecule templates.
+fn validate_inputs(targets: &[Target]) -> Result<(), PackError> {
+    if targets.is_empty() {
+        return Err(PackError::NoTargets);
+    }
+    for (i, t) in targets.iter().enumerate() {
+        if t.natoms() == 0 {
+            return Err(PackError::EmptyMolecule(i));
+        }
+    }
+    Ok(())
+}
+
+/// Fully-built packing state handed from [`Molpack::prepare_system`] to the
+/// main loop: the runtime context, the initial variable vector, per-type move
+/// budgets (referenced by `MoveBadConfig`), spawned relaxer runners, and the
+/// system dimensions.
+struct Prepared {
+    sys: PackContext,
+    x: Vec<F>,
+    maxmove_per_type: Vec<usize>,
+    relaxer_runners: Vec<(usize, Vec<Box<dyn RelaxerRunner>>)>,
+    ntype: usize,
+    ntype_with_fixed: usize,
+    ntotmol_free: usize,
+    ntotat: usize,
+}
+
 /// Default Packmol parameters
 const PRECISION: F = 0.01;
 // Packmol default from getinp.f90: discale = 1.1d0
@@ -282,64 +311,11 @@ impl Molpack {
     ///
     /// Returns a [`PackResult`] containing the final atom positions and
     /// convergence information (`fdist`, `frest`, `converged`).
-    pub fn pack(&mut self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError> {
-        if targets.is_empty() {
-            return Err(PackError::NoTargets);
-        }
-
-        for (i, t) in targets.iter().enumerate() {
-            if t.natoms() == 0 {
-                return Err(PackError::EmptyMolecule(i));
-            }
-        }
-
-        // Scope equivalence (spec §4): broadcast global restraints to each target.
-        // If none were added via `Molpack::add_restraint`, this is a no-op.
-        let broadcast_targets: Vec<Target>;
-        let targets: &[Target] = if self.global_restraints.is_empty() {
-            targets
-        } else {
-            broadcast_targets = targets
-                .iter()
-                .map(|t| {
-                    let mut t = t.clone();
-                    for r in &self.global_restraints {
-                        t.molecule_restraints.push(Arc::clone(r));
-                    }
-                    t
-                })
-                .collect();
-            &broadcast_targets
-        };
-        // Derive the system periodic box from two independent sources:
-        //   1. `Molpack::with_periodic_box` — global PBC (script `pbc`).
-        //   2. `Restraint::periodic_box` — per-restraint declarations,
-        //      e.g. `InsideBoxRestraint` with any axis marked periodic.
-        //
-        // The two must not disagree; if both are present they must
-        // match exactly (same bounds, same per-axis flags). Validate
-        // the global PBC extent here since `derive_periodic_box`
-        // already does this for restraint-sourced boxes.
-        if let Some((min, max, _)) = self.periodic_box {
-            let length = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-            if length.iter().any(|&v| v <= 0.0) {
-                return Err(PackError::InvalidPBCBox { min, max });
-            }
-        }
-        let pbc = match (self.periodic_box, derive_periodic_box(targets)?) {
-            (None, derived) => derived,
-            (Some(global), None) => Some(global),
-            (Some(global), Some(derived)) if global == derived => Some(global),
-            (Some(global), Some(derived)) => {
-                return Err(PackError::ConflictingPeriodicBoxes {
-                    first: global,
-                    second: derived,
-                });
-            }
-        };
-
-        let mut rng = SmallRng::seed_from_u64(self.seed);
-
+    /// Build the runtime context, restraint tables, fixed placements, the
+    /// initial variable vector, and relaxer runners from `targets` (already
+    /// global-restraint-broadcasted). Pure setup — no handler callbacks and no
+    /// `initial()` solve, which the caller runs afterwards.
+    fn prepare_system(&self, targets: &[Target]) -> Prepared {
         // Split into free and fixed targets
         let free_targets: Vec<&Target> = targets.iter().filter(|t| t.fixed_at.is_none()).collect();
         let fixed_targets: Vec<&Target> = targets.iter().filter(|t| t.fixed_at.is_some()).collect();
@@ -506,7 +482,98 @@ impl Molpack {
         crate::frame::init_frame_constants(&mut sys);
 
         // Initialize x vector
-        let mut x = vec![0.0 as F; n];
+        let x = vec![0.0 as F; n];
+
+        // Build relaxer runners from target relaxers (RelaxerRunner carries
+        // mutable MC state). Built here from reference coords, which `initial()`
+        // does not modify. Each entry: (type_index, Vec<Box<dyn RelaxerRunner>>).
+        let relaxer_runners: Vec<(usize, Vec<Box<dyn RelaxerRunner>>)> = free_targets
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| !t.relaxers.is_empty())
+            .map(|(i, t)| {
+                let base = sys.idfirst[i];
+                let na = sys.natoms[i];
+                let ref_slice = &sys.coor[base..base + na];
+                let runners = t.relaxers.iter().map(|r| r.spawn(ref_slice)).collect();
+                (i, runners)
+            })
+            .collect();
+
+        Prepared {
+            sys,
+            x,
+            maxmove_per_type,
+            relaxer_runners,
+            ntype,
+            ntype_with_fixed,
+            ntotmol_free,
+            ntotat,
+        }
+    }
+
+    pub fn pack(&mut self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError> {
+        validate_inputs(targets)?;
+
+        // Scope equivalence (spec §4): broadcast global restraints to each target.
+        // If none were added via `Molpack::add_restraint`, this is a no-op.
+        let broadcast_targets: Vec<Target>;
+        let targets: &[Target] = if self.global_restraints.is_empty() {
+            targets
+        } else {
+            broadcast_targets = targets
+                .iter()
+                .map(|t| {
+                    let mut t = t.clone();
+                    for r in &self.global_restraints {
+                        t.molecule_restraints.push(Arc::clone(r));
+                    }
+                    t
+                })
+                .collect();
+            &broadcast_targets
+        };
+        // Derive the system periodic box from two independent sources:
+        //   1. `Molpack::with_periodic_box` — global PBC (script `pbc`).
+        //   2. `Restraint::periodic_box` — per-restraint declarations,
+        //      e.g. `InsideBoxRestraint` with any axis marked periodic.
+        //
+        // The two must not disagree; if both are present they must
+        // match exactly (same bounds, same per-axis flags). Validate
+        // the global PBC extent here since `derive_periodic_box`
+        // already does this for restraint-sourced boxes.
+        if let Some((min, max, _)) = self.periodic_box {
+            let length = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+            if length.iter().any(|&v| v <= 0.0) {
+                return Err(PackError::InvalidPBCBox { min, max });
+            }
+        }
+        let pbc = match (self.periodic_box, derive_periodic_box(targets)?) {
+            (None, derived) => derived,
+            (Some(global), None) => Some(global),
+            (Some(global), Some(derived)) if global == derived => Some(global),
+            (Some(global), Some(derived)) => {
+                return Err(PackError::ConflictingPeriodicBoxes {
+                    first: global,
+                    second: derived,
+                });
+            }
+        };
+
+        let mut rng = SmallRng::seed_from_u64(self.seed);
+
+        // Build the runtime context, restraint tables, fixed placements, the
+        // initial variable vector, and relaxer runners.
+        let Prepared {
+            mut sys,
+            mut x,
+            maxmove_per_type,
+            mut relaxer_runners,
+            ntype,
+            ntype_with_fixed,
+            ntotmol_free,
+            ntotat,
+        } = self.prepare_system(targets);
 
         // Notify handlers immediately (before any heavy computation)
         for h in self.handlers.iter_mut() {
@@ -538,22 +605,6 @@ impl Molpack {
         for h in self.handlers.iter_mut() {
             h.on_initialized(&sys);
         }
-
-        // Build relaxer runners from target relaxers (RelaxerRunner carries mutable MC state).
-        // Each entry: (type_index, Vec<Box<dyn RelaxerRunner>>).
-        let mut relaxer_runners: Vec<(usize, Vec<Box<dyn RelaxerRunner>>)> = free_targets
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| !t.relaxers.is_empty())
-            .map(|(i, t)| {
-                let base = sys.idfirst[i];
-                let na = sys.natoms[i];
-                let ref_slice = &sys.coor[base..base + na];
-                let runners = t.relaxers.iter().map(|r| r.spawn(ref_slice)).collect();
-                (i, runners)
-            })
-            .collect();
-
         // max_loops controls the outer loop count, matching Packmol's `nloop` parameter.
         let gencan_params = GencanParams {
             maxit: self.inner_iterations,
