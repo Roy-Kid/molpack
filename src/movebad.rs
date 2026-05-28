@@ -29,17 +29,17 @@ pub fn movebad(
     // Zero per-atom accumulators
     let ntotat = sys.ntotat;
     for icart in 0..ntotat {
-        sys.fdist_atom[icart] = 0.0;
-        sys.frest_atom[icart] = 0.0;
+        sys.eval.fdist_atom[icart] = 0.0;
+        sys.eval.frest_atom[icart] = 0.0;
     }
 
     // Compute f with move flag to collect per-atom scores.
     // Packmol keeps radius=radius_ini during the whole movebad routine and restores
     // the working radii only at the end (heuristics.f90 lines 45-47 and 145-147).
     sys.selective_repack_mode = true;
-    sys.work.radiuswork.copy_from_slice(&sys.radius);
+    sys.work.radiuswork.copy_from_slice(&sys.eval.radius);
     for i in 0..sys.ntotat {
-        sys.set_radius(i, sys.radius_ini[i]);
+        sys.set_radius(i, sys.eval.radius_ini[i]);
     }
     sys.evaluate(x, EvalMode::FOnly, None);
     sys.selective_repack_mode = false;
@@ -49,12 +49,12 @@ pub fn movebad(
     let mut icart_offset = 0usize;
     for itype in 0..sys.ntype {
         if !sys.is_type_active[itype] {
-            icart_offset += sys.nmols[itype] * sys.natoms[itype];
+            icart_offset += sys.topology.nmols[itype] * sys.topology.natoms[itype];
             continue;
         }
 
-        let nmols_itype = sys.nmols[itype];
-        let natoms_itype = sys.natoms[itype];
+        let nmols_itype = sys.topology.nmols[itype];
+        let natoms_itype = sys.topology.natoms[itype];
 
         // Compute per-molecule violation score
         sys.work.fmol.clear();
@@ -66,8 +66,8 @@ pub fn movebad(
             let mut fdist_mol = 0.0 as F;
             let mut frest_mol = 0.0 as F;
             for _ in 0..natoms_itype {
-                fdist_mol = fdist_mol.max(sys.fdist_atom[icart]);
-                frest_mol = frest_mol.max(sys.frest_atom[icart]);
+                fdist_mol = fdist_mol.max(sys.eval.fdist_atom[icart]);
+                frest_mol = frest_mol.max(sys.eval.frest_atom[icart]);
                 icart += 1;
             }
             if fdist_mol > precision || frest_mol > precision {
@@ -105,7 +105,7 @@ pub fn movebad(
             let mut base = 0usize;
             for it in 0..itype {
                 if sys.is_type_active[it] {
-                    base += sys.nmols[it];
+                    base += sys.topology.nmols[it];
                 }
             }
             base
@@ -128,7 +128,7 @@ pub fn movebad(
             let x_com_offset_good = (mol_base + igood_mol) * 3;
             let x_euler_offset_good = ntotmol * 3 + (mol_base + igood_mol) * 3;
 
-            let dmax = sys.dmax[itype];
+            let dmax = sys.topology.dmax[itype];
             if cfg.movebadrandom {
                 x[x_com_offset_bad] =
                     sys.sizemin[0] + uniform01(rng) * (sys.sizemax[0] - sys.sizemin[0]);

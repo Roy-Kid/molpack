@@ -25,8 +25,8 @@ fn build_snapshot() -> (PackContext, Vec<f64>) {
 
     let ntotat = 400;
     let mut sys = PackContext::new(ntotat, 0, 0);
-    sys.radius.iter_mut().for_each(|r| *r = 0.75);
-    sys.radius_ini.iter_mut().for_each(|r| *r = 1.5);
+    sys.eval.radius.iter_mut().for_each(|r| *r = 0.75);
+    sys.eval.radius_ini.iter_mut().for_each(|r| *r = 1.5);
     sys.work.radiuswork.resize(ntotat, 0.0);
     (sys, Vec::new())
 }

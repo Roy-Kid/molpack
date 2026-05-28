@@ -192,13 +192,13 @@ impl XYZHandler {
         let io = |r: std::io::Result<()>| {
             r.map_err(|e| PackError::HandlerIo(format!("XYZHandler: write failed: {e}")))
         };
-        let nat = sys.xcart.len();
+        let nat = sys.eval.xcart.len();
         io(writeln!(w, "{nat}"))?;
         io(writeln!(
             w,
             "Properties=species:S:1:pos:R:3:mol:I:1  {comment}"
         ))?;
-        for (icart, pos) in sys.xcart.iter().enumerate() {
+        for (icart, pos) in sys.eval.xcart.iter().enumerate() {
             let elem = sys
                 .elements
                 .get(icart)
@@ -261,7 +261,7 @@ impl Handler for ProgressHandler {
         let elapsed = self.start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
         eprintln!(
             "  Initializing... done ({:.1}s)  overlap: {:.4e}  constraints: {:.4e}",
-            elapsed, sys.fdist, sys.frest
+            elapsed, sys.eval.fdist, sys.eval.frest
         );
         Ok(())
     }
@@ -290,15 +290,15 @@ impl Handler for ProgressHandler {
 
     fn on_finish(&mut self, sys: &PackContext) -> Result<(), PackError> {
         let elapsed = self.start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
-        if sys.fdist < 0.01 && sys.frest < 0.01 {
+        if sys.eval.fdist < 0.01 && sys.eval.frest < 0.01 {
             eprintln!(
                 "  Converged in {:.1}s — overlap: {:.2e}  constraints: {:.2e}",
-                elapsed, sys.fdist, sys.frest,
+                elapsed, sys.eval.fdist, sys.eval.frest,
             );
         } else {
             eprintln!(
                 "  Did not converge ({:.1}s) — overlap: {:.2e}  constraints: {:.2e}",
-                elapsed, sys.fdist, sys.frest,
+                elapsed, sys.eval.fdist, sys.eval.frest,
             );
         }
         Ok(())

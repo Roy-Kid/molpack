@@ -111,26 +111,95 @@ const NEIGHBOR_OFFSETS_G: [(isize, isize, isize); 13] = [
     (1, -1, -1),
 ];
 
-/// Full runtime context for one packing execution.
-/// All arrays are 0-based; Fortran 1-based arrays are shifted by -1.
-pub struct PackContext {
-    // ---- Atom Cartesian coordinates (updated every function evaluation) ----
+/// Per-evaluation mutable state: Cartesian positions, current/initial radii,
+/// fscale, and the objective accumulators. Grouped out of [`PackContext`] as
+/// the state rewritten on every `evaluate()` — the natural `&mut` borrow unit.
+pub struct EvalState {
     /// Current Cartesian positions: `xcart[icart]` = `[x, y, z]`. Size: ntotat.
     pub xcart: Vec<[F; 3]>,
-    /// Element per atom: `elements[icart]`. Size: ntotat. `None` means unknown/"X".
-    pub elements: Vec<Option<Element>>,
-
-    // ---- Reference (centered) coordinates ----
-    /// Reference coordinates `coor[idatom]` = `[x, y, z]`. Size: total atoms across all types.
-    pub coor: Vec<[F; 3]>,
-
-    // ---- Radii ----
     /// Current radii (may be scaled): `radius[icart]`. Size: ntotat.
     pub radius: Vec<F>,
     /// Original (unscaled) radii: `radius_ini[icart]`. Size: ntotat.
     pub radius_ini: Vec<F>,
     /// Function scaling per atom: `fscale[icart]`. Size: ntotat.
     pub fscale: Vec<F>,
+    /// Maximum inter-molecular distance violation (fdist in Fortran).
+    pub fdist: F,
+    /// Maximum constraint violation (frest in Fortran).
+    pub frest: F,
+    /// Per-atom distance violation (for movebad).
+    pub fdist_atom: Vec<F>,
+    /// Per-atom constraint violation (for movebad).
+    pub frest_atom: Vec<F>,
+}
+
+/// Per-type molecule topology: counts, atom-layout offsets, reference
+/// coordinates, and max internal distances. Grouped out of [`PackContext`]
+/// as the (mostly) static description of *what* is being packed.
+pub struct Topology {
+    /// Number of molecules per type: `nmols[itype]`. 0-based type index.
+    pub nmols: Vec<usize>,
+    /// Number of atoms per type: `natoms[itype]`. 0-based type index.
+    pub natoms: Vec<usize>,
+    /// First datum atom index (0-based) for each type: `idfirst[itype]`.
+    pub idfirst: Vec<usize>,
+    /// Reference coordinates `coor[idatom]` = `[x, y, z]`. Size: total atoms.
+    pub coor: Vec<[F; 3]>,
+    /// Maximum internal distance per type: `dmax[itype]`.
+    pub dmax: Vec<F>,
+}
+
+/// Linked-cell grid: geometry plus the per-cell/per-atom linked lists used
+/// for neighbor lookup. Grouped out of [`PackContext`] so the cell rebuild
+/// and neighbor traversal can be reasoned about (and borrowed) as a unit.
+pub struct CellGrid {
+    pub ncells: [usize; 3],
+    pub cell_length: [F; 3],
+    /// `latomfirst[icell]` = first atom index in cell, `NONE_IDX` if empty.
+    pub latomfirst: Vec<u32>,
+    /// `latomnext[icart]` = next atom in the same cell (`NONE_IDX` = end).
+    pub latomnext: Vec<u32>,
+    /// Fixed atom list per cell (permanent), `NONE_IDX` if cell has no fixed atoms.
+    pub latomfix: Vec<u32>,
+    /// Occupied cell linked list: first cell (`NONE_IDX` if none occupied).
+    pub lcellfirst: u32,
+    /// `lcellnext[icell]` = next occupied cell (`NONE_IDX` = end).
+    pub lcellnext: Vec<u32>,
+    /// Is cell empty?
+    pub empty_cell: Vec<bool>,
+    /// Cells that contain fixed atoms and must be restored on every reset.
+    pub fixed_cells: Vec<usize>,
+    /// Cells touched during the previous objective/gradient evaluation.
+    pub active_cells: Vec<usize>,
+    /// Precomputed 13 forward-neighbor cell indices per cell for `compute_f`.
+    pub neighbor_cells_f: Vec<[usize; 13]>,
+    /// Precomputed 13 forward-neighbor cell indices per cell for `compute_g`.
+    pub neighbor_cells_g: Vec<[usize; 13]>,
+}
+
+/// Periodic-boundary parameters, grouped out of [`PackContext`] so the
+/// pair-kernel can borrow `&ctx.pbc` independently of the mutable eval state.
+#[derive(Clone, Debug, Default)]
+pub struct PbcParams {
+    /// Box edge lengths per axis (the minimum-image period).
+    pub length: [F; 3],
+    /// Box origin (minimum corner) per axis.
+    pub min: [F; 3],
+    /// Per-axis periodicity flags. `periodic[k] == true` means axis `k`
+    /// wraps in the pair-kernel minimum image and the cell list; `false`
+    /// means the cell list clamps and no wrap is applied.
+    pub periodic: [bool; 3],
+}
+
+/// Full runtime context for one packing execution.
+/// All arrays are 0-based; Fortran 1-based arrays are shifted by -1.
+pub struct PackContext {
+    // ---- Per-evaluation mutable state ----
+    /// Cartesian positions, radii, fscale, and objective accumulators that
+    /// are rewritten on every function/gradient evaluation.
+    pub eval: EvalState,
+    /// Element per atom: `elements[icart]`. Size: ntotat. `None` means unknown/"X".
+    pub elements: Vec<Option<Element>>,
 
     // ---- Short radius (optional secondary penalty) ----
     pub use_short_radius: Vec<bool>,
@@ -163,23 +232,9 @@ pub struct PackContext {
     /// [`Self::debug_assert_atom_props_sync`] will catch the drift.
     pub atom_props: Vec<AtomProps>,
 
-    // ---- Objective function accumulators ----
-    /// Maximum inter-molecular distance violation (fdist in Fortran).
-    pub fdist: F,
-    /// Maximum constraint violation (frest in Fortran).
-    pub frest: F,
-    /// Per-atom distance violation (for movebad).
-    pub fdist_atom: Vec<F>,
-    /// Per-atom constraint violation (for movebad).
-    pub frest_atom: Vec<F>,
-
     // ---- Molecule topology ----
-    /// Number of molecules per type: `nmols[itype]`. 0-based type index.
-    pub nmols: Vec<usize>,
-    /// Number of atoms per type: `natoms[itype]`. 0-based type index.
-    pub natoms: Vec<usize>,
-    /// First datum atom index (0-based) for each type: `idfirst[itype]`.
-    pub idfirst: Vec<usize>,
+    /// Per-type counts/offsets + reference coords + max internal distances.
+    pub topology: Topology,
     /// Total number of types (free).
     pub ntype: usize,
     /// Total number of types including fixed types.
@@ -218,39 +273,11 @@ pub struct PackContext {
     /// Is this type being computed in the current iteration? Packmol: `comptype`.
     pub is_type_active: Vec<bool>,
 
-    // ---- Cell geometry ----
-    pub ncells: [usize; 3],
-    pub cell_length: [F; 3],
-    pub pbc_length: [F; 3],
-    pub pbc_min: [F; 3],
-    /// Per-axis periodicity flags. `pbc_periodic[k] == true` means axis
-    /// `k` wraps in the pair-kernel minimum image and the cell list;
-    /// `false` means the cell list clamps and no wrap is applied. Set
+    // ---- Cell grid (geometry + linked lists) ----
+    pub cells: CellGrid,
+    /// Periodic-boundary parameters (length / min / per-axis flags). Set
     /// from restraints that override `Restraint::periodic_box()`.
-    pub pbc_periodic: [bool; 3],
-
-    // ---- Linked cell lists ----
-    /// `latomfirst[icell]` = first atom index in cell, `NONE_IDX` if empty.
-    /// Stored as flat Vec indexed by `index_cell`.
-    pub latomfirst: Vec<u32>,
-    /// `latomnext[icart]` = next atom in the same cell (`NONE_IDX` = end).
-    pub latomnext: Vec<u32>,
-    /// Fixed atom list per cell (permanent), `NONE_IDX` if cell has no fixed atoms.
-    pub latomfix: Vec<u32>,
-    /// Occupied cell linked list: first cell (`NONE_IDX` if none occupied).
-    pub lcellfirst: u32,
-    /// `lcellnext[icell]` = next occupied cell (`NONE_IDX` = end).
-    pub lcellnext: Vec<u32>,
-    /// Is cell empty?
-    pub empty_cell: Vec<bool>,
-    /// Cells that contain fixed atoms and must be restored on every reset.
-    pub fixed_cells: Vec<usize>,
-    /// Cells touched during the previous objective/gradient evaluation.
-    pub active_cells: Vec<usize>,
-    /// Precomputed 13 forward-neighbor cell indices per cell for `compute_f`.
-    pub neighbor_cells_f: Vec<[usize; 13]>,
-    /// Precomputed 13 forward-neighbor cell indices per cell for `compute_g`.
-    pub neighbor_cells_g: Vec<[usize; 13]>,
+    pub pbc: PbcParams,
 
     // ---- State flags ----
     /// If true, skip pair-distance computations (constraints only during init).
@@ -275,9 +302,6 @@ pub struct PackContext {
     pub sizemin: [F; 3],
     pub sizemax: [F; 3],
 
-    // ---- Maximum internal distances per type ----
-    pub dmax: Vec<F>,
-
     // ---- Work buffers ----
     pub work: WorkBuffers,
 
@@ -301,12 +325,17 @@ impl PackContext {
             "ntotat={ntotat} must fit in u32 (< NONE_IDX)"
         );
         Self {
-            xcart: vec![[0.0; 3]; ntotat],
+            eval: EvalState {
+                xcart: vec![[0.0; 3]; ntotat],
+                radius: vec![0.0; ntotat],
+                radius_ini: vec![0.0; ntotat],
+                fscale: vec![1.0; ntotat],
+                fdist: 0.0,
+                frest: 0.0,
+                fdist_atom: vec![0.0; ntotat],
+                frest_atom: vec![0.0; ntotat],
+            },
             elements: vec![None; ntotat],
-            coor: Vec::new(),
-            radius: vec![0.0; ntotat],
-            radius_ini: vec![0.0; ntotat],
-            fscale: vec![1.0; ntotat],
             use_short_radius: vec![false; ntotat],
             short_radius: vec![0.0; ntotat],
             short_radius_scale: vec![0.0; ntotat],
@@ -315,13 +344,13 @@ impl PackContext {
             n_fixed_atoms: 0,
             n_short_radius: 0,
             atom_props: vec![AtomProps::default(); ntotat],
-            fdist: 0.0,
-            frest: 0.0,
-            fdist_atom: vec![0.0; ntotat],
-            frest_atom: vec![0.0; ntotat],
-            nmols: Vec::new(),
-            natoms: Vec::new(),
-            idfirst: Vec::new(),
+            topology: Topology {
+                nmols: Vec::new(),
+                natoms: Vec::new(),
+                idfirst: Vec::new(),
+                coor: Vec::new(),
+                dmax: vec![0.0; ntype],
+            },
             ntype,
             ntype_with_fixed: ntype,
             ntotmol,
@@ -336,21 +365,25 @@ impl PackContext {
             atom_mol_idx: vec![0; ntotat],
             fixedatom: vec![false; ntotat],
             is_type_active: vec![true; ntype],
-            ncells,
-            cell_length: [1.0; 3],
-            pbc_length: [1.0; 3],
-            pbc_min: [0.0; 3],
-            pbc_periodic: [false; 3],
-            latomfirst: vec![NONE_IDX; ncell_total],
-            latomnext: vec![NONE_IDX; ntotat],
-            latomfix: vec![NONE_IDX; ncell_total],
-            lcellfirst: NONE_IDX,
-            lcellnext: vec![NONE_IDX; ncell_total],
-            empty_cell: vec![true; ncell_total],
-            fixed_cells: Vec::new(),
-            active_cells: Vec::new(),
-            neighbor_cells_f: vec![[0; 13]; ncell_total],
-            neighbor_cells_g: vec![[0; 13]; ncell_total],
+            cells: CellGrid {
+                ncells,
+                cell_length: [1.0; 3],
+                latomfirst: vec![NONE_IDX; ncell_total],
+                latomnext: vec![NONE_IDX; ntotat],
+                latomfix: vec![NONE_IDX; ncell_total],
+                lcellfirst: NONE_IDX,
+                lcellnext: vec![NONE_IDX; ncell_total],
+                empty_cell: vec![true; ncell_total],
+                fixed_cells: Vec::new(),
+                active_cells: Vec::new(),
+                neighbor_cells_f: vec![[0; 13]; ncell_total],
+                neighbor_cells_g: vec![[0; 13]; ncell_total],
+            },
+            pbc: PbcParams {
+                length: [1.0; 3],
+                min: [0.0; 3],
+                periodic: [false; 3],
+            },
             init1: false,
             selective_repack_mode: false,
             parallel_pair_eval: false,
@@ -358,7 +391,6 @@ impl PackContext {
             scale2: 0.01,
             sizemin: [0.0; 3],
             sizemax: [0.0; 3],
-            dmax: vec![0.0; ntype],
             work: WorkBuffers::new(ntotat),
             frame: molrs::Frame::new(),
             ncf: 0,
@@ -409,51 +441,51 @@ impl PackContext {
         }
         EvalOutput {
             f_total,
-            fdist_max: self.fdist,
-            frest_max: self.frest,
+            fdist_max: self.eval.fdist,
+            frest_max: self.eval.frest,
         }
     }
 
     /// Resize cell list arrays after ncells is set.
     pub fn resize_cell_arrays(&mut self) {
-        let nc = self.ncells[0] * self.ncells[1] * self.ncells[2];
+        let nc = self.cells.ncells[0] * self.cells.ncells[1] * self.cells.ncells[2];
         debug_assert!(
             nc < NONE_IDX as usize,
             "ncell_total={nc} must fit in u32 (< NONE_IDX)"
         );
-        self.latomfirst = vec![NONE_IDX; nc];
-        self.latomfix = vec![NONE_IDX; nc];
-        self.lcellnext = vec![NONE_IDX; nc];
-        self.empty_cell = vec![true; nc];
-        self.fixed_cells.clear();
-        self.active_cells.clear();
-        self.neighbor_cells_f = vec![[0; 13]; nc];
-        self.neighbor_cells_g = vec![[0; 13]; nc];
+        self.cells.latomfirst = vec![NONE_IDX; nc];
+        self.cells.latomfix = vec![NONE_IDX; nc];
+        self.cells.lcellnext = vec![NONE_IDX; nc];
+        self.cells.empty_cell = vec![true; nc];
+        self.cells.fixed_cells.clear();
+        self.cells.active_cells.clear();
+        self.cells.neighbor_cells_f = vec![[0; 13]; nc];
+        self.cells.neighbor_cells_g = vec![[0; 13]; nc];
         self.rebuild_neighbor_cells();
     }
 
     /// Reset cell lists (called at start of each compute_f/compute_g).
     /// Port of `resetcells.f90`.
     pub fn resetcells(&mut self) {
-        self.lcellfirst = NONE_IDX;
-        for &icell in &self.active_cells {
-            self.latomfirst[icell] = NONE_IDX;
-            self.lcellnext[icell] = NONE_IDX;
-            self.empty_cell[icell] = true;
+        self.cells.lcellfirst = NONE_IDX;
+        for &icell in &self.cells.active_cells {
+            self.cells.latomfirst[icell] = NONE_IDX;
+            self.cells.lcellnext[icell] = NONE_IDX;
+            self.cells.empty_cell[icell] = true;
         }
-        self.active_cells.clear();
+        self.cells.active_cells.clear();
 
-        for &icell in &self.fixed_cells {
-            self.latomfirst[icell] = self.latomfix[icell];
-            self.empty_cell[icell] = false;
-            self.lcellnext[icell] = self.lcellfirst;
-            self.lcellfirst = icell as u32;
-            self.active_cells.push(icell);
+        for &icell in &self.cells.fixed_cells {
+            self.cells.latomfirst[icell] = self.cells.latomfix[icell];
+            self.cells.empty_cell[icell] = false;
+            self.cells.lcellnext[icell] = self.cells.lcellfirst;
+            self.cells.lcellfirst = icell as u32;
+            self.cells.active_cells.push(icell);
         }
 
         // Reset latomnext for free atoms only
         let free_atoms = self.ntotat - self.nfixedat;
-        self.latomnext[..free_atoms].fill(NONE_IDX);
+        self.cells.latomnext[..free_atoms].fill(NONE_IDX);
     }
 
     #[inline]
@@ -497,9 +529,9 @@ impl PackContext {
                 atom_type_idx: self.atom_type_idx[i] as u32,
                 flags,
                 _padding: 0,
-                fscale: self.fscale[i],
-                radius: self.radius[i],
-                radius_ini: self.radius_ini[i],
+                fscale: self.eval.fscale[i],
+                radius: self.eval.radius[i],
+                radius_ini: self.eval.radius_ini[i],
             };
         }
         self.n_fixed_atoms = n_fixed;
@@ -509,12 +541,12 @@ impl PackContext {
     }
 
     /// Update atom `i`'s live radius on both the `Vec<F>` and the AoS
-    /// mirror.  Preferred over writing `sys.radius[i]` directly: the
+    /// mirror.  Preferred over writing `sys.eval.radius[i]` directly: the
     /// hot-loop kernel reads `atom_props[i].radius`, so a raw write
     /// would silently desynchronize.
     #[inline]
     pub fn set_radius(&mut self, i: usize, value: F) {
-        self.radius[i] = value;
+        self.eval.radius[i] = value;
         if i < self.atom_props.len() {
             self.atom_props[i].radius = value;
         }
@@ -524,7 +556,7 @@ impl PackContext {
     /// scaling-phase paths that modulate per-atom weight.
     #[inline]
     pub fn set_fscale(&mut self, i: usize, value: F) {
-        self.fscale[i] = value;
+        self.eval.fscale[i] = value;
         if i < self.atom_props.len() {
             self.atom_props[i].fscale = value;
         }
@@ -646,15 +678,15 @@ impl PackContext {
                 "atom_props[{i}].atom_type_idx drift"
             );
             assert_eq!(
-                ap.fscale, self.fscale[i],
-                "atom_props[{i}].fscale drift — did you write sys.fscale[{i}] directly?"
+                ap.fscale, self.eval.fscale[i],
+                "atom_props[{i}].fscale drift — did you write sys.eval.fscale[{i}] directly?"
             );
             assert_eq!(
-                ap.radius, self.radius[i],
+                ap.radius, self.eval.radius[i],
                 "atom_props[{i}].radius drift — use set_radius()"
             );
             assert_eq!(
-                ap.radius_ini, self.radius_ini[i],
+                ap.radius_ini, self.eval.radius_ini[i],
                 "atom_props[{i}].radius_ini drift"
             );
             assert_eq!(
@@ -697,10 +729,14 @@ impl PackContext {
     }
 
     fn rebuild_neighbor_cells(&mut self) {
-        let (nx, ny, nz) = (self.ncells[0], self.ncells[1], self.ncells[2]);
+        let (nx, ny, nz) = (
+            self.cells.ncells[0],
+            self.cells.ncells[1],
+            self.cells.ncells[2],
+        );
         let nc = nx * ny * nz;
         for icell in 0..nc {
-            let cell = icell_to_cell(icell, &self.ncells);
+            let cell = icell_to_cell(icell, &self.cells.ncells);
             let (ci, cj, ck) = (cell[0], cell[1], cell[2]);
 
             let mut nbs_f = [0usize; 13];
@@ -710,9 +746,9 @@ impl PackContext {
                     cell_ind(cj as isize + dj, ny),
                     cell_ind(ck as isize + dk, nz),
                 ];
-                nbs_f[idx] = index_cell(&ncell, &self.ncells);
+                nbs_f[idx] = index_cell(&ncell, &self.cells.ncells);
             }
-            self.neighbor_cells_f[icell] = nbs_f;
+            self.cells.neighbor_cells_f[icell] = nbs_f;
 
             let mut nbs_g = [0usize; 13];
             for (idx, &(di, dj, dk)) in NEIGHBOR_OFFSETS_G.iter().enumerate() {
@@ -721,9 +757,9 @@ impl PackContext {
                     cell_ind(cj as isize + dj, ny),
                     cell_ind(ck as isize + dk, nz),
                 ];
-                nbs_g[idx] = index_cell(&ncell, &self.ncells);
+                nbs_g[idx] = index_cell(&ncell, &self.cells.ncells);
             }
-            self.neighbor_cells_g[icell] = nbs_g;
+            self.cells.neighbor_cells_g[icell] = nbs_g;
         }
     }
 }
@@ -737,9 +773,9 @@ mod atom_props_tests {
         for i in 0..ntotat {
             sys.atom_mol_idx[i] = i;
             sys.atom_type_idx[i] = 0;
-            sys.radius[i] = 1.0;
-            sys.radius_ini[i] = 1.0;
-            sys.fscale[i] = 1.0;
+            sys.eval.radius[i] = 1.0;
+            sys.eval.radius_ini[i] = 1.0;
+            sys.eval.fscale[i] = 1.0;
         }
         sys.sync_atom_props();
         sys
@@ -759,9 +795,9 @@ mod atom_props_tests {
         let mut sys = PackContext::new(3, 3, 1);
         sys.atom_mol_idx = vec![10, 20, 30];
         sys.atom_type_idx = vec![1, 2, 3];
-        sys.fscale = vec![0.5, 0.25, 0.125];
-        sys.radius = vec![1.1, 2.2, 3.3];
-        sys.radius_ini = vec![1.0, 2.0, 3.0];
+        sys.eval.fscale = vec![0.5, 0.25, 0.125];
+        sys.eval.radius = vec![1.1, 2.2, 3.3];
+        sys.eval.radius_ini = vec![1.0, 2.0, 3.0];
         sys.fixedatom = vec![false, true, false];
         sys.use_short_radius = vec![false, false, true];
         sys.sync_atom_props();
@@ -769,9 +805,9 @@ mod atom_props_tests {
         for i in 0..3 {
             assert_eq!(sys.atom_props[i].atom_mol_idx, sys.atom_mol_idx[i] as u32);
             assert_eq!(sys.atom_props[i].atom_type_idx, sys.atom_type_idx[i] as u32);
-            assert_eq!(sys.atom_props[i].fscale, sys.fscale[i]);
-            assert_eq!(sys.atom_props[i].radius, sys.radius[i]);
-            assert_eq!(sys.atom_props[i].radius_ini, sys.radius_ini[i]);
+            assert_eq!(sys.atom_props[i].fscale, sys.eval.fscale[i]);
+            assert_eq!(sys.atom_props[i].radius, sys.eval.radius[i]);
+            assert_eq!(sys.atom_props[i].radius_ini, sys.eval.radius_ini[i]);
         }
         assert_eq!(sys.atom_props[0].flags, 0);
         assert_eq!(sys.atom_props[1].flags, ATOM_FLAG_FIXED);
@@ -785,7 +821,7 @@ mod atom_props_tests {
     fn set_radius_keeps_mirror_in_sync() {
         let mut sys = tiny_ctx(4);
         sys.set_radius(2, 7.25);
-        assert_eq!(sys.radius[2], 7.25);
+        assert_eq!(sys.eval.radius[2], 7.25);
         assert_eq!(sys.atom_props[2].radius, 7.25);
         // Other atoms unchanged.
         assert_eq!(sys.atom_props[0].radius, 1.0);
@@ -797,7 +833,7 @@ mod atom_props_tests {
     fn set_fscale_keeps_mirror_in_sync() {
         let mut sys = tiny_ctx(4);
         sys.set_fscale(1, 0.125);
-        assert_eq!(sys.fscale[1], 0.125);
+        assert_eq!(sys.eval.fscale[1], 0.125);
         assert_eq!(sys.atom_props[1].fscale, 0.125);
         sys.debug_assert_atom_props_sync();
     }
@@ -900,7 +936,7 @@ mod atom_props_tests {
     #[should_panic(expected = "atom_props")]
     fn debug_invariant_catches_direct_fscale_write() {
         let mut sys = tiny_ctx(2);
-        sys.fscale[1] = 99.0;
+        sys.eval.fscale[1] = 99.0;
         sys.debug_assert_atom_props_sync();
     }
 

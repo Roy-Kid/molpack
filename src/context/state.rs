@@ -11,12 +11,12 @@ pub struct RuntimeState<'a> {
 impl<'a> RuntimeState<'a> {
     #[inline]
     pub fn fdist(&self) -> F {
-        self.ctx.fdist
+        self.ctx.eval.fdist
     }
 
     #[inline]
     pub fn frest(&self) -> F {
-        self.ctx.frest
+        self.ctx.eval.frest
     }
 
     #[inline]

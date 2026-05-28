@@ -32,14 +32,14 @@ fn single_atom_system(nmol: usize) -> PackContext {
     let ntotat = nmol;
     let mut sys = PackContext::new(ntotat, nmol, 1);
     sys.ntype_with_fixed = 1;
-    sys.nmols = vec![nmol];
-    sys.natoms = vec![1];
-    sys.idfirst = vec![0];
+    sys.topology.nmols = vec![nmol];
+    sys.topology.natoms = vec![1];
+    sys.topology.idfirst = vec![0];
     sys.is_type_active = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0]];
-    sys.radius = vec![1.0; ntotat];
-    sys.radius_ini = vec![1.0; ntotat];
-    sys.fscale = vec![1.0; ntotat];
+    sys.topology.coor = vec![[0.0, 0.0, 0.0]];
+    sys.eval.radius = vec![1.0; ntotat];
+    sys.eval.radius_ini = vec![1.0; ntotat];
+    sys.eval.fscale = vec![1.0; ntotat];
     for i in 0..ntotat {
         sys.atom_mol_idx[i] = i;
     }
@@ -48,10 +48,10 @@ fn single_atom_system(nmol: usize) -> PackContext {
 }
 
 fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
-    sys.ncells = [cell_n, cell_n, cell_n];
-    sys.cell_length = [cell_len; 3];
-    sys.pbc_min = [0.0; 3];
-    sys.pbc_length = [cell_len * cell_n as F; 3];
+    sys.cells.ncells = [cell_n, cell_n, cell_n];
+    sys.cells.cell_length = [cell_len; 3];
+    sys.pbc.min = [0.0; 3];
+    sys.pbc.length = [cell_len * cell_n as F; 3];
     sys.resize_cell_arrays();
 }
 
@@ -362,15 +362,15 @@ fn gradient_above_gaussian_constraint() {
 fn gradient_with_rotations() {
     let mut sys = PackContext::new(4, 2, 1);
     sys.ntype_with_fixed = 1;
-    sys.nmols = vec![2];
-    sys.natoms = vec![2];
-    sys.idfirst = vec![0];
+    sys.topology.nmols = vec![2];
+    sys.topology.natoms = vec![2];
+    sys.topology.idfirst = vec![0];
     sys.is_type_active = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
+    sys.topology.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
 
-    sys.radius = vec![1.0; 4];
-    sys.radius_ini = vec![1.0; 4];
-    sys.fscale = vec![1.0; 4];
+    sys.eval.radius = vec![1.0; 4];
+    sys.eval.radius_ini = vec![1.0; 4];
+    sys.eval.fscale = vec![1.0; 4];
     // 2 molecules × 2 atoms — atoms 0,1 belong to mol 0, atoms 2,3 to mol 1.
     sys.atom_mol_idx = vec![0, 0, 1, 1];
     sys.atom_type_idx = vec![0; 4];
@@ -419,15 +419,15 @@ fn gradient_with_rotations() {
 fn gradient_combined_constraint_and_pairs() {
     let mut sys = PackContext::new(3, 3, 1);
     sys.ntype_with_fixed = 1;
-    sys.nmols = vec![3];
-    sys.natoms = vec![1];
-    sys.idfirst = vec![0];
+    sys.topology.nmols = vec![3];
+    sys.topology.natoms = vec![1];
+    sys.topology.idfirst = vec![0];
     sys.is_type_active = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0]];
+    sys.topology.coor = vec![[0.0, 0.0, 0.0]];
 
-    sys.radius = vec![1.0; 3];
-    sys.radius_ini = vec![1.0; 3];
-    sys.fscale = vec![1.0; 3];
+    sys.eval.radius = vec![1.0; 3];
+    sys.eval.radius_ini = vec![1.0; 3];
+    sys.eval.fscale = vec![1.0; 3];
     sys.atom_mol_idx = vec![0, 1, 2];
     sys.sync_atom_props();
 
@@ -474,15 +474,15 @@ fn gradient_combined_constraint_and_pairs() {
 fn fused_function_and_gradient_matches_separate_evaluation() {
     let mut sys = PackContext::new(4, 2, 1);
     sys.ntype_with_fixed = 1;
-    sys.nmols = vec![2];
-    sys.natoms = vec![2];
-    sys.idfirst = vec![0];
+    sys.topology.nmols = vec![2];
+    sys.topology.natoms = vec![2];
+    sys.topology.idfirst = vec![0];
     sys.is_type_active = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
+    sys.topology.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
 
-    sys.radius = vec![1.0; 4];
-    sys.radius_ini = vec![1.0; 4];
-    sys.fscale = vec![1.0; 4];
+    sys.eval.radius = vec![1.0; 4];
+    sys.eval.radius_ini = vec![1.0; 4];
+    sys.eval.fscale = vec![1.0; 4];
     sys.atom_mol_idx = vec![0, 0, 1, 1];
     sys.sync_atom_props();
 

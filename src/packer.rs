@@ -344,16 +344,16 @@ impl Molpack {
         let mut coor = Vec::new();
         let mut maxmove_per_type = vec![0usize; ntype];
 
-        sys.nmols = vec![0; ntype_with_fixed];
-        sys.natoms = vec![0; ntype_with_fixed];
-        sys.idfirst = vec![0; ntype_with_fixed];
+        sys.topology.nmols = vec![0; ntype_with_fixed];
+        sys.topology.natoms = vec![0; ntype_with_fixed];
+        sys.topology.idfirst = vec![0; ntype_with_fixed];
         sys.constrain_rot = vec![[false; 3]; ntype];
         sys.rot_bound = vec![[[0.0; 2]; 3]; ntype];
 
         for (itype, target) in free_targets.iter().enumerate() {
-            sys.nmols[itype] = target.count;
-            sys.natoms[itype] = target.natoms();
-            sys.idfirst[itype] = cum_atoms;
+            sys.topology.nmols[itype] = target.count;
+            sys.topology.natoms[itype] = target.natoms();
+            sys.topology.idfirst[itype] = cum_atoms;
             coor.extend_from_slice(reference_coords(target));
             cum_atoms += target.natoms();
 
@@ -369,13 +369,13 @@ impl Molpack {
 
         for (fi, target) in fixed_targets.iter().enumerate() {
             let itype = ntype + fi;
-            sys.nmols[itype] = 1;
-            sys.natoms[itype] = target.natoms();
-            sys.idfirst[itype] = cum_atoms;
+            sys.topology.nmols[itype] = 1;
+            sys.topology.natoms[itype] = target.natoms();
+            sys.topology.idfirst[itype] = cum_atoms;
             coor.extend_from_slice(reference_coords(target));
             cum_atoms += target.natoms();
         }
-        sys.coor = coor;
+        sys.topology.coor = coor;
 
         // Assign radii, element symbols, and per-atom (itype, imol) tags.
         // Packmol uses `radius = tolerance/2` for ALL atoms (packmol.f90 line 283:
@@ -388,8 +388,8 @@ impl Molpack {
         for (itype, target) in free_targets.iter().enumerate() {
             for imol in 0..target.count {
                 for iatom in 0..target.natoms() {
-                    sys.radius[icart] = atom_radius;
-                    sys.radius_ini[icart] = atom_radius;
+                    sys.eval.radius[icart] = atom_radius;
+                    sys.eval.radius_ini[icart] = atom_radius;
                     sys.atom_type_idx[icart] = itype;
                     sys.atom_mol_idx[icart] = imol;
                     sys.elements[icart] = Element::by_symbol(&target.elements[iatom]);
@@ -400,8 +400,8 @@ impl Molpack {
         for (fi, target) in fixed_targets.iter().enumerate() {
             let itype = ntype + fi;
             for iatom in 0..target.natoms() {
-                sys.radius[icart] = atom_radius;
-                sys.radius_ini[icart] = atom_radius;
+                sys.eval.radius[icart] = atom_radius;
+                sys.eval.radius_ini[icart] = atom_radius;
                 sys.atom_type_idx[icart] = itype;
                 sys.atom_mol_idx[icart] = 0;
                 sys.elements[icart] = Element::by_symbol(&target.elements[iatom]);
@@ -463,7 +463,7 @@ impl Molpack {
             let ref_coords = reference_coords(target);
             for ref_coord in ref_coords.iter().take(target.natoms()) {
                 let pos = compcart(&fp.position, ref_coord, &v1, &v2, &v3);
-                sys.xcart[fixed_icart] = pos;
+                sys.eval.xcart[fixed_icart] = pos;
                 sys.fixedatom[fixed_icart] = true;
                 fixed_icart += 1;
             }
@@ -492,9 +492,9 @@ impl Molpack {
             .enumerate()
             .filter(|(_, t)| !t.relaxers.is_empty())
             .map(|(i, t)| {
-                let base = sys.idfirst[i];
-                let na = sys.natoms[i];
-                let ref_slice = &sys.coor[base..base + na];
+                let base = sys.topology.idfirst[i];
+                let na = sys.topology.natoms[i];
+                let ref_slice = &sys.topology.coor[base..base + na];
                 let runners = t.relaxers.iter().map(|r| r.spawn(ref_slice)).collect();
                 (i, runners)
             })
@@ -665,8 +665,8 @@ impl Molpack {
         if !converged {
             log::warn!(
                 "  Pack did not fully converge (fdist={:.4e}, frest={:.4e})",
-                sys.fdist,
-                sys.frest
+                sys.eval.fdist,
+                sys.eval.frest
             );
         }
 
@@ -686,8 +686,8 @@ impl Molpack {
         let frame = crate::frame::finalize_frame(&mut sys);
         Ok(PackResult {
             frame,
-            fdist: sys.fdist,
-            frest: sys.frest,
+            fdist: sys.eval.fdist,
+            frest: sys.eval.frest,
             converged,
         })
     }
@@ -752,9 +752,9 @@ fn reference_coords(target: &Target) -> &[[F; 3]] {
 /// Evaluate the packing objective once under **unscaled** radii (`radius_ini`),
 /// restoring the caller's `radius` values on return.
 ///
-/// On return, `sys.fdist` / `sys.frest` / `sys.fdist_atom` / `sys.frest_atom`
+/// On return, `sys.eval.fdist` / `sys.eval.frest` / `sys.eval.fdist_atom` / `sys.eval.frest_atom`
 /// reflect the unscaled evaluation (the radius-dependent inner state); only
-/// `sys.radius` itself is rolled back to what it was on entry.
+/// `sys.eval.radius` itself is rolled back to what it was on entry.
 ///
 /// Returns `(f_total, fdist, frest)` from the unscaled evaluation — the exact
 /// triple the packer's main loop feeds to `flast` / `fimp` / handler `StepInfo`.
@@ -764,7 +764,7 @@ fn reference_coords(target: &Target) -> &[[F; 3]] {
 pub fn evaluate_unscaled(sys: &mut PackContext, xwork: &[F]) -> (F, F, F) {
     let guard = UnscaledRadii::enter(sys);
     let f_total = guard.sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
-    (f_total, guard.sys.fdist, guard.sys.frest)
+    (f_total, guard.sys.eval.fdist, guard.sys.eval.frest)
     // `guard` drops here, restoring the scaled radii even on early return/panic.
 }
 
@@ -779,9 +779,9 @@ struct UnscaledRadii<'a> {
 
 impl<'a> UnscaledRadii<'a> {
     fn enter(sys: &'a mut PackContext) -> Self {
-        sys.work.radiuswork.copy_from_slice(&sys.radius);
+        sys.work.radiuswork.copy_from_slice(&sys.eval.radius);
         for i in 0..sys.ntotat {
-            sys.set_radius(i, sys.radius_ini[i]);
+            sys.set_radius(i, sys.eval.radius_ini[i]);
         }
         Self { sys }
     }
@@ -893,14 +893,14 @@ pub fn run_iteration(
             continue;
         }
 
-        let base = sys.idfirst[*itype];
-        let na = sys.natoms[*itype];
+        let base = sys.topology.idfirst[*itype];
+        let na = sys.topology.natoms[*itype];
 
         for runner in runners.iter_mut() {
             // Reuse gencan_workspace buffer to avoid per-iteration allocation.
             let snap = &mut gencan_workspace.coords_snapshot;
             snap.resize(na, [0.0 as F; 3]);
-            snap.copy_from_slice(&sys.coor[base..base + na]);
+            snap.copy_from_slice(&sys.topology.coor[base..base + na]);
             let saved: &[[F; 3]] = snap;
             let f_before = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
 
@@ -908,16 +908,16 @@ pub fn run_iteration(
                 saved,
                 f_before,
                 &mut |trial: &[[F; 3]]| {
-                    sys.coor[base..base + na].copy_from_slice(trial);
+                    sys.topology.coor[base..base + na].copy_from_slice(trial);
                     let f = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
-                    sys.coor[base..base + na].copy_from_slice(saved);
+                    sys.topology.coor[base..base + na].copy_from_slice(saved);
                     f
                 },
                 rng,
             );
 
             if let Some(new_coords) = result {
-                sys.coor[base..base + na].copy_from_slice(&new_coords);
+                sys.topology.coor[base..base + na].copy_from_slice(&new_coords);
             }
         }
     }
@@ -999,7 +999,7 @@ pub fn run_iteration(
     if state.radscale > 1.0 && (fimp < 2.0 || (fdist < precision && fimp < 10.0)) {
         state.radscale = (0.9 * state.radscale).max(1.0);
         for i in 0..sys.ntotat {
-            let new_r = sys.radius_ini[i].max(0.9 * sys.radius[i]);
+            let new_r = sys.eval.radius_ini[i].max(0.9 * sys.eval.radius[i]);
             sys.set_radius(i, new_r);
         }
     }
@@ -1110,7 +1110,7 @@ pub fn run_phase(
     // Compact x to this type (action=1) or restore full x (all-type phase)
     // Packmol resets radscale = discale at the START of each phase.
     for icart in 0..sys.ntotat {
-        sys.set_radius(icart, discale * sys.radius_ini[icart]);
+        sys.set_radius(icart, discale * sys.eval.radius_ini[icart]);
     }
 
     // Get working x vector (compact for per-type, full for all-type)
@@ -1128,7 +1128,7 @@ pub fn run_phase(
     // Packmol checks whether the current approximation is already a solution
     // before entering the GENCAN loop for this phase (packmol.f90 lines 775-782).
     sys.evaluate(&xwork, EvalMode::FOnly, None);
-    if sys.fdist < precision && sys.frest < precision {
+    if sys.eval.fdist < precision && sys.eval.frest < precision {
         if !is_all {
             swap.save_type(phase, &xwork, sys);
             swap.restore(x, sys);

@@ -34,8 +34,8 @@ use molpack::{F, PackContext};
 fn build_ctx() -> PackContext {
     let ntotat = 4;
     let mut sys = PackContext::new(ntotat, 0, 0);
-    sys.radius.fill(0.75);
-    sys.radius_ini.fill(1.5);
+    sys.eval.radius.fill(0.75);
+    sys.eval.radius_ini.fill(1.5);
     sys.work.radiuswork.resize(ntotat, 0.0);
     sys.sync_atom_props();
     sys

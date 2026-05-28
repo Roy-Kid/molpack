@@ -29,20 +29,20 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
     let mut sys = PackContext::new(ntotat, n_mols, ntype);
     sys.ntype_with_fixed = ntype;
 
-    sys.nmols = vec![n_mols];
-    sys.natoms = vec![atoms_per_mol];
-    sys.idfirst = vec![0];
+    sys.topology.nmols = vec![n_mols];
+    sys.topology.natoms = vec![atoms_per_mol];
+    sys.topology.idfirst = vec![0];
     sys.is_type_active = vec![true; ntype];
     sys.constrain_rot = vec![[false; 3]; ntype];
     sys.rot_bound = vec![[[0.0; 2]; 3]; ntype];
 
     // Reference coords: water-like O + 2H layout.
-    sys.coor = vec![[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
+    sys.topology.coor = vec![[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
 
     // Radii: Packmol tolerance/2 = 1.0 Å for tolerance=2.0.
-    sys.radius.fill(1.0);
-    sys.radius_ini.fill(1.0);
-    sys.fscale.fill(1.0);
+    sys.eval.radius.fill(1.0);
+    sys.eval.radius_ini.fill(1.0);
+    sys.eval.fscale.fill(1.0);
 
     // Per-atom molecule/type tags (same layout as `Molpack::pack` writes).
     for imol in 0..n_mols {
@@ -60,20 +60,20 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
     // Cell geometry.  We use a padded box so `setcell` does no wrapping and
     // the PBC branch short-circuits (matches `Molpack::pack` without `.pbc()`).
     let pad: F = 3.0;
-    sys.pbc_min = [-pad, -pad, -pad];
-    sys.pbc_length = [box_side + 2.0 * pad; 3];
+    sys.pbc.min = [-pad, -pad, -pad];
+    sys.pbc.length = [box_side + 2.0 * pad; 3];
     let cell_side: F = 2.0; // ≈ 1.01 * 2*radius_ini
     for k in 0..3 {
-        sys.ncells[k] = ((sys.pbc_length[k] / cell_side).floor() as usize).max(1);
-        sys.cell_length[k] = sys.pbc_length[k] / sys.ncells[k] as F;
+        sys.cells.ncells[k] = ((sys.pbc.length[k] / cell_side).floor() as usize).max(1);
+        sys.cells.cell_length[k] = sys.pbc.length[k] / sys.cells.ncells[k] as F;
     }
     sys.resize_cell_arrays();
 
-    sys.sizemin = sys.pbc_min;
+    sys.sizemin = sys.pbc.min;
     sys.sizemax = [
-        sys.pbc_min[0] + sys.pbc_length[0],
-        sys.pbc_min[1] + sys.pbc_length[1],
-        sys.pbc_min[2] + sys.pbc_length[2],
+        sys.pbc.min[0] + sys.pbc.length[0],
+        sys.pbc.min[1] + sys.pbc.length[1],
+        sys.pbc.min[2] + sys.pbc.length[2],
     ];
 
     sys.sync_atom_props();
@@ -153,25 +153,25 @@ fn sys_template_clone(src: &PackContext) -> PackContext {
     let ntype = src.ntype;
     let mut dst = PackContext::new(ntotat, ntotmol, ntype);
     dst.ntype_with_fixed = src.ntype_with_fixed;
-    dst.nmols = src.nmols.clone();
-    dst.natoms = src.natoms.clone();
-    dst.idfirst = src.idfirst.clone();
+    dst.topology.nmols = src.topology.nmols.clone();
+    dst.topology.natoms = src.topology.natoms.clone();
+    dst.topology.idfirst = src.topology.idfirst.clone();
     dst.is_type_active = src.is_type_active.clone();
     dst.constrain_rot = src.constrain_rot.clone();
     dst.rot_bound = src.rot_bound.clone();
-    dst.coor = src.coor.clone();
-    dst.radius = src.radius.clone();
-    dst.radius_ini = src.radius_ini.clone();
-    dst.fscale = src.fscale.clone();
+    dst.topology.coor = src.topology.coor.clone();
+    dst.eval.radius = src.eval.radius.clone();
+    dst.eval.radius_ini = src.eval.radius_ini.clone();
+    dst.eval.fscale = src.eval.fscale.clone();
     dst.atom_type_idx = src.atom_type_idx.clone();
     dst.atom_mol_idx = src.atom_mol_idx.clone();
     dst.fixedatom = src.fixedatom.clone();
     dst.iratom_offsets = src.iratom_offsets.clone();
     dst.iratom_data = src.iratom_data.clone();
-    dst.pbc_min = src.pbc_min;
-    dst.pbc_length = src.pbc_length;
-    dst.ncells = src.ncells;
-    dst.cell_length = src.cell_length;
+    dst.pbc.min = src.pbc.min;
+    dst.pbc.length = src.pbc.length;
+    dst.cells.ncells = src.cells.ncells;
+    dst.cells.cell_length = src.cells.cell_length;
     dst.sizemin = src.sizemin;
     dst.sizemax = src.sizemax;
     dst.resize_cell_arrays();
