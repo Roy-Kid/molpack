@@ -32,7 +32,10 @@ use types::{PyAngle, PyAxis, PyCenteringMode};
 
 mod constraint;
 use constraint::{
-    PyAbovePlaneRestraint, PyBelowPlaneRestraint, PyInsideBoxRestraint, PyInsideSphereRestraint,
+    PyAboveGaussianRestraint, PyAbovePlaneRestraint, PyBelowGaussianRestraint,
+    PyBelowPlaneRestraint, PyInsideBoxRestraint, PyInsideCubeRestraint, PyInsideCylinderRestraint,
+    PyInsideEllipsoidRestraint, PyInsideSphereRestraint, PyOutsideBoxRestraint,
+    PyOutsideCubeRestraint, PyOutsideCylinderRestraint, PyOutsideEllipsoidRestraint,
     PyOutsideSphereRestraint,
 };
 
@@ -55,10 +58,19 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCenteringMode>()?;
 
     m.add_class::<PyInsideBoxRestraint>()?;
+    m.add_class::<PyInsideCubeRestraint>()?;
     m.add_class::<PyInsideSphereRestraint>()?;
+    m.add_class::<PyInsideEllipsoidRestraint>()?;
+    m.add_class::<PyInsideCylinderRestraint>()?;
+    m.add_class::<PyOutsideBoxRestraint>()?;
+    m.add_class::<PyOutsideCubeRestraint>()?;
     m.add_class::<PyOutsideSphereRestraint>()?;
+    m.add_class::<PyOutsideEllipsoidRestraint>()?;
+    m.add_class::<PyOutsideCylinderRestraint>()?;
     m.add_class::<PyAbovePlaneRestraint>()?;
     m.add_class::<PyBelowPlaneRestraint>()?;
+    m.add_class::<PyAboveGaussianRestraint>()?;
+    m.add_class::<PyBelowGaussianRestraint>()?;
 
     m.add_class::<PyTarget>()?;
     m.add_class::<PyPacker>()?;

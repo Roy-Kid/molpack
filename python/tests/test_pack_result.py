@@ -139,3 +139,42 @@ class TestMultipleRestraints:
         result = packer.pack([target], max_loops=100)
 
         assert result.positions.shape == (3, 3)
+
+
+class TestAllRestraintKinds:
+    """All 14 Packmol restraint kinds are reachable from Python (#12)."""
+
+    def test_all_14_classes_exposed(self):
+        for name in [
+            "InsideBoxRestraint",
+            "InsideCubeRestraint",
+            "InsideSphereRestraint",
+            "InsideEllipsoidRestraint",
+            "InsideCylinderRestraint",
+            "OutsideBoxRestraint",
+            "OutsideCubeRestraint",
+            "OutsideSphereRestraint",
+            "OutsideEllipsoidRestraint",
+            "OutsideCylinderRestraint",
+            "AbovePlaneRestraint",
+            "BelowPlaneRestraint",
+            "AboveGaussianRestraint",
+            "BelowGaussianRestraint",
+        ]:
+            assert hasattr(molpack, name), f"{name} not exposed"
+
+    def test_pack_with_newly_exposed_restraints(self):
+        positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
+        frame = _make_frame(positions, ["X"])
+        target = (
+            molpack.Target(frame, 2)
+            .with_restraint(molpack.InsideCubeRestraint([0.0, 0.0, 0.0], 20.0))
+            .with_restraint(
+                molpack.InsideCylinderRestraint(
+                    [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 8.0, 20.0
+                )
+            )
+        )
+        packer = molpack.Molpack().with_tolerance(2.0).with_progress(False).with_seed(7)
+        result = packer.pack([target], max_loops=50)
+        assert result.positions.shape == (2, 3)

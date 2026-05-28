@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 
 use super::error::ScriptError;
-use super::restraint_parse::{parse_inside, parse_outside, parse_plane_above, parse_plane_below};
+use super::restraint_parse::{parse_above, parse_below, parse_inside, parse_outside};
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Public AST
@@ -90,13 +90,47 @@ pub enum RestraintSpec {
         min: [f64; 3],
         max: [f64; 3],
     },
+    InsideCube {
+        origin: [f64; 3],
+        side: f64,
+    },
     InsideSphere {
         center: [f64; 3],
         radius: f64,
     },
+    InsideEllipsoid {
+        center: [f64; 3],
+        axes: [f64; 3],
+        exponent: f64,
+    },
+    InsideCylinder {
+        center: [f64; 3],
+        axis: [f64; 3],
+        radius: f64,
+        length: f64,
+    },
+    OutsideBox {
+        min: [f64; 3],
+        max: [f64; 3],
+    },
+    OutsideCube {
+        origin: [f64; 3],
+        side: f64,
+    },
     OutsideSphere {
         center: [f64; 3],
         radius: f64,
+    },
+    OutsideEllipsoid {
+        center: [f64; 3],
+        axes: [f64; 3],
+        exponent: f64,
+    },
+    OutsideCylinder {
+        center: [f64; 3],
+        axis: [f64; 3],
+        radius: f64,
+        length: f64,
     },
     /// `over plane` — atom must lie above the plane.
     AbovePlane {
@@ -107,6 +141,24 @@ pub enum RestraintSpec {
     BelowPlane {
         normal: [f64; 3],
         distance: f64,
+    },
+    /// `over gaussian` — atom must lie above a Gaussian bump surface.
+    AboveGaussian {
+        cx: f64,
+        cy: f64,
+        sx: f64,
+        sy: f64,
+        z0: f64,
+        height: f64,
+    },
+    /// `below gaussian` — atom must lie below a Gaussian bump surface.
+    BelowGaussian {
+        cx: f64,
+        cy: f64,
+        sx: f64,
+        sy: f64,
+        z0: f64,
+        height: f64,
     },
 }
 
@@ -249,12 +301,12 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                     State::InStructure(s)
                 }
                 "over" | "above" => {
-                    let r = parse_plane_above(&tokens, lineno)?;
+                    let r = parse_above(&tokens, lineno)?;
                     s.mol_restraints.push(r);
                     State::InStructure(s)
                 }
                 "below" => {
-                    let r = parse_plane_below(&tokens, lineno)?;
+                    let r = parse_below(&tokens, lineno)?;
                     s.mol_restraints.push(r);
                     State::InStructure(s)
                 }
@@ -320,7 +372,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                     }
                 }
                 "over" | "above" => {
-                    let r = parse_plane_above(&tokens, lineno)?;
+                    let r = parse_above(&tokens, lineno)?;
                     group.restraints.push(r);
                     State::InAtoms {
                         structure: s,
@@ -328,7 +380,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                     }
                 }
                 "below" => {
-                    let r = parse_plane_below(&tokens, lineno)?;
+                    let r = parse_below(&tokens, lineno)?;
                     group.restraints.push(r);
                     State::InAtoms {
                         structure: s,
@@ -535,6 +587,50 @@ end structure
         assert_eq!(s.atom_groups.len(), 2);
         assert_eq!(s.atom_groups[0].atom_indices, vec![31, 32]);
         assert_eq!(s.atom_groups[1].atom_indices, vec![1, 2]);
+    }
+
+    #[test]
+    fn parse_all_inside_outside_shapes() {
+        let src = "\
+output out.xyz
+structure m.pdb
+  number 1
+  inside cube 0. 0. 0. 10.
+  inside ellipsoid 0. 0. 0. 5. 6. 7. 1.
+  inside cylinder 0. 0. 0. 0. 0. 1. 5. 20.
+  outside box 0. 0. 0. 10. 10. 10.
+  outside cube 0. 0. 0. 10.
+  outside ellipsoid 0. 0. 0. 5. 6. 7. 1.
+  outside cylinder 0. 0. 0. 0. 0. 1. 5. 20.
+  over gaussian 0. 0. 2. 2. 0. 5.
+  below gaussian 0. 0. 2. 2. 0. 5.
+end structure
+";
+        let inp = parse(src).expect("parse failed");
+        let r = &inp.structures[0].mol_restraints;
+        assert_eq!(r.len(), 9);
+        assert!(matches!(r[0], RestraintSpec::InsideCube { .. }));
+        assert!(matches!(r[1], RestraintSpec::InsideEllipsoid { .. }));
+        assert!(matches!(r[2], RestraintSpec::InsideCylinder { .. }));
+        assert!(matches!(r[3], RestraintSpec::OutsideBox { .. }));
+        assert!(matches!(r[4], RestraintSpec::OutsideCube { .. }));
+        assert!(matches!(r[5], RestraintSpec::OutsideEllipsoid { .. }));
+        assert!(matches!(r[6], RestraintSpec::OutsideCylinder { .. }));
+        assert!(matches!(r[7], RestraintSpec::AboveGaussian { .. }));
+        assert!(matches!(r[8], RestraintSpec::BelowGaussian { .. }));
+    }
+
+    #[test]
+    fn reject_cube_nonpositive_side() {
+        let src = "\
+output out.xyz
+structure m.pdb
+  number 1
+  inside cube 0. 0. 0. 0.
+end structure
+";
+        let err = parse(src).expect_err("cube side must be > 0");
+        assert!(err.to_string().contains("side"), "unexpected error: {err}");
     }
 
     #[test]

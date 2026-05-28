@@ -7,6 +7,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- All 14 restraint kinds are now reachable from `.inp` scripts and the Python
+  API (previously only 5 were wired through each frontend). Newly available:
+  `inside`/`outside` `cube`/`ellipsoid`/`cylinder`, `outside box`, and
+  `over`/`below gaussian`; Python gains the matching `*Restraint` classes. A
+  single keyword→spec table (parser) and `spec_to_restraint` map (build) are
+  the one place a new kind is wired.
+
 ### Changed
 - `.inp` parser now rejects `atoms 0` (atom indices are 1-based) and `inside`/
   `outside sphere` with `radius <= 0`; Python `Target`/`Packer` reject
