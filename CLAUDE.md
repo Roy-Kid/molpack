@@ -21,13 +21,19 @@ Modules:
 
 | Path | Owns |
 |---|---|
-| `src/script/` | `.inp` parsing + lowering to Targets (`parser.rs`, `build.rs`, `io.rs`) |
+| `src/script/` | `.inp` parsing + lowering to Targets (`parser.rs`, `build.rs`, `io.rs`, `error.rs`) |
+| `src/target.rs` | `Target` type + builder (`from_coords`, `with_*`) |
 | `src/restraint.rs` | `Restraint` trait + concrete restraints (analytic `f` + matching `fg`) |
+| `src/constraints/` | constraints container layer (`container.rs`) |
 | `src/objective.rs` | objective + gradient construction over targets |
-| `src/packer.rs` | outer loop driver (move / relax / evaluate) |
+| `src/packer.rs` | outer loop driver / `Molpack` + `PackResult` (move / relax / evaluate) |
 | `src/gencan/` | bound-constrained optimizer (cg, spg) |
+| `src/context/` | per-pack mutable state + work buffers (`pack_context.rs`, `state.rs`, `model.rs`, `work_buffers.rs`) |
 | `src/region.rs`, `src/cell.rs` | neighbor lookup |
 | `src/initial.rs`, `src/relaxer.rs`, `src/movebad.rs` | initialization, relaxation, escape moves |
+| `src/api/`, `src/handler.rs` | high-level entry points / packing handler |
+| `src/frame.rs`, `src/euler.rs`, `src/numerics.rs`, `src/random.rs` | frame I/O glue, rotations, math helpers, RNG |
+| `src/cases.rs`, `src/error.rs`, `src/validation.rs` | example-case harness, error types, input validation |
 | `src/bin/molpack/` | CLI front-end (cli feature) |
 | `python/src/` | PyO3 wheel |
 
@@ -41,7 +47,7 @@ Modules:
 | `rayon` | `rayon` + `molrs/rayon` (parallel evaluation) |
 
 The Python wheel is built **without** `io` — the wheel relies on the user's `molrs` Python package
-for frame loading, then calls `Target::from_frame_parts` / `Script::lower`.
+for frame loading, then calls `Target::from_coords` and lowers the parsed script via `Script::lower`.
 
 ## Hard rules (load-bearing)
 
