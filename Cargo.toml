@@ -21,11 +21,11 @@ name = "molpack"
 # `cargo publish` to resolve against the crates.io registry.
 #
 # Library-required:
-molrs = { path = "../molrs/molrs-core", version = "0.0.16", package = "molcrafts-molrs-core", default-features = false }
+molrs = { path = "../molrs/molrs-core", version = "0.0.17", package = "molcrafts-molrs-core", default-features = false }
 # Only required when the `io` (or `cli`) feature is enabled. Front-ends that
 # bring their own frame loader — notably the PyO3 wheel, which delegates to
 # molrs's Python bindings — opt out and avoid the static-link cost.
-molrs_io = { path = "../molrs/molrs-io", version = "0.0.16", package = "molcrafts-molrs-io", default-features = false, optional = true }
+molrs_io = { path = "../molrs/molrs-io", version = "0.0.17", package = "molcrafts-molrs-io", default-features = false, optional = true }
 rand = "0.9"
 ndarray = "0.17"
 log = "0.4"
