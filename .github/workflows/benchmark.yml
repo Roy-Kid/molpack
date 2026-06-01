@@ -26,7 +26,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build against published molrs (drop local path deps)
-        run: sed -i -E 's#path = "\.\./molrs/[^"]*", ##g' Cargo.toml
+        run: |
+          sed -i -E 's#path = "\.\./molrs/[^"]*", ##g' Cargo.toml
 
       # End-to-end packing benches are optimizer-iteration-dominated and the
       # `solvprotein` case is slow + high-variance, so run them at criterion's
