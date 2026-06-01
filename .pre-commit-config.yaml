@@ -1,3 +1,20 @@
+# Mirrors every check in .github/workflows/*.yml. Any divergence is a bug —
+# when you add/modify a CI step, update this file in the same commit.
+#
+# Fast static checks (cargo fmt, clippy, ruff, ty) run at the default
+# `pre-commit` stage; slow checks (cargo test, pytest, maturin build) run at
+# the `pre-push` stage. A passing
+#     pre-commit run --all-files --hook-stage pre-push
+# should predict a green CI run of .github/workflows/ci.yml.
+#
+# NOTE on sibling deps: CI checks out MolCrafts/molrs as a sibling repo for the
+# rust clippy/test/python jobs (Cargo.toml has `path = "../molrs/..."` deps).
+# These hooks assume the same local-dev layout (molrs checked out next to
+# molpack). If molrs is absent, the cargo/maturin/pytest hooks will fail to
+# resolve the path dependency — exactly as CI would without the checkout.
+
+default_install_hook_types: [pre-commit, pre-push]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -10,27 +27,93 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
 
+  # ── python lint + types (CI job: python-lint, working-directory: python) ────
+  # CI installs `ruff` unpinned (`pip install --group typecheck`), i.e. latest.
+  # ruff-pre-commit has no "latest" rev, so we pin a recent rev matching the
+  # ruff version currently installed locally (ruff 0.15.13). Bump on ruff
+  # upgrades to keep parity with CI's floating `ruff`.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.6
+    rev: v0.15.13
     hooks:
+      # CI: `ruff format --check .` (working-directory: python)
       - id: ruff-format
+        name: ruff format --check (CI python-lint)
+        args: [--check]
         files: ^python/
+      # CI: `ruff check .` (working-directory: python)
       - id: ruff
+        name: ruff check (CI python-lint)
         files: ^python/
-        args: [--fix, --exit-non-zero-on-fix]
-
-  - repo: https://github.com/doublify/pre-commit-rust
-    rev: v1.0
-    hooks:
-      - id: fmt
-      - id: clippy
-        args: ["--all-targets", "--features", "cli", "--", "-D", "warnings"]
 
   - repo: local
     hooks:
+      # ── CI job: python-lint — ty check ──────────────────────────────────────
+      # CI: `ty check python tests examples` (working-directory: python)
       - id: ty
-        name: ty (Python type check)
+        name: ty check python tests examples (CI python-lint)
         language: system
         entry: sh -c 'cd python && ty check python tests examples'
         files: ^python/
         pass_filenames: false
+
+      # ── CI job: fmt ─────────────────────────────────────────────────────────
+      # CI: `cargo fmt --check` (molpack root)
+      - id: cargo-fmt
+        name: cargo fmt --check (CI fmt)
+        language: system
+        entry: cargo fmt --check
+        types: [rust]
+        pass_filenames: false
+
+      # ── CI job: clippy ──────────────────────────────────────────────────────
+      # CI: `cargo clippy --all-targets --features cli -- -D warnings`
+      - id: cargo-clippy
+        name: cargo clippy --all-targets --features cli -- -D warnings (CI clippy)
+        language: system
+        entry: cargo clippy --all-targets --features cli -- -D warnings
+        types: [rust]
+        pass_filenames: false
+
+      # ── CI job: test (slow → pre-push) ──────────────────────────────────────
+      # CI: `cargo test --lib --tests --examples`
+      - id: cargo-test
+        name: cargo test --lib --tests --examples (CI test)
+        language: system
+        entry: cargo test --lib --tests --examples
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+      # CI: `cargo test --test cli --features cli`
+      - id: cargo-test-cli
+        name: cargo test --test cli --features cli (CI test)
+        language: system
+        entry: cargo test --test cli --features cli
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+      # CI: `cargo bench --no-run --all-features`
+      - id: cargo-bench-build
+        name: cargo bench --no-run --all-features (CI test)
+        language: system
+        entry: cargo bench --no-run --all-features
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+
+      # ── CI job: python (slow → pre-push, working-directory: python) ─────────
+      # CI: `maturin develop --release` then `pytest -v` (inside a uv venv).
+      # Locally we run them in the dev's active environment; the commands match.
+      - id: maturin-develop
+        name: maturin develop --release (CI python)
+        language: system
+        entry: sh -c 'cd python && maturin develop --release'
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: pytest
+        name: pytest -v (CI python)
+        language: system
+        entry: sh -c 'cd python && pytest -v'
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
