@@ -20,11 +20,11 @@ jobs:
     name: criterion benchmarks
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6  # molpack at workspace root so benchmark-action can push gh-pages
       - uses: actions/checkout@v6
         with:
           repository: MolCrafts/molrs
           path: molrs
-      - uses: actions/checkout@v6  # molpack at workspace root so benchmark-action can push gh-pages
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
