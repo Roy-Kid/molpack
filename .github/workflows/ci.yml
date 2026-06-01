@@ -99,7 +99,7 @@ jobs:
         run: cargo test --test cli --features cli
         working-directory: molpack
       - name: Benches build
-        run: cargo bench --no-run
+        run: cargo bench --no-run --all-features
         working-directory: molpack
 
   python:
