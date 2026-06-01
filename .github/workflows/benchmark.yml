@@ -1,11 +1,12 @@
 name: Benchmark
 
 # Continuous performance tracking via benchmark-action/github-action-benchmark.
-# Runs the criterion benches, emits libtest "bencher" output, and stores the
-# trend on the `gh-pages` branch so regressions are visible over time.
+# Runs the criterion benches and stores the trend on `gh-pages`.
 #
-# Local runs on a shared/noisy machine are unreliable (load drift dwarfs the
-# signal); the authoritative numbers come from this workflow on a clean runner.
+# molpack builds against the PUBLISHED molrs crate here (the Cargo.toml
+# `path = "../molrs/..."` is only for local sibling-checkout dev). We strip
+# those path keys so Cargo resolves molrs from crates.io. molpack is checked
+# out at the workspace root so benchmark-action has a git repo for the gh-pages push.
 on:
   push:
     branches: [master, main]
@@ -20,29 +21,12 @@ jobs:
     name: criterion benchmarks
     runs-on: ubuntu-latest
     steps:
-      # Root checkout of molpack so benchmark-action has a git repo at $GITHUB_WORKSPACE
-      # for the gh-pages fetch/push. The build itself runs in ./molpack (below), which
-      # path-depends on ./molrs as a sibling.
       - uses: actions/checkout@v6
-      - uses: actions/checkout@v6
-        with:
-          repository: MolCrafts/molrs
-          path: molrs
-      - uses: actions/checkout@v6
-        with:
-          path: molpack
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: molpack
-      - name: Cache test data
-        uses: actions/cache@v5
-        with:
-          path: molrs/molrs-core/target/tests-data
-          key: ${{ runner.os }}-test-data-${{ hashFiles('molrs/scripts/fetch-test-data.sh') }}
-      - name: Fetch test data
-        run: bash scripts/fetch-test-data.sh
-        working-directory: molrs
+
+      - name: Build against published molrs (drop local path deps)
+        run: sed -i -E 's#path = "\.\./molrs/[^"]*", ##g' Cargo.toml
 
       # End-to-end packing benches are optimizer-iteration-dominated and the
       # `solvprotein` case is slow + high-variance, so run them at criterion's
@@ -53,7 +37,6 @@ jobs:
           cargo bench --bench pack_end_to_end --features cli,rayon --
           --output-format bencher --sample-size 10 --warm-up-time 1
           | tee bench-e2e.txt
-        working-directory: molpack
       - name: Run kernel / micro benches (more samples)
         run: >
           cargo bench
@@ -62,21 +45,17 @@ jobs:
           --features cli,rayon --
           --output-format bencher --sample-size 50
           | tee bench-kernel.txt
-        working-directory: molpack
       - name: Merge bench output
         run: cat bench-e2e.txt bench-kernel.txt > output.txt
-        working-directory: molpack
 
       - name: Store + compare benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: molpack criterion
           tool: cargo
-          output-file-path: molpack/output.txt
+          output-file-path: output.txt
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
-          # Noise-tolerant: the e2e cases swing widely on shared runners.
-          # Tighten once the trend stabilises (or split e2e into its own chart).
           alert-threshold: "200%"
           comment-on-alert: true
           fail-on-alert: false
