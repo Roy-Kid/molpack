@@ -2,10 +2,9 @@ name: Benchmark
 
 # Performance tracking via benchmark-action/github-action-benchmark, stored on gh-pages.
 #
-# Runs only the cheap, deterministic micro/kernel benches here. The end-to-end
-# pack_end_to_end benches drive full Packmol optimizations (pack_spherical alone
-# is 30-60 min: 18k molecules x 800 loops x 10 samples) and are NOT run per-push;
-# trigger them on demand with `cargo bench --bench pack_end_to_end`.
+# Runs the fast micro/kernel benches plus the end-to-end pack benches across ALL
+# example cases. The e2e benches rely on natural convergence (pack() breaks when
+# fdist/frest < precision); max_loops is only a safety cap. 3 samples per example.
 #
 # molpack builds against the PUBLISHED molrs crate (the `path = "../molrs/..."` in
 # Cargo.toml is local-dev only); we strip those path keys so Cargo uses crates.io.
@@ -40,11 +39,20 @@ jobs:
           --bench run_iteration --bench run_phase --bench partial_gradient_merge
           --features cli,rayon --
           --output-format bencher --sample-size 50
-          | tee output.txt
+          | tee bench-kernel.txt
 
-      # The benchmark-action switches to the gh-pages branch in this same tree;
-      # restore the sed-modified Cargo.toml (+ any build-updated lock) so the
-      # switch isn't blocked by dirty tracked files. output.txt is untracked and survives.
+      - name: Run e2e benches (all examples, 3 samples)
+        run: >
+          cargo bench --bench pack_end_to_end --features cli,rayon --
+          --output-format bencher
+          | tee bench-e2e.txt
+
+      - name: Merge bench output
+        run: cat bench-kernel.txt bench-e2e.txt > output.txt
+
+      # benchmark-action switches to gh-pages in this same tree; restore the
+      # sed-modified Cargo.toml (+ build-updated lock) so the switch isn't blocked
+      # by dirty tracked files. output.txt is untracked and survives.
       - name: Restore working tree
         run: git checkout -- .
 
