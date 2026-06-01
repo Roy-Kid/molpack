@@ -12,8 +12,10 @@ use crate::helpers::{NpF, stash_err};
 use molpack::F;
 use molpack::restraint::Restraint;
 use molpack::restraint::{
-    AbovePlaneRestraint, BelowPlaneRestraint, InsideBoxRestraint, InsideSphereRestraint,
-    OutsideSphereRestraint,
+    AboveGaussianRestraint, AbovePlaneRestraint, BelowGaussianRestraint, BelowPlaneRestraint,
+    InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint, InsideEllipsoidRestraint,
+    InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint, OutsideCylinderRestraint,
+    OutsideEllipsoidRestraint, OutsideSphereRestraint,
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -73,6 +75,33 @@ pub(crate) fn extract_restraint(obj: &Bound<'_, pyo3::types::PyAny>) -> PyResult
         return Ok(SharedRestraint(Arc::new(c.inner)));
     }
     if let Ok(c) = obj.extract::<PyBelowPlaneRestraint>() {
+        return Ok(SharedRestraint(Arc::new(c.inner)));
+    }
+    if let Ok(c) = obj.extract::<PyInsideCubeRestraint>() {
+        return Ok(SharedRestraint(Arc::new(c.inner)));
+    }
+    if let Ok(c) = obj.extract::<PyOutsideCubeRestraint>() {
+        return Ok(SharedRestraint(Arc::new(c.inner)));
+    }
+    if let Ok(c) = obj.extract::<PyOutsideBoxRestraint>() {
+        return Ok(SharedRestraint(Arc::new(c.inner)));
+    }
+    if let Ok(c) = obj.extract::<PyInsideEllipsoidRestraint>() {
+        return Ok(SharedRestraint(Arc::new(c.inner)));
+    }
+    if let Ok(c) = obj.extract::<PyOutsideEllipsoidRestraint>() {
+        return Ok(SharedRestraint(Arc::new(c.inner)));
+    }
+    if let Ok(c) = obj.extract::<PyInsideCylinderRestraint>() {
+        return Ok(SharedRestraint(Arc::new(c.inner)));
+    }
+    if let Ok(c) = obj.extract::<PyOutsideCylinderRestraint>() {
+        return Ok(SharedRestraint(Arc::new(c.inner)));
+    }
+    if let Ok(c) = obj.extract::<PyAboveGaussianRestraint>() {
+        return Ok(SharedRestraint(Arc::new(c.inner)));
+    }
+    if let Ok(c) = obj.extract::<PyBelowGaussianRestraint>() {
         return Ok(SharedRestraint(Arc::new(c.inner)));
     }
 
@@ -297,6 +326,232 @@ impl PyBelowPlaneRestraint {
         format!(
             "BelowPlaneRestraint(normal={:?}, distance={})",
             self.inner.normal, self.inner.distance,
+        )
+    }
+}
+
+#[pyclass(name = "InsideCubeRestraint", from_py_object)]
+#[derive(Clone)]
+pub struct PyInsideCubeRestraint {
+    pub(crate) inner: InsideCubeRestraint,
+}
+
+#[pymethods]
+impl PyInsideCubeRestraint {
+    #[new]
+    #[pyo3(signature = (origin, side))]
+    fn new(origin: [NpF; 3], side: NpF) -> Self {
+        Self {
+            inner: InsideCubeRestraint::new(origin, side),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "InsideCubeRestraint(origin={:?}, side={})",
+            self.inner.origin, self.inner.side,
+        )
+    }
+}
+
+#[pyclass(name = "OutsideCubeRestraint", from_py_object)]
+#[derive(Clone)]
+pub struct PyOutsideCubeRestraint {
+    pub(crate) inner: OutsideCubeRestraint,
+}
+
+#[pymethods]
+impl PyOutsideCubeRestraint {
+    #[new]
+    #[pyo3(signature = (origin, side))]
+    fn new(origin: [NpF; 3], side: NpF) -> Self {
+        Self {
+            inner: OutsideCubeRestraint::new(origin, side),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "OutsideCubeRestraint(origin={:?}, side={})",
+            self.inner.origin, self.inner.side,
+        )
+    }
+}
+
+#[pyclass(name = "OutsideBoxRestraint", from_py_object)]
+#[derive(Clone)]
+pub struct PyOutsideBoxRestraint {
+    pub(crate) inner: OutsideBoxRestraint,
+}
+
+#[pymethods]
+impl PyOutsideBoxRestraint {
+    #[new]
+    #[pyo3(signature = (min, max))]
+    fn new(min: [NpF; 3], max: [NpF; 3]) -> Self {
+        Self {
+            inner: OutsideBoxRestraint::new(min, max),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "OutsideBoxRestraint(min={:?}, max={:?})",
+            self.inner.min, self.inner.max,
+        )
+    }
+}
+
+#[pyclass(name = "InsideEllipsoidRestraint", from_py_object)]
+#[derive(Clone)]
+pub struct PyInsideEllipsoidRestraint {
+    pub(crate) inner: InsideEllipsoidRestraint,
+}
+
+#[pymethods]
+impl PyInsideEllipsoidRestraint {
+    #[new]
+    #[pyo3(signature = (center, axes, exponent))]
+    fn new(center: [NpF; 3], axes: [NpF; 3], exponent: NpF) -> Self {
+        Self {
+            inner: InsideEllipsoidRestraint::new(center, axes, exponent),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "InsideEllipsoidRestraint(center={:?}, axes={:?}, exponent={})",
+            self.inner.center, self.inner.axes, self.inner.exponent,
+        )
+    }
+}
+
+#[pyclass(name = "OutsideEllipsoidRestraint", from_py_object)]
+#[derive(Clone)]
+pub struct PyOutsideEllipsoidRestraint {
+    pub(crate) inner: OutsideEllipsoidRestraint,
+}
+
+#[pymethods]
+impl PyOutsideEllipsoidRestraint {
+    #[new]
+    #[pyo3(signature = (center, axes, exponent))]
+    fn new(center: [NpF; 3], axes: [NpF; 3], exponent: NpF) -> Self {
+        Self {
+            inner: OutsideEllipsoidRestraint::new(center, axes, exponent),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "OutsideEllipsoidRestraint(center={:?}, axes={:?}, exponent={})",
+            self.inner.center, self.inner.axes, self.inner.exponent,
+        )
+    }
+}
+
+#[pyclass(name = "InsideCylinderRestraint", from_py_object)]
+#[derive(Clone)]
+pub struct PyInsideCylinderRestraint {
+    pub(crate) inner: InsideCylinderRestraint,
+}
+
+#[pymethods]
+impl PyInsideCylinderRestraint {
+    #[new]
+    #[pyo3(signature = (center, axis, radius, length))]
+    fn new(center: [NpF; 3], axis: [NpF; 3], radius: NpF, length: NpF) -> Self {
+        Self {
+            inner: InsideCylinderRestraint::new(center, axis, radius, length),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "InsideCylinderRestraint(center={:?}, axis={:?}, radius={}, length={})",
+            self.inner.center, self.inner.axis, self.inner.radius, self.inner.length,
+        )
+    }
+}
+
+#[pyclass(name = "OutsideCylinderRestraint", from_py_object)]
+#[derive(Clone)]
+pub struct PyOutsideCylinderRestraint {
+    pub(crate) inner: OutsideCylinderRestraint,
+}
+
+#[pymethods]
+impl PyOutsideCylinderRestraint {
+    #[new]
+    #[pyo3(signature = (center, axis, radius, length))]
+    fn new(center: [NpF; 3], axis: [NpF; 3], radius: NpF, length: NpF) -> Self {
+        Self {
+            inner: OutsideCylinderRestraint::new(center, axis, radius, length),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "OutsideCylinderRestraint(center={:?}, axis={:?}, radius={}, length={})",
+            self.inner.center, self.inner.axis, self.inner.radius, self.inner.length,
+        )
+    }
+}
+
+#[pyclass(name = "AboveGaussianRestraint", from_py_object)]
+#[derive(Clone)]
+pub struct PyAboveGaussianRestraint {
+    pub(crate) inner: AboveGaussianRestraint,
+}
+
+#[pymethods]
+impl PyAboveGaussianRestraint {
+    #[new]
+    #[pyo3(signature = (cx, cy, sx, sy, z0, height))]
+    fn new(cx: NpF, cy: NpF, sx: NpF, sy: NpF, z0: NpF, height: NpF) -> Self {
+        Self {
+            inner: AboveGaussianRestraint::new(cx, cy, sx, sy, z0, height),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "AboveGaussianRestraint(cx={}, cy={}, sx={}, sy={}, z0={}, height={})",
+            self.inner.cx,
+            self.inner.cy,
+            self.inner.sx,
+            self.inner.sy,
+            self.inner.z0,
+            self.inner.height,
+        )
+    }
+}
+
+#[pyclass(name = "BelowGaussianRestraint", from_py_object)]
+#[derive(Clone)]
+pub struct PyBelowGaussianRestraint {
+    pub(crate) inner: BelowGaussianRestraint,
+}
+
+#[pymethods]
+impl PyBelowGaussianRestraint {
+    #[new]
+    #[pyo3(signature = (cx, cy, sx, sy, z0, height))]
+    fn new(cx: NpF, cy: NpF, sx: NpF, sy: NpF, z0: NpF, height: NpF) -> Self {
+        Self {
+            inner: BelowGaussianRestraint::new(cx, cy, sx, sy, z0, height),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "BelowGaussianRestraint(cx={}, cy={}, sx={}, sy={}, z0={}, height={})",
+            self.inner.cx,
+            self.inner.cy,
+            self.inner.sx,
+            self.inner.sy,
+            self.inner.z0,
+            self.inner.height,
         )
     }
 }

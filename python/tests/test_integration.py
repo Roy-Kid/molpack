@@ -178,3 +178,131 @@ class TestCompositeRestraints:
         dists = np.linalg.norm(centres - sphere_centre, axis=1)
         if result.converged:
             assert (dists >= 4.5).all()
+
+
+# ── correctness asserts: every packed atom satisfies its restraint ─────────
+
+# Until this block was added, the Python tests checked atom counts and
+# positional shapes but never verified that the packed coordinates
+# actually obey the geometric restraint. A regression in the PyO3 layer
+# (e.g. a Target/restraint wiring drift between Rust and Python) could
+# produce shape-correct but geometrically-wrong output and slip past CI.
+
+TOLERANCE = 2.0
+_PRECISION_SLACK = 0.05  # absolute slack on `precision = 1e-2`
+
+
+def _packer_with_tolerance(tolerance: float = TOLERANCE) -> molpack.Molpack:
+    return (
+        molpack.Molpack()
+        .with_tolerance(tolerance)
+        .with_precision(0.01)
+        .with_progress(False)
+    )
+
+
+def _max_pairwise_violation(
+    positions: np.ndarray, tolerance: float, *, atoms_per_mol: int
+) -> float:
+    """Return max(0, tolerance − min inter-molecule distance).
+
+    Pairs within the same molecule are skipped (they are rigid). Naïve
+    O(N²) — fine for small test sizes.
+    """
+    n = positions.shape[0]
+    worst = 0.0
+    for i in range(n):
+        for j in range(i + 1, n):
+            if i // atoms_per_mol == j // atoms_per_mol:
+                continue
+            d = float(np.linalg.norm(positions[i] - positions[j]))
+            if d < tolerance:
+                worst = max(worst, tolerance - d)
+    return worst
+
+
+@pytest.mark.integration
+class TestRestraintSatisfaction:
+    """Coordinate-level correctness: packed atoms obey their restraint."""
+
+    def test_inside_sphere_atoms_within_radius(self, water_frame):
+        centre = np.array([10.0, 10.0, 10.0])
+        radius = 12.0
+        target = (
+            molpack.Target(water_frame, count=8)
+            .with_name("water")
+            .with_restraint(molpack.InsideSphereRestraint(centre.tolist(), radius))
+        )
+        result = _packer_with_tolerance().with_seed(42).pack([target], max_loops=150)
+
+        dists = np.linalg.norm(result.positions - centre, axis=1)
+        # Allow a small slack so the optimizer's `precision=0.01` floor
+        # does not cause a flake at the boundary.
+        assert dists.max() <= radius + _PRECISION_SLACK, (
+            f"max distance {dists.max()} > radius {radius}"
+        )
+
+    def test_inside_box_atoms_within_bounds(self, water_frame):
+        box_min = np.array([0.0, 0.0, 0.0])
+        box_max = np.array([20.0, 20.0, 20.0])
+        target = (
+            molpack.Target(water_frame, count=8)
+            .with_name("water")
+            .with_restraint(
+                molpack.InsideBoxRestraint(box_min.tolist(), box_max.tolist())
+            )
+        )
+        result = _packer_with_tolerance().with_seed(42).pack([target], max_loops=150)
+
+        positions = result.positions
+        assert (positions >= box_min - _PRECISION_SLACK).all(), (
+            "atoms below box minimum"
+        )
+        assert (positions <= box_max + _PRECISION_SLACK).all(), (
+            "atoms above box maximum"
+        )
+
+    def test_pairwise_tolerance_respected(self, water_frame):
+        # Smaller box so pair penalties are actually contended.
+        target = (
+            molpack.Target(water_frame, count=10)
+            .with_name("water")
+            .with_restraint(
+                molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [18.0, 18.0, 18.0])
+            )
+        )
+        result = _packer_with_tolerance().with_seed(42).pack([target], max_loops=200)
+
+        atoms_per_mol = water_frame["atoms"].nrows
+        worst = _max_pairwise_violation(
+            result.positions, TOLERANCE, atoms_per_mol=atoms_per_mol
+        )
+        # `precision=0.01` is the soft tolerance the optimizer
+        # promises; allow a small slack on top.
+        assert worst <= 0.01 + _PRECISION_SLACK, (
+            f"max pairwise tolerance violation {worst}"
+        )
+
+    def test_outside_sphere_atoms_outside_radius(self, water_frame):
+        centre = np.array([15.0, 15.0, 15.0])
+        radius = 5.0
+        target = (
+            molpack.Target(water_frame, count=6)
+            .with_name("water")
+            .with_restraint(
+                molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
+            )
+            .with_restraint(molpack.OutsideSphereRestraint(centre.tolist(), radius))
+        )
+        result = _packer_with_tolerance().with_seed(42).pack([target], max_loops=200)
+
+        # Skip when convergence stalls — outside-sphere is a harder
+        # objective and a tiny seed can leave residual penalty. The
+        # `if result.converged` guard mirrors the existing
+        # `TestCompositeRestraints` test.
+        if not result.converged:
+            pytest.skip("packer did not converge; restraint check non-meaningful")
+        dists = np.linalg.norm(result.positions - centre, axis=1)
+        assert dists.min() >= radius - _PRECISION_SLACK, (
+            f"min distance {dists.min()} < radius {radius}"
+        )

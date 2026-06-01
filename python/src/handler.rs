@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::helpers::stash_err;
 use molpack::F;
+use molpack::PackError;
 use molpack::context::PackContext;
 use molpack::handler::{Handler, StepInfo};
 use pyo3::prelude::*;
@@ -147,8 +148,10 @@ impl Handler for PyHandlerWrapper {
         });
     }
 
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
-        let Some(m) = &self.on_step else { return };
+    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) -> Result<(), PackError> {
+        let Some(m) = &self.on_step else {
+            return Ok(());
+        };
         Python::attach(|py| {
             let py_info = match Py::new(py, PyStepInfo::from_info(info)) {
                 Ok(v) => v,
@@ -167,15 +170,21 @@ impl Handler for PyHandlerWrapper {
                 Err(e) => self.fail(e),
             }
         });
+        // Python errors are stashed via `self.fail` and drained by `pack()`
+        // (the PyErr-stashing pattern), so the Rust-side result is always Ok.
+        Ok(())
     }
 
-    fn on_finish(&mut self, _sys: &PackContext) {
-        let Some(m) = &self.on_finish else { return };
+    fn on_finish(&mut self, _sys: &PackContext) -> Result<(), PackError> {
+        let Some(m) = &self.on_finish else {
+            return Ok(());
+        };
         Python::attach(|py| {
             if let Err(e) = m.bind(py).call1(()) {
                 self.fail(e);
             }
         });
+        Ok(())
     }
 
     fn should_stop(&self) -> bool {

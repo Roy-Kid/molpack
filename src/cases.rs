@@ -211,7 +211,7 @@ pub fn build_targets(case: ExampleCase, base: &Path) -> Result<Vec<Target>, Box<
     Ok(targets)
 }
 
-pub fn render_packmol_input(case: ExampleCase, base: &Path, output: &Path, seed: u64) -> String {
+pub fn render_molpack_input(case: ExampleCase, base: &Path, output: &Path, seed: u64) -> String {
     let water = base.join("water.pdb");
     let lipid = base.join("palmitoil.pdb");
     let urea = base.join("urea.pdb");

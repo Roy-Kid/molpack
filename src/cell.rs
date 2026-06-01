@@ -101,16 +101,3 @@ pub fn icell_to_cell(icell: usize, ncells: &[usize; 3]) -> [usize; 3] {
 pub fn cell_ind(idx: isize, ncells: usize) -> usize {
     idx.rem_euclid(ncells as isize) as usize
 }
-
-/// Compute PBC-corrected difference vector with per-axis wrapping.
-/// Port of `delta_vector` from `pbc.f90`.
-#[inline]
-pub fn delta_vector(xi: &[F; 3], xj: &[F; 3], pbc_length: &[F; 3], periodic: &[bool; 3]) -> [F; 3] {
-    let mut d = [xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2]];
-    for k in 0..3 {
-        if periodic[k] {
-            d[k] -= (d[k] / pbc_length[k]).round() * pbc_length[k];
-        }
-    }
-    d
-}

@@ -75,13 +75,23 @@ coordinates that satisfy all constraints.
     result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
     ```
 
-## Where to next
+## Documentation map
 
-- **[Getting started](getting_started.md)** — full CLI + library walkthrough
-- **[Concepts](concepts.md)** — targets, restraints, the packing loop
-- **[Architecture](architecture.md)** — module map and internals
-- **[Extending](extending.md)** — custom restraints, formats, optimizers
-- **[Packmol parity](packmol_parity.md)** — behavior-alignment notes for users migrating from Packmol
+**Get Started**
+
+- **[Install](install.md)** — CLI, Rust crate, Python binding.
+- **[Getting Started](getting_started.md)** — first pack, end to end.
+
+**Guide**
+
+- **[Concepts](concepts.md)** — targets, restraints, regions, handlers, relaxers.
+- **[Examples](examples.md)** — five canonical workloads.
+- **[Packmol parity](packmol_parity.md)** — what is matched, how it is verified.
+
+**Internals**
+
+- **[Architecture](architecture.md)** — module map, data flow, loops, hot path.
+- **[Extending](extending.md)** — write your own `Restraint` / `Region` / `Handler` / `Relaxer`.
 
 ## License
 

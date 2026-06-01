@@ -47,12 +47,56 @@ class InsideBoxRestraint:
     ) -> None: ...
     def __repr__(self) -> str: ...
 
+class InsideCubeRestraint:
+    def __init__(self, origin: Sequence[float], side: float) -> None: ...
+    def __repr__(self) -> str: ...
+
 class InsideSphereRestraint:
     def __init__(self, center: Sequence[float], radius: float) -> None: ...
     def __repr__(self) -> str: ...
 
+class InsideEllipsoidRestraint:
+    def __init__(
+        self, center: Sequence[float], axes: Sequence[float], exponent: float
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class InsideCylinderRestraint:
+    def __init__(
+        self,
+        center: Sequence[float],
+        axis: Sequence[float],
+        radius: float,
+        length: float,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class OutsideBoxRestraint:
+    def __init__(self, min: Sequence[float], max: Sequence[float]) -> None: ...
+    def __repr__(self) -> str: ...
+
+class OutsideCubeRestraint:
+    def __init__(self, origin: Sequence[float], side: float) -> None: ...
+    def __repr__(self) -> str: ...
+
 class OutsideSphereRestraint:
     def __init__(self, center: Sequence[float], radius: float) -> None: ...
+    def __repr__(self) -> str: ...
+
+class OutsideEllipsoidRestraint:
+    def __init__(
+        self, center: Sequence[float], axes: Sequence[float], exponent: float
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class OutsideCylinderRestraint:
+    def __init__(
+        self,
+        center: Sequence[float],
+        axis: Sequence[float],
+        radius: float,
+        length: float,
+    ) -> None: ...
     def __repr__(self) -> str: ...
 
 class AbovePlaneRestraint:
@@ -63,15 +107,36 @@ class BelowPlaneRestraint:
     def __init__(self, normal: Sequence[float], distance: float) -> None: ...
     def __repr__(self) -> str: ...
 
+class AboveGaussianRestraint:
+    def __init__(
+        self, cx: float, cy: float, sx: float, sy: float, z0: float, height: float
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class BelowGaussianRestraint:
+    def __init__(
+        self, cx: float, cy: float, sx: float, sy: float, z0: float, height: float
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
 # Built-in restraint union — accepted wherever a native `*Restraint` is
 # expected. Custom duck-typed objects (see `Restraint` Protocol in the
 # package root) are also accepted.
 type BuiltinRestraint = (
     InsideBoxRestraint
+    | InsideCubeRestraint
     | InsideSphereRestraint
+    | InsideEllipsoidRestraint
+    | InsideCylinderRestraint
+    | OutsideBoxRestraint
+    | OutsideCubeRestraint
     | OutsideSphereRestraint
+    | OutsideEllipsoidRestraint
+    | OutsideCylinderRestraint
     | AbovePlaneRestraint
     | BelowPlaneRestraint
+    | AboveGaussianRestraint
+    | BelowGaussianRestraint
 )
 
 class _RestraintLike(Protocol):

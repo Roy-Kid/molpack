@@ -10,69 +10,47 @@ permissions:
   contents: read
   id-token: write
 
+# Build matrix produces one wheel per OS for the latest Python (3.13).
+# Linux + macOS only; macOS wheel is universal2 so a single artifact covers
+# both Apple Silicon and Intel Macs. sdist is kept as a safety net so users
+# on unlisted platforms (Windows, Linux aarch64, …) can still build from
+# source if they have a Rust toolchain.
 jobs:
   build-linux:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Build wheels
+          python-version: "3.13"
+      - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
           working-directory: python
           manylinux: auto
           command: build
-          args: --release --out dist --interpreter python${{ matrix.python-version }}
+          args: --release --out dist --interpreter python3.13
       - uses: actions/upload-artifact@v7
         with:
-          name: wheels-linux-${{ matrix.python-version }}
+          name: wheels-linux
           path: python/dist
 
   build-macos:
     runs-on: macos-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Build wheels
+          python-version: "3.13"
+      - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
           working-directory: python
           command: build
-          args: --release --out dist --interpreter python${{ matrix.python-version }} --target universal2-apple-darwin
+          args: --release --out dist --interpreter python3.13 --target universal2-apple-darwin
       - uses: actions/upload-artifact@v7
         with:
-          name: wheels-macos-${{ matrix.python-version }}
-          path: python/dist
-
-  build-windows:
-    runs-on: windows-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          working-directory: python
-          command: build
-          args: --release --out dist --interpreter python${{ matrix.python-version }}
-      - uses: actions/upload-artifact@v7
-        with:
-          name: wheels-windows-${{ matrix.python-version }}
+          name: wheels-macos
           path: python/dist
 
   build-sdist:
@@ -91,7 +69,7 @@ jobs:
           path: python/dist
 
   publish:
-    needs: [build-linux, build-macos, build-windows, build-sdist]
+    needs: [build-linux, build-macos, build-sdist]
     runs-on: ubuntu-latest
     environment: pypi
     steps:

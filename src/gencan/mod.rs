@@ -6,7 +6,7 @@ use molrs::types::F;
 pub mod cg;
 pub mod spg;
 
-use crate::constraints::EvalMode;
+use crate::context::EvalMode;
 use crate::numerics::{numeric_controls, positive_norm_floor};
 use crate::objective::Objective;
 
@@ -56,6 +56,13 @@ pub struct GencanWorkspace {
     cg_scratch: cg::CgScratch,
     spg_scratch: spg::SpgScratch,
     tnls_scratch: TnLsScratch,
+    /// Reusable no-gradient-progress history buffer (maxitngp = 1000).
+    lastgpns: Vec<F>,
+    /// Reusable bounds vectors for pgencan.
+    bounds_l: Vec<F>,
+    bounds_u: Vec<F>,
+    /// Reusable coords snapshot for relaxer MC block in packer.
+    pub coords_snapshot: Vec<[F; 3]>,
 }
 
 impl GencanWorkspace {
@@ -69,6 +76,10 @@ impl GencanWorkspace {
             cg_scratch: cg::CgScratch::new(0),
             spg_scratch: spg::SpgScratch::new(0),
             tnls_scratch: TnLsScratch::new(0),
+            lastgpns: Vec::new(),
+            bounds_l: Vec::new(),
+            bounds_u: Vec::new(),
+            coords_snapshot: Vec::new(),
         }
     }
 
@@ -114,11 +125,18 @@ pub fn pgencan(
 ) -> GencanResult {
     let n = x.len();
 
-    let mut l = vec![0.0 as F; n];
-    let mut u = vec![0.0 as F; n];
-    obj.bounds(&mut l, &mut u);
+    workspace.bounds_l.resize(n, 0.0);
+    workspace.bounds_u.resize(n, 0.0);
+    obj.bounds(&mut workspace.bounds_l, &mut workspace.bounds_u);
 
-    gencan(x, &l, &u, obj, params, precision, workspace)
+    // Swap bounds out of workspace to avoid borrow conflicts when passing
+    // both the slices and `&mut workspace` to `gencan`.
+    let bounds_l = std::mem::take(&mut workspace.bounds_l);
+    let bounds_u = std::mem::take(&mut workspace.bounds_u);
+    let result = gencan(x, &bounds_l, &bounds_u, obj, params, precision, workspace);
+    workspace.bounds_l = bounds_l;
+    workspace.bounds_u = bounds_u;
+    result
 }
 
 /// Main GENCAN loop.
@@ -226,7 +244,8 @@ pub fn gencan(
     let mut fprev = INFABS;
     let mut bestprog = 0.0 as F;
     let mut itnfp = 0usize;
-    let mut lastgpns = vec![INFABS; maxitngp];
+    workspace.lastgpns.resize(maxitngp, INFABS);
+    let lastgpns = &mut workspace.lastgpns;
 
     // Working vectors
     let d = &mut workspace.d;

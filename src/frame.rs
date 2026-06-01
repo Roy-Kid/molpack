@@ -65,8 +65,8 @@ pub fn compute_mol_ids(sys: &PackContext) -> Vec<usize> {
     let mut icart = 0usize;
     let mut mol_offset = 0usize;
     for itype in 0..sys.ntype_with_fixed {
-        let nmol = sys.nmols[itype];
-        let nat = sys.natoms[itype];
+        let nmol = sys.topology.nmols[itype];
+        let nat = sys.topology.natoms[itype];
         for imol in 0..nmol {
             for _iatom in 0..nat {
                 ids[icart] = mol_offset + imol;
@@ -110,10 +110,10 @@ pub fn init_frame_constants(sys: &mut PackContext) {
 /// Finalize the frame by writing position columns from `xcart`,
 /// then move the frame out of the context (zero-copy ownership transfer).
 ///
-/// After this call `sys.frame` is empty and `sys.xcart` is drained.
+/// After this call `sys.frame` is empty and `sys.eval.xcart` is drained.
 #[inline(never)]
 pub fn finalize_frame(sys: &mut PackContext) -> molrs::Frame {
-    let xcart = std::mem::take(&mut sys.xcart);
+    let xcart = std::mem::take(&mut sys.eval.xcart);
 
     let x_vals: Vec<F> = xcart.iter().map(|p| p[0]).collect();
     let y_vals: Vec<F> = xcart.iter().map(|p| p[1]).collect();
@@ -142,11 +142,11 @@ pub fn finalize_frame(sys: &mut PackContext) -> molrs::Frame {
 
 /// Build a `molrs::Frame` from a [`PackContext`] (one-shot convenience wrapper).
 pub fn context_to_frame(sys: &PackContext) -> molrs::Frame {
-    let n = sys.xcart.len();
+    let n = sys.eval.xcart.len();
 
-    let x_vals: Vec<F> = sys.xcart.iter().map(|p| p[0]).collect();
-    let y_vals: Vec<F> = sys.xcart.iter().map(|p| p[1]).collect();
-    let z_vals: Vec<F> = sys.xcart.iter().map(|p| p[2]).collect();
+    let x_vals: Vec<F> = sys.eval.xcart.iter().map(|p| p[0]).collect();
+    let y_vals: Vec<F> = sys.eval.xcart.iter().map(|p| p[1]).collect();
+    let z_vals: Vec<F> = sys.eval.xcart.iter().map(|p| p[2]).collect();
 
     let elem_strs: Vec<String> = sys
         .elements

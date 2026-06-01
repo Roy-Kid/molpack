@@ -4,7 +4,10 @@
 use std::sync::Arc;
 
 use molpack::objective::{compute_f, compute_fg, compute_g};
-use molpack::{AbovePlaneRestraint, F, InsideBoxRestraint, InsideSphereRestraint, PackContext};
+use molpack::{
+    AboveGaussianRestraint, AbovePlaneRestraint, F, InsideBoxRestraint, InsideCylinderRestraint,
+    InsideEllipsoidRestraint, InsideSphereRestraint, OutsideEllipsoidRestraint, PackContext,
+};
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -21,34 +24,34 @@ fn finite_diff(x: &[F], sys: &mut PackContext, i: usize, h: F) -> F {
 
 /// Build a minimal PackContext for `nmol` single-atom molecules.
 ///
-/// Also assigns distinct `ibmol[icart]` values so pair-penalty kernels do
+/// Also assigns distinct `atom_mol_idx[icart]` values so pair-penalty kernels do
 /// not skip atom pairs as "same molecule". The prior version left every
-/// atom at `ibmol=0`, which silently made `gradient_pair_penalty` test
+/// atom at `atom_mol_idx=0`, which silently made `gradient_pair_penalty` test
 /// a no-op.
 fn single_atom_system(nmol: usize) -> PackContext {
     let ntotat = nmol;
     let mut sys = PackContext::new(ntotat, nmol, 1);
     sys.ntype_with_fixed = 1;
-    sys.nmols = vec![nmol];
-    sys.natoms = vec![1];
-    sys.idfirst = vec![0];
-    sys.comptype = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0]];
-    sys.radius = vec![1.0; ntotat];
-    sys.radius_ini = vec![1.0; ntotat];
-    sys.fscale = vec![1.0; ntotat];
+    sys.topology.nmols = vec![nmol];
+    sys.topology.natoms = vec![1];
+    sys.topology.idfirst = vec![0];
+    sys.is_type_active = vec![true];
+    sys.topology.coor = vec![[0.0, 0.0, 0.0]];
+    sys.eval.radius = vec![1.0; ntotat];
+    sys.eval.radius_ini = vec![1.0; ntotat];
+    sys.eval.fscale = vec![1.0; ntotat];
     for i in 0..ntotat {
-        sys.ibmol[i] = i;
+        sys.atom_mol_idx[i] = i;
     }
     sys.sync_atom_props();
     sys
 }
 
 fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
-    sys.ncells = [cell_n, cell_n, cell_n];
-    sys.cell_length = [cell_len; 3];
-    sys.pbc_min = [0.0; 3];
-    sys.pbc_length = [cell_len * cell_n as F; 3];
+    sys.cells.ncells = [cell_n, cell_n, cell_n];
+    sys.cells.cell_length = [cell_len; 3];
+    sys.pbc.min = [0.0; 3];
+    sys.pbc.length = [cell_len * cell_n as F; 3];
     sys.resize_cell_arrays();
 }
 
@@ -184,24 +187,193 @@ fn gradient_above_plane_constraint() {
     }
 }
 
+// ── cylinder constraint gradient ───────────────────────────────────────────
+
+/// Finite-difference parity for `InsideCylinderRestraint`. Cylinder is the
+/// most algebraically complex single-atom restraint (axis projection +
+/// radial distance + finite length), so its hand-rolled `fg` is the most
+/// likely to drift relative to `f` if anyone touches `restraint.rs`. Place
+/// the atom *outside* the cylinder on every axis so all three penalty
+/// terms (`-w`, `w-len`, `d-r²`) are simultaneously active.
+#[test]
+fn gradient_inside_cylinder_constraint() {
+    let mut sys = single_atom_system(1);
+    // Cylinder along +x, base at origin, length 4, radius 2.
+    sys.restraints = vec![Arc::new(InsideCylinderRestraint::new(
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        2.0,
+        4.0,
+    ))];
+    sys.iratom_offsets = vec![0, 1];
+    sys.iratom_data = vec![0];
+    sys.init1 = true;
+
+    // Outside on every axis: x past the end cap, off the radial axis.
+    let mut x = vec![0.0; 6];
+    x[0] = 6.0; // past length=4
+    x[1] = 3.5; // outside radius=2
+    x[2] = 0.5;
+
+    let _ = compute_f(&x, &mut sys);
+    let mut g = vec![0.0; x.len()];
+    compute_g(&x, &mut sys, &mut g);
+
+    let h = 1e-6;
+    for i in 0..3 {
+        let gfd = finite_diff(&x, &mut sys, i, h);
+        let err = (g[i] - gfd).abs();
+        assert!(
+            err < 1e-3,
+            "cylinder constraint gradient mismatch at var {i}: analytic={} fd={gfd} err={err}",
+            g[i]
+        );
+    }
+}
+
+// ── ellipsoid constraint gradient ──────────────────────────────────────────
+
+/// Finite-difference parity for `InsideEllipsoidRestraint`. The penalty
+/// uses anisotropic axes (a/b/c distinct), so the gradient mixes
+/// per-axis division by `axis²` — most likely place for an off-by-axis
+/// transcription bug.
+#[test]
+fn gradient_inside_ellipsoid_constraint() {
+    let mut sys = single_atom_system(1);
+    sys.restraints = vec![Arc::new(InsideEllipsoidRestraint::new(
+        [0.0, 0.0, 0.0],
+        [3.0, 2.0, 1.5],
+        1.0,
+    ))];
+    sys.iratom_offsets = vec![0, 1];
+    sys.iratom_data = vec![0];
+    sys.init1 = true;
+
+    // Outside the ellipsoid → penalty active. (3.5, 2.4, 1.7) lies just
+    // beyond the surface (a1 + a2 + a3 ≈ 3.18 > 1).
+    let mut x = vec![0.0; 6];
+    x[0] = 3.5;
+    x[1] = 2.4;
+    x[2] = 1.7;
+
+    let _ = compute_f(&x, &mut sys);
+    let mut g = vec![0.0; x.len()];
+    compute_g(&x, &mut sys, &mut g);
+
+    let h = 1e-6;
+    for i in 0..3 {
+        let gfd = finite_diff(&x, &mut sys, i, h);
+        let err = (g[i] - gfd).abs();
+        assert!(
+            err < 1e-3,
+            "ellipsoid constraint gradient mismatch at var {i}: analytic={} fd={gfd} err={err}",
+            g[i]
+        );
+    }
+}
+
+// ── outside-ellipsoid constraint gradient (kind 9) ─────────────────────────
+
+/// Finite-difference parity for `OutsideEllipsoidRestraint` (Packmol
+/// kind 9). Until the `f` / `fg` `scale2` symmetry fix, `f` returned a
+/// raw `v²` while `fg`'s gradient corresponded to `∂(scale2·v²)/∂x` —
+/// at the default `scale2 = 0.01` this made the optimizer see a
+/// gradient 100× flatter than `f` actually was, so the optimizer
+/// declared "converged" while the function value was still high. This
+/// test pins the symmetric form and would have caught the original
+/// transcription bug.
+#[test]
+fn gradient_outside_ellipsoid_constraint() {
+    let mut sys = single_atom_system(1);
+    sys.restraints = vec![Arc::new(OutsideEllipsoidRestraint::new(
+        [0.0, 0.0, 0.0],
+        [3.0, 2.0, 1.5],
+        1.0,
+    ))];
+    sys.iratom_offsets = vec![0, 1];
+    sys.iratom_data = vec![0];
+    sys.init1 = true;
+
+    // Inside the ellipsoid → penalty active.
+    let mut x = vec![0.0; 6];
+    x[0] = 0.5;
+    x[1] = 0.3;
+    x[2] = -0.4;
+
+    let _ = compute_f(&x, &mut sys);
+    let mut g = vec![0.0; x.len()];
+    compute_g(&x, &mut sys, &mut g);
+
+    let h = 1e-6;
+    for i in 0..3 {
+        let gfd = finite_diff(&x, &mut sys, i, h);
+        let err = (g[i] - gfd).abs();
+        assert!(
+            err < 1e-3,
+            "outside_ellipsoid gradient mismatch at var {i}: analytic={} fd={gfd} err={err}",
+            g[i]
+        );
+    }
+}
+
+// ── gaussian constraint gradient ───────────────────────────────────────────
+
+/// Finite-difference parity for `AboveGaussianRestraint`. The gradient
+/// has a non-trivial cross term (`(z-z0)` × Gaussian profile) that is
+/// easy to mis-derive; without this guard a refactor of the Fortran
+/// kind-14 transcription could go unnoticed.
+#[test]
+fn gradient_above_gaussian_constraint() {
+    let mut sys = single_atom_system(1);
+    // Gaussian "hill" centred at (0,0) with σ=2, base z0=0, height 3.
+    sys.restraints = vec![Arc::new(AboveGaussianRestraint::new(
+        0.0, 0.0, 2.0, 2.0, 0.0, 3.0,
+    ))];
+    sys.iratom_offsets = vec![0, 1];
+    sys.iratom_data = vec![0];
+    sys.init1 = true;
+
+    // Below the gaussian surface: at (1,1) the surface sits at
+    // 3*exp(-(1+1)/8) ≈ 2.34, so z=0.5 is below → penalty active.
+    let mut x = vec![0.0; 6];
+    x[0] = 1.0;
+    x[1] = 1.0;
+    x[2] = 0.5;
+
+    let _ = compute_f(&x, &mut sys);
+    let mut g = vec![0.0; x.len()];
+    compute_g(&x, &mut sys, &mut g);
+
+    let h = 1e-6;
+    for i in 0..3 {
+        let gfd = finite_diff(&x, &mut sys, i, h);
+        let err = (g[i] - gfd).abs();
+        assert!(
+            err < 1e-3,
+            "gaussian constraint gradient mismatch at var {i}: analytic={} fd={gfd} err={err}",
+            g[i]
+        );
+    }
+}
+
 // ── rotation gradient (multi-atom molecules) ───────────────────────────────
 
 #[test]
 fn gradient_with_rotations() {
     let mut sys = PackContext::new(4, 2, 1);
     sys.ntype_with_fixed = 1;
-    sys.nmols = vec![2];
-    sys.natoms = vec![2];
-    sys.idfirst = vec![0];
-    sys.comptype = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
+    sys.topology.nmols = vec![2];
+    sys.topology.natoms = vec![2];
+    sys.topology.idfirst = vec![0];
+    sys.is_type_active = vec![true];
+    sys.topology.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
 
-    sys.radius = vec![1.0; 4];
-    sys.radius_ini = vec![1.0; 4];
-    sys.fscale = vec![1.0; 4];
+    sys.eval.radius = vec![1.0; 4];
+    sys.eval.radius_ini = vec![1.0; 4];
+    sys.eval.fscale = vec![1.0; 4];
     // 2 molecules × 2 atoms — atoms 0,1 belong to mol 0, atoms 2,3 to mol 1.
-    sys.ibmol = vec![0, 0, 1, 1];
-    sys.ibtype = vec![0; 4];
+    sys.atom_mol_idx = vec![0, 0, 1, 1];
+    sys.atom_type_idx = vec![0; 4];
     sys.sync_atom_props();
 
     sys.restraints.clear();
@@ -247,16 +419,16 @@ fn gradient_with_rotations() {
 fn gradient_combined_constraint_and_pairs() {
     let mut sys = PackContext::new(3, 3, 1);
     sys.ntype_with_fixed = 1;
-    sys.nmols = vec![3];
-    sys.natoms = vec![1];
-    sys.idfirst = vec![0];
-    sys.comptype = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0]];
+    sys.topology.nmols = vec![3];
+    sys.topology.natoms = vec![1];
+    sys.topology.idfirst = vec![0];
+    sys.is_type_active = vec![true];
+    sys.topology.coor = vec![[0.0, 0.0, 0.0]];
 
-    sys.radius = vec![1.0; 3];
-    sys.radius_ini = vec![1.0; 3];
-    sys.fscale = vec![1.0; 3];
-    sys.ibmol = vec![0, 1, 2];
+    sys.eval.radius = vec![1.0; 3];
+    sys.eval.radius_ini = vec![1.0; 3];
+    sys.eval.fscale = vec![1.0; 3];
+    sys.atom_mol_idx = vec![0, 1, 2];
     sys.sync_atom_props();
 
     // Box restraint on all atoms
@@ -302,16 +474,16 @@ fn gradient_combined_constraint_and_pairs() {
 fn fused_function_and_gradient_matches_separate_evaluation() {
     let mut sys = PackContext::new(4, 2, 1);
     sys.ntype_with_fixed = 1;
-    sys.nmols = vec![2];
-    sys.natoms = vec![2];
-    sys.idfirst = vec![0];
-    sys.comptype = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
+    sys.topology.nmols = vec![2];
+    sys.topology.natoms = vec![2];
+    sys.topology.idfirst = vec![0];
+    sys.is_type_active = vec![true];
+    sys.topology.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
 
-    sys.radius = vec![1.0; 4];
-    sys.radius_ini = vec![1.0; 4];
-    sys.fscale = vec![1.0; 4];
-    sys.ibmol = vec![0, 0, 1, 1];
+    sys.eval.radius = vec![1.0; 4];
+    sys.eval.radius_ini = vec![1.0; 4];
+    sys.eval.fscale = vec![1.0; 4];
+    sys.atom_mol_idx = vec![0, 0, 1, 1];
     sys.sync_atom_props();
 
     sys.restraints = vec![Arc::new(InsideBoxRestraint::new(

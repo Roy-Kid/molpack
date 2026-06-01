@@ -7,7 +7,7 @@
 //! below stay in the tree as future-regression guards.
 //!
 //! Setup: empty-molecule PackContext. With `ntype=0` / `ntotmol=0` the
-//! body's handler-loop / comptype-loop / xwork alloc / evaluate /
+//! body's handler-loop / is_type_active-loop / xwork alloc / evaluate /
 //! precision short-circuit still execute on empty vectors — this
 //! measures **function-call boundary cost** (indirection, inlining) on
 //! a trivial body. Full-workload benchmarking lives in
@@ -18,7 +18,7 @@ use molpack::gencan::{GencanParams, GencanWorkspace};
 use molpack::handler::Handler;
 use molpack::initial::SwapState;
 use molpack::movebad::MoveBadConfig;
-use molpack::packer::{PhaseOutcome, run_phase};
+use molpack::packer::{Phase, PhaseOutcome, run_phase};
 use molpack::relaxer::RelaxerRunner;
 use molpack::{F, PackContext};
 use rand::SeedableRng;
@@ -37,8 +37,8 @@ type Snapshot = (
 fn build_snapshot() -> Snapshot {
     let ntotat = 4;
     let mut sys = PackContext::new(ntotat, 0, 0);
-    sys.radius.fill(0.75);
-    sys.radius_ini.fill(1.5);
+    sys.eval.radius.fill(0.75);
+    sys.eval.radius_ini.fill(1.5);
     sys.work.radiuswork.resize(ntotat, 0.0);
     sys.sync_atom_props();
     let x: Vec<F> = Vec::new();
@@ -73,7 +73,7 @@ fn bench_fn(c: &mut Criterion) {
             build_snapshot,
             |(mut sys, mut x, mut swap, mut ws, mut runners, mut handlers, mut rng)| {
                 let out = run_phase(
-                    0,
+                    Phase::PerType(0),
                     0,
                     0,
                     1,
@@ -90,7 +90,8 @@ fn bench_fn(c: &mut Criterion) {
                     &mut handlers,
                     &mut ws,
                     &mut rng,
-                );
+                )
+                .expect("run_phase");
                 std::hint::black_box(out);
             },
             BatchSize::SmallInput,
@@ -112,7 +113,7 @@ fn bench_caller(c: &mut Criterion) {
             build_snapshot,
             |(mut sys, mut x, mut swap, mut ws, mut runners, mut handlers, mut rng)| {
                 let mut converged = false;
-                for phase in 0..=0usize {
+                for phase in [Phase::PerType(0)] {
                     let out = run_phase(
                         phase,
                         0,
@@ -131,7 +132,8 @@ fn bench_caller(c: &mut Criterion) {
                         &mut handlers,
                         &mut ws,
                         &mut rng,
-                    );
+                    )
+                    .expect("run_phase");
                     match out {
                         PhaseOutcome::Continue => {}
                         PhaseOutcome::Converged => {

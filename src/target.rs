@@ -105,7 +105,7 @@ pub struct Target {
     /// Centering policy.
     pub centering: CenteringMode,
     /// Rotation bounds in Euler variable order
-    /// `[beta(y), gama(z), teta(x)]` as `(center, half_width)` [`Angle`] pairs.
+    /// `[euler_beta(y), euler_gamma(z), euler_theta(x)]` as `(center, half_width)` [`Angle`] pairs.
     pub rotation_bound: [Option<(Angle, Angle)>; 3],
     /// If `Some`, this molecule is fixed (one copy, placed at the given location).
     pub fixed_at: Option<Placement>,
@@ -229,7 +229,7 @@ impl Target {
     pub fn with_rotation_bound(mut self, axis: Axis, center: Angle, half_width: Angle) -> Self {
         let idx = match axis {
             // Internal index order follows Packmol's Euler variable order
-            // `[beta(y), gama(z), teta(x)]`.
+            // `[euler_beta(y), euler_gamma(z), euler_theta(x)]`.
             Axis::Y => 0,
             Axis::Z => 1,
             Axis::X => 2,

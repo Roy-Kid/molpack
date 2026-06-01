@@ -25,42 +25,42 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
     let ntype = 1usize;
     let mut sys = PackContext::new(ntotat, n_mols, ntype);
     sys.ntype_with_fixed = ntype;
-    sys.nmols = vec![n_mols];
-    sys.natoms = vec![atoms_per_mol];
-    sys.idfirst = vec![0];
-    sys.comptype = vec![true; ntype];
+    sys.topology.nmols = vec![n_mols];
+    sys.topology.natoms = vec![atoms_per_mol];
+    sys.topology.idfirst = vec![0];
+    sys.is_type_active = vec![true; ntype];
     sys.constrain_rot = vec![[false; 3]; ntype];
     sys.rot_bound = vec![[[0.0; 2]; 3]; ntype];
-    sys.coor = vec![[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
-    sys.radius.fill(1.0);
-    sys.radius_ini.fill(1.0);
-    sys.fscale.fill(1.0);
+    sys.topology.coor = vec![[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
+    sys.eval.radius.fill(1.0);
+    sys.eval.radius_ini.fill(1.0);
+    sys.eval.fscale.fill(1.0);
 
     for imol in 0..n_mols {
         for iatom in 0..atoms_per_mol {
             let icart = imol * atoms_per_mol + iatom;
-            sys.ibtype[icart] = 0;
-            sys.ibmol[icart] = imol;
+            sys.atom_type_idx[icart] = 0;
+            sys.atom_mol_idx[icart] = imol;
         }
     }
     sys.iratom_offsets = vec![0; ntotat + 1];
     sys.iratom_data.clear();
 
     let pad: F = 3.0;
-    sys.pbc_min = [-pad, -pad, -pad];
-    sys.pbc_length = [box_side + 2.0 * pad; 3];
+    sys.pbc.min = [-pad, -pad, -pad];
+    sys.pbc.length = [box_side + 2.0 * pad; 3];
     let cell_side: F = 2.0;
     for k in 0..3 {
-        sys.ncells[k] = ((sys.pbc_length[k] / cell_side).floor() as usize).max(1);
-        sys.cell_length[k] = sys.pbc_length[k] / sys.ncells[k] as F;
+        sys.cells.ncells[k] = ((sys.pbc.length[k] / cell_side).floor() as usize).max(1);
+        sys.cells.cell_length[k] = sys.pbc.length[k] / sys.cells.ncells[k] as F;
     }
     sys.resize_cell_arrays();
 
-    sys.sizemin = sys.pbc_min;
+    sys.sizemin = sys.pbc.min;
     sys.sizemax = [
-        sys.pbc_min[0] + sys.pbc_length[0],
-        sys.pbc_min[1] + sys.pbc_length[1],
-        sys.pbc_min[2] + sys.pbc_length[2],
+        sys.pbc.min[0] + sys.pbc.length[0],
+        sys.pbc.min[1] + sys.pbc.length[1],
+        sys.pbc.min[2] + sys.pbc.length[2],
     ];
 
     sys.sync_atom_props();
@@ -159,4 +159,76 @@ fn compute_fg_small_system_parallel_matches_serial() {
     for (a, b) in g_fused.iter().zip(&g_sep) {
         assert!((a - b).abs() < 1e-10, "g mismatch: {a} vs {b}");
     }
+}
+
+// ── pack-level parity: full Molpack::pack run, serial vs parallel ──────────
+
+/// The kernel-level tests above lock in `compute_fg` parity, but the
+/// *full* pack driver layers gencan, relaxer, movebad, RNG sampling, and
+/// handler IO on top. A subtle drift inside any of those that depends
+/// on the parallel branch (e.g. an evaluation-order dependency in the
+/// movebad heuristic) would not surface in `compute_fg` alone. This
+/// test exercises a complete `Molpack::pack` run twice — same seed,
+/// same targets — once serial and once with `parallel_pair_eval(true)`,
+/// and asserts that the final atom coordinates agree to within
+/// `1e-10`. Bit-exactness across rayon merge order is not guaranteed,
+/// so we use an absolute tolerance rather than `==`.
+///
+/// Small workload (3 waters in a 30 Å box, 5 outer loops) keeps this
+/// fast enough to live in the default tier (< 200 ms).
+#[test]
+fn pack_seed_parity_serial_vs_parallel() {
+    use molpack::{InsideBoxRestraint, Molpack, Target};
+
+    fn build_target() -> Target {
+        let positions = vec![[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
+        let radii = vec![1.52, 1.20, 1.20];
+        Target::from_coords(&positions, &radii, 3).with_restraint(InsideBoxRestraint::new(
+            [0.0, 0.0, 0.0],
+            [30.0, 30.0, 30.0],
+            [false; 3],
+        ))
+    }
+
+    const SEED: u64 = 0xA11CE;
+    const MAX_LOOPS: usize = 5;
+
+    let serial = Molpack::new()
+        .with_seed(SEED)
+        .with_parallel_eval(false)
+        .pack(&[build_target()], MAX_LOOPS)
+        .expect("serial pack failed");
+
+    let parallel = Molpack::new()
+        .with_seed(SEED)
+        .with_parallel_eval(true)
+        .pack(&[build_target()], MAX_LOOPS)
+        .expect("parallel pack failed");
+
+    assert_eq!(
+        serial.natoms(),
+        parallel.natoms(),
+        "atom count diverged: {} serial vs {} parallel",
+        serial.natoms(),
+        parallel.natoms()
+    );
+
+    let s = serial.positions();
+    let p = parallel.positions();
+    let mut max_err: F = 0.0;
+    for (i, (a, b)) in s.iter().zip(p.iter()).enumerate() {
+        for k in 0..3 {
+            let err = (a[k] - b[k]).abs();
+            if err > max_err {
+                max_err = err;
+            }
+            assert!(
+                err < 1e-10,
+                "atom {i} axis {k}: serial={} parallel={} err={err}",
+                a[k],
+                b[k]
+            );
+        }
+    }
+    eprintln!("pack_seed_parity: max coord diff = {max_err:e}");
 }

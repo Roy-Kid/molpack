@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::context::PackContext;
+use crate::error::PackError;
 use crate::frame::compute_mol_ids;
 use crate::numerics::objective_small_floor;
 
@@ -73,17 +74,27 @@ pub trait Handler: Send {
 
     /// Called once after initialization completes, with valid `xcart` positions.
     /// Use this to write the initial conformation (e.g. [`XYZHandler`]).
-    fn on_initialized(&mut self, _sys: &PackContext) {}
+    ///
+    /// Returns `Err` to abort packing — e.g. a trajectory writer that cannot
+    /// open its output file.
+    fn on_initialized(&mut self, _sys: &PackContext) -> Result<(), PackError> {
+        Ok(())
+    }
 
-    /// Called after each outer optimization loop iteration.
-    fn on_step(&mut self, info: &StepInfo, sys: &PackContext);
+    /// Called after each outer optimization loop iteration. Returns `Err` to
+    /// abort packing (the error surfaces from `pack()`), e.g. on a write
+    /// failure in a trajectory writer.
+    fn on_step(&mut self, info: &StepInfo, sys: &PackContext) -> Result<(), PackError>;
 
     /// Called at the start of each packing phase (per-type and all-types).
     /// Allows stateful handlers to reset between phases.
     fn on_phase_start(&mut self, _info: &PhaseInfo) {}
 
     /// Called once after the packing loop finishes (convergence or max loops).
-    fn on_finish(&mut self, _sys: &PackContext) {}
+    /// Returns `Err` to surface a teardown/flush failure from `pack()`.
+    fn on_finish(&mut self, _sys: &PackContext) -> Result<(), PackError> {
+        Ok(())
+    }
 
     /// Return `true` to request early termination of the packing loop.
     fn should_stop(&self) -> bool {
@@ -119,7 +130,9 @@ pub trait Handler: Send {
 pub struct NullHandler;
 
 impl Handler for NullHandler {
-    fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {}
+    fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) -> Result<(), PackError> {
+        Ok(())
+    }
 }
 
 // ── XYZHandler ────────────────────────────────────────────────────────────────
@@ -153,29 +166,39 @@ impl XYZHandler {
         }
     }
 
-    fn open(&mut self) {
+    fn open(&mut self) -> Result<(), PackError> {
         if self.file.is_some() {
-            return;
+            return Ok(());
         }
-        match std::fs::OpenOptions::new()
+        let f = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(&self.path)
-        {
-            Ok(f) => self.file = Some(BufWriter::new(f)),
-            Err(e) => log::warn!("XYZHandler: cannot open {}: {e}", self.path.display()),
-        }
+            .map_err(|e| {
+                PackError::HandlerIo(format!(
+                    "XYZHandler: cannot open {}: {e}",
+                    self.path.display()
+                ))
+            })?;
+        self.file = Some(BufWriter::new(f));
+        Ok(())
     }
 
-    fn write_frame(&mut self, comment: &str, sys: &PackContext) {
-        self.open();
-        let Some(ref mut w) = self.file else { return };
+    fn write_frame(&mut self, comment: &str, sys: &PackContext) -> Result<(), PackError> {
+        self.open()?;
+        let w = self.file.as_mut().expect("file opened above");
         use std::io::Write;
-        let nat = sys.xcart.len();
-        let _ = writeln!(w, "{nat}");
-        let _ = writeln!(w, "Properties=species:S:1:pos:R:3:mol:I:1  {comment}");
-        for (icart, pos) in sys.xcart.iter().enumerate() {
+        let io = |r: std::io::Result<()>| {
+            r.map_err(|e| PackError::HandlerIo(format!("XYZHandler: write failed: {e}")))
+        };
+        let nat = sys.eval.xcart.len();
+        io(writeln!(w, "{nat}"))?;
+        io(writeln!(
+            w,
+            "Properties=species:S:1:pos:R:3:mol:I:1  {comment}"
+        ))?;
+        for (icart, pos) in sys.eval.xcart.iter().enumerate() {
             let elem = sys
                 .elements
                 .get(icart)
@@ -183,25 +206,27 @@ impl XYZHandler {
                 .map(|e| e.symbol())
                 .unwrap_or("X");
             let mol_id = self.mol_ids.get(icart).copied().unwrap_or(0);
-            let _ = writeln!(
+            io(writeln!(
                 w,
                 "{elem}  {:.6}  {:.6}  {:.6}  {mol_id}",
                 pos[0], pos[1], pos[2]
-            );
+            ))?;
         }
-        let _ = w.flush();
+        io(w.flush())
     }
 }
 
 impl Handler for XYZHandler {
-    fn on_initialized(&mut self, sys: &PackContext) {
+    fn on_initialized(&mut self, sys: &PackContext) -> Result<(), PackError> {
         self.mol_ids = compute_mol_ids(sys);
+        Ok(())
     }
 
-    fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
+    fn on_step(&mut self, info: &StepInfo, sys: &PackContext) -> Result<(), PackError> {
         if info.loop_idx % self.every == 0 {
-            self.write_frame(&format!("step {}", info.loop_idx), sys);
+            self.write_frame(&format!("step {}", info.loop_idx), sys)?;
         }
+        Ok(())
     }
 }
 
@@ -232,12 +257,13 @@ impl Handler for ProgressHandler {
         eprintln!("Packing {ntotmol} molecules ({ntotat} atoms)...");
     }
 
-    fn on_initialized(&mut self, sys: &PackContext) {
+    fn on_initialized(&mut self, sys: &PackContext) -> Result<(), PackError> {
         let elapsed = self.start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
         eprintln!(
             "  Initializing... done ({:.1}s)  overlap: {:.4e}  constraints: {:.4e}",
-            elapsed, sys.fdist, sys.frest
+            elapsed, sys.eval.fdist, sys.eval.frest
         );
+        Ok(())
     }
 
     fn on_phase_start(&mut self, info: &PhaseInfo) {
@@ -248,7 +274,7 @@ impl Handler for ProgressHandler {
         eprintln!("  Phase [{}/{}] {desc}", info.phase + 1, info.total_phases,);
     }
 
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
+    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) -> Result<(), PackError> {
         let elapsed = self.start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
         eprintln!(
             "    Step [{}/{}]  overlap: {:.2e}  constraints: {:.2e}  improved {:.1}%  ({:.1}s)",
@@ -259,21 +285,23 @@ impl Handler for ProgressHandler {
             info.improvement_pct,
             elapsed,
         );
+        Ok(())
     }
 
-    fn on_finish(&mut self, sys: &PackContext) {
+    fn on_finish(&mut self, sys: &PackContext) -> Result<(), PackError> {
         let elapsed = self.start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
-        if sys.fdist < 0.01 && sys.frest < 0.01 {
+        if sys.eval.fdist < 0.01 && sys.eval.frest < 0.01 {
             eprintln!(
                 "  Converged in {:.1}s — overlap: {:.2e}  constraints: {:.2e}",
-                elapsed, sys.fdist, sys.frest,
+                elapsed, sys.eval.fdist, sys.eval.frest,
             );
         } else {
             eprintln!(
                 "  Did not converge ({:.1}s) — overlap: {:.2e}  constraints: {:.2e}",
-                elapsed, sys.fdist, sys.frest,
+                elapsed, sys.eval.fdist, sys.eval.frest,
             );
         }
+        Ok(())
     }
 }
 
@@ -330,10 +358,11 @@ impl Default for EarlyStopHandler {
 }
 
 impl Handler for EarlyStopHandler {
-    fn on_initialized(&mut self, _sys: &PackContext) {
+    fn on_initialized(&mut self, _sys: &PackContext) -> Result<(), PackError> {
         self.prev_violation = F::INFINITY;
         self.stall_count = 0;
         self.stop = false;
+        Ok(())
     }
 
     fn on_phase_start(&mut self, _info: &PhaseInfo) {
@@ -342,11 +371,11 @@ impl Handler for EarlyStopHandler {
         self.stop = false;
     }
 
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
+    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) -> Result<(), PackError> {
         let v = info.fdist + info.frest;
         if info.loop_idx <= self.warmup {
             self.prev_violation = v;
-            return;
+            return Ok(());
         }
         let rel_change = if self.prev_violation > 0.0 {
             (self.prev_violation - v) / self.prev_violation
@@ -370,6 +399,7 @@ impl Handler for EarlyStopHandler {
             self.stall_count = 0;
         }
         self.prev_violation = v;
+        Ok(())
     }
 
     fn should_stop(&self) -> bool {

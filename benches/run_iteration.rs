@@ -17,7 +17,7 @@ use molpack::gencan::{GencanParams, GencanWorkspace};
 use molpack::handler::{Handler, PhaseInfo};
 use molpack::initial::SwapState;
 use molpack::movebad::MoveBadConfig;
-use molpack::packer::{IterOutcome, run_iteration};
+use molpack::packer::{IterOutcome, IterationConfig, IterationState, run_iteration};
 use molpack::relaxer::RelaxerRunner;
 use molpack::{F, PackContext};
 use rand::SeedableRng;
@@ -36,8 +36,8 @@ type Snapshot = (
 fn build_snapshot() -> Snapshot {
     let ntotat = 4;
     let mut sys = PackContext::new(ntotat, 0, 0);
-    sys.radius.fill(0.75);
-    sys.radius_ini.fill(1.5);
+    sys.eval.radius.fill(0.75);
+    sys.eval.radius_ini.fill(1.5);
     sys.work.radiuswork.resize(ntotat, 0.0);
     sys.sync_atom_props();
     let x: Vec<F> = Vec::new();
@@ -80,30 +80,34 @@ fn bench_fn(c: &mut Criterion) {
         b.iter_batched(
             build_snapshot,
             |(mut sys, mut x, mut swap, mut ws, mut runners, mut handlers, mut rng)| {
-                let mut flast = 0.0_f64;
-                let mut fimp_prev = F::INFINITY;
-                let mut radscale = 1.0_f64;
+                let cfg = IterationConfig {
+                    max_loops: 10,
+                    is_all: true,
+                    phase: 0,
+                    phase_info: pi,
+                    precision: 0.01,
+                    disable_movebad: true,
+                    movebad_cfg: &mb,
+                    gencan_params: &gp,
+                };
+                let mut state = IterationState {
+                    loop_idx: 0,
+                    flast: 0.0_f64,
+                    fimp_prev: F::INFINITY,
+                    radscale: 1.0_f64,
+                };
                 let out = run_iteration(
-                    0,
-                    10,
-                    true,
-                    0,
-                    pi,
-                    0.01,
-                    true,
-                    &mb,
-                    &gp,
+                    cfg,
+                    &mut state,
                     &mut sys,
                     &mut x,
                     &mut swap,
-                    &mut flast,
-                    &mut fimp_prev,
-                    &mut radscale,
                     &mut runners,
                     &mut handlers,
                     &mut ws,
                     &mut rng,
-                );
+                )
+                .expect("run_iteration");
                 std::hint::black_box(out);
             },
             BatchSize::SmallInput,
@@ -125,31 +129,35 @@ fn bench_caller(c: &mut Criterion) {
         b.iter_batched(
             build_snapshot,
             |(mut sys, mut x, mut swap, mut ws, mut runners, mut handlers, mut rng)| {
-                let mut flast = 0.0_f64;
-                let mut fimp_prev = F::INFINITY;
-                let mut radscale = 1.0_f64;
                 let mut converged = false;
+                let cfg = IterationConfig {
+                    max_loops: 10,
+                    is_all: true,
+                    phase: 0,
+                    phase_info: pi,
+                    precision: 0.01,
+                    disable_movebad: true,
+                    movebad_cfg: &mb,
+                    gencan_params: &gp,
+                };
+                let mut state = IterationState {
+                    loop_idx: 0,
+                    flast: 0.0_f64,
+                    fimp_prev: F::INFINITY,
+                    radscale: 1.0_f64,
+                };
                 let out = run_iteration(
-                    0,
-                    10,
-                    true,
-                    0,
-                    pi,
-                    0.01,
-                    true,
-                    &mb,
-                    &gp,
+                    cfg,
+                    &mut state,
                     &mut sys,
                     &mut x,
                     &mut swap,
-                    &mut flast,
-                    &mut fimp_prev,
-                    &mut radscale,
                     &mut runners,
                     &mut handlers,
                     &mut ws,
                     &mut rng,
-                );
+                )
+                .expect("run_iteration");
                 match out {
                     IterOutcome::Continue => {}
                     IterOutcome::Converged | IterOutcome::EarlyStop => {

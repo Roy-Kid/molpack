@@ -44,7 +44,7 @@ pub struct WorkBuffers {
     /// Last x-vector whose expanded Cartesian geometry is still resident in `PackContext`.
     pub cached_x: Vec<F>,
     /// Active-type mask associated with `cached_x`.
-    pub cached_comptype: Vec<bool>,
+    pub cached_is_type_active: Vec<bool>,
     /// Whether the cached geometry was built in init1 mode.
     pub cached_init1: bool,
     /// Cell grid signature for the cached geometry.
@@ -68,7 +68,7 @@ impl WorkBuffers {
             flash_ind: Vec::new(),
             flash_l: Vec::new(),
             cached_x: Vec::new(),
-            cached_comptype: Vec::new(),
+            cached_is_type_active: Vec::new(),
             cached_init1: false,
             cached_ncells: [0; 3],
             cached_cell_length: [0.0; 3],
@@ -161,7 +161,7 @@ impl WorkBuffers {
     pub fn matches_cached_geometry(
         &self,
         x: &[F],
-        comptype: &[bool],
+        is_type_active: &[bool],
         init1: bool,
         ncells: [usize; 3],
         cell_length: [F; 3],
@@ -177,14 +177,14 @@ impl WorkBuffers {
             && self.cached_pbc_length == pbc_length
             && self.cached_pbc_periodic == pbc_periodic
             && self.cached_x == x
-            && self.cached_comptype == comptype
+            && self.cached_is_type_active == is_type_active
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn update_cached_geometry(
         &mut self,
         x: &[F],
-        comptype: &[bool],
+        is_type_active: &[bool],
         init1: bool,
         ncells: [usize; 3],
         cell_length: [F; 3],
@@ -194,8 +194,8 @@ impl WorkBuffers {
     ) {
         self.cached_x.clear();
         self.cached_x.extend_from_slice(x);
-        self.cached_comptype.clear();
-        self.cached_comptype.extend_from_slice(comptype);
+        self.cached_is_type_active.clear();
+        self.cached_is_type_active.extend_from_slice(is_type_active);
         self.cached_init1 = init1;
         self.cached_ncells = ncells;
         self.cached_cell_length = cell_length;
