@@ -1,19 +1,23 @@
 name: Benchmark
 
-# Continuous performance tracking via benchmark-action/github-action-benchmark.
-# Runs the criterion benches and stores the trend on `gh-pages`.
+# Performance tracking via benchmark-action/github-action-benchmark, stored on gh-pages.
 #
-# molpack builds against the PUBLISHED molrs crate here (the Cargo.toml
-# `path = "../molrs/..."` is only for local sibling-checkout dev). We strip
-# those path keys so Cargo resolves molrs from crates.io. molpack is checked
-# out at the workspace root so benchmark-action has a git repo for the gh-pages push.
+# Runs only the cheap, deterministic micro/kernel benches here. The end-to-end
+# pack_end_to_end benches drive full Packmol optimizations (pack_spherical alone
+# is 30-60 min: 18k molecules x 800 loops x 10 samples) and are NOT run per-push;
+# trigger them on demand with `cargo bench --bench pack_end_to_end`.
+#
+# molpack builds against the PUBLISHED molrs crate (the `path = "../molrs/..."` in
+# Cargo.toml is local-dev only); we strip those path keys so Cargo uses crates.io.
+# molpack is checked out at the workspace root so benchmark-action has a git repo
+# for the gh-pages push.
 on:
   push:
     branches: [master, main]
   workflow_dispatch:
 
 permissions:
-  contents: write # push results to gh-pages
+  contents: write
   deployments: write
 
 jobs:
@@ -29,13 +33,20 @@ jobs:
         run: |
           sed -i -E 's#path = "\.\./molrs/[^"]*", ##g' Cargo.toml
 
-      # SMOKE: one fast micro-bench just to prove the build->output->gh-pages flow.
-      # TODO: restore the full e2e + kernel suite once the pipeline is green.
-      - name: Run quick smoke bench
+      - name: Run kernel / micro benches
         run: >
-          cargo bench --bench objective_dispatch --features cli,rayon --
-          --output-format bencher --sample-size 10 --measurement-time 1 --warm-up-time 1
+          cargo bench
+          --bench objective_dispatch --bench pair_kernel --bench evaluate_unscaled
+          --bench run_iteration --bench run_phase --bench partial_gradient_merge
+          --features cli,rayon --
+          --output-format bencher --sample-size 50
           | tee output.txt
+
+      # The benchmark-action switches to the gh-pages branch in this same tree;
+      # restore the sed-modified Cargo.toml (+ any build-updated lock) so the
+      # switch isn't blocked by dirty tracked files. output.txt is untracked and survives.
+      - name: Restore working tree
+        run: git checkout -- .
 
       - name: Store + compare benchmark result
         uses: benchmark-action/github-action-benchmark@v1
