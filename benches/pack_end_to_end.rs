@@ -32,7 +32,7 @@ fn bench_case(c: &mut Criterion, case: ExampleCase) {
     let seed = case.seed();
 
     let mut group = c.benchmark_group("pack_end_to_end");
-    group.sample_size(10);
+    group.sample_size(3);
     group.bench_function(case.name(), |b| {
         b.iter_batched(
             || build_targets(case, &base).expect("build targets"),
