@@ -29,25 +29,13 @@ jobs:
         run: |
           sed -i -E 's#path = "\.\./molrs/[^"]*", ##g' Cargo.toml
 
-      # End-to-end packing benches are optimizer-iteration-dominated and the
-      # `solvprotein` case is slow + high-variance, so run them at criterion's
-      # floor (sample-size 10). Microbenches are cheap and deterministic, so
-      # give them more samples for tighter intervals.
-      - name: Run e2e benches (few samples)
+      # SMOKE: one fast micro-bench just to prove the build->output->gh-pages flow.
+      # TODO: restore the full e2e + kernel suite once the pipeline is green.
+      - name: Run quick smoke bench
         run: >
-          cargo bench --bench pack_end_to_end --features cli,rayon --
-          --output-format bencher --sample-size 10 --warm-up-time 1
-          | tee bench-e2e.txt
-      - name: Run kernel / micro benches (more samples)
-        run: >
-          cargo bench
-          --bench objective_dispatch --bench pair_kernel --bench evaluate_unscaled
-          --bench run_iteration --bench run_phase --bench partial_gradient_merge
-          --features cli,rayon --
-          --output-format bencher --sample-size 50
-          | tee bench-kernel.txt
-      - name: Merge bench output
-        run: cat bench-e2e.txt bench-kernel.txt > output.txt
+          cargo bench --bench objective_dispatch --features cli,rayon --
+          --output-format bencher --sample-size 10 --measurement-time 1 --warm-up-time 1
+          | tee output.txt
 
       - name: Store + compare benchmark result
         uses: benchmark-action/github-action-benchmark@v1
