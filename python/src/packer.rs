@@ -3,7 +3,8 @@
 //! [`PyPacker`] is the Python face of [`molpack::Molpack`]. Builders mirror
 //! the Rust names 1:1. [`PyPackResult`] is the output container — callers
 //! get a ready-to-use `molrs.Frame` from `.frame` (full topology + box) and a
-//! numpy `positions` view. See [`crate::assemble`] for how the frame is built.
+//! numpy `positions` view. The frame assembly lives in the `molpack._assemble`
+//! Python module; `.frame` is a thin marshalling shim over it.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -18,6 +19,7 @@ use molpack::packer::{Molpack, PackResult};
 use numpy::IntoPyArray;
 use numpy::PyArray2;
 use pyo3::prelude::*;
+use pyo3::types::{PyList, PyModule};
 
 // ── PackResult ─────────────────────────────────────────────────────────────
 
@@ -63,62 +65,33 @@ impl PyPackResult {
         arr.into_pyarray(py)
     }
 
-    /// Packed result as a ready-to-use ``molrs.Frame`` (built via the user's
-    /// installed ``molrs`` — molpack does not link the ``molrs`` Python crate).
+    /// Packed result as a ready-to-use ``molrs.Frame``.
     ///
     /// When the targets carry source frames (the ``Target(frame, count)``
     /// API), each template's full topology is replayed onto the packed
-    /// coordinates: the ``"atoms"`` block holds every template column plus
-    /// packed ``x``/``y``/``z`` and regenerated ``id`` / ``mol_id``, and any
-    /// ``"bonds"`` / ``"angles"`` / ``"dihedrals"`` / ``"impropers"`` blocks
-    /// are included with index columns offset per copy. The periodic box, if
-    /// one was declared via :meth:`Molpack.with_periodic_box`, is stamped on
-    /// ``frame.box``. Force fields are out of scope — merge them separately
-    /// (e.g. ``molpy``'s ``ForceField.merge``).
+    /// coordinates — atom columns tiled per copy, ``"bonds"`` / ``"angles"`` /
+    /// ``"dihedrals"`` / ``"impropers"`` index columns offset per copy, and
+    /// ``id`` / ``mol_id`` regenerated. The periodic box, if one was declared
+    /// via :meth:`Molpack.with_periodic_box`, is stamped on ``frame.box``.
+    /// Falls back to a coordinates-only ``"atoms"`` block when no source
+    /// frames are available (``.inp`` script packing). Force fields are out of
+    /// scope — merge them separately.
     ///
-    /// Falls back to a coordinates-only ``"atoms"`` block (``x``, ``y``,
-    /// ``z``, ``element``) when no source frames are available (``.inp``
-    /// script packing). molpack does not provide writers.
+    /// The assembly itself lives in :mod:`molpack._assemble`, which speaks the
+    /// ``Frame.to_dict`` / ``Frame.from_dict`` boundary shared by every frame
+    /// flavour. This getter is a thin marshalling shim over it.
     #[getter]
     fn frame<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let assemble = PyModule::import(py, "molpack._assemble")?;
+        let positions = self.positions(py);
         if self.templates.is_empty() {
-            let atoms = self
-                .inner
-                .frame
-                .get("atoms")
-                .expect("frame has no 'atoms' block");
-            let xs: Vec<F> = atoms
-                .get_float("x")
-                .expect("no 'x' column")
-                .iter()
-                .copied()
-                .collect();
-            let ys: Vec<F> = atoms
-                .get_float("y")
-                .expect("no 'y' column")
-                .iter()
-                .copied()
-                .collect();
-            let zs: Vec<F> = atoms
-                .get_float("z")
-                .expect("no 'z' column")
-                .iter()
-                .copied()
-                .collect();
-            let elements: Vec<String> = atoms
-                .get_string("element")
-                .expect("no 'element' column")
-                .iter()
-                .cloned()
-                .collect();
-            return crate::assemble::coords_only_frame(py, xs, ys, zs, elements, self.box_bounds);
+            return assemble.call_method1(
+                "coords_only_frame",
+                (positions, self.elements(), self.box_bounds),
+            );
         }
-        crate::assemble::topology_frame(
-            py,
-            &self.inner.positions(),
-            &self.templates,
-            self.box_bounds,
-        )
+        let templates = PyList::new(py, self.templates.iter().map(|(f, c)| (f.bind(py), *c)))?;
+        assemble.call_method1("topology_frame", (positions, templates, self.box_bounds))
     }
 
     #[getter]
