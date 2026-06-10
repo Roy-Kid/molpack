@@ -359,7 +359,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         packer = packer.with_handler(XYZHandler::new(out_dir.join("polymer_vesicle.xyz"), 10));
     }
 
-    let result = packer.pack(&targets, 500)?;
+    let result = packer.pack_with_report(&targets, 500)?;
 
     eprintln!(
         "Done — {} atoms, converged={}, fdist={:.2e}, frest={:.2e}",

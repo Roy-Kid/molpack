@@ -46,13 +46,14 @@
 //!     .with_name("water")
 //!     .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0, 40.0, 40.0], [false; 3]));
 //!
-//! let result = Molpack::new()
+//! let frame = Molpack::new()
 //!     .with_tolerance(2.0)
 //!     .with_precision(0.01)
 //!     .with_seed(42)
 //!     .pack(&[target], 200)?;
 //!
-//! println!("converged = {}, natoms = {}", result.converged, result.natoms());
+//! let natoms = frame.get("atoms").and_then(|b| b.nrows()).unwrap_or(0);
+//! println!("packed {natoms} atoms");
 //! # Ok::<(), molpack::PackError>(())
 //! ```
 //!
@@ -60,11 +61,11 @@
 //!
 //! | Category | Items |
 //! |---|---|
-//! | Builder | [`Molpack`], [`PackResult`] |
+//! | Builder | [`Molpack`], [`MolpackLogLevel`], [`PackResult`] |
 //! | Target  | [`Target`], [`CenteringMode`] |
 //! | Restraint trait + 14 concrete structs | [`Restraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…Restraint` |
 //! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
-//! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`PhaseInfo`], [`PhaseReport`] |
+//! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`PhaseInfo`], [`PhaseReport`] |
 //! | Relaxer trait + built-in | [`Relaxer`], [`RelaxerRunner`], [`TorsionMcRelaxer`] (aliased to `TorsionMcHook`) |
 //! | Errors | [`PackError`] |
 //! | Validation | [`validate_from_targets`], [`ValidationReport`], [`ViolationMetrics`] |
@@ -113,8 +114,8 @@ pub use context::PackContext;
 pub use error::PackError;
 pub use frame::{compute_mol_ids, context_to_frame, finalize_frame, frame_to_coords};
 pub use handler::{
-    EarlyStopHandler, Handler, NullHandler, PhaseInfo, PhaseReport, ProgressHandler, StepInfo,
-    XYZHandler,
+    EarlyStopHandler, Handler, LammpsLogHandler, MolpackLogLevel, NullHandler, PhaseInfo,
+    PhaseReport, ProgressHandler, StepInfo, XYZHandler,
 };
 pub use molrs::Element;
 pub use molrs::types::F;
@@ -173,7 +174,7 @@ pub mod extending {}
 ///
 /// let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 10)
 ///     .with_restraint(InsideBoxRestraint::new([0.0; 3], [10.0; 3], [false; 3]));
-/// let result = Molpack::new().pack(&[target], 100)?;
+/// let frame = Molpack::new().pack(&[target], 100)?;
 /// # Ok::<(), molpack::PackError>(())
 /// ```
 ///
@@ -205,7 +206,9 @@ pub mod prelude {
         InsideSphereRegion,
         InsideSphereRestraint,
         // Core builder + result + error
+        LammpsLogHandler,
         Molpack,
+        MolpackLogLevel,
         Not,
         NullHandler,
         Or,

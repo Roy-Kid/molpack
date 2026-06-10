@@ -51,7 +51,7 @@ water = Target(water_frame, count=1000).with_name("water").with_restraint(box)
 urea  = Target(urea_frame,  count=400).with_name("urea").with_restraint(box)
 
 packer = Molpack().with_tolerance(2.0).with_seed(1_234_567)
-result = packer.pack([water, urea], max_loops=400)
+result = packer.pack_with_report([water, urea], max_loops=400)
 print(f"converged={result.converged}  natoms={result.natoms}")
 ```
 
@@ -73,7 +73,7 @@ frame = {
 water = Target(frame, count=100).with_name("water").with_restraint(
     InsideBoxRestraint([0, 0, 0], [30, 30, 30])
 )
-packer = Molpack().with_tolerance(2.0).with_progress(False).with_seed(42)
-result = packer.pack([water], max_loops=200)
+packer = Molpack().with_tolerance(2.0).with_log_level("quiet").with_seed(42)
+result = packer.pack_with_report([water], max_loops=200)
 print(f"converged={result.converged}  natoms={result.natoms}")
 ```

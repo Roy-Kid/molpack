@@ -17,6 +17,7 @@ __pycache__/
 .venv/
 dist/
 *.egg-info/
+python/uv.lock
 
 # Example outputs (generated at runtime)
 examples/**/out/

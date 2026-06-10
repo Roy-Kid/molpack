@@ -40,6 +40,27 @@ pub struct PhaseReport {
     pub converged: bool,
 }
 
+/// Screen-log detail level for LAMMPS-style packer output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum MolpackLogLevel {
+    /// Print nothing.
+    #[default]
+    Quiet,
+    /// Print system setup, phase summaries, and final summary.
+    Summary,
+    /// Print per-step thermo-style progress lines.
+    Progress,
+    /// Print the same progress lines plus extra diagnostic columns.
+    Verbose,
+}
+
+impl MolpackLogLevel {
+    #[inline]
+    pub const fn is_enabled(self) -> bool {
+        !matches!(self, Self::Quiet)
+    }
+}
+
 /// Per-iteration progress snapshot.
 #[derive(Debug, Clone)]
 pub struct StepInfo {
@@ -274,6 +295,187 @@ impl Handler for ProgressHandler {
                 elapsed, sys.fdist, sys.frest,
             );
         }
+    }
+}
+
+// ── LammpsLogHandler ─────────────────────────────────────────────────────────
+
+/// LAMMPS-style screen log for packing runs.
+///
+/// Most users should enable this through
+/// [`Molpack::with_lammps_output`][crate::packer::Molpack::with_lammps_output]
+/// or [`Molpack::with_log_level`][crate::packer::Molpack::with_log_level]
+/// instead of attaching the handler manually.
+pub struct LammpsLogHandler {
+    level: MolpackLogLevel,
+    every: usize,
+    tolerance: F,
+    precision: F,
+    seed: u64,
+    max_loops: usize,
+    ntypes: usize,
+    periodic_box: Option<([F; 3], [F; 3], [bool; 3])>,
+    start: Option<Instant>,
+    phase_start: Option<Instant>,
+}
+
+impl LammpsLogHandler {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        level: MolpackLogLevel,
+        every: usize,
+        tolerance: F,
+        precision: F,
+        seed: u64,
+        max_loops: usize,
+        ntypes: usize,
+        periodic_box: Option<([F; 3], [F; 3], [bool; 3])>,
+    ) -> Self {
+        Self {
+            level,
+            every: every.max(1),
+            tolerance,
+            precision,
+            seed,
+            max_loops,
+            ntypes,
+            periodic_box,
+            start: None,
+            phase_start: None,
+        }
+    }
+
+    fn elapsed(&self) -> F {
+        self.start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0)
+    }
+
+    fn phase_elapsed(&self) -> F {
+        self.phase_start
+            .map(|t| t.elapsed().as_secs_f64())
+            .unwrap_or(0.0)
+    }
+}
+
+impl Handler for LammpsLogHandler {
+    fn on_start(&mut self, ntotat: usize, ntotmol: usize) {
+        if !self.level.is_enabled() {
+            return;
+        }
+
+        let now = Instant::now();
+        self.start = Some(now);
+        self.phase_start = Some(now);
+
+        eprintln!("Molpack screen log");
+        eprintln!("System information:");
+        eprintln!("  molecule types = {}", self.ntypes);
+        eprintln!("  molecules      = {ntotmol}");
+        eprintln!("  atoms          = {ntotat}");
+        eprintln!("Settings:");
+        eprintln!("  tolerance      = {:.6} A", self.tolerance);
+        eprintln!("  precision      = {:.6}", self.precision);
+        eprintln!("  seed           = {}", self.seed);
+        eprintln!("  nloop          = {}", self.max_loops);
+        match self.periodic_box {
+            Some((min, max, flags)) => eprintln!(
+                "  pbc            = [{:.6}, {:.6}, {:.6}] -> [{:.6}, {:.6}, {:.6}]  flags={:?}",
+                min[0], min[1], min[2], max[0], max[1], max[2], flags
+            ),
+            None => eprintln!("  pbc            = off"),
+        }
+    }
+
+    fn on_initialized(&mut self, sys: &PackContext) {
+        if !self.level.is_enabled() {
+            return;
+        }
+        eprintln!(
+            "Initialization: time={:.3}s overlap={:.4e} restraints={:.4e}",
+            self.elapsed(),
+            sys.fdist,
+            sys.frest
+        );
+    }
+
+    fn on_phase_start(&mut self, info: &PhaseInfo) {
+        if !self.level.is_enabled() {
+            return;
+        }
+        self.phase_start = Some(Instant::now());
+        let desc = match info.molecule_type {
+            Some(itype) => format!("type {itype} compaction"),
+            None => "all-type optimization".to_string(),
+        };
+        eprintln!("Phase {}/{}: {desc}", info.phase + 1, info.total_phases);
+        if self.level >= MolpackLogLevel::Progress {
+            if self.level >= MolpackLogLevel::Verbose {
+                eprintln!(
+                    "{:>8} {:>14} {:>14} {:>10} {:>10} {:>10}",
+                    "Step", "Overlap", "Restraint", "Improve%", "RadScale", "Time"
+                );
+            } else {
+                eprintln!(
+                    "{:>8} {:>14} {:>14} {:>10} {:>10}",
+                    "Step", "Overlap", "Restraint", "Improve%", "Time"
+                );
+            }
+        }
+    }
+
+    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
+        if self.level < MolpackLogLevel::Progress || info.loop_idx % self.every != 0 {
+            return;
+        }
+        if self.level >= MolpackLogLevel::Verbose {
+            eprintln!(
+                "{:>8} {:>14.6e} {:>14.6e} {:>10.3} {:>10.4} {:>10.3}",
+                info.loop_idx + 1,
+                info.fdist,
+                info.frest,
+                info.improvement_pct,
+                info.radscale,
+                self.elapsed(),
+            );
+        } else {
+            eprintln!(
+                "{:>8} {:>14.6e} {:>14.6e} {:>10.3} {:>10.3}",
+                info.loop_idx + 1,
+                info.fdist,
+                info.frest,
+                info.improvement_pct,
+                self.elapsed(),
+            );
+        }
+    }
+
+    fn on_phase_end(&mut self, info: &PhaseInfo, report: &PhaseReport) {
+        if !self.level.is_enabled() {
+            return;
+        }
+        eprintln!(
+            "Phase {}/{} summary: steps={} converged={} overlap={:.6e} restraints={:.6e} time={:.3}s",
+            info.phase + 1,
+            info.total_phases,
+            report.iterations,
+            report.converged,
+            report.fdist,
+            report.frest,
+            self.phase_elapsed(),
+        );
+    }
+
+    fn on_finish(&mut self, sys: &PackContext) {
+        if !self.level.is_enabled() {
+            return;
+        }
+        let converged = sys.fdist < self.precision && sys.frest < self.precision;
+        eprintln!(
+            "Final summary: converged={} overlap={:.6e} restraints={:.6e} elapsed={:.3}s",
+            converged,
+            sys.fdist,
+            sys.frest,
+            self.elapsed(),
+        );
     }
 }
 

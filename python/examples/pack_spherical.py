@@ -67,7 +67,7 @@ def main() -> None:
         .with_seed(1_234_567)
     )
 
-    result = packer.pack(
+    result = packer.pack_with_report(
         [water_inner, lipid_inner, lipid_outer, water_outer],
         max_loops=800,
     )

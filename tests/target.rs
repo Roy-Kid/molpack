@@ -162,7 +162,7 @@ fn fixed_target_auto_centering_disabled() {
 
     let result = Molpack::new()
         .with_seed(1)
-        .pack(&[free, fixed], 5)
+        .pack_with_report(&[free, fixed], 5)
         .expect("pack should succeed");
 
     // Fixed atoms follow free atoms in output.
@@ -181,7 +181,7 @@ fn fixed_target_centered() {
 
     let result = Molpack::new()
         .with_seed(1)
-        .pack(&[free, fixed], 5)
+        .pack_with_report(&[free, fixed], 5)
         .expect("pack should succeed");
 
     // COM of [10,12] = 11. After centering, ref_coords = [-1, +1].

@@ -55,7 +55,7 @@ class TestHandlerCallbacks:
         target = molpack.Target(_two_water_frame(), count=30).with_restraint(
             molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
-        _packer().with_handler(log).with_seed(1).pack([target], max_loops=5)
+        _packer().with_handler(log).with_seed(1).pack_with_report([target], max_loops=5)
 
         assert log.started is True
         assert log.finished is True
@@ -88,7 +88,9 @@ class TestHandlerCallbacks:
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
             molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
-        _packer().with_handler(Grabber()).with_seed(1).pack([target], max_loops=2)
+        _packer().with_handler(Grabber()).with_seed(1).pack_with_report(
+            [target], max_loops=2
+        )
 
         assert captured, "expected at least one on_step call"
         first = captured[0]
@@ -112,7 +114,10 @@ class TestHandlerCallbacks:
             molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         result = (
-            _packer().with_handler(Empty()).with_seed(1).pack([target], max_loops=2)
+            _packer()
+            .with_handler(Empty())
+            .with_seed(1)
+            .pack_with_report([target], max_loops=2)
         )
         assert result.natoms == 4
 
@@ -129,7 +134,9 @@ class TestHandlerEarlyStop:
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
             molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
         )
-        _packer().with_handler(StopAfterOne()).with_seed(1).pack([target], max_loops=50)
+        _packer().with_handler(StopAfterOne()).with_seed(1).pack_with_report(
+            [target], max_loops=50
+        )
 
         # The per-phase compaction loop itself runs through its handler
         # pass before checking should_stop; we just assert that we did
@@ -149,7 +156,9 @@ class TestHandlerErrorPropagation:
             molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         with pytest.raises(ValueError, match="boom from handler"):
-            _packer().with_handler(Explodes()).with_seed(1).pack([target], max_loops=5)
+            _packer().with_handler(Explodes()).with_seed(1).pack_with_report(
+                [target], max_loops=5
+            )
 
     def test_exception_in_on_start_is_reraised(self):
         class ExplodesEarly:
@@ -160,7 +169,7 @@ class TestHandlerErrorPropagation:
             molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         with pytest.raises(RuntimeError, match="boom from on_start"):
-            _packer().with_handler(ExplodesEarly()).with_seed(1).pack(
+            _packer().with_handler(ExplodesEarly()).with_seed(1).pack_with_report(
                 [target], max_loops=5
             )
 
@@ -172,7 +181,7 @@ class TestMultipleHandlers:
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
             molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
-        _packer().with_handler(log1).with_handler(log2).with_seed(1).pack(
+        _packer().with_handler(log1).with_handler(log2).with_seed(1).pack_with_report(
             [target], max_loops=2
         )
 

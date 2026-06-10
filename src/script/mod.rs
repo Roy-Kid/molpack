@@ -15,8 +15,8 @@
 //!   let script = script::parse(&src)?;
 //!   let built = script.build(Path::new("."))?;
 //!
-//!   let result = built.packer.pack(&built.targets, built.nloop)?;
-//!   script::write_frame(&built.output, &result.frame)?;
+//!   let frame = built.packer.pack(&built.targets, built.nloop)?;
+//!   script::write_frame(&built.output, &frame)?;
 //!   # Ok::<(), Box<dyn std::error::Error>>(())
 //!   ```
 //!

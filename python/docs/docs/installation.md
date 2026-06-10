@@ -34,7 +34,7 @@ water = (
     .with_name("water")
     .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
-result = Molpack().with_seed(42).pack([water], max_loops=200)
+frame = Molpack().with_seed(42).pack([water], max_loops=200)
 ```
 
 `molpack` also accepts plain Python dicts-of-dicts, so `molcrafts-molrs`

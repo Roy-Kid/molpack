@@ -6,7 +6,7 @@
 //! |------------------|----------------------|------------------------------------|
 //! | `Target`         | [`PyTarget`]         | Molecule specification for packing |
 //! | `Molpack`        | [`PyPacker`]         | Molecular packer (Packmol port)    |
-//! | `PackResult`     | [`PyPackResult`]     | Pack output (positions, elements)  |
+//! | `PackResult`     | [`PyPackResult`]     | Diagnostics from `pack_with_report` |
 //! | `StepInfo`       | [`PyStepInfo`]       | Read-only snapshot for handlers    |
 //! | `InsideBox`      | [`PyInsideBox`]      | Box restraint                      |
 //! | `InsideSphere`   | [`PyInsideSphere`]   | Sphere restraint (inside)          |

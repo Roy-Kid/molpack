@@ -229,15 +229,28 @@ class TestMolpackPack:
         return molpack.Molpack().with_tolerance(2.0).with_progress(False)
 
     def test_minimal_packing(self):
-        result = self._packer().with_seed(42).pack([self._make_target()], max_loops=50)
+        result = (
+            self._packer()
+            .with_seed(42)
+            .pack_with_report([self._make_target()], max_loops=50)
+        )
 
         assert result.positions.shape == (3, 3)
         assert result.fdist >= 0.0
         assert result.frest >= 0.0
         assert isinstance(result.converged, bool)
 
+    def test_pack_returns_frame(self):
+        frame = self._packer().with_seed(42).pack([self._make_target()], max_loops=50)
+
+        assert frame["atoms"].nrows == 3
+
     def test_result_elements_match_positions(self):
-        result = self._packer().with_seed(42).pack([self._make_target()], max_loops=50)
+        result = (
+            self._packer()
+            .with_seed(42)
+            .pack_with_report([self._make_target()], max_loops=50)
+        )
 
         assert len(result.elements) == result.positions.shape[0]
         assert result.natoms == result.positions.shape[0]
@@ -260,7 +273,7 @@ class TestMolpackPack:
             )
         )
 
-        result = self._packer().with_seed(42).pack([target], max_loops=50)
+        result = self._packer().with_seed(42).pack_with_report([target], max_loops=50)
 
         assert len(result.elements) == 6
         assert result.positions.shape[0] == 6
@@ -272,32 +285,36 @@ class TestMolpackPack:
         t1 = molpack.Target(_make_frame(1), 2).with_restraint(box_c)
         t2 = molpack.Target(_make_frame(2, ["C", "H"]), 3).with_restraint(box_c)
 
-        result = self._packer().with_seed(42).pack([t1, t2], max_loops=50)
+        result = self._packer().with_seed(42).pack_with_report([t1, t2], max_loops=50)
 
         assert len(result.elements) == 8
         assert result.positions.shape[0] == 8
 
     def test_with_seed_reproducible(self):
         packer = self._packer().with_seed(123)
-        r1 = packer.pack([self._make_target()], max_loops=30)
-        r2 = packer.pack([self._make_target()], max_loops=30)
+        r1 = packer.pack_with_report([self._make_target()], max_loops=30)
+        r2 = packer.pack_with_report([self._make_target()], max_loops=30)
         np.testing.assert_array_equal(r1.positions, r2.positions)
 
     def test_no_targets_raises_typed_error(self):
         packer = molpack.Molpack().with_progress(False)
         with pytest.raises(molpack.NoTargetsError):
-            packer.pack([], max_loops=10)
+            packer.pack_with_report([], max_loops=10)
 
     def test_multiple_targets(self):
         box = molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
         t1 = molpack.Target(_make_frame(), 2).with_restraint(box)
         t2 = molpack.Target(_make_frame(), 3).with_restraint(box)
 
-        result = self._packer().with_seed(42).pack([t1, t2], max_loops=50)
+        result = self._packer().with_seed(42).pack_with_report([t1, t2], max_loops=50)
         assert result.positions.shape[0] == 5
 
     def test_pack_result_repr(self):
-        result = self._packer().with_seed(1).pack([self._make_target(2)], max_loops=30)
+        result = (
+            self._packer()
+            .with_seed(1)
+            .pack_with_report([self._make_target(2)], max_loops=30)
+        )
         r = repr(result)
         assert "PackResult" in r
         assert "converged" in r
@@ -317,7 +334,7 @@ class TestMolpackGlobalRestraint:
             )
             .with_seed(42)
         )
-        result = packer.pack([t1, t2], max_loops=50)
+        result = packer.pack_with_report([t1, t2], max_loops=50)
         assert result.natoms == 4
         # All atoms must land inside the global box.
         for pos in result.positions:

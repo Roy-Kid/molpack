@@ -145,7 +145,7 @@ fn pack_with_torsion_hook_in_box() {
     let result = Molpack::new()
         .with_handler(NullHandler)
         .with_seed(42)
-        .pack(&[target], 10)
+        .pack_with_report(&[target], 10)
         .expect("pack should not fail");
 
     assert_eq!(result.natoms(), n);
@@ -168,7 +168,7 @@ fn pack_with_torsion_hook_in_sphere() {
     let result = Molpack::new()
         .with_handler(NullHandler)
         .with_seed(123)
-        .pack(&[target], 15)
+        .pack_with_report(&[target], 15)
         .expect("pack should not fail");
 
     assert_eq!(result.natoms(), n);
@@ -198,7 +198,7 @@ fn pack_hook_with_regular_target() {
     let result = Molpack::new()
         .with_handler(NullHandler)
         .with_seed(99)
-        .pack(&[chain_target, point_target], 10)
+        .pack_with_report(&[chain_target, point_target], 10)
         .expect("pack should not fail");
 
     assert_eq!(result.natoms(), 8); // 5 chain + 3 point

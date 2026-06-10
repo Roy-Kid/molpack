@@ -117,14 +117,18 @@ Molpack()
 - `.with_perturb(enabled: bool)` — master switch (default True).
 - `.with_seed(seed: int)` — deterministic RNG (default 0).
 - `.with_parallel_eval(enabled: bool)` — rayon-backed pair eval.
-- `.with_progress(enabled: bool)` — built-in progress reporter.
+- `.with_lammps_output(enabled: bool)` — enable LAMMPS-style screen output.
+- `.with_log_level(level: str)` — `quiet`, `summary`, `progress`, or `verbose`.
+- `.with_log_frequency(n: int)` — print every `n` outer steps.
+- `.with_progress(enabled: bool)` — compatibility alias for progress output.
 - `.with_handler(handler)` — attach a custom `Handler` (stackable).
 - `.with_global_restraint(r)` — broadcast to every target (stackable).
 
 **Run**
 
 ```python
-.pack(targets: list[Target], max_loops: int = 200) -> PackResult
+.pack(targets: list[Target], max_loops: int = 200) -> molrs.Frame
+.pack_with_report(targets: list[Target], max_loops: int = 200) -> PackResult
 ```
 
 Raises a typed `PackError` subclass on failure.
@@ -133,7 +137,7 @@ Raises a typed `PackError` subclass on failure.
 
 ## `PackResult`
 
-Read-only output container.
+Read-only output container returned by `pack_with_report()`.
 
 **Properties**
 

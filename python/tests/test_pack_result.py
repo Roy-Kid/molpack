@@ -35,7 +35,7 @@ def _make_tiny_pack() -> molpack.PackResult:
         molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
     )
     packer = molpack.Molpack().with_tolerance(2.0).with_progress(False).with_seed(42)
-    return packer.pack([target], max_loops=50)
+    return packer.pack_with_report([target], max_loops=50)
 
 
 class TestPackResultProperties:
@@ -106,7 +106,7 @@ class TestFrameTopology:
         packer = molpack.Molpack().with_tolerance(2.0).with_progress(False).with_seed(7)
         if box:
             packer = packer.with_periodic_box([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
-        return packer.pack([target], max_loops=50)
+        return packer.pack_with_report([target], max_loops=50)
 
     def test_frame_carries_replicated_topology(self):
         result = self._pack(3)
@@ -149,7 +149,7 @@ class TestMolpackErrorPaths:
     def test_empty_targets_list_raises(self):
         packer = molpack.Molpack().with_progress(False).with_seed(1)
         with pytest.raises(molpack.NoTargetsError):
-            packer.pack([], max_loops=10)
+            packer.pack_with_report([], max_loops=10)
 
     def test_invalid_pbc_raises_typed_error(self):
         # Zero-length axis on a periodic box is rejected at pack().
@@ -169,7 +169,7 @@ class TestMolpackErrorPaths:
         )
         packer = molpack.Molpack().with_progress(False).with_seed(1)
         with pytest.raises(molpack.InvalidPBCBoxError):
-            packer.pack([target], max_loops=10)
+            packer.pack_with_report([target], max_loops=10)
 
     def test_pack_error_is_runtime_error_subclass(self):
         assert issubclass(molpack.NoTargetsError, molpack.PackError)
@@ -197,6 +197,6 @@ class TestMultipleRestraints:
         packer = (
             molpack.Molpack().with_tolerance(2.0).with_progress(False).with_seed(42)
         )
-        result = packer.pack([target], max_loops=100)
+        result = packer.pack_with_report([target], max_loops=100)
 
         assert result.positions.shape == (3, 3)

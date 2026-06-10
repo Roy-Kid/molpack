@@ -151,13 +151,14 @@ let target = Target::from_coords(&water_positions, &water_radii, 100)
     .with_name("water")
     .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
 
-let result = Molpack::new()
+let frame = Molpack::new()
     .with_tolerance(2.0)
     .with_precision(0.01)
     .with_seed(42)
     .pack(&[target], 200)?;
 
-println!("converged = {}, natoms = {}", result.converged, result.natoms());
+let natoms = frame.get("atoms").and_then(|b| b.nrows()).unwrap_or(0);
+println!("packed {natoms} atoms");
 # Ok::<(), molpack::PackError>(())
 ```
 
@@ -167,9 +168,11 @@ Arguments to [`Molpack::pack`](crate::Molpack::pack):
 - `max_loops: usize` — outer-iteration budget per phase.
 
 Seed and every other tuning knob live on the builder (`.with_seed(n)`,
-`.with_tolerance(t)` etc.). Returns a [`PackResult`](crate::PackResult)
-with the output coordinates as a `molrs::Frame` plus convergence
-diagnostics.
+`.with_tolerance(t)` etc.). `pack()` returns the packed `molrs::Frame`.
+Use `.with_lammps_output(true)`, `.with_log_level(level)`, and
+`.with_log_frequency(n)` for screen summaries/progress. Advanced callers
+that need structured convergence fields can call
+[`pack_with_report`](crate::Molpack::pack_with_report).
 
 ## Restraint scopes
 
@@ -204,7 +207,7 @@ calling `with_restraint` on every target:
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 # let t_a = Target::from_coords(pos, rad, 100);
 # let t_b = Target::from_coords(pos, rad, 100);
-let result = Molpack::new()
+let frame = Molpack::new()
     .with_global_restraint(InsideSphereRestraint::new([20.0; 3], 30.0))
     .with_seed(42)
     .pack(&[t_a, t_b], 200)?;
@@ -215,17 +218,28 @@ The scope-equivalence law is formal: `molpack.with_global_restraint(r)`
 is implemented as `for t in targets { t.with_restraint(r.clone()) }`.
 There is no separate "global-restraint" storage path.
 
-## Handlers (progress observation)
+## Screen output and handlers
 
-Attach [`Handler`](crate::Handler) implementations for progress reporting,
-trajectory output, or early-stop logic. Built-ins:
+Use the builder to enable LAMMPS-style screen output:
 
 ```rust,no_run
-# use molpack::{EarlyStopHandler, InsideBoxRestraint, Molpack, ProgressHandler, Target, XYZHandler};
+# use molpack::{InsideBoxRestraint, Molpack, MolpackLogLevel, Target};
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 # let target = Target::from_coords(pos, rad, 100).with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
 let mut packer = Molpack::new()
-    .with_handler(ProgressHandler::new())
+    .with_log_level(MolpackLogLevel::Progress)
+    .with_log_frequency(10);
+# let _ = packer.with_seed(42).pack(&[target], 200);
+```
+
+Attach [`Handler`](crate::Handler) implementations for trajectory output,
+custom observation, or early-stop logic. Built-ins:
+
+```rust,no_run
+# use molpack::{EarlyStopHandler, InsideBoxRestraint, Molpack, Target, XYZHandler};
+# let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
+# let target = Target::from_coords(pos, rad, 100).with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
+let mut packer = Molpack::new()
     .with_handler(XYZHandler::new("traj.xyz", /* every = */ 10))
     .with_handler(EarlyStopHandler::new(/* threshold = */ 1e-4));
 # let _ = packer.with_seed(42).pack(&[target], 200);
@@ -239,10 +253,10 @@ Flexible molecules benefit from torsion-MC relaxation between outer
 optimizer calls. Attach a [`Relaxer`](crate::Relaxer) to a target:
 
 ```rust,no_run
-# use molrs::molgraph::MolGraph;
+# use molrs::atomistic::Atomistic;
 # use molpack::{InsideSphereRestraint, Target, TorsionMcRelaxer};
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
-# let graph = MolGraph::new();
+# let graph = Atomistic::new();
 let target = Target::from_coords(pos, rad, 1)  // relaxers require count == 1
     .with_restraint(InsideSphereRestraint::new([0.0; 3], 20.0))
     .with_relaxer(
@@ -335,7 +349,7 @@ water = (
     .with_name("water")
     .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
 )
-result = (
+frame = (
     Molpack()
     .with_tolerance(2.0)
     .with_seed(42)
@@ -346,8 +360,9 @@ result = (
 The Python API mirrors the Rust builder surface one-for-one. The
 binding is I/O-free — use
 [`molcrafts-molrs`](https://pypi.org/project/molcrafts-molrs/) (or any
-Frame-compatible loader) to read templates, and write `result.frame`
-back out with the same library.
+Frame-compatible loader) to read templates, and write the returned Frame
+back out with the same library. Use `pack_with_report()` if you need
+`converged`, `fdist`, or `frest` as Python properties.
 
 The standalone Python documentation site lives under
 [`python/docs/`](https://github.com/MolCrafts/molpack/tree/master/python/docs);

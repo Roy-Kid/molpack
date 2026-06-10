@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use molpack::ProgressHandler;
+use molpack::MolpackLogLevel;
 use molpack::script::{self, BuildResult, ScriptError};
 
 #[derive(Parser, Debug)]
@@ -79,28 +79,12 @@ fn run(src: &str, base_dir: &std::path::Path) -> Result<(), ScriptError> {
         nloop,
     } = script_ast.build(base_dir)?;
 
-    // Attach the progress handler only for the CLI; the library stays headless.
-    packer = packer.with_handler(ProgressHandler::new());
+    // CLI defaults to screen output; library callers stay headless unless
+    // configured on the builder.
+    packer = packer.with_log_level(MolpackLogLevel::Progress);
 
-    let result = packer.pack(&targets, nloop)?;
-
-    println!(
-        "Packing complete — converged: {}, fdist: {:.6}, frest: {:.6}, natoms: {}",
-        result.converged,
-        result.fdist,
-        result.frest,
-        result.natoms()
-    );
-
-    if !result.converged {
-        eprintln!(
-            "Warning: packing did not fully converge (fdist={:.6}, frest={:.6}). \
-             Consider increasing `nloop` or adjusting restraints.",
-            result.fdist, result.frest
-        );
-    }
-
-    script::write_frame(&output, &result.frame)?;
+    let frame = packer.pack(&targets, nloop)?;
+    script::write_frame(&output, &frame)?;
     println!("Output written to: {}", output.display());
 
     Ok(())

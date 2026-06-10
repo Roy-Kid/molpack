@@ -196,13 +196,13 @@ fn pack_seed_parity_serial_vs_parallel() {
     let serial = Molpack::new()
         .with_seed(SEED)
         .with_parallel_eval(false)
-        .pack(&[build_target()], MAX_LOOPS)
+        .pack_with_report(&[build_target()], MAX_LOOPS)
         .expect("serial pack failed");
 
     let parallel = Molpack::new()
         .with_seed(SEED)
         .with_parallel_eval(true)
-        .pack(&[build_target()], MAX_LOOPS)
+        .pack_with_report(&[build_target()], MAX_LOOPS)
         .expect("parallel pack failed");
 
     assert_eq!(

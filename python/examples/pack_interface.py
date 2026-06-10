@@ -58,7 +58,7 @@ def main() -> None:
         .with_seed(1_234_567)
     )
 
-    result = packer.pack([water, chloroform, t3], max_loops=400)
+    result = packer.pack_with_report([water, chloroform, t3], max_loops=400)
 
     print(
         f"converged={result.converged} natoms={result.natoms} "

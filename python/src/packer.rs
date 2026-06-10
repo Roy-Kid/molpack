@@ -1,10 +1,9 @@
 //! Python wrapper for the Molpack molecular packer.
 //!
 //! [`PyPacker`] is the Python face of [`molpack::Molpack`]. Builders mirror
-//! the Rust names 1:1. [`PyPackResult`] is the output container — callers
-//! get a ready-to-use `molrs.Frame` from `.frame` (full topology + box) and a
-//! numpy `positions` view. The frame assembly lives in the `molpack._assemble`
-//! Python module; `.frame` is a thin marshalling shim over it.
+//! the Rust names 1:1. `Molpack.pack()` returns a ready-to-use `molrs.Frame`;
+//! [`PyPackResult`] remains available through `pack_with_report()` for callers
+//! that need structured diagnostics.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -14,7 +13,7 @@ use crate::handler::PyHandlerWrapper;
 use crate::helpers::{NpF, pack_error_to_pyerr, take_err};
 use crate::target::PyTarget;
 use molpack::F;
-use molpack::handler::ProgressHandler;
+use molpack::handler::MolpackLogLevel;
 use molpack::packer::{Molpack, PackResult};
 use numpy::IntoPyArray;
 use numpy::PyArray2;
@@ -125,6 +124,8 @@ pub struct PyPacker {
     pub(crate) seed: Option<u64>,
     pub(crate) parallel_eval: Option<bool>,
     pub(crate) progress: bool,
+    pub(crate) log_level: Option<MolpackLogLevel>,
+    pub(crate) log_frequency: Option<usize>,
     /// Global periodic-boundary box — `(min, max)` in Å. Every axis is
     /// treated as periodic.
     pub(crate) periodic_box: Option<([F; 3], [F; 3])>,
@@ -146,6 +147,8 @@ impl Default for PyPacker {
             seed: None,
             parallel_eval: None,
             progress: false,
+            log_level: None,
+            log_frequency: None,
             periodic_box: None,
             py_handlers: Vec::new(),
             global_restraints: Vec::new(),
@@ -235,6 +238,39 @@ impl PyPacker {
         cloned
     }
 
+    fn with_lammps_output(&self, enabled: bool) -> Self {
+        let mut cloned = self.clone_fields();
+        cloned.log_level = Some(if enabled {
+            MolpackLogLevel::Progress
+        } else {
+            MolpackLogLevel::Quiet
+        });
+        cloned
+    }
+
+    fn with_log_level(&self, level: &str) -> PyResult<Self> {
+        let parsed = match level.to_ascii_lowercase().as_str() {
+            "quiet" | "off" | "none" => MolpackLogLevel::Quiet,
+            "summary" => MolpackLogLevel::Summary,
+            "progress" | "thermo" => MolpackLogLevel::Progress,
+            "verbose" | "debug" => MolpackLogLevel::Verbose,
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unknown log level {other:?}; expected quiet, summary, progress, or verbose"
+                )));
+            }
+        };
+        let mut cloned = self.clone_fields();
+        cloned.log_level = Some(parsed);
+        Ok(cloned)
+    }
+
+    fn with_log_frequency(&self, n: usize) -> Self {
+        let mut cloned = self.clone_fields();
+        cloned.log_frequency = Some(n.max(1));
+        cloned
+    }
+
     /// Append a Python handler. See :class:`StepInfo` for the callback
     /// contract and :mod:`molpack` for the ``Handler`` protocol.
     fn with_handler(&self, handler: Py<pyo3::types::PyAny>) -> Self {
@@ -253,7 +289,38 @@ impl PyPacker {
     }
 
     #[pyo3(signature = (targets, max_loops=200))]
-    fn pack(
+    fn pack<'py>(
+        &self,
+        py: Python<'py>,
+        targets: Vec<PyTarget>,
+        max_loops: usize,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = self.pack_report_inner(py, targets, max_loops)?;
+        crate::frame_marshal::rust_frame_to_py(py, &result.inner.frame, self.periodic_box)
+    }
+
+    #[pyo3(signature = (targets, max_loops=200))]
+    fn pack_with_report(
+        &self,
+        py: Python<'_>,
+        targets: Vec<PyTarget>,
+        max_loops: usize,
+    ) -> PyResult<PyPackResult> {
+        self.pack_report_inner(py, targets, max_loops)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Molpack(handlers={}, global_restraints={}, seed={:?})",
+            self.py_handlers.len(),
+            self.global_restraints.len(),
+            self.seed,
+        )
+    }
+}
+
+impl PyPacker {
+    fn pack_report_inner(
         &self,
         py: Python<'_>,
         targets: Vec<PyTarget>,
@@ -294,6 +361,15 @@ impl PyPacker {
         if let Some(v) = self.parallel_eval {
             packer = packer.with_parallel_eval(v);
         }
+        let level = self.log_level.unwrap_or(if self.progress {
+            MolpackLogLevel::Progress
+        } else {
+            MolpackLogLevel::Quiet
+        });
+        packer = packer.with_log_level(level);
+        if let Some(every) = self.log_frequency {
+            packer = packer.with_log_frequency(every);
+        }
         if let Some((min, max)) = self.periodic_box {
             packer = packer.with_periodic_box(min, max);
         }
@@ -301,10 +377,6 @@ impl PyPacker {
         for gr in &self.global_restraints {
             let shared = extract_restraint(gr.bind(py))?;
             packer = packer.with_global_restraint(shared);
-        }
-
-        if self.progress {
-            packer = packer.with_handler(ProgressHandler::new());
         }
 
         // Any handler stashing an error or returning `True` from `on_step`
@@ -315,7 +387,7 @@ impl PyPacker {
             packer = packer.with_handler(wrapper);
         }
 
-        let result = packer.pack(&rust_targets, max_loops);
+        let result = packer.pack_with_report(&rust_targets, max_loops);
 
         // Python exceptions take priority: any PackError from this run is
         // a downstream symptom of the callback that raised.
@@ -332,17 +404,6 @@ impl PyPacker {
         })
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "Molpack(handlers={}, global_restraints={}, seed={:?})",
-            self.py_handlers.len(),
-            self.global_restraints.len(),
-            self.seed,
-        )
-    }
-}
-
-impl PyPacker {
     fn clone_fields(&self) -> PyPacker {
         // `Py<PyAny>::clone_ref` needs a GIL token; the builder is
         // called from Python so `Python::attach` is a cheap no-op here.
@@ -358,6 +419,8 @@ impl PyPacker {
             seed: self.seed,
             parallel_eval: self.parallel_eval,
             progress: self.progress,
+            log_level: self.log_level,
+            log_frequency: self.log_frequency,
             periodic_box: self.periodic_box,
             py_handlers: self.py_handlers.iter().map(|h| h.clone_ref(py)).collect(),
             global_restraints: self

@@ -54,7 +54,7 @@ coordinates that satisfy all constraints.
         .with_name("water")
         .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
 
-    let result = Molpack::new()
+    let frame = Molpack::new()
         .with_tolerance(2.0)
         .with_seed(42)
         .pack(&[target], 200)?;
@@ -64,15 +64,16 @@ coordinates that satisfy all constraints.
 
     ```python
     import molrs
-    from molpack import InsideBox, Molpack, Target
+    from molpack import InsideBoxRestraint, Molpack, Target
 
     frame = molrs.read_pdb("water.pdb")
 
     water = (
-        Target("water", frame, count=100)
-        .with_restraint(InsideBox([0, 0, 0], [40, 40, 40]))
+        Target(frame, count=100)
+        .with_name("water")
+        .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
     )
-    result = Molpack(tolerance=2.0).pack([water], max_loops=200, seed=42)
+    frame = Molpack().with_tolerance(2.0).with_seed(42).pack([water], max_loops=200)
     ```
 
 ## Documentation map

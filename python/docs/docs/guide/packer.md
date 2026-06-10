@@ -32,11 +32,15 @@ packer = (
     .with_perturb(True)             # enable the stall-perturbation heuristic
     .with_seed(42)                  # deterministic RNG
     .with_parallel_eval(False)      # rayon-backed pair-kernel eval (opt-in)
-    .with_progress(True)            # attach the built-in progress reporter
+    .with_lammps_output(True)       # attach LAMMPS-style screen output
+    .with_log_level("progress")     # quiet | summary | progress | verbose
+    .with_log_frequency(1)          # print every N outer steps
 )
 ```
 
-Use `.with_progress(False)` to run silently (useful in tests and scripts).
+Use `.with_lammps_output(False)` or `.with_log_level("quiet")` to run
+silently (the default). `.with_progress()` is kept as a compatibility
+alias for enabling/disabling progress output.
 
 ## Global restraints
 
@@ -76,7 +80,7 @@ See [Periodic boundaries](periodic-boundaries.md).
 ## Running
 
 ```python
-result = packer.pack(targets, max_loops=200)
+frame = packer.pack(targets, max_loops=200)
 ```
 
 - `targets`   — list of `Target` objects (must be non-empty).
@@ -85,6 +89,13 @@ result = packer.pack(targets, max_loops=200)
 Raises one of the typed `PackError` subclasses on failure
 (`NoTargetsError`, `InvalidPBCBoxError`,
 `ConflictingPeriodicBoxesError`, …).
+
+`pack()` returns a `molrs.Frame`. To retrieve structured diagnostics,
+use `pack_with_report()`:
+
+```python
+result = packer.pack_with_report(targets, max_loops=200)
+```
 
 ## PackResult
 
@@ -105,7 +116,7 @@ if not result.converged:
     print(f"not converged: fdist={result.fdist:.4f} frest={result.frest:.4f}")
 ```
 
-`result.frame` is the primary Frame-oriented output — pass it to a
+`PackResult.frame` is the same Frame returned by `pack()`. Pass it to a
 writer of your choice (e.g. `molrs.write_pdb`). molpack does **not**
 provide writers.
 

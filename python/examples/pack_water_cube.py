@@ -34,7 +34,7 @@ def main() -> None:
         .with_progress(False)
         .with_seed(42)
     )
-    result = packer.pack([water], max_loops=200)
+    result = packer.pack_with_report([water], max_loops=200)
 
     print(f"converged = {result.converged}")
     print(f"natoms    = {result.natoms}")

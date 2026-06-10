@@ -91,7 +91,7 @@ class TestPackingBehavior:
             InsideSpherePy(sphere_center.tolist(), radius)
         )
 
-        result = _packer().with_seed(1).pack([target], max_loops=80)
+        result = _packer().with_seed(1).pack_with_report([target], max_loops=80)
 
         positions = np.asarray(result.positions)
         distances = np.linalg.norm(positions - sphere_center, axis=1)
@@ -119,7 +119,7 @@ class TestCallContract:
         target = molpack.Target(_single_atom_frame(), count=2).with_restraint(
             Recorder()
         )
-        _packer().with_seed(1).pack([target], max_loops=3)
+        _packer().with_seed(1).pack_with_report([target], max_loops=3)
 
         assert seen, "fg was never called"
         x, scale, scale2 = seen[0]
@@ -142,7 +142,7 @@ class TestErrorPropagation:
             Explodes()
         )
         with pytest.raises(ValueError, match="boom from restraint"):
-            _packer().with_seed(1).pack([target], max_loops=3)
+            _packer().with_seed(1).pack_with_report([target], max_loops=3)
 
     def test_fg_wrong_return_shape_is_reraised(self):
         class WrongShape:
@@ -156,4 +156,4 @@ class TestErrorPropagation:
             WrongShape()
         )
         with pytest.raises(TypeError, match="fg.* must return"):
-            _packer().with_seed(1).pack([target], max_loops=3)
+            _packer().with_seed(1).pack_with_report([target], max_loops=3)

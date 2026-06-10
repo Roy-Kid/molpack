@@ -37,7 +37,7 @@ def main() -> None:
         .with_seed(1_234_567)
     )
 
-    result = packer.pack([water, urea], max_loops=400)
+    result = packer.pack_with_report([water, urea], max_loops=400)
 
     print(
         f"converged={result.converged} natoms={result.natoms} "

@@ -45,7 +45,7 @@ fn pack_and_validate(targets: Vec<Target>, max_loops: usize) {
         .with_tolerance(TOL)
         .with_precision(PRECISION)
         .with_seed(SEED)
-        .pack(&targets, max_loops)
+        .pack_with_report(&targets, max_loops)
         .expect("pack should succeed");
     let positions = result.positions().to_vec();
     let report = validate_from_targets(&targets, &positions, TOL, PRECISION);
@@ -73,7 +73,7 @@ fn pack_one(target: Target, max_loops: usize) -> Vec<[F; 3]> {
         .with_tolerance(TOL)
         .with_precision(PRECISION)
         .with_seed(SEED)
-        .pack(std::slice::from_ref(&target), max_loops)
+        .pack_with_report(std::slice::from_ref(&target), max_loops)
         .expect("pack should succeed");
     let positions = result.positions().to_vec();
     let report = validate_from_targets(&[target], &positions, TOL, PRECISION);

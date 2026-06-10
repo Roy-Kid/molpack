@@ -23,8 +23,8 @@ water = (
 )
 
 packer = Molpack().with_tolerance(2.0).with_seed(42)
-result = packer.pack([water], max_loops=200)
-print(f"converged={result.converged}  natoms={result.natoms}  fdist={result.fdist:.4f}")
+frame = packer.pack([water], max_loops=200)
+print(f"packed {frame['atoms'].nrows} atoms")
 ```
 
 ## Where next
@@ -46,7 +46,7 @@ print(f"converged={result.converged}  natoms={result.natoms}  fdist={result.fdis
 - [`molcrafts-molrs`](https://pypi.org/project/molcrafts-molrs/) —
   companion package for file I/O (PDB, XYZ, …) and the `Frame` data
   model. Pass a `molrs.Frame` directly to `Target`; no manual array
-  extraction needed. `PackResult.frame` returns a Frame-compatible
+  extraction needed. `Molpack.pack()` returns a Frame-compatible
   structure for the writer of your choice.
 
 [targets]: guide/targets.md

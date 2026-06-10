@@ -73,39 +73,29 @@ see [Restraints](guide/restraints.md).
 from molpack import Molpack
 
 packer = Molpack().with_tolerance(2.0).with_seed(42)
-result = packer.pack([water], max_loops=200)
+frame = packer.pack([water], max_loops=200)
 
-print(f"converged: {result.converged}")
-print(f"natoms:    {result.natoms}")
-print(f"fdist:     {result.fdist:.4f}   (distance-violation sum)")
-print(f"frest:     {result.frest:.4f}   (restraint-violation sum)")
+print(frame["atoms"].nrows)
 ```
 
-`result.positions` is an `(N, 3)` float64 numpy array of packed
-coordinates. `result.elements` is the element list in the same order.
+`pack()` returns a ready-to-use `molrs.Frame`. If you need structured
+diagnostics, call `pack_with_report()` instead; it returns a
+`PackResult` with `.converged`, `.fdist`, `.frest`, `.positions`, and
+`.frame`.
 
 ## 5. Save
 
 `molpack` does not write files directly — Frame is the canonical
-output. Hand `result.frame` (or positions/elements) to a writer:
+output. Hand the returned frame to a writer:
 
 ```python
 import molrs
 
-# result.frame is a dict compatible with molrs.Frame. Compose a
-# writable frame and persist:
-out = molrs.Frame()
-atoms = molrs.Block()
-f = result.frame["atoms"]
-atoms.insert("x", f["x"])
-atoms.insert("y", f["y"])
-atoms.insert("z", f["z"])
-atoms.insert("element", f["element"])
-out["atoms"] = atoms
-molrs.write_xyz("packed.xyz", out)
+molrs.write_xyz("packed.xyz", frame)
 ```
 
-Or use numpy directly (`np.savetxt`, `.npz`, …) on `result.positions`.
+Or use `pack_with_report()` and write `result.frame` if you also need
+the diagnostic fields.
 
 ## Full script
 
@@ -121,12 +111,11 @@ water = (
     .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
-result = (
+frame = (
     Molpack().with_tolerance(2.0).with_seed(42).pack([water], max_loops=200)
 )
 
-assert result.converged
-print(f"packed {result.natoms} atoms")
+print(f"packed {frame['atoms'].nrows} atoms")
 ```
 
 ## Next steps

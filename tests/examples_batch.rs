@@ -27,7 +27,7 @@ fn run_case(case: ExampleCase) -> Result<(), Box<dyn std::error::Error>> {
         .with_precision(1e-2)
         .with_handler(XYZHandler::new(&out_path, 10))
         .with_seed(case.seed());
-    let pack_result = packer.pack(&targets, case.max_loops())?;
+    let pack_result = packer.pack_with_report(&targets, case.max_loops())?;
     let coords = &pack_result.positions();
     let report = validate_from_targets(&targets, coords, 2.0, 1e-2);
 

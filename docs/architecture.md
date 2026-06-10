@@ -92,10 +92,9 @@ PER-ITERATION                ─→  evaluate(x, mode, &mut g)
                                   → project gradient back: gxcar → g
                                   returns f_total, fdist, frest
 
-OUTPUT                       ─→  PackResult
-                                  positions (Frame),
-                                  converged, fdist, frest,
-                                  per-phase report
+OUTPUT                       ─→  Frame
+                                  pack_with_report() also exposes
+                                  converged, fdist, frest
 ```
 
 Three rules govern this flow:
@@ -153,7 +152,7 @@ fn pack(targets, max_loops):
         report := run_phase(phase, max_loops, …)
         if report.error_phase: break
     handlers.on_finish
-    build PackResult { frame, converged, fdist, frest, per-phase reports }
+    build Frame; pack_with_report() also returns converged/fdist/frest
 ```
 
 Why per-type pre-compaction first: if every type optimizes simultaneously

@@ -15,7 +15,9 @@ use crate::context::PackContext;
 use crate::error::PackError;
 use crate::euler::{compcart, eulerfixed};
 use crate::gencan::{GencanParams, GencanWorkspace, pgencan};
-use crate::handler::{Handler, PhaseInfo, StepInfo};
+use crate::handler::{
+    Handler, LammpsLogHandler, MolpackLogLevel, PhaseInfo, PhaseReport, StepInfo,
+};
 use crate::initial::{SwapState, init_xcart_from_x, initial};
 use crate::movebad::{MoveBadConfig, movebad};
 use crate::numerics::objective_small_floor;
@@ -111,6 +113,10 @@ pub struct Molpack {
     /// present, they must match exactly or `pack()` returns
     /// [`PackError::ConflictingPeriodicBoxes`].
     periodic_box: Option<PeriodicSpec>,
+    /// Built-in LAMMPS-style screen output detail.
+    log_level: MolpackLogLevel,
+    /// Print every N outer iterations when `log_level` includes progress.
+    log_frequency: usize,
 }
 
 impl Default for Molpack {
@@ -144,6 +150,8 @@ impl Molpack {
             seed: 0,
             parallel_eval: false,
             periodic_box: None,
+            log_level: MolpackLogLevel::Quiet,
+            log_frequency: 1,
         }
     }
 
@@ -266,6 +274,38 @@ impl Molpack {
         self
     }
 
+    /// Enable or disable built-in LAMMPS-style screen output.
+    ///
+    /// This is intentionally a builder-level concern: `pack()` returns the
+    /// packed [`molrs::Frame`], while timing, optimization diagnostics, and
+    /// system summaries are streamed to stderr when enabled.
+    pub fn with_lammps_output(mut self, enabled: bool) -> Self {
+        self.log_level = if enabled {
+            MolpackLogLevel::Progress
+        } else {
+            MolpackLogLevel::Quiet
+        };
+        self
+    }
+
+    /// Set built-in screen-log detail.
+    ///
+    /// `Quiet` is the default. `Summary` prints system/phase/final summaries,
+    /// `Progress` also prints thermo-style per-step lines, and `Verbose` adds
+    /// extra diagnostic columns.
+    pub fn with_log_level(mut self, level: MolpackLogLevel) -> Self {
+        self.log_level = level;
+        self
+    }
+
+    /// Print every `n` outer iterations for progress/verbose logs.
+    ///
+    /// Values below 1 are clamped to 1.
+    pub fn with_log_frequency(mut self, n: usize) -> Self {
+        self.log_frequency = n.max(1);
+        self
+    }
+
     /// Run the packing.
     ///
     /// `max_loops` is the outer iteration budget; it is positional
@@ -273,9 +313,28 @@ impl Molpack {
     /// on system size and convergence difficulty). Every other knob
     /// lives on the builder.
     ///
-    /// Returns a [`PackResult`] containing the final atom positions and
-    /// convergence information (`fdist`, `frest`, `converged`).
-    pub fn pack(&mut self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError> {
+    /// Returns the packed [`molrs::Frame`]. Enable built-in screen logging
+    /// with [`with_lammps_output`][Self::with_lammps_output] or
+    /// [`with_log_level`][Self::with_log_level] for timing, optimization
+    /// diagnostics, and system summaries.
+    pub fn pack(
+        &mut self,
+        targets: &[Target],
+        max_loops: usize,
+    ) -> Result<molrs::Frame, PackError> {
+        Ok(self.pack_with_report(targets, max_loops)?.frame)
+    }
+
+    /// Run the packing and retain structured convergence diagnostics.
+    ///
+    /// This is mainly for tests, bindings, and advanced programmatic callers.
+    /// The primary user-facing API is [`pack`][Self::pack], which returns only
+    /// the packed frame.
+    pub fn pack_with_report(
+        &mut self,
+        targets: &[Target],
+        max_loops: usize,
+    ) -> Result<PackResult, PackError> {
         if targets.is_empty() {
             return Err(PackError::NoTargets);
         }
@@ -339,6 +398,20 @@ impl Molpack {
 
         let ntype = free_targets.len();
         let ntype_with_fixed = ntype + fixed_targets.len();
+
+        let mut handlers = std::mem::take(&mut self.handlers);
+        if self.log_level.is_enabled() {
+            handlers.push(Box::new(LammpsLogHandler::new(
+                self.log_level,
+                self.log_frequency,
+                self.tolerance,
+                self.precision,
+                self.seed,
+                max_loops,
+                ntype_with_fixed,
+                pbc,
+            )));
+        }
 
         // Count atoms
         let ntotmol_free: usize = free_targets.iter().map(|t| t.count).sum();
@@ -502,7 +575,7 @@ impl Molpack {
         let mut x = vec![0.0 as F; n];
 
         // Notify handlers immediately (before any heavy computation)
-        for h in self.handlers.iter_mut() {
+        for h in handlers.iter_mut() {
             h.on_start(ntotat, ntotmol_free);
         }
 
@@ -528,7 +601,7 @@ impl Molpack {
         );
 
         // Notify handlers: initialization complete, xcart is valid
-        for h in self.handlers.iter_mut() {
+        for h in handlers.iter_mut() {
             h.on_initialized(&sys);
         }
 
@@ -588,7 +661,7 @@ impl Molpack {
                 &mut x,
                 &mut swap,
                 &mut relaxer_runners,
-                &mut self.handlers,
+                &mut handlers,
                 &mut gencan_workspace,
                 &mut rng,
             );
@@ -617,7 +690,7 @@ impl Molpack {
         init_xcart_from_x(&x, &mut sys);
 
         // Notify handlers of final state
-        for h in self.handlers.iter_mut() {
+        for h in handlers.iter_mut() {
             h.on_finish(&sys);
         }
 
@@ -633,6 +706,11 @@ impl Molpack {
                 frame.simbox = Some(simbox);
             }
         }
+        if self.log_level.is_enabled() {
+            handlers.pop();
+        }
+        self.handlers = handlers;
+
         Ok(PackResult {
             frame,
             fdist: sys.fdist,
@@ -1008,6 +1086,15 @@ pub fn run_phase(
     // before entering the GENCAN loop for this phase (packmol.f90 lines 775-782).
     sys.evaluate(&xwork, EvalMode::FOnly, None);
     if sys.fdist < precision && sys.frest < precision {
+        let report = PhaseReport {
+            iterations: 0,
+            fdist: sys.fdist,
+            frest: sys.frest,
+            converged: true,
+        };
+        for h in handlers.iter_mut() {
+            h.on_phase_end(&phase_info, &report);
+        }
         if !is_all {
             swap.save_type(phase, &xwork, sys);
             swap.restore(x, sys);
@@ -1026,6 +1113,7 @@ pub fn run_phase(
     // Initialized to 1e99 so movebad is NOT called on the first iteration.
     let mut fimp_prev = F::INFINITY;
     let mut converged_inner = false;
+    let mut iterations = 0usize;
 
     for loop_idx in 0..max_loops {
         let outcome = run_iteration(
@@ -1049,6 +1137,7 @@ pub fn run_phase(
             gencan_workspace,
             rng,
         );
+        iterations += 1;
         match outcome {
             IterOutcome::Continue => {}
             IterOutcome::Converged => {
@@ -1057,6 +1146,16 @@ pub fn run_phase(
             }
             IterOutcome::EarlyStop => break,
         }
+    }
+
+    let report = PhaseReport {
+        iterations,
+        fdist: sys.fdist,
+        frest: sys.frest,
+        converged: converged_inner,
+    };
+    for h in handlers.iter_mut() {
+        h.on_phase_end(&phase_info, &report);
     }
 
     // After per-type phase: save results + restore full x

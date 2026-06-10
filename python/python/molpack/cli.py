@@ -219,7 +219,7 @@ def pack(
     )
 
     try:
-        result = packer.pack(job.targets, max_loops=effective_max_loops)
+        result = packer.pack_with_report(job.targets, max_loops=effective_max_loops)
     except PackError as exc:
         typer.echo(f"error: packing failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc

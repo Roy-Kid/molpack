@@ -168,11 +168,11 @@ Molpack::new()
     .with_tolerance(2.0)
     .with_precision(0.01)
     .with_inner_iterations(20)
+    .with_log_level(...)
     .with_handler(...)
     .with_global_restraint(...) // broadcast to every target
-    // PBC declared via InsideBoxRestraint::new(min, max, [true; 3])
-    // on any target restraint — not a Molpack method.
-    .pack(&[targets], max_loops, seed)
+    .with_periodic_box(min, max) // or via periodic InsideBoxRestraint
+    .pack(&[targets], max_loops)
 ```
 
 Every setter consumes and returns `self`. `pack` takes `&mut self`

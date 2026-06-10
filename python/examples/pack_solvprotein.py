@@ -58,7 +58,7 @@ def main() -> None:
         .with_seed(1_234_567)
     )
 
-    result = packer.pack(
+    result = packer.pack_with_report(
         [protein, water, sodium, chloride],
         max_loops=800,
     )
