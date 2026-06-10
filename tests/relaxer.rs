@@ -6,13 +6,14 @@ use molpack::{
     F, InsideBoxRestraint, InsideSphereRestraint, Molpack, NullHandler, Relaxer, Target,
     TorsionMcRelaxer,
 };
-use molrs::molgraph::{Atom, MolGraph};
+use molrs::atomistic::Atomistic;
+use molrs::molgraph::Atom;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
 /// Build a linear chain MolGraph + zigzag coords with tetrahedral angles.
-fn chain(n: usize, bond_length: F) -> (MolGraph, Vec<[F; 3]>, Vec<F>) {
-    let mut g = MolGraph::new();
+fn chain(n: usize, bond_length: F) -> (Atomistic, Vec<[F; 3]>, Vec<F>) {
+    let mut g = Atomistic::new();
     let mut ids = Vec::new();
     for _ in 0..n {
         ids.push(g.add_atom(Atom::new()));

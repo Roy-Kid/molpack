@@ -120,9 +120,14 @@ fn read_element_column(block: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
 }
 
 #[pyclass(name = "Target", from_py_object)]
-#[derive(Clone)]
 pub struct PyTarget {
     pub(crate) inner: Target,
+    /// The original Python frame this target was built from, retained so
+    /// [`crate::packer::PyPackResult::frame`] can replay its full topology
+    /// (bonds/angles/…) onto the packed coordinates. `None` for targets built
+    /// without a source frame (e.g. the `.inp` script loader); such results
+    /// fall back to a coordinates-only frame.
+    pub(crate) template: Option<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -143,19 +148,26 @@ impl PyTarget {
     fn new(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Self> {
         Ok(PyTarget {
             inner: target_from_frame(frame, count)?,
+            template: Some(frame.clone().unbind()),
         })
     }
 
-    fn with_name(&self, name: &str) -> Self {
+    fn with_name(&self, py: Python<'_>, name: &str) -> Self {
         PyTarget {
             inner: self.inner.clone().with_name(name),
+            template: self.clone_template(py),
         }
     }
 
-    fn with_restraint(&self, restraint: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
+    fn with_restraint(
+        &self,
+        py: Python<'_>,
+        restraint: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<Self> {
         let r = extract_restraint(restraint)?;
         Ok(PyTarget {
             inner: self.inner.clone().with_restraint(r),
+            template: self.clone_template(py),
         })
     }
 
@@ -165,6 +177,7 @@ impl PyTarget {
     /// Packmol ``.inp`` file? Subtract 1 at the call site.
     fn with_atom_restraint(
         &self,
+        py: Python<'_>,
         indices: Vec<usize>,
         restraint: &Bound<'_, pyo3::types::PyAny>,
     ) -> PyResult<Self> {
@@ -172,34 +185,45 @@ impl PyTarget {
         let r = extract_restraint(restraint)?;
         Ok(PyTarget {
             inner: self.inner.clone().with_atom_restraint(&indices, r),
+            template: self.clone_template(py),
         })
     }
 
-    fn with_perturb_budget(&self, budget: usize) -> Self {
+    fn with_perturb_budget(&self, py: Python<'_>, budget: usize) -> Self {
         PyTarget {
             inner: self.inner.clone().with_perturb_budget(budget),
+            template: self.clone_template(py),
         }
     }
 
-    fn with_centering(&self, mode: PyCenteringMode) -> Self {
+    fn with_centering(&self, py: Python<'_>, mode: PyCenteringMode) -> Self {
         PyTarget {
             inner: self.inner.clone().with_centering(mode.into()),
+            template: self.clone_template(py),
         }
     }
 
-    fn with_rotation_bound(&self, axis: PyAxis, center: PyAngle, half_width: PyAngle) -> Self {
+    fn with_rotation_bound(
+        &self,
+        py: Python<'_>,
+        axis: PyAxis,
+        center: PyAngle,
+        half_width: PyAngle,
+    ) -> Self {
         PyTarget {
             inner: self.inner.clone().with_rotation_bound(
                 axis.into(),
                 center.inner,
                 half_width.inner,
             ),
+            template: self.clone_template(py),
         }
     }
 
-    fn fixed_at(&self, position: [NpF; 3]) -> Self {
+    fn fixed_at(&self, py: Python<'_>, position: [NpF; 3]) -> Self {
         PyTarget {
             inner: self.inner.clone().fixed_at(position),
+            template: self.clone_template(py),
         }
     }
 
@@ -208,13 +232,14 @@ impl PyTarget {
     /// Takes a 3-tuple of :class:`Angle` — e.g.
     /// ``(Angle.from_degrees(45), Angle.ZERO, Angle.from_degrees(90))``.
     /// Must be called after :meth:`fixed_at`.
-    fn with_orientation(&self, orientation: (PyAngle, PyAngle, PyAngle)) -> Self {
+    fn with_orientation(&self, py: Python<'_>, orientation: (PyAngle, PyAngle, PyAngle)) -> Self {
         PyTarget {
             inner: self.inner.clone().with_orientation([
                 orientation.0.inner,
                 orientation.1.inner,
                 orientation.2.inner,
             ]),
+            template: self.clone_template(py),
         }
     }
 
@@ -255,6 +280,24 @@ impl PyTarget {
             self.inner.count,
             self.inner.name
         )
+    }
+}
+
+impl PyTarget {
+    /// Clone the retained template reference (a new GIL-counted handle to the
+    /// same Python frame), preserving it across the fluent `with_*` builders.
+    fn clone_template(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.template.as_ref().map(|t| t.clone_ref(py))
+    }
+}
+
+impl Clone for PyTarget {
+    // `Py<PyAny>` has no GIL-free `Clone`; bumping its refcount needs a token.
+    fn clone(&self) -> Self {
+        Python::attach(|py| PyTarget {
+            inner: self.inner.clone(),
+            template: self.clone_template(py),
+        })
     }
 }
 

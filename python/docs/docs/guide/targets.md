@@ -75,7 +75,7 @@ target = target.with_centering(CenteringMode.OFF)     # keep input coords
 
 ## Fixed placement
 
-Pin a target at a specific location (e.g. a reference protein):
+Pin a target at a specific location (e.g. a fixed reference molecule):
 
 ```python
 from molpack import Angle

@@ -2,8 +2,8 @@
 //!
 //! [`PyPacker`] is the Python face of [`molpack::Molpack`]. Builders mirror
 //! the Rust names 1:1. [`PyPackResult`] is the output container — callers
-//! get a Frame-compatible `.frame` (dict with an `atoms` block) and a
-//! numpy `positions` view.
+//! get a ready-to-use `molrs.Frame` from `.frame` (full topology + box) and a
+//! numpy `positions` view. See [`crate::assemble`] for how the frame is built.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -18,14 +18,37 @@ use molpack::packer::{Molpack, PackResult};
 use numpy::IntoPyArray;
 use numpy::PyArray2;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 
 // ── PackResult ─────────────────────────────────────────────────────────────
 
 #[pyclass(name = "PackResult", from_py_object)]
-#[derive(Clone)]
 pub struct PyPackResult {
     inner: PackResult,
+    /// `(template_frame, count)` for each target, in pack order. Retained so
+    /// [`PyPackResult::frame`] can replay each template's full topology onto
+    /// the packed coordinates. Empty when any target lacked a source frame
+    /// (e.g. `.inp` script packing), in which case `frame` falls back to a
+    /// coordinates-only block.
+    templates: Vec<(Py<PyAny>, usize)>,
+    /// The periodic box `(min, max)` the packer was configured with, if any.
+    /// Stamped onto `frame.box` so callers don't re-create it. `None` when no
+    /// box was declared (e.g. restraint-only packing).
+    box_bounds: Option<([F; 3], [F; 3])>,
+}
+
+impl Clone for PyPackResult {
+    // `Py<PyAny>` has no GIL-free `Clone`; bumping its refcount needs a token.
+    fn clone(&self) -> Self {
+        Python::attach(|py| PyPackResult {
+            inner: self.inner.clone(),
+            templates: self
+                .templates
+                .iter()
+                .map(|(f, c)| (f.clone_ref(py), *c))
+                .collect(),
+            box_bounds: self.box_bounds,
+        })
+    }
 }
 
 #[pymethods]
@@ -40,48 +63,62 @@ impl PyPackResult {
         arr.into_pyarray(py)
     }
 
-    /// Packed frame as a dict compatible with ``molrs.Frame``.
+    /// Packed result as a ready-to-use ``molrs.Frame`` (built via the user's
+    /// installed ``molrs`` — molpack does not link the ``molrs`` Python crate).
     ///
-    /// Contains a single ``"atoms"`` block with at least the columns
-    /// ``x``, ``y``, ``z``, ``element``. Users persist the result by
-    /// passing this frame to a writer — e.g. ``molrs.write_pdb``. molpack
-    /// does not provide writers.
+    /// When the targets carry source frames (the ``Target(frame, count)``
+    /// API), each template's full topology is replayed onto the packed
+    /// coordinates: the ``"atoms"`` block holds every template column plus
+    /// packed ``x``/``y``/``z`` and regenerated ``id`` / ``mol_id``, and any
+    /// ``"bonds"`` / ``"angles"`` / ``"dihedrals"`` / ``"impropers"`` blocks
+    /// are included with index columns offset per copy. The periodic box, if
+    /// one was declared via :meth:`Molpack.with_periodic_box`, is stamped on
+    /// ``frame.box``. Force fields are out of scope — merge them separately
+    /// (e.g. ``molpy``'s ``ForceField.merge``).
+    ///
+    /// Falls back to a coordinates-only ``"atoms"`` block (``x``, ``y``,
+    /// ``z``, ``element``) when no source frames are available (``.inp``
+    /// script packing). molpack does not provide writers.
     #[getter]
-    fn frame<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let atoms_block = self
-            .inner
-            .frame
-            .get("atoms")
-            .expect("frame has no 'atoms' block");
-
-        let x = atoms_block.get_float("x").expect("no 'x' column");
-        let y = atoms_block.get_float("y").expect("no 'y' column");
-        let z = atoms_block.get_float("z").expect("no 'z' column");
-        let elements: Vec<String> = atoms_block
-            .get_string("element")
-            .expect("no 'element' column")
-            .iter()
-            .cloned()
-            .collect();
-
-        let atoms = PyDict::new(py);
-        atoms.set_item(
-            "x",
-            ndarray::Array1::from_iter(x.iter().copied()).into_pyarray(py),
-        )?;
-        atoms.set_item(
-            "y",
-            ndarray::Array1::from_iter(y.iter().copied()).into_pyarray(py),
-        )?;
-        atoms.set_item(
-            "z",
-            ndarray::Array1::from_iter(z.iter().copied()).into_pyarray(py),
-        )?;
-        atoms.set_item("element", elements)?;
-
-        let frame = PyDict::new(py);
-        frame.set_item("atoms", atoms)?;
-        Ok(frame)
+    fn frame<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        if self.templates.is_empty() {
+            let atoms = self
+                .inner
+                .frame
+                .get("atoms")
+                .expect("frame has no 'atoms' block");
+            let xs: Vec<F> = atoms
+                .get_float("x")
+                .expect("no 'x' column")
+                .iter()
+                .copied()
+                .collect();
+            let ys: Vec<F> = atoms
+                .get_float("y")
+                .expect("no 'y' column")
+                .iter()
+                .copied()
+                .collect();
+            let zs: Vec<F> = atoms
+                .get_float("z")
+                .expect("no 'z' column")
+                .iter()
+                .copied()
+                .collect();
+            let elements: Vec<String> = atoms
+                .get_string("element")
+                .expect("no 'element' column")
+                .iter()
+                .cloned()
+                .collect();
+            return crate::assemble::coords_only_frame(py, xs, ys, zs, elements, self.box_bounds);
+        }
+        crate::assemble::topology_frame(
+            py,
+            &self.inner.positions(),
+            &self.templates,
+            self.box_bounds,
+        )
     }
 
     #[getter]
@@ -287,6 +324,25 @@ impl PyPacker {
         targets: Vec<PyTarget>,
         max_loops: usize,
     ) -> PyResult<PyPackResult> {
+        // Retain each target's source frame + count so the result can replay
+        // full topology. Require every target to carry one — a mixed batch
+        // (some without, e.g. script-built) falls back to coordinates-only.
+        let templates: Vec<(Py<PyAny>, usize)> = if targets.iter().all(|t| t.template.is_some()) {
+            targets
+                .iter()
+                .map(|t| {
+                    (
+                        t.template
+                            .as_ref()
+                            .expect("template present (checked above)")
+                            .clone_ref(py),
+                        t.inner.count,
+                    )
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let rust_targets: Vec<_> = targets.into_iter().map(|t| t.inner).collect();
 
         let mut packer = Molpack::new();
@@ -350,7 +406,13 @@ impl PyPacker {
         }
 
         let result = result.map_err(pack_error_to_pyerr)?;
-        Ok(PyPackResult { inner: result })
+        Ok(PyPackResult {
+            inner: result,
+            templates,
+            // The declared periodic box (if any) is stamped onto the result
+            // frame's `box` so callers don't re-create it.
+            box_bounds: self.periodic_box,
+        })
     }
 
     fn __repr__(&self) -> String {

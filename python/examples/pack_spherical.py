@@ -1,8 +1,8 @@
-"""Packmol spherical example: nested double-layered vesicle.
+"""Packmol spherical example: nested double-layered shell.
 
 Reproduces Packmol's ``spherical.inp``: four shells around the origin,
-with atom-subset restraints pinning lipid heads and tails onto the
-correct inner/outer surfaces of the bilayer.
+with atom-subset restraints pinning molecule heads and tails onto the
+correct inner/outer surfaces of the double layer.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def main() -> None:
         .with_restraint(molpack.InsideSphereRestraint(ORIGIN, 13.0))
     )
 
-    # 2. Inner lipid layer: head atom (0-based index 36) inside r=14,
+    # 2. Inner layer: head atom (0-based index 36) inside r=14,
     # tail atom (0-based index 4) outside r=26.
     lipid_inner = (
         molpack.Target(lipid_frame, count=90)
@@ -40,7 +40,7 @@ def main() -> None:
         .with_atom_restraint([4], molpack.OutsideSphereRestraint(ORIGIN, 26.0))
     )
 
-    # 3. Outer lipid layer: tail atom 4 inside r=29, head atom 36 outside r=41.
+    # 3. Outer layer: tail atom 4 inside r=29, head atom 36 outside r=41.
     lipid_outer = (
         molpack.Target(lipid_frame, count=300)
         .with_name("lipid_outer")

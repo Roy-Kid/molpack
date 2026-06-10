@@ -1,4 +1,4 @@
-//! Packmol solvprotein example: fixed protein + water + ions in a sphere.
+//! Packmol solvprotein example: one fixed solute + water + ions in a sphere.
 //!
 //! Equivalent to Packmol's `solvprotein.inp`:
 //! ```text

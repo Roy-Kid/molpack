@@ -12,9 +12,12 @@ pub(crate) struct NumericControls {
 
 #[inline]
 pub(crate) fn numeric_controls() -> NumericControls {
-    // Packmol calibrates these constants for double precision. `molrs-pack`
-    // defaults to `f32`, so any control threshold tied to finite differences
-    // or "same point" detection must stay above the active machine epsilon.
+    // Packmol calibrates these constants for double precision, which is the
+    // active precision here (`F = molrs::types::F = f64`). The `.max(eps)`
+    // floors are a defensive lower bound on each finite-difference / "same
+    // point" threshold; under f64 they are no-ops (every literal already sits
+    // well above `f64::EPSILON`), but they keep the thresholds meaningful if
+    // `F` is ever narrowed.
     let eps = F::EPSILON;
     NumericControls {
         steabs: (1.0e-10 as F).max(eps),

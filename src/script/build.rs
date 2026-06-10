@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     AbovePlaneRestraint, Angle, BelowPlaneRestraint, CenteringMode, InsideBoxRestraint,
-    InsideSphereRestraint, Molpack, OutsideSphereRestraint, Target,
+    InsideCubeRestraint, InsideCylinderRestraint, InsideEllipsoidRestraint, InsideSphereRestraint,
+    Molpack, OutsideBoxRestraint, OutsideCubeRestraint, OutsideCylinderRestraint,
+    OutsideEllipsoidRestraint, OutsideSphereRestraint, Restraint, Target,
 };
 
 use super::error::ScriptError;
@@ -145,24 +147,62 @@ fn resolve(base: &Path, path: &Path) -> PathBuf {
     }
 }
 
-fn apply_mol_restraint(target: Target, r: &RestraintSpec) -> Target {
+/// Lower one parsed [`RestraintSpec`] to its concrete [`Restraint`].
+///
+/// Single source of truth for the spec → restraint mapping, shared by the
+/// whole-molecule and per-atom-group application paths. Adding a new restraint
+/// kind is one arm here plus one parser arm and one [`RestraintSpec`] variant.
+fn restraint_from_spec(r: &RestraintSpec) -> Box<dyn Restraint> {
     match *r {
         RestraintSpec::InsideBox { min, max } => {
-            target.with_restraint(InsideBoxRestraint::new(min, max, [false; 3]))
+            Box::new(InsideBoxRestraint::new(min, max, [false; 3]))
+        }
+        RestraintSpec::OutsideBox { min, max } => Box::new(OutsideBoxRestraint::new(min, max)),
+        RestraintSpec::InsideCube { origin, side } => {
+            Box::new(InsideCubeRestraint::new(origin, side))
+        }
+        RestraintSpec::OutsideCube { origin, side } => {
+            Box::new(OutsideCubeRestraint::new(origin, side))
         }
         RestraintSpec::InsideSphere { center, radius } => {
-            target.with_restraint(InsideSphereRestraint::new(center, radius))
+            Box::new(InsideSphereRestraint::new(center, radius))
         }
         RestraintSpec::OutsideSphere { center, radius } => {
-            target.with_restraint(OutsideSphereRestraint::new(center, radius))
+            Box::new(OutsideSphereRestraint::new(center, radius))
         }
+        RestraintSpec::InsideEllipsoid {
+            center,
+            axes,
+            exponent,
+        } => Box::new(InsideEllipsoidRestraint::new(center, axes, exponent)),
+        RestraintSpec::OutsideEllipsoid {
+            center,
+            axes,
+            exponent,
+        } => Box::new(OutsideEllipsoidRestraint::new(center, axes, exponent)),
+        RestraintSpec::InsideCylinder {
+            center,
+            axis,
+            radius,
+            length,
+        } => Box::new(InsideCylinderRestraint::new(center, axis, radius, length)),
+        RestraintSpec::OutsideCylinder {
+            center,
+            axis,
+            radius,
+            length,
+        } => Box::new(OutsideCylinderRestraint::new(center, axis, radius, length)),
         RestraintSpec::AbovePlane { normal, distance } => {
-            target.with_restraint(AbovePlaneRestraint::new(normal, distance))
+            Box::new(AbovePlaneRestraint::new(normal, distance))
         }
         RestraintSpec::BelowPlane { normal, distance } => {
-            target.with_restraint(BelowPlaneRestraint::new(normal, distance))
+            Box::new(BelowPlaneRestraint::new(normal, distance))
         }
     }
+}
+
+fn apply_mol_restraint(target: Target, r: &RestraintSpec) -> Target {
+    target.with_restraint(restraint_from_spec(r))
 }
 
 fn apply_atom_group(mut target: Target, group: &AtomGroup) -> Target {
@@ -174,23 +214,7 @@ fn apply_atom_group(mut target: Target, group: &AtomGroup) -> Target {
         .collect();
     let indices = zero_indexed.as_slice();
     for r in &group.restraints {
-        target = match *r {
-            RestraintSpec::InsideBox { min, max } => {
-                target.with_atom_restraint(indices, InsideBoxRestraint::new(min, max, [false; 3]))
-            }
-            RestraintSpec::InsideSphere { center, radius } => {
-                target.with_atom_restraint(indices, InsideSphereRestraint::new(center, radius))
-            }
-            RestraintSpec::OutsideSphere { center, radius } => {
-                target.with_atom_restraint(indices, OutsideSphereRestraint::new(center, radius))
-            }
-            RestraintSpec::AbovePlane { normal, distance } => {
-                target.with_atom_restraint(indices, AbovePlaneRestraint::new(normal, distance))
-            }
-            RestraintSpec::BelowPlane { normal, distance } => {
-                target.with_atom_restraint(indices, BelowPlaneRestraint::new(normal, distance))
-            }
-        };
+        target = target.with_atom_restraint(indices, restraint_from_spec(r));
     }
     target
 }

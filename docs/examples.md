@@ -7,10 +7,10 @@ target counts.
 | Workload | Rust example | Python example | Demonstrates |
 |---|---|---|---|
 | Mixture | `examples/pack_mixture` | `python/examples/pack_mixture.py` | two species in one box |
-| Bilayer | `examples/pack_bilayer` | `python/examples/pack_bilayer.py` | atom-subset restraints to orient lipids |
+| Bilayer | `examples/pack_bilayer` | `python/examples/pack_bilayer.py` | atom-subset restraints to orient layer molecules |
 | Interface | `examples/pack_interface` | `python/examples/pack_interface.py` | fixed structures plus mobile solvents |
 | Spherical | `examples/pack_spherical` | `python/examples/pack_spherical.py` | nested regions, shell packing |
-| Solvated protein | `examples/pack_solvprotein` | `python/examples/pack_solvprotein.py` | one fixed macromolecule, heterogeneous solvent |
+| Solvated solute | `examples/pack_solvprotein` | `python/examples/pack_solvprotein.py` | one fixed solute, heterogeneous solvent |
 
 ## Run the Rust examples
 

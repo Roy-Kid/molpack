@@ -72,7 +72,7 @@ pub struct Placement {
 /// Deprecated legacy name for [`Placement`]. Will be removed in the
 /// next release.
 #[deprecated(
-    since = "0.2.0",
+    since = "0.1.0",
     note = "Renamed to `Placement` — the `Fixed` prefix is redundant now that the constructor name carries the semantic."
 )]
 pub type FixedPlacement = Placement;

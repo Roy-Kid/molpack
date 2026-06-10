@@ -1,7 +1,7 @@
-"""Packmol bilayer example: lipid double layer with water above and below.
+"""Packmol bilayer example: a double layer with water above and below.
 
 Based on Packmol's ``bilayer.inp`` — atom-subset restraints pin the
-polar heads and the aliphatic tails of each lipid into their
+head atoms and the tail atoms of each molecule into their
 respective slabs.
 """
 

@@ -1,4 +1,4 @@
-//! Packmol bilayer example: lipid double layer with water above and below.
+//! Packmol bilayer example: a double layer with solvent above and below.
 //!
 //! Based on Packmol's `bilayer.inp` from https://m3g.github.io/packmol/examples.shtml.
 //! This version maps Packmol atom-level orientation constraints directly:

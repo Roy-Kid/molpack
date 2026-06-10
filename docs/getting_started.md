@@ -277,7 +277,7 @@ let target = Target::from_coords(pos, rad, 100).with_restraint(
 ```
 
 Slab geometries with only some axes wrapping (e.g. X/Y periodic
-membrane, Z confined):
+slab, Z confined):
 
 ```rust,no_run
 # use molpack::{InsideBoxRestraint, Target};

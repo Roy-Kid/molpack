@@ -1,4 +1,4 @@
-//! Pack multiple polyethylene chains (with explicit H) into a spherical vesicle.
+//! Pack multiple polyethylene chains (with explicit H) into a spherical shell.
 //!
 //! Each PE chain is generated as a 3D random-walk backbone, then hydrogenated
 //! with `add_hydrogens`. During packing, MC torsion rotations fold the chains
@@ -6,8 +6,8 @@
 //!
 //! Structure:
 //! - 5 PE chains (20 carbons each, with explicit H) inside sphere r=10
-//! - 90 lipids forming the inner leaflet
-//! - 300 lipids forming the outer leaflet
+//! - 90 chains forming the inner layer
+//! - 300 chains forming the outer layer
 //! - 2000 water molecules in outer shell
 //!
 //! Run with:
@@ -21,9 +21,10 @@ use molpack::{
     InsideBoxRestraint, InsideSphereRestraint, Molpack, OutsideSphereRestraint, ProgressHandler,
     Target, TorsionMcRelaxer, XYZHandler,
 };
+use molrs::atomistic::{AtomId, Atomistic};
 use molrs::element::Element;
 use molrs::hydrogens::add_hydrogens;
-use molrs::molgraph::{Atom, AtomId, MolGraph};
+use molrs::molgraph::Atom;
 use molrs::types::F;
 use molrs_io::pdb::read_pdb_frame;
 use rand::Rng;
@@ -46,7 +47,7 @@ fn random_direction(rng: &mut impl Rng) -> [F; 3] {
 /// Generate a polyethylene chain with explicit hydrogen atoms.
 ///
 /// Returns `(graph, coords, radii, elements)` where:
-/// - `graph`: MolGraph with C backbone + H atoms and all bonds
+/// - `graph`: Atomistic with C backbone + H atoms and all bonds
 /// - `coords`: 3D positions for all atoms (C first, then H)
 /// - `radii`: VdW radii per atom
 /// - `elements`: element symbol strings per atom
@@ -54,11 +55,11 @@ fn polyethylene_chain(
     n_carbons: usize,
     cc_bond: F,
     rng: &mut impl Rng,
-) -> (MolGraph, Vec<[F; 3]>, Vec<F>, Vec<String>) {
+) -> (Atomistic, Vec<[F; 3]>, Vec<F>, Vec<String>) {
     let ch_bond: F = 1.09;
 
     // ── 1. Build C-only backbone topology ────────────────────────────────
-    let mut backbone = MolGraph::new();
+    let mut backbone = Atomistic::new();
     let mut c_ids: Vec<AtomId> = Vec::with_capacity(n_carbons);
     for _ in 0..n_carbons {
         let mut a = Atom::new();
@@ -135,8 +136,7 @@ fn polyethylene_chain(
                     && full_graph
                         .get_atom(nid)
                         .ok()
-                        .and_then(|a| a.get_str("symbol"))
-                        .map(|s| s != "H")
+                        .and_then(|a| a.get_str("symbol").map(|s| s != "H"))
                         .unwrap_or(false)
             })
             .map(|nid| coords[id_to_idx[&nid]])
@@ -151,8 +151,7 @@ fn polyethylene_chain(
                     && full_graph
                         .get_atom(nid)
                         .ok()
-                        .and_then(|a| a.get_str("symbol"))
-                        .map(|s| s == "H")
+                        .and_then(|a| a.get_str("symbol").map(|s| s == "H"))
                         .unwrap_or(false)
                     && id_to_idx[&nid] < global_idx
             })
@@ -321,15 +320,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         targets.push(target);
     }
 
-    // ── Vesicle (from pack_spherical, scaled down) ──────────────────────
+    // ── Shell (from pack_spherical, scaled down) ───────────────────────
 
-    // Inner lipid leaflet
+    // Inner layer
     let lipid_inner = Target::new(lipid.clone(), 90)
         .with_atom_restraint(&[36], InsideSphereRestraint::new(origin, 14.0))
         .with_atom_restraint(&[4], OutsideSphereRestraint::new(origin, 26.0))
         .with_name("lipid_inner");
 
-    // Outer lipid leaflet
+    // Outer layer
     let lipid_outer = Target::new(lipid, 300)
         .with_atom_restraint(&[4], InsideSphereRestraint::new(origin, 29.0))
         .with_atom_restraint(&[36], OutsideSphereRestraint::new(origin, 41.0))

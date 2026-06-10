@@ -68,7 +68,7 @@ A restraint can be applied at two scopes:
 - **Atom subset** — `target.with_atom_restraint([0, 1, 2], r)` —
   penalises only the listed atoms (0-based indices).
 
-Example — lipid bilayer: pin heads above z=12, tails below z=2:
+Example — a bilayer: pin heads above z=12, tails below z=2:
 
 ```python
 lipid = (

@@ -542,8 +542,27 @@ pub fn initial(
         t0.elapsed().as_secs_f64(),
         cell_side
     );
-    for k in 0..3 {
-        sys.ncells[k] = ((sys.pbc_length[k] / cell_side).floor() as usize).max(1);
+    // Raw grid resolution: one cell per `cell_side` along each axis.
+    let raw = [
+        ((sys.pbc_length[0] / cell_side).floor() as usize).max(1),
+        ((sys.pbc_length[1] / cell_side).floor() as usize).max(1),
+        ((sys.pbc_length[2] / cell_side).floor() as usize).max(1),
+    ];
+    // Cap the total cell count. With no spatial constraint the fallback box is
+    // ±`sidemax` (default 1000 Å) wide, which drives the raw grid to ~10⁹ cells
+    // and OOMs `resize_cell_arrays` (each cell costs ~120 B across the cell
+    // arrays). There is no benefit to having far more cells than atoms, so the
+    // budget scales with `ntotat` under a hard ceiling. Coarser cells only slow
+    // the neighbor search — they never change the packing result.
+    let max_total_cells = sys.ntotat.max(1).saturating_mul(64).clamp(1 << 16, 1 << 22);
+    let raw_total = raw[0].saturating_mul(raw[1]).saturating_mul(raw[2]);
+    let shrink = if raw_total > max_total_cells {
+        (raw_total as f64 / max_total_cells as f64).cbrt()
+    } else {
+        1.0
+    };
+    for (k, &raw_k) in raw.iter().enumerate() {
+        sys.ncells[k] = ((raw_k as f64 / shrink).floor() as usize).max(1);
         sys.cell_length[k] = sys.pbc_length[k] / sys.ncells[k] as F;
     }
     log::debug!(

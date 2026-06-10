@@ -24,11 +24,18 @@ workloads.
 - Precision gate on `fdist` (overlap) and `frest` (restraint
   violation).
 
-**Restraint vocabulary used by the canonical examples**
+**Restraint vocabulary**
 
-- `inside box`, `inside sphere`, `outside sphere`
-- `above plane` / `below plane`
+- `inside`/`outside box`, `cube`, `sphere`, `ellipsoid`, `cylinder`
+- `over plane` (above) / `below plane`
 - fixed molecule placement
+
+All twelve box/cube/sphere/ellipsoid/cylinder/plane kinds lower through a single
+`restraint_from_spec` table in `script::build`, so each is reachable from both
+whole-molecule and `atoms … end atoms` blocks. The two Gaussian-surface kinds
+(14/15) exist in the Rust/Python API but have no `.inp` keyword yet — Packmol's
+Gaussian grammar is not pinned down here, and emitting a wrong parameter mapping
+would silently mis-pack, so the parser rejects them rather than guessing.
 
 **Periodicity**
 

@@ -185,7 +185,7 @@ pub fn flash1(a: &mut [F], m: usize, ind: &mut [usize], l_buf: &mut Vec<usize>) 
     let nmax_idx = a
         .iter()
         .enumerate()
-        .max_by(|(_, x), (_, y)| x.partial_cmp(y).unwrap())
+        .max_by(|(_, x), (_, y)| x.total_cmp(y))
         .map(|(i, _)| i)
         .unwrap_or(0);
 

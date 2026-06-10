@@ -49,7 +49,7 @@ pub struct Aabb {
 /// Deprecated legacy name for [`Aabb`]. Will be removed in the next
 /// release.
 #[deprecated(
-    since = "0.2.0",
+    since = "0.1.0",
     note = "Renamed to `Aabb` — the standard abbreviation for axis-aligned bounding box."
 )]
 pub type BBox = Aabb;
@@ -222,7 +222,7 @@ pub struct RegionRestraint<R: Region>(pub R);
 /// Deprecated legacy name for [`RegionRestraint`]. Will be removed in
 /// the next release.
 #[deprecated(
-    since = "0.2.0",
+    since = "0.1.0",
     note = "Renamed to `RegionRestraint` — `From` was meaningless as a type name."
 )]
 pub type FromRegion<R> = RegionRestraint<R>;

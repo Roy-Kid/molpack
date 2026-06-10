@@ -24,6 +24,8 @@
 
 use pyo3::prelude::*;
 
+mod assemble;
+
 mod helpers;
 use helpers::register_errors;
 

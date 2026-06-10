@@ -156,6 +156,10 @@ fn build_target(
     let target = target_from_frame(&frame_obj, sp.number)?;
     Ok(PyTarget {
         inner: sp.apply(target),
+        // `.inp`-loaded frames come from molrs (column access via `.view`,
+        // not enumerable like molpy/dict frames), so we don't replay their
+        // topology — script results keep the coordinates-only frame.
+        template: None,
     })
 }
 

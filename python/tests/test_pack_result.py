@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import molrs
 import numpy as np
 import pytest
 
 import molpack
+
+
+def _col(frame, block: str, name: str) -> np.ndarray:
+    """Read a column from a ``molrs.Frame`` block as a numpy array."""
+    return np.asarray(frame[block].view(name))
 
 
 def _make_frame(
@@ -66,15 +72,77 @@ class TestPackResultProperties:
         # Template is ["O", "H"] × 3 copies → "OHOHOH".
         assert result.elements == ["O", "H"] * 3
 
-    def test_frame_exposes_atoms_block(self):
+    def test_frame_is_molrs_frame_with_atoms(self):
         result = _make_tiny_pack()
         frame = result.frame
-        assert "atoms" in frame
-        atoms = frame["atoms"]
-        assert "x" in atoms and "y" in atoms and "z" in atoms
-        assert "element" in atoms
-        assert len(atoms["element"]) == result.natoms
-        assert atoms["x"].shape[0] == result.natoms
+        # `.frame` is a genuine molrs.Frame, not a dict.
+        assert isinstance(frame, molrs.Frame)
+        for col in ("x", "y", "z", "element", "id", "mol_id"):
+            assert len(_col(frame, "atoms", col)) == result.natoms
+
+
+class TestFrameTopology:
+    """End-to-end: a template's topology is replayed onto packed coordinates."""
+
+    @staticmethod
+    def _diatomic_with_bond() -> dict:
+        return {
+            "atoms": {
+                "type": np.array(["A", "B"]),
+                "charge": np.array([0.1, -0.1]),
+                "mass": np.array([12.0, 1.0]),
+                "element": np.array(["C", "H"]),
+                "x": np.array([0.0, 1.0]),
+                "y": np.array([0.0, 0.0]),
+                "z": np.array([0.0, 0.0]),
+            },
+            "bonds": {"atomi": np.array([0]), "atomj": np.array([1])},
+        }
+
+    def _pack(self, copies: int, box: bool = False) -> molpack.PackResult:
+        target = molpack.Target(self._diatomic_with_bond(), copies).with_restraint(
+            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
+        )
+        packer = molpack.Molpack().with_tolerance(2.0).with_progress(False).with_seed(7)
+        if box:
+            packer = packer.with_periodic_box([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
+        return packer.pack([target], max_loops=50)
+
+    def test_frame_carries_replicated_topology(self):
+        result = self._pack(3)
+        frame = result.frame
+
+        assert isinstance(frame, molrs.Frame)
+        # All template columns survive, plus regenerated id / mol_id.
+        assert np.array_equal(_col(frame, "atoms", "id"), np.arange(1, 7))
+        assert np.array_equal(
+            _col(frame, "atoms", "mol_id"), np.array([1, 1, 2, 2, 3, 3])
+        )
+        assert np.array_equal(_col(frame, "atoms", "type"), np.array(["A", "B"] * 3))
+
+    def test_bond_indices_offset_per_copy(self):
+        frame = self._pack(3).frame
+        # One bond per copy, second atom of each diatomic: (0,1),(2,3),(4,5).
+        assert np.array_equal(_col(frame, "bonds", "atomi"), np.array([0, 2, 4]))
+        assert np.array_equal(_col(frame, "bonds", "atomj"), np.array([1, 3, 5]))
+        # Regenerated bond ids.
+        assert np.array_equal(_col(frame, "bonds", "id"), np.array([1, 2, 3]))
+
+    def test_atom_coords_match_packed_positions(self):
+        result = self._pack(3)
+        frame = result.frame
+        packed = result.positions
+        assert np.allclose(_col(frame, "atoms", "x"), packed[:, 0])
+        assert np.allclose(_col(frame, "atoms", "y"), packed[:, 1])
+        assert np.allclose(_col(frame, "atoms", "z"), packed[:, 2])
+
+    def test_periodic_box_is_stamped_on_frame(self):
+        box = self._pack(3, box=True).frame.box
+        assert box is not None
+        assert np.allclose(np.asarray(box.lengths), [15.0, 15.0, 15.0])
+
+    def test_no_box_when_not_declared(self):
+        assert self._pack(3).frame.box is None
 
 
 class TestMolpackErrorPaths:

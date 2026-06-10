@@ -312,6 +312,12 @@ pub struct InsideEllipsoidRestraint {
 
 impl InsideEllipsoidRestraint {
     pub fn new(center: [F; 3], axes: [F; 3], exponent: F) -> Self {
+        // Each axis halves the penalty via division by `axes[k]²`; a zero axis
+        // produces NaN/inf at eval time. The contract is positive semi-axes.
+        debug_assert!(
+            axes.iter().all(|&a| a > 0.0),
+            "ellipsoid semi-axes must be strictly positive, got {axes:?}"
+        );
         Self {
             center,
             axes,
@@ -545,6 +551,12 @@ pub struct OutsideEllipsoidRestraint {
 
 impl OutsideEllipsoidRestraint {
     pub fn new(center: [F; 3], axes: [F; 3], exponent: F) -> Self {
+        // Each axis halves the penalty via division by `axes[k]²`; a zero axis
+        // produces NaN/inf at eval time. The contract is positive semi-axes.
+        debug_assert!(
+            axes.iter().all(|&a| a > 0.0),
+            "ellipsoid semi-axes must be strictly positive, got {axes:?}"
+        );
         Self {
             center,
             axes,
@@ -677,6 +689,12 @@ pub struct InsideCylinderRestraint {
 
 impl InsideCylinderRestraint {
     pub fn new(center: [F; 3], axis: [F; 3], radius: F, length: F) -> Self {
+        // The axis is normalized by `|axis|` in `f`/`fg`; a zero vector yields
+        // NaN. The contract is a non-zero axis direction.
+        debug_assert!(
+            axis[0] != 0.0 || axis[1] != 0.0 || axis[2] != 0.0,
+            "cylinder axis must be a non-zero direction"
+        );
         Self {
             center,
             axis,
@@ -759,6 +777,12 @@ pub struct OutsideCylinderRestraint {
 
 impl OutsideCylinderRestraint {
     pub fn new(center: [F; 3], axis: [F; 3], radius: F, length: F) -> Self {
+        // The axis is normalized by `|axis|` in `f`/`fg`; a zero vector yields
+        // NaN. The contract is a non-zero axis direction.
+        debug_assert!(
+            axis[0] != 0.0 || axis[1] != 0.0 || axis[2] != 0.0,
+            "cylinder axis must be a non-zero direction"
+        );
         Self {
             center,
             axis,

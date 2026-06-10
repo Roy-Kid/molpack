@@ -1,4 +1,4 @@
-//! Packmol spherical example: double-layered vesicle with water inside and outside.
+//! Packmol spherical example: double-layered shell with water inside and outside.
 //!
 //! Based on Packmol's `spherical.inp` from https://m3g.github.io/packmol/examples.shtml.
 //!
@@ -9,7 +9,7 @@
 //!   inside sphere 0. 0. 0. 13.
 //! end structure
 //!
-//! structure palmitoil.pdb           # inner lipid layer
+//! structure palmitoil.pdb           # inner layer
 //!   number 90
 //!   atoms 37
 //!     inside sphere 0. 0. 0. 14.
@@ -19,7 +19,7 @@
 //!   end atoms
 //! end structure
 //!
-//! structure palmitoil.pdb           # outer lipid layer
+//! structure palmitoil.pdb           # outer layer
 //!   number 300
 //!   atoms 5
 //!     inside sphere 0. 0. 0. 29.
@@ -36,7 +36,7 @@
 //! end structure
 //! ```
 //!
-//! Lipids use `with_restraint`, same semantics as all other restraints.
+//! Layer molecules use `with_restraint`, same semantics as all other restraints.
 //!
 //! Run with:
 //! ```sh
@@ -67,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(InsideSphereRestraint::new(origin, 13.0))
         .with_name("water_inner");
 
-    // 2. Inner lipid layer: 90 molecules.
+    // 2. Inner layer: 90 molecules.
     //    Packmol input constrains only specific atoms:
     //    atom 37 inside sphere r=14, atom 5 outside sphere r=26.
     let lipid_inner = Target::new(lipid.clone(), 90)
@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_atom_restraint(&[4], OutsideSphereRestraint::new(origin, 26.0))
         .with_name("lipid_inner");
 
-    // 3. Outer lipid layer: 300 molecules.
+    // 3. Outer layer: 300 molecules.
     //    Packmol input constrains only specific atoms:
     //    atom 5 inside sphere r=29, atom 37 outside sphere r=41.
     let lipid_outer = Target::new(lipid, 300)

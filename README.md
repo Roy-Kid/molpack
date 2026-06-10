@@ -55,14 +55,21 @@ cat mixture.inp | molpack
 | `avoid_overlap <yes\|no>` | Parsed for compatibility |
 | `structure <file>` … `end structure` | One block per molecule type |
 | `number <n>` | Copies to pack |
-| `inside box x0 y0 z0 x1 y1 z1` | Axis-aligned box restraint |
-| `inside sphere cx cy cz r` | Sphere restraint |
-| `outside sphere cx cy cz r` | Exclusion sphere |
+| `inside\|outside box x0 y0 z0 x1 y1 z1` | Axis-aligned box restraint |
+| `inside\|outside cube x0 y0 z0 d` | Axis-aligned cube (origin corner + side) |
+| `inside\|outside sphere cx cy cz r` | Sphere restraint |
+| `inside\|outside ellipsoid a1 a2 a3 b1 b2 b3 c` | Ellipsoid (center, semi-axes, exponent) |
+| `inside\|outside cylinder a1 a2 a3 d1 d2 d3 r l` | Finite cylinder (center, axis, radius, length) |
 | `over plane nx ny nz d` | Half-space (above) restraint |
 | `below plane nx ny nz d` | Half-space (below) restraint |
 | `center` | Center molecule at origin before packing |
 | `fixed x y z ex ey ez` | Fix molecule at position + Euler angles |
 | `atoms i j …` … `end atoms` | Per-atom-subset restraints |
+
+All 12 box/cube/sphere/ellipsoid/cylinder/plane restraints are reachable from
+both whole-molecule and `atoms … end atoms` blocks. The Gaussian-surface
+restraints (`AboveGaussianRestraint` / `BelowGaussianRestraint`) are available
+through the Rust/Python API but not yet exposed as `.inp` keywords.
 
 **Extended format support** — beyond Packmol's PDB/XYZ, molpack also reads SDF/MOL, LAMMPS dump, and LAMMPS data files. Set `filetype` to `sdf`, `lammps_dump`, or `lammps_data`, or use the matching file extension:
 

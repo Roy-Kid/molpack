@@ -48,10 +48,10 @@ def _element_from_atom_name(name: str) -> str:
     """Best-effort element symbol from a PDB atom-name (columns 13–16).
 
     The PDB standard places element symbols in columns 77–78; when those
-    are blank we fall back to the atom name. Convention for protein
-    records: strip digits, then take the first letter — so ``"CA"``,
-    ``"CB"``, ``"CG"`` all map to ``C`` (alpha / beta / gamma carbon);
-    ``"OG1"`` maps to ``O``; ``"NE2"`` to ``N``. This heuristic mislabels
+    are blank we fall back to the atom name. Many PDB atom names follow
+    the convention: strip digits, then take the first letter — so ``"CA"``,
+    ``"CB"``, ``"CG"`` all map to ``C``; ``"OG1"`` maps to ``O``;
+    ``"NE2"`` to ``N``. This heuristic mislabels
     two-letter elements like sodium (``"NA"``) and calcium (``"CA"``)
     when they appear under ``ATOM``/``HETATM`` without an element field
     — such PDBs should fill in columns 77–78 explicitly.

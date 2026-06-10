@@ -41,7 +41,9 @@ Modules:
 | `rayon` | `rayon` + `molrs/rayon` (parallel evaluation) |
 
 The Python wheel is built **without** `io` — the wheel relies on the user's `molrs` Python package
-for frame loading, then calls `Target::from_frame_parts` / `Script::lower`.
+for frame loading, then builds targets from the loaded frame (the PyO3
+`target_from_frame` helper) and lowers scripts with `Script::lower` +
+`StructurePlan::apply`.
 
 ## Hard rules (load-bearing)
 

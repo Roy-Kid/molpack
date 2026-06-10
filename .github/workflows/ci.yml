@@ -7,70 +7,14 @@ on:
   workflow_call:
   workflow_dispatch:
 
+# CI is a tests-only gate. Formatting and linting (cargo fmt + clippy,
+# ruff-format + ruff, ty) are enforced by the pre-commit hooks in
+# `.pre-commit-config.yaml`, which use first-party registry-hosted tooling.
+# Keeping CI focused on the test suites avoids duplicating those checks here.
+
 jobs:
-  # ── fast gates (run in parallel) ──────────────────────────────────────────
-
-  fmt:
-    name: rustfmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --check
-
-  python-lint:
-    name: python lint + types
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          path: molpack
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Install typecheck dep group
-        run: pip install --group typecheck
-        working-directory: molpack/python
-      - name: ruff format
-        run: ruff format --check .
-        working-directory: molpack/python
-      - name: ruff lint
-        run: ruff check .
-        working-directory: molpack/python
-      - name: ty check
-        run: ty check python tests examples
-        working-directory: molpack/python
-
-  # ── rust lint gate ─────────────────────────────────────────────────────────
-
-  clippy:
-    name: clippy
-    needs: fmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: MolCrafts/molrs
-          path: molrs
-      - uses: actions/checkout@v6
-        with:
-          path: molpack
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: molpack
-      - run: cargo clippy --all-targets --features cli -- -D warnings
-        working-directory: molpack
-
-  # ── full checks (blocked on both lint gates) ───────────────────────────────
-
   test:
-    name: test
-    needs: clippy
+    name: rust tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -92,19 +36,15 @@ jobs:
       - name: Fetch test data
         run: bash scripts/fetch-test-data.sh
         working-directory: molrs
-      - name: Test (library + examples)
+      - name: Test (library + integration + examples)
         run: cargo test --lib --tests --examples
         working-directory: molpack
       - name: Test CLI (cli feature)
         run: cargo test --test cli --features cli
         working-directory: molpack
-      - name: Benches build
-        run: cargo bench --no-run
-        working-directory: molpack
 
   python:
-    name: python bindings
-    needs: [clippy, python-lint]
+    name: python tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

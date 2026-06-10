@@ -5,8 +5,10 @@ use std::sync::Arc;
 
 use molpack::objective::{compute_f, compute_fg, compute_g};
 use molpack::{
-    AboveGaussianRestraint, AbovePlaneRestraint, F, InsideBoxRestraint, InsideCylinderRestraint,
-    InsideEllipsoidRestraint, InsideSphereRestraint, OutsideEllipsoidRestraint, PackContext,
+    AboveGaussianRestraint, AbovePlaneRestraint, BelowGaussianRestraint, BelowPlaneRestraint, F,
+    InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint, InsideEllipsoidRestraint,
+    InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint, OutsideCylinderRestraint,
+    OutsideEllipsoidRestraint, OutsideSphereRestraint, PackContext, Restraint,
 };
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -53,6 +55,158 @@ fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
     sys.pbc_min = [0.0; 3];
     sys.pbc_length = [cell_len * cell_n as F; 3];
     sys.resize_cell_arrays();
+}
+
+/// Generic `f` ↔ `fg` finite-difference parity check for a single restraint.
+///
+/// Installs `restraint` on a one-atom system, places the atom at `pos`, and
+/// asserts the analytic gradient matches a central finite difference on all
+/// three translational DOF. `pos` MUST be chosen so every penalty branch is
+/// active — the helper asserts `f(pos) > 0` so a vacuous "penalty inactive,
+/// gradient trivially zero" pass cannot masquerade as a real check.
+fn check_restraint_gradient(
+    restraint: std::sync::Arc<dyn Restraint>,
+    pos: [F; 3],
+    h: F,
+    tol: F,
+    label: &str,
+) {
+    let mut sys = single_atom_system(1);
+    sys.restraints = vec![restraint];
+    sys.iratom_offsets = vec![0, 1];
+    sys.iratom_data = vec![0];
+    sys.init1 = true;
+
+    let mut x = vec![0.0; 6];
+    x[0] = pos[0];
+    x[1] = pos[1];
+    x[2] = pos[2];
+
+    let f0 = compute_f(&x, &mut sys);
+    assert!(
+        f0 > 1e-9,
+        "{label}: penalty inactive at {pos:?} (f={f0}) — test would be vacuous; \
+         move the atom so every penalty branch is engaged"
+    );
+
+    let mut g = vec![0.0; x.len()];
+    compute_g(&x, &mut sys, &mut g);
+
+    for i in 0..3 {
+        let gfd = finite_diff(&x, &mut sys, i, h);
+        let err = (g[i] - gfd).abs();
+        assert!(
+            err < tol,
+            "{label} gradient mismatch at var {i}: analytic={} fd={gfd} err={err}",
+            g[i]
+        );
+    }
+}
+
+// ── f ↔ fg parity for the remaining restraint kinds ─────────────────────────
+//
+// The dedicated tests above cover kinds 3/4/5/9/10/12/14. These cover the
+// other seven concrete restraints so that every `Restraint` impl has its
+// `fg` pinned against its `f` by finite difference. Each atom is positioned
+// where the penalty is genuinely active (and, for the linear-penalty box /
+// cube kinds, off every median plane so the FD step does not straddle the
+// gradient kink).
+
+#[test]
+fn gradient_inside_cube_constraint() {
+    // Cube [0,4]³; atom past the +x/+y/+z faces → all three upper terms active.
+    check_restraint_gradient(
+        std::sync::Arc::new(InsideCubeRestraint::new([0.0, 0.0, 0.0], 4.0)),
+        [5.0, 5.5, 6.0],
+        1e-7,
+        1e-5,
+        "inside_cube",
+    );
+}
+
+#[test]
+fn gradient_outside_cube_constraint() {
+    // Cube [0,4]³; atom inside, off-center toward the min corner.
+    check_restraint_gradient(
+        std::sync::Arc::new(OutsideCubeRestraint::new([0.0, 0.0, 0.0], 4.0)),
+        [1.0, 1.3, 0.7],
+        1e-7,
+        1e-5,
+        "outside_cube",
+    );
+}
+
+#[test]
+fn gradient_outside_box_constraint() {
+    // Box [0,4]³; atom inside, off-center toward the min corner.
+    check_restraint_gradient(
+        std::sync::Arc::new(OutsideBoxRestraint::new([0.0, 0.0, 0.0], [4.0, 4.0, 4.0])),
+        [1.1, 0.9, 1.4],
+        1e-7,
+        1e-5,
+        "outside_box",
+    );
+}
+
+#[test]
+fn gradient_outside_sphere_constraint() {
+    // Sphere r=3 at origin; atom inside → penalty active.
+    check_restraint_gradient(
+        std::sync::Arc::new(OutsideSphereRestraint::new([0.0, 0.0, 0.0], 3.0)),
+        [1.0, 0.5, -0.4],
+        1e-6,
+        1e-3,
+        "outside_sphere",
+    );
+}
+
+#[test]
+fn gradient_below_plane_constraint() {
+    // Plane z = 5; atom above → penalty active.
+    check_restraint_gradient(
+        std::sync::Arc::new(BelowPlaneRestraint::new([0.0, 0.0, 1.0], 5.0)),
+        [0.0, 0.0, 7.0],
+        1e-7,
+        1e-5,
+        "below_plane",
+    );
+}
+
+/// `OutsideCylinderRestraint` (kind 13). Its `f` is the *product* of the three
+/// clamped face penalties (an AND: penalty only when the atom is inside every
+/// boundary), and its `fg` is the product rule of that same product — this is
+/// the deliberate asymmetry with kind-12 `InsideCylinder` (which *sums*). Place
+/// the atom strictly inside all three boundaries so the product is non-zero and
+/// every product-rule term contributes.
+#[test]
+fn gradient_outside_cylinder_constraint() {
+    // Cylinder along +x, base at origin, length 4, radius 2. Atom at axial
+    // w=2 (inside 0..4) and radial d=0.5 (inside r²=4): all three terms active.
+    check_restraint_gradient(
+        std::sync::Arc::new(OutsideCylinderRestraint::new(
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            2.0,
+            4.0,
+        )),
+        [2.0, 0.5, 0.5],
+        1e-6,
+        1e-3,
+        "outside_cylinder",
+    );
+}
+
+#[test]
+fn gradient_below_gaussian_constraint() {
+    // Gaussian hill σ=2, z0=0, height 3, centred at (0,0). At (1,1) the surface
+    // sits at ≈2.34; atom at z=4 is above → below-gaussian penalty active.
+    check_restraint_gradient(
+        std::sync::Arc::new(BelowGaussianRestraint::new(0.0, 0.0, 2.0, 2.0, 0.0, 3.0)),
+        [1.0, 1.0, 4.0],
+        1e-6,
+        1e-3,
+        "below_gaussian",
+    );
 }
 
 // ── pair penalty gradient ──────────────────────────────────────────────────

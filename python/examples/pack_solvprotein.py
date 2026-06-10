@@ -1,6 +1,6 @@
-"""Packmol solvprotein example: fixed protein + water + ions in a 50 Å sphere.
+"""Packmol solvprotein example: one fixed solute + water + ions in a 50 Å sphere.
 
-Reproduces Packmol's ``solvprotein.inp``. The protein is centred at
+Reproduces Packmol's ``solvprotein.inp``. The solute is centred at
 the origin and pinned; water and monoatomic ions are packed into a
 spherical shell around it.
 """

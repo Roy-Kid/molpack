@@ -136,6 +136,13 @@ pub use target::FixedPlacement;
 pub use target::{Angle, Axis, CenteringMode, Placement, Target};
 pub use validation::{ValidationReport, ViolationMetrics, validate_from_targets};
 
+// Custom-objective extension surface. `Molpack::pack` drives a `dyn Objective`
+// through GENCAN; downstream code that implements a bespoke objective (or wants
+// to evaluate the packing energy/gradient directly) names these at the crate
+// root rather than reaching into the `objective` / `constraints` modules.
+pub use constraints::{Constraints, EvalMode, EvalOutput};
+pub use objective::Objective;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Documentation modules (rustdoc-only; no runtime items).
 // Content lives in `docs/*.md`, loaded via `include_str!` so each markdown

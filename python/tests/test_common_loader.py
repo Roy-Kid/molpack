@@ -49,7 +49,7 @@ class TestElementFromAtomName:
         assert _element_from_atom_name(" N  ") == "N"
 
     def test_protein_alpha_carbon(self):
-        # "CA" in a protein context is an alpha carbon, not calcium.
+        # " CA " (leading space) is a carbon atom name, not the element calcium.
         assert _element_from_atom_name(" CA ") == "C"
 
     def test_strips_digits(self):

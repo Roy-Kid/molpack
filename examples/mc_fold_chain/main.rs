@@ -16,8 +16,9 @@ use std::collections::HashSet;
 
 use molpack::TorsionMcRelaxer;
 use molpack::relaxer::{Relaxer, compute_excluded_pairs, self_avoidance_penalty};
+use molrs::atomistic::{AtomId, Atomistic};
 use molrs::hydrogens::add_hydrogens;
-use molrs::molgraph::{Atom, AtomId, MolGraph};
+use molrs::molgraph::Atom;
 use molrs::types::F;
 use rand::Rng;
 use rand::SeedableRng;
@@ -203,12 +204,12 @@ fn zigzag_pe_chain(
     n_carbons: usize,
     cc_bond: F,
     rng: &mut impl Rng,
-) -> (MolGraph, Vec<[F; 3]>, Vec<String>) {
+) -> (Atomistic, Vec<[F; 3]>, Vec<String>) {
     let ch_bond: F = 1.09;
     let theta = (109.5_f64 * std::f64::consts::PI / 180.0) as F;
 
     // Build C-only backbone.
-    let mut backbone = MolGraph::new();
+    let mut backbone = Atomistic::new();
     let mut c_ids: Vec<AtomId> = Vec::with_capacity(n_carbons);
     for _ in 0..n_carbons {
         let mut a = Atom::new();
@@ -254,8 +255,8 @@ fn zigzag_pe_chain(
         let sym = full_graph
             .get_atom(atom_id)
             .ok()
-            .and_then(|a| a.get_str("symbol"))
-            .unwrap_or("X");
+            .and_then(|a| a.get_str("symbol").map(|s| s.to_string()))
+            .unwrap_or_else(|| "X".to_string());
         if sym != "H" {
             continue;
         }
@@ -270,8 +271,7 @@ fn zigzag_pe_chain(
                     && full_graph
                         .get_atom(nid)
                         .ok()
-                        .and_then(|a| a.get_str("symbol"))
-                        .map(|s| s != "H")
+                        .and_then(|a| a.get_str("symbol").map(|s| s != "H"))
                         .unwrap_or(false)
             })
             .map(|nid| coords[id_to_idx[&nid]])
@@ -283,8 +283,7 @@ fn zigzag_pe_chain(
                     && full_graph
                         .get_atom(nid)
                         .ok()
-                        .and_then(|a| a.get_str("symbol"))
-                        .map(|s| s == "H")
+                        .and_then(|a| a.get_str("symbol").map(|s| s == "H"))
                         .unwrap_or(false)
                     && id_to_idx[&nid] < global_idx
             })

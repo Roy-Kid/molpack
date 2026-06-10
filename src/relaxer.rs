@@ -10,7 +10,7 @@
 //!
 //! - [`TorsionMcRelaxer`]: Monte Carlo torsion angle sampling for flexible molecules.
 
-use molrs::molgraph::MolGraph;
+use molrs::atomistic::Atomistic;
 use molrs::rotatable::{RotatableBond, atom_id_to_index, detect_rotatable_bonds_with_downstream};
 use molrs::types::F;
 use rand::RngCore;
@@ -127,7 +127,7 @@ impl TorsionMcRelaxer {
     /// Rotatable bonds are detected automatically from the graph topology
     /// (single, acyclic, non-terminal). Downstream atom sets are computed
     /// via BFS for each rotatable bond.
-    pub fn new(graph: &MolGraph) -> Self {
+    pub fn new(graph: &Atomistic) -> Self {
         let bonds = detect_rotatable_bonds_with_downstream(graph);
         let excluded_pairs = compute_excluded_pairs(graph);
         Self {
@@ -190,7 +190,7 @@ impl Relaxer for TorsionMcRelaxer {
 /// them creates a huge baseline penalty that masks real overlaps.
 ///
 /// Uses positional indices (0-based), stored as `(min, max)` for canonical order.
-pub fn compute_excluded_pairs(graph: &MolGraph) -> HashSet<(usize, usize)> {
+pub fn compute_excluded_pairs(graph: &Atomistic) -> HashSet<(usize, usize)> {
     let id_to_idx = atom_id_to_index(graph);
 
     // Build adjacency list (AtomId → Vec<AtomId>) for BFS.
@@ -261,15 +261,18 @@ pub fn self_avoidance_penalty(
     let mut penalty: F = 0.0;
 
     for i in 0..n {
-        for j in (i + 1)..n {
-            if excluded.contains(&(i, j)) {
-                continue;
-            }
-            let dx = coords[i][0] - coords[j][0];
-            let dy = coords[i][1] - coords[j][1];
-            let dz = coords[i][2] - coords[j][2];
+        let ci = coords[i];
+        for (j, cj) in coords.iter().enumerate().skip(i + 1) {
+            let dx = ci[0] - cj[0];
+            let dy = ci[1] - cj[1];
+            let dz = ci[2] - cj[2];
             let dist_sq = dx * dx + dy * dy + dz * dz;
-            if dist_sq < cutoff_sq {
+            // Cheap distance gate before the exclusion probe: most pairs are
+            // far apart, so this skips the hash lookup for the common case and
+            // only consults `excluded` for pairs actually within the cutoff.
+            // `(i, j)` is already canonical (`i < j`), matching how
+            // `excluded` stores `(min, max)`.
+            if dist_sq < cutoff_sq && !excluded.contains(&(i, j)) {
                 // Quartic form matching packer's fparc: (d² - r²)²
                 let gap = dist_sq - cutoff_sq; // negative when overlapping
                 penalty += gap * gap;
@@ -303,12 +306,17 @@ impl RelaxerRunner for TorsionMcRelaxerRunner {
         };
         let mut any_accepted = false;
 
+        // Single reusable trial buffer, allocated once. Each step overwrites it
+        // from `best`; on accept we swap (the old `best` lands in `trial` and is
+        // overwritten next iteration), avoiding a per-step heap allocation.
+        let mut trial = best.clone();
+
         for _ in 0..self.steps {
             let bond_idx = rng_usize(rng, self.bonds.len());
             let bond = &self.bonds[bond_idx];
             let delta = (rng_f(rng) * 2.0 - 1.0) * self.max_delta;
 
-            let mut trial = best.clone();
+            trial.copy_from_slice(&best);
             rotate_around_bond(&mut trial, bond, delta);
             recenter(&mut trial);
 
@@ -326,7 +334,7 @@ impl RelaxerRunner for TorsionMcRelaxerRunner {
             };
 
             if metropolis_accept(f_trial, best_f, self.temperature, rng) {
-                best = trial;
+                std::mem::swap(&mut best, &mut trial);
                 best_f = f_trial;
                 self.accepts += 1;
                 any_accepted = true;
@@ -435,8 +443,8 @@ mod tests {
     use molrs::rotatable::RotatableBond;
 
     /// Build a chain MolGraph (topology only, no coords needed) + zigzag coords.
-    fn chain(n: usize) -> (MolGraph, Vec<[F; 3]>) {
-        let mut g = MolGraph::new();
+    fn chain(n: usize) -> (Atomistic, Vec<[F; 3]>) {
+        let mut g = Atomistic::new();
         let mut ids = Vec::new();
         for _ in 0..n {
             ids.push(g.add_atom(Atom::new()));

@@ -8,10 +8,10 @@ equivalent Rust example (same RNG seed → identical final coordinates).
 |-----------------------|-------------------|---------------|
 | `pack_water_cube.py`  | —                 | hello-world: 100 waters in a box, no I/O library |
 | `pack_mixture.py`     | `mixture.inp`     | two species co-packed in one box |
-| `pack_bilayer.py`     | `bilayer.inp`     | atom-subset restraints for lipid orientation |
+| `pack_bilayer.py`     | `bilayer.inp`     | atom-subset restraints for layer-molecule orientation |
 | `pack_interface.py`   | `interface.inp`   | fixed reference molecule + two solvents |
-| `pack_spherical.py`   | `spherical.inp`   | nested spheres, double-layer vesicle |
-| `pack_solvprotein.py` | `solvprotein.inp` | fixed protein solvated by water + ions |
+| `pack_spherical.py`   | `spherical.inp`   | nested spheres, double-layer shell |
+| `pack_solvprotein.py` | `solvprotein.inp` | fixed solute solvated by water + ions |
 
 Examples that load PDB files (`pack_mixture.py` and above) require
 `molcrafts-molrs`:

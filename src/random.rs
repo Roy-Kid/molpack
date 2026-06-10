@@ -5,8 +5,9 @@ use rand::{Rng, RngCore};
 
 /// Draw a uniform random number in `[0, 1)` from an f64 stream, then cast to `F`.
 ///
-/// This keeps the RNG trajectory identical across `f32`/`f64` builds and isolates
-/// true numeric-precision differences from type-dependent random draws.
+/// `F` is currently `f64`, so the cast is a no-op; drawing from a fixed f64
+/// stream regardless keeps the RNG trajectory stable if `F` is ever narrowed,
+/// isolating true numeric-precision effects from type-dependent random draws.
 #[inline]
 pub fn uniform01(rng: &mut impl Rng) -> F {
     rng.random::<f64>() as F

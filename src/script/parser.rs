@@ -107,6 +107,47 @@ pub enum RestraintSpec {
         normal: [f64; 3],
         distance: f64,
     },
+    /// `inside cube x0 y0 z0 d` — atom inside an axis-aligned cube.
+    InsideCube {
+        origin: [f64; 3],
+        side: f64,
+    },
+    /// `outside cube x0 y0 z0 d` — atom outside an axis-aligned cube.
+    OutsideCube {
+        origin: [f64; 3],
+        side: f64,
+    },
+    /// `outside box xmin ymin zmin xmax ymax zmax` — atom outside a box.
+    OutsideBox {
+        min: [f64; 3],
+        max: [f64; 3],
+    },
+    /// `inside ellipsoid a1 a2 a3 b1 b2 b3 c` — center, semi-axes, exponent.
+    InsideEllipsoid {
+        center: [f64; 3],
+        axes: [f64; 3],
+        exponent: f64,
+    },
+    /// `outside ellipsoid a1 a2 a3 b1 b2 b3 c` — center, semi-axes, exponent.
+    OutsideEllipsoid {
+        center: [f64; 3],
+        axes: [f64; 3],
+        exponent: f64,
+    },
+    /// `inside cylinder a1 a2 a3 d1 d2 d3 r l` — center, axis, radius, length.
+    InsideCylinder {
+        center: [f64; 3],
+        axis: [f64; 3],
+        radius: f64,
+        length: f64,
+    },
+    /// `outside cylinder a1 a2 a3 d1 d2 d3 r l` — center, axis, radius, length.
+    OutsideCylinder {
+        center: [f64; 3],
+        axis: [f64; 3],
+        radius: f64,
+        length: f64,
+    },
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -366,10 +407,33 @@ fn parse_inside(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptE
             let max = parse_vec3(tokens, 5, "inside box max", lineno)?;
             Ok(RestraintSpec::InsideBox { min, max })
         }
+        "cube" => {
+            let (origin, side) = parse_cube_args(tokens, lineno, "inside cube")?;
+            Ok(RestraintSpec::InsideCube { origin, side })
+        }
         "sphere" => {
             let center = parse_vec3(tokens, 2, "inside sphere center", lineno)?;
             let radius = parse_f64(tokens, 5, "inside sphere radius", lineno)?;
             Ok(RestraintSpec::InsideSphere { center, radius })
+        }
+        "ellipsoid" => {
+            let (center, axes, exponent) =
+                parse_ellipsoid_args(tokens, lineno, "inside ellipsoid")?;
+            Ok(RestraintSpec::InsideEllipsoid {
+                center,
+                axes,
+                exponent,
+            })
+        }
+        "cylinder" => {
+            let (center, axis, radius, length) =
+                parse_cylinder_args(tokens, lineno, "inside cylinder")?;
+            Ok(RestraintSpec::InsideCylinder {
+                center,
+                axis,
+                radius,
+                length,
+            })
         }
         _ => Err(parse_err(
             lineno,
@@ -384,16 +448,92 @@ fn parse_outside(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, Script
         .map(|s| s.to_ascii_lowercase())
         .ok_or_else(|| parse_err(lineno, "`outside` requires a shape keyword"))?;
     match shape.as_str() {
+        "box" => {
+            let min = parse_vec3(tokens, 2, "outside box min", lineno)?;
+            let max = parse_vec3(tokens, 5, "outside box max", lineno)?;
+            Ok(RestraintSpec::OutsideBox { min, max })
+        }
+        "cube" => {
+            let (origin, side) = parse_cube_args(tokens, lineno, "outside cube")?;
+            Ok(RestraintSpec::OutsideCube { origin, side })
+        }
         "sphere" => {
             let center = parse_vec3(tokens, 2, "outside sphere center", lineno)?;
             let radius = parse_f64(tokens, 5, "outside sphere radius", lineno)?;
             Ok(RestraintSpec::OutsideSphere { center, radius })
+        }
+        "ellipsoid" => {
+            let (center, axes, exponent) =
+                parse_ellipsoid_args(tokens, lineno, "outside ellipsoid")?;
+            Ok(RestraintSpec::OutsideEllipsoid {
+                center,
+                axes,
+                exponent,
+            })
+        }
+        "cylinder" => {
+            let (center, axis, radius, length) =
+                parse_cylinder_args(tokens, lineno, "outside cylinder")?;
+            Ok(RestraintSpec::OutsideCylinder {
+                center,
+                axis,
+                radius,
+                length,
+            })
         }
         _ => Err(parse_err(
             lineno,
             format!("unsupported `outside` shape `{shape}`"),
         )),
     }
+}
+
+/// `<kw> cube x0 y0 z0 d` — origin corner + side length.
+fn parse_cube_args(
+    tokens: &[&str],
+    lineno: usize,
+    ctx: &str,
+) -> Result<([f64; 3], f64), ScriptError> {
+    let origin = parse_vec3(tokens, 2, ctx, lineno)?;
+    let side = parse_f64(tokens, 5, ctx, lineno)?;
+    Ok((origin, side))
+}
+
+/// `<kw> ellipsoid a1 a2 a3 b1 b2 b3 c` — center, semi-axes, exponent.
+fn parse_ellipsoid_args(
+    tokens: &[&str],
+    lineno: usize,
+    ctx: &str,
+) -> Result<([f64; 3], [f64; 3], f64), ScriptError> {
+    let center = parse_vec3(tokens, 2, ctx, lineno)?;
+    let axes = parse_vec3(tokens, 5, ctx, lineno)?;
+    if axes.iter().any(|&a| a <= 0.0) {
+        return Err(parse_err(
+            lineno,
+            format!("{ctx} semi-axes must be strictly positive, got {axes:?}"),
+        ));
+    }
+    let exponent = parse_f64(tokens, 8, ctx, lineno)?;
+    Ok((center, axes, exponent))
+}
+
+/// `<kw> cylinder a1 a2 a3 d1 d2 d3 r l` — center, axis, radius, length.
+fn parse_cylinder_args(
+    tokens: &[&str],
+    lineno: usize,
+    ctx: &str,
+) -> Result<([f64; 3], [f64; 3], f64, f64), ScriptError> {
+    let center = parse_vec3(tokens, 2, ctx, lineno)?;
+    let axis = parse_vec3(tokens, 5, ctx, lineno)?;
+    if axis == [0.0; 3] {
+        return Err(parse_err(
+            lineno,
+            format!("{ctx} axis must be a non-zero direction"),
+        ));
+    }
+    let radius = parse_f64(tokens, 8, ctx, lineno)?;
+    let length = parse_f64(tokens, 9, ctx, lineno)?;
+    Ok((center, axis, radius, length))
 }
 
 fn parse_plane_above(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptError> {
@@ -773,5 +913,88 @@ end structure
             }
             other => panic!("expected UnknownKeyword, got {other:?}"),
         }
+    }
+
+    /// Parse a single restraint line inside a structure block and return the
+    /// parsed `RestraintSpec`.
+    fn parse_one_restraint(line: &str) -> RestraintSpec {
+        let src =
+            format!("output out.pdb\n\nstructure mol.pdb\n  number 1\n  {line}\nend structure\n");
+        let inp = parse(&src).expect("parse failed");
+        inp.structures[0].mol_restraints[0].clone()
+    }
+
+    #[test]
+    fn parse_inside_cube() {
+        assert!(matches!(
+            parse_one_restraint("inside cube 1. 2. 3. 10."),
+            RestraintSpec::InsideCube { origin, side }
+                if origin == [1.0, 2.0, 3.0] && side == 10.0
+        ));
+    }
+
+    #[test]
+    fn parse_outside_cube() {
+        assert!(matches!(
+            parse_one_restraint("outside cube 0. 0. 0. 5."),
+            RestraintSpec::OutsideCube { side, .. } if side == 5.0
+        ));
+    }
+
+    #[test]
+    fn parse_outside_box() {
+        assert!(matches!(
+            parse_one_restraint("outside box 0. 0. 0. 4. 5. 6."),
+            RestraintSpec::OutsideBox { min, max }
+                if min == [0.0, 0.0, 0.0] && max == [4.0, 5.0, 6.0]
+        ));
+    }
+
+    #[test]
+    fn parse_inside_ellipsoid() {
+        assert!(matches!(
+            parse_one_restraint("inside ellipsoid 0. 0. 0. 3. 2. 1.5 1."),
+            RestraintSpec::InsideEllipsoid { axes, exponent, .. }
+                if axes == [3.0, 2.0, 1.5] && exponent == 1.0
+        ));
+    }
+
+    #[test]
+    fn parse_outside_ellipsoid() {
+        assert!(matches!(
+            parse_one_restraint("outside ellipsoid 1. 1. 1. 2. 2. 2. 1."),
+            RestraintSpec::OutsideEllipsoid { center, .. } if center == [1.0, 1.0, 1.0]
+        ));
+    }
+
+    #[test]
+    fn parse_inside_cylinder() {
+        assert!(matches!(
+            parse_one_restraint("inside cylinder 0. 0. 0. 1. 0. 0. 2. 8."),
+            RestraintSpec::InsideCylinder { axis, radius, length, .. }
+                if axis == [1.0, 0.0, 0.0] && radius == 2.0 && length == 8.0
+        ));
+    }
+
+    #[test]
+    fn parse_outside_cylinder() {
+        assert!(matches!(
+            parse_one_restraint("outside cylinder 0. 0. 0. 0. 0. 1. 3. 5."),
+            RestraintSpec::OutsideCylinder { axis, .. } if axis == [0.0, 0.0, 1.0]
+        ));
+    }
+
+    #[test]
+    fn parse_ellipsoid_rejects_zero_axis() {
+        let src = "output out.pdb\n\nstructure mol.pdb\n  number 1\n  \
+                   inside ellipsoid 0. 0. 0. 0. 2. 2. 1.\nend structure\n";
+        assert!(parse(src).is_err(), "zero semi-axis must be rejected");
+    }
+
+    #[test]
+    fn parse_cylinder_rejects_zero_axis() {
+        let src = "output out.pdb\n\nstructure mol.pdb\n  number 1\n  \
+                   inside cylinder 0. 0. 0. 0. 0. 0. 2. 8.\nend structure\n";
+        assert!(parse(src).is_err(), "zero cylinder axis must be rejected");
     }
 }
