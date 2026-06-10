@@ -83,6 +83,7 @@
 //! Precision is fixed at `f64` via `molrs::types::F`.
 
 pub mod api;
+pub mod assemble;
 #[cfg(feature = "io")]
 pub mod cases;
 pub mod cell;

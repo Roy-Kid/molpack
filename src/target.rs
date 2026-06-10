@@ -111,6 +111,11 @@ pub struct Target {
     pub fixed_at: Option<Placement>,
     /// Per-target in-loop relaxers (e.g. torsion MC). Called in order each iteration.
     pub relaxers: Vec<Box<dyn Relaxer>>,
+    /// Source frame this target was built from, retained so the packer can
+    /// replay its full topology (bonds/angles/…) and per-atom metadata onto
+    /// the packed coordinates. `None` for targets built from bare coordinates
+    /// ([`Target::from_coords`]), whose result frame is coordinates-only.
+    pub template: Option<molrs::Frame>,
 }
 
 impl Target {
@@ -121,7 +126,9 @@ impl Target {
     /// VdW radii and element symbols are looked up from the `"element"` column.
     pub fn new(frame: molrs::Frame, count: usize) -> Self {
         let (positions, radii, elements) = frame_to_coords_and_elements(&frame);
-        Self::from_parts(&positions, &radii, elements, count)
+        let mut target = Self::from_parts(&positions, &radii, elements, count);
+        target.template = Some(frame);
+        target
     }
 
     /// Create a new target directly from coordinate arrays.
@@ -161,6 +168,7 @@ impl Target {
             rotation_bound: [None, None, None],
             fixed_at: None,
             relaxers: Vec::new(),
+            template: None,
         }
     }
 

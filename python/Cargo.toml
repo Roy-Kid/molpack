@@ -18,6 +18,8 @@ pyo3 = { version = "0.28", features = ["extension-module"] }
 numpy = "0.28"
 ndarray = "0.17"
 molpack = { path = "..", package = "molcrafts-molpack", version = "0.1.0" }
+# Same crate (and version) molpack links, so frame types unify across the wheel.
+molrs = { path = "../../molrs/molrs-core", package = "molcrafts-molrs-core", version = "0.0.18" }
 
 # Standalone package — not a member of any outer workspace.
 [workspace]

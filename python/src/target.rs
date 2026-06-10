@@ -1,17 +1,13 @@
 //! Python wrapper for packing `Target`.
 //!
 //! [`PyTarget`] describes one type of molecule to pack: its template
-//! geometry, element symbols, and the number of copies.
+//! geometry, topology, and the number of copies.
 //!
-//! The constructor accepts any ``frame``-like object with a ``"atoms"`` block:
-//!
-//! - ``molrs.Frame`` (from ``molrs.read_pdb`` / ``read_xyz``) — block columns
-//!   are accessed via ``.view(name)`` since ``molrs.Block`` has no ``__getitem__``.
-//! - ``molpy.Frame`` / plain dicts — columns accessed via ``block[name]``.
-//!
-//! Rust calls the appropriate Python method by probing ``.view()`` first, then
-//! falling back to ``[]``.  The element column is tried as ``"element"`` first
-//! (molpy, XYZ), then ``"symbol"`` (molrs PDB).
+//! The constructor accepts any frame-like object with an ``"atoms"`` block —
+//! ``molrs.Frame``, ``molpy.Frame``, or a plain ``dict`` — and converts it to a
+//! Rust [`molrs::Frame`] (see [`crate::frame_marshal`]). The full frame, with
+//! topology, is handed to the core [`Target`], which owns the assembly. The
+//! binding never re-derives the result frame; it only marshals data.
 
 use crate::constraint::extract_restraint;
 use crate::helpers::NpF;
@@ -22,112 +18,27 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
-/// Bondi (1964) van der Waals radius for a given element symbol (Å).
-/// Falls back to 1.50 Å for unknowns.
-pub(crate) fn vdw_radius_for(element: &str) -> NpF {
-    match element.to_uppercase().as_str() {
-        "H" => 1.20,
-        "C" => 1.70,
-        "N" => 1.55,
-        "O" => 1.52,
-        "F" => 1.47,
-        "P" => 1.80,
-        "S" => 1.80,
-        "CL" => 1.75,
-        "BR" => 1.85,
-        "I" => 1.98,
-        "NA" => 2.27,
-        "K" => 2.75,
-        "CA" => 1.73,
-        "MG" => 1.73,
-        "ZN" => 1.39,
-        "FE" => 1.94,
-        _ => 1.50,
-    }
-}
-
 /// Build a [`Target`] from any frame-like Python object plus a copy count.
 ///
-/// Used by both [`PyTarget::new`] and the script loader so they share one
-/// duck-typed extraction path. The frame may be a [`molrs.Frame`] (block
-/// columns via `.view(name)`), a `molpy.Frame`, or a plain dict.
+/// Shared by [`PyTarget::new`] and the script loader. The frame is converted to
+/// a Rust [`molrs::Frame`] so the core retains its full topology.
 pub(crate) fn target_from_frame(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Target> {
-    let atoms = frame
-        .get_item("atoms")
-        .map_err(|_| PyValueError::new_err(r#"frame must have an "atoms" block"#))?;
-
-    let x: Vec<NpF> = read_column(&atoms, "x")?;
-    let y: Vec<NpF> = read_column(&atoms, "y")?;
-    let z: Vec<NpF> = read_column(&atoms, "z")?;
-    let elements: Vec<String> = read_element_column(&atoms)?;
-
-    let n = x.len();
-    if y.len() != n || z.len() != n || elements.len() != n {
+    let rust_frame = crate::frame_marshal::pyframe_to_rust(frame)?;
+    let atoms = rust_frame
+        .get("atoms")
+        .ok_or_else(|| PyValueError::new_err(r#"frame must have an "atoms" block"#))?;
+    if atoms.get("x").is_none() {
         return Err(PyValueError::new_err(
-            "x, y, z, and element arrays must all have the same length",
+            r#"atoms block must have "x" / "y" / "z" columns"#,
         ));
     }
-
-    let coords: Vec<[F; 3]> = x
-        .iter()
-        .zip(y.iter())
-        .zip(z.iter())
-        .map(|((xi, yi), zi)| [*xi, *yi, *zi])
-        .collect();
-    let radii: Vec<F> = elements.iter().map(|e| vdw_radius_for(e)).collect();
-
-    let mut target = Target::from_coords(&coords, &radii, count);
-    target.elements = elements;
-    Ok(target)
-}
-
-/// Read a numeric column from an atoms block.
-///
-/// Tries `block.view(name)` first (``molrs.Block``), then ``block[name]``
-/// (``molpy.Block`` / plain dict).
-fn read_column(block: &Bound<'_, PyAny>, name: &str) -> PyResult<Vec<NpF>> {
-    if let Ok(col) = block.call_method1("view", (name,)) {
-        return col.extract();
-    }
-    block
-        .get_item(name)
-        .map_err(|_| PyValueError::new_err(format!(r#"atoms block has no "{name}" column"#)))?
-        .extract()
-}
-
-/// Read the element-symbol column from an atoms block.
-///
-/// Tries the columns ``"element"`` and ``"symbol"`` in order, using both
-/// ``.view()`` (molrs) and ``[]`` (molpy / dict) access per column.
-///
-/// | Source          | Column    | Access  |
-/// |-----------------|-----------|---------|
-/// | molrs PDB       | ``symbol``  | `.view()` |
-/// | molrs XYZ       | ``element`` | `.view()` |
-/// | molpy / dict    | ``element`` | `[]`    |
-fn read_element_column(block: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
-    for col in ["element", "symbol"] {
-        if let Ok(arr) = block.call_method1("view", (col,)) {
-            return arr.extract();
-        }
-        if let Ok(arr) = block.get_item(col) {
-            return arr.extract();
-        }
-    }
-    Err(PyValueError::new_err(
-        r#"atoms block must have an "element" or "symbol" column"#,
-    ))
+    Ok(Target::new(rust_frame, count))
 }
 
 #[pyclass(name = "Target", from_py_object)]
+#[derive(Clone)]
 pub struct PyTarget {
     pub(crate) inner: Target,
-    /// The original Python frame this target was built from, retained so
-    /// [`crate::packer::PyPackResult::frame`] can replay its full topology
-    /// (bonds/angles/…) onto the packed coordinates. `None` for targets built
-    /// without a source frame (e.g. the `.inp` script loader); such results
-    /// fall back to a coordinates-only frame.
-    pub(crate) template: Option<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -148,26 +59,19 @@ impl PyTarget {
     fn new(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Self> {
         Ok(PyTarget {
             inner: target_from_frame(frame, count)?,
-            template: Some(frame.clone().unbind()),
         })
     }
 
-    fn with_name(&self, py: Python<'_>, name: &str) -> Self {
+    fn with_name(&self, name: &str) -> Self {
         PyTarget {
             inner: self.inner.clone().with_name(name),
-            template: self.clone_template(py),
         }
     }
 
-    fn with_restraint(
-        &self,
-        py: Python<'_>,
-        restraint: &Bound<'_, pyo3::types::PyAny>,
-    ) -> PyResult<Self> {
+    fn with_restraint(&self, restraint: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
         let r = extract_restraint(restraint)?;
         Ok(PyTarget {
             inner: self.inner.clone().with_restraint(r),
-            template: self.clone_template(py),
         })
     }
 
@@ -177,7 +81,6 @@ impl PyTarget {
     /// Packmol ``.inp`` file? Subtract 1 at the call site.
     fn with_atom_restraint(
         &self,
-        py: Python<'_>,
         indices: Vec<usize>,
         restraint: &Bound<'_, pyo3::types::PyAny>,
     ) -> PyResult<Self> {
@@ -185,45 +88,34 @@ impl PyTarget {
         let r = extract_restraint(restraint)?;
         Ok(PyTarget {
             inner: self.inner.clone().with_atom_restraint(&indices, r),
-            template: self.clone_template(py),
         })
     }
 
-    fn with_perturb_budget(&self, py: Python<'_>, budget: usize) -> Self {
+    fn with_perturb_budget(&self, budget: usize) -> Self {
         PyTarget {
             inner: self.inner.clone().with_perturb_budget(budget),
-            template: self.clone_template(py),
         }
     }
 
-    fn with_centering(&self, py: Python<'_>, mode: PyCenteringMode) -> Self {
+    fn with_centering(&self, mode: PyCenteringMode) -> Self {
         PyTarget {
             inner: self.inner.clone().with_centering(mode.into()),
-            template: self.clone_template(py),
         }
     }
 
-    fn with_rotation_bound(
-        &self,
-        py: Python<'_>,
-        axis: PyAxis,
-        center: PyAngle,
-        half_width: PyAngle,
-    ) -> Self {
+    fn with_rotation_bound(&self, axis: PyAxis, center: PyAngle, half_width: PyAngle) -> Self {
         PyTarget {
             inner: self.inner.clone().with_rotation_bound(
                 axis.into(),
                 center.inner,
                 half_width.inner,
             ),
-            template: self.clone_template(py),
         }
     }
 
-    fn fixed_at(&self, py: Python<'_>, position: [NpF; 3]) -> Self {
+    fn fixed_at(&self, position: [NpF; 3]) -> Self {
         PyTarget {
             inner: self.inner.clone().fixed_at(position),
-            template: self.clone_template(py),
         }
     }
 
@@ -232,14 +124,13 @@ impl PyTarget {
     /// Takes a 3-tuple of :class:`Angle` — e.g.
     /// ``(Angle.from_degrees(45), Angle.ZERO, Angle.from_degrees(90))``.
     /// Must be called after :meth:`fixed_at`.
-    fn with_orientation(&self, py: Python<'_>, orientation: (PyAngle, PyAngle, PyAngle)) -> Self {
+    fn with_orientation(&self, orientation: (PyAngle, PyAngle, PyAngle)) -> Self {
         PyTarget {
             inner: self.inner.clone().with_orientation([
                 orientation.0.inner,
                 orientation.1.inner,
                 orientation.2.inner,
             ]),
-            template: self.clone_template(py),
         }
     }
 
@@ -280,24 +171,6 @@ impl PyTarget {
             self.inner.count,
             self.inner.name
         )
-    }
-}
-
-impl PyTarget {
-    /// Clone the retained template reference (a new GIL-counted handle to the
-    /// same Python frame), preserving it across the fluent `with_*` builders.
-    fn clone_template(&self, py: Python<'_>) -> Option<Py<PyAny>> {
-        self.template.as_ref().map(|t| t.clone_ref(py))
-    }
-}
-
-impl Clone for PyTarget {
-    // `Py<PyAny>` has no GIL-free `Clone`; bumping its refcount needs a token.
-    fn clone(&self) -> Self {
-        Python::attach(|py| PyTarget {
-            inner: self.inner.clone(),
-            template: self.clone_template(py),
-        })
     }
 }
 

@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use molrs::Element;
+use molrs::region::simbox::SimBox;
 use molrs::types::F;
+use ndarray::Array1;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
@@ -619,8 +621,18 @@ impl Molpack {
             h.on_finish(&sys);
         }
 
-        // Finalize frame: write positions into frame, move it out (zero-copy)
-        let frame = crate::frame::finalize_frame(&mut sys);
+        // Assemble the topology-complete result frame: replay each target's
+        // template onto the packed coordinates (shared Rust core, so every
+        // language binding gets an identical frame). Stamp the periodic box.
+        let positions = std::mem::take(&mut sys.xcart);
+        let mut frame = crate::assemble::assemble_frame(targets, &positions);
+        if let Some((min, max, flags)) = pbc {
+            let lengths = Array1::from_vec(vec![max[0] - min[0], max[1] - min[1], max[2] - min[2]]);
+            let origin = Array1::from_vec(min.to_vec());
+            if let Ok(simbox) = SimBox::ortho(lengths, origin, flags) {
+                frame.simbox = Some(simbox);
+            }
+        }
         Ok(PackResult {
             frame,
             fdist: sys.fdist,

@@ -160,6 +160,7 @@ name = "molpack-python"
 version = "0.1.0"
 dependencies = [
  "molcrafts-molpack",
+ "molcrafts-molrs-core",
  "ndarray",
  "numpy",
  "pyo3",

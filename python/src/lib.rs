@@ -24,6 +24,8 @@
 
 use pyo3::prelude::*;
 
+mod frame_marshal;
+
 mod helpers;
 use helpers::register_errors;
 
