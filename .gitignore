@@ -62,3 +62,6 @@ site/
 
 # JCC paper (separate project, not part of the code release)
 molpack-jcc/
+
+# Local Claude worktrees (transient)
+.claude/worktrees/
