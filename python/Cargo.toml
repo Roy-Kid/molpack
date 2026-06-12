@@ -19,10 +19,18 @@ numpy = "0.28"
 ndarray = "0.17"
 molpack = { path = "..", package = "molcrafts-molpack", version = "0.1.0" }
 # Same crate (and version) molpack links, so frame types unify across the wheel.
-molrs = { path = "../../molrs/molrs-core", package = "molcrafts-molrs-core", version = "0.0.18" }
+molrs = { path = "../../molrs/molrs-core", package = "molcrafts-molrs-core", version = "0.1.0" }
+# Direct rayon dep so the binding can introspect/configure the global pool
+# (`num_threads`, `init_thread_pool`); shares the same process-global pool
+# molpack's parallel evaluator runs on. Gated behind the `rayon` feature.
+rayon = { version = "1.11", optional = true }
 
 # Standalone package — not a member of any outer workspace.
 [workspace]
 
 [features]
 default = []
+# Forward the parallel evaluator into the wheel. Enabling this compiles the
+# rayon code paths in molpack (and `molrs/rayon`); without it the binding's
+# `with_parallel_eval(True)` raises instead of silently no-op'ing.
+rayon = ["dep:rayon", "molpack/rayon"]

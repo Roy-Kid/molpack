@@ -37,7 +37,7 @@ pub struct ScriptPlan {
     pub structures: Vec<StructurePlan>,
     /// Resolved output file path.
     pub output: PathBuf,
-    /// Outer-loop iteration cap (`nloop` keyword; default 400).
+    /// Outer-loop iteration cap (`nloop` keyword; default `200 * ntype`).
     pub nloop: usize,
     /// Global `filetype` override (script-level), if any. Frame loaders
     /// should fall back to extension-based detection when this is `None`.
@@ -76,7 +76,9 @@ impl Script {
             return Err(ScriptError::NoStructures);
         }
 
-        let mut packer = Molpack::new().with_tolerance(self.tolerance);
+        let mut packer = Molpack::new()
+            .with_tolerance(self.tolerance)
+            .with_avoid_overlap(self.avoid_overlap);
         if let Some(seed) = self.seed {
             packer = packer.with_seed(seed);
         }

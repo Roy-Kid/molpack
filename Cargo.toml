@@ -21,11 +21,11 @@ name = "molpack"
 # `cargo publish` to resolve against the crates.io registry.
 #
 # Library-required:
-molrs = { path = "../molrs/molrs-core", version = "0.0.18", package = "molcrafts-molrs-core", default-features = false }
+molrs = { path = "../molrs/molrs-core", version = "0.1.0", package = "molcrafts-molrs-core", default-features = false }
 # Only required when the `io` (or `cli`) feature is enabled. Front-ends that
 # bring their own frame loader — notably the PyO3 wheel, which delegates to
 # molrs's Python bindings — opt out and avoid the static-link cost.
-molrs_io = { path = "../molrs/molrs-io", version = "0.0.18", package = "molcrafts-molrs-io", default-features = false, optional = true }
+molrs_io = { path = "../molrs/molrs-io", version = "0.1.0", package = "molcrafts-molrs-io", default-features = false, optional = true }
 rand = "0.9"
 ndarray = "0.17"
 log = "0.4"
@@ -47,38 +47,8 @@ io = ["dep:molrs_io"]
 cli = ["dep:clap", "io"]
 
 [dev-dependencies]
-criterion = "0.5"
 # Used by the example programs under `examples/`.
 env_logger = "0.11"
-
-[[bench]]
-name = "pack_end_to_end"
-harness = false
-
-[[bench]]
-name = "evaluate_unscaled"
-harness = false
-
-[[bench]]
-name = "run_iteration"
-harness = false
-
-[[bench]]
-name = "run_phase"
-harness = false
-
-[[bench]]
-name = "objective_dispatch"
-harness = false
-
-[[bench]]
-name = "pair_kernel"
-harness = false
-
-[[bench]]
-name = "partial_gradient_merge"
-harness = false
-required-features = ["rayon"]
 
 [[bin]]
 name = "molpack"
@@ -121,16 +91,6 @@ required-features = ["io"]
 [[example]]
 name = "pack_spherical"
 path = "examples/pack_spherical/main.rs"
-required-features = ["io"]
-
-[[example]]
-name = "pack_polymer_vesicle"
-path = "examples/pack_polymer_vesicle/main.rs"
-required-features = ["io"]
-
-[[example]]
-name = "mc_fold_chain"
-path = "examples/mc_fold_chain/main.rs"
 required-features = ["io"]
 
 [profile.release]

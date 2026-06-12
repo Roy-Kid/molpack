@@ -47,6 +47,9 @@ use target::PyTarget;
 mod packer;
 use packer::{PyPackResult, PyPacker};
 
+mod parallel;
+use parallel::{init_thread_pool, num_threads, rayon_enabled};
+
 mod script;
 use script::{PyScriptJob, load_script};
 
@@ -69,6 +72,10 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_class::<PyScriptJob>()?;
     m.add_function(wrap_pyfunction!(load_script, m)?)?;
+
+    m.add_function(wrap_pyfunction!(rayon_enabled, m)?)?;
+    m.add_function(wrap_pyfunction!(num_threads, m)?)?;
+    m.add_function(wrap_pyfunction!(init_thread_pool, m)?)?;
 
     register_errors(m.py(), m)?;
 

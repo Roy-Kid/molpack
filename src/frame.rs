@@ -1,6 +1,6 @@
 //! Helpers for converting between `molrs_core::Frame` and packing inputs.
 
-use molrs::block::Block;
+use molrs::store::block::Block;
 use molrs::types::{F, I};
 use ndarray::Array1;
 use std::str::FromStr;

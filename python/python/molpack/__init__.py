@@ -22,7 +22,10 @@ from .molpack import (
     ScriptJob,
     StepInfo,
     Target,
+    init_thread_pool,
     load_script,
+    num_threads,
+    rayon_enabled,
 )
 
 __all__ = [
@@ -44,6 +47,10 @@ __all__ = [
     # Script loader (`.inp` input)
     "ScriptJob",
     "load_script",
+    # Parallel evaluation (rayon)
+    "rayon_enabled",
+    "num_threads",
+    "init_thread_pool",
     # Duck-type protocols
     "Handler",
     "Restraint",

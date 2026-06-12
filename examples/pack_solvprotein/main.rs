@@ -31,7 +31,7 @@ use std::fs::create_dir_all;
 use std::path::PathBuf;
 
 use molpack::{CenteringMode, InsideSphereRestraint, Molpack, ProgressHandler, Target, XYZHandler};
-use molrs_io::pdb::read_pdb_frame;
+use molrs_io::data::pdb::read_pdb_frame;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = env_logger::try_init();
@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_centering(CenteringMode::Center)
         .fixed_at([0.0, 0.0, 0.0]);
 
-    let water_target = Target::new(water, 1000)
+    let water_target = Target::new(water, 16500)
         .with_restraint(sphere)
         .with_name("water");
 

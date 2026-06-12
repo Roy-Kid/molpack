@@ -201,7 +201,15 @@ class Molpack:
     def with_random_perturb(self, enabled: bool) -> Self: ...
     def with_perturb(self, enabled: bool) -> Self: ...
     def with_seed(self, seed: int) -> Self: ...
-    def with_parallel_eval(self, enabled: bool) -> Self: ...
+    def with_parallel_eval(self, enabled: bool) -> Self:
+        """Run pair-kernel reductions on rayon worker threads.
+
+        Raises :class:`RuntimeError` if ``enabled`` is true but this wheel was
+        built without the ``rayon`` feature — see :func:`rayon_enabled`.
+        Parallelism applies only to global evaluations; per-molecule GENCAN
+        move evaluations stay serial.
+        """
+        ...
     def with_progress(self, enabled: bool) -> Self: ...
     def with_lammps_output(self, enabled: bool) -> Self: ...
     def with_log_level(self, level: str) -> Self: ...
@@ -244,6 +252,28 @@ def load_script(path: str | os.PathLike[str]) -> ScriptJob:
 
     Relative paths inside the script (structure files, output) are
     resolved against the script's parent directory.
+    """
+
+# ---------------------------------------------------------------------------
+# Parallel evaluation (rayon)
+# ---------------------------------------------------------------------------
+
+def rayon_enabled() -> bool:
+    """True if this wheel was built with the ``rayon`` feature (parallel
+    evaluation compiled in)."""
+
+def num_threads() -> int:
+    """Worker threads the parallel evaluator will use — the rayon global pool
+    size, or ``1`` for a serial build."""
+
+def init_thread_pool(n: int) -> None:
+    """Pin the rayon global thread pool to ``n`` workers.
+
+    Must be called before the first parallel pack — the pool is immutable once
+    built. Raises :class:`RuntimeError` without the ``rayon`` feature or if the
+    pool was already initialized, and :class:`ValueError` if ``n < 1``. For a
+    scaling sweep, set the count once per process and launch one process per
+    data point.
     """
 
 # ---------------------------------------------------------------------------

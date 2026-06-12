@@ -47,7 +47,7 @@ Repository = "https://github.com/MolCrafts/molpack"
 [tool.maturin]
 python-source = "python"
 module-name = "molpack.molpack"
-features = ["pyo3/extension-module"]
+features = ["pyo3/extension-module", "rayon"]
 exclude = [
   "python/molpack/*.so",
   "python/molpack/*.dylib",

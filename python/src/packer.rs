@@ -11,6 +11,7 @@ use std::sync::atomic::AtomicBool;
 use crate::constraint::extract_restraint;
 use crate::handler::PyHandlerWrapper;
 use crate::helpers::{NpF, pack_error_to_pyerr, take_err};
+use crate::parallel::rayon_compiled;
 use crate::target::PyTarget;
 use molpack::F;
 use molpack::handler::MolpackLogLevel;
@@ -226,10 +227,27 @@ impl PyPacker {
         cloned
     }
 
-    fn with_parallel_eval(&self, enabled: bool) -> Self {
+    /// Run the pair-kernel reductions on rayon worker threads.
+    ///
+    /// Fail-fast: enabling parallel evaluation in a wheel that was **not**
+    /// built with the `rayon` feature raises ``RuntimeError`` rather than
+    /// silently running serially — a silent no-op here is what makes
+    /// thread-count scaling studies show a flat curve. Build with
+    /// ``maturin develop --release`` (the wheel ships `rayon` by default).
+    ///
+    /// Parallelism also only applies to global evaluations (`!move_flag`);
+    /// per-molecule GENCAN move evaluations stay serial by design.
+    fn with_parallel_eval(&self, enabled: bool) -> PyResult<Self> {
+        if enabled && !rayon_compiled() {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "parallel evaluation requested but this molpack wheel was built \
+                 without the `rayon` feature; rebuild with `maturin develop --release` \
+                 (rayon is enabled by default) or check `molpack.rayon_enabled()`",
+            ));
+        }
         let mut cloned = self.clone_fields();
         cloned.parallel_eval = Some(enabled);
-        cloned
+        Ok(cloned)
     }
 
     fn with_progress(&self, enabled: bool) -> Self {

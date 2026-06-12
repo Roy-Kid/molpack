@@ -108,6 +108,44 @@ const NEIGHBOR_OFFSETS_G: [(isize, isize, isize); 13] = [
     (1, -1, -1),
 ];
 
+/// Full 26-neighbor stencil (every cell in the 3×3×3 block except the
+/// center). Used only by the parallel gradient path, which is *atom-centric*:
+/// each atom sums the force from every surrounding atom into its own slot, so
+/// it needs both the forward and backward neighbors that the half-stencils
+/// [`NEIGHBOR_OFFSETS_F`] / [`NEIGHBOR_OFFSETS_G`] deliberately omit. Like the
+/// half-stencils, correctness presupposes `ncells >= 3` per axis (otherwise
+/// wrapped offsets alias the same cell — a precondition the serial half-list
+/// shares).
+#[cfg(feature = "rayon")]
+const NEIGHBOR_OFFSETS_FULL: [(isize, isize, isize); 26] = [
+    (-1, -1, -1),
+    (-1, -1, 0),
+    (-1, -1, 1),
+    (-1, 0, -1),
+    (-1, 0, 0),
+    (-1, 0, 1),
+    (-1, 1, -1),
+    (-1, 1, 0),
+    (-1, 1, 1),
+    (0, -1, -1),
+    (0, -1, 0),
+    (0, -1, 1),
+    (0, 0, -1),
+    (0, 0, 1),
+    (0, 1, -1),
+    (0, 1, 0),
+    (0, 1, 1),
+    (1, -1, -1),
+    (1, -1, 0),
+    (1, -1, 1),
+    (1, 0, -1),
+    (1, 0, 0),
+    (1, 0, 1),
+    (1, 1, -1),
+    (1, 1, 0),
+    (1, 1, 1),
+];
+
 /// Full runtime context for one packing execution.
 /// All arrays are 0-based; Fortran 1-based arrays are shifted by -1.
 pub struct PackContext {
@@ -251,6 +289,10 @@ pub struct PackContext {
     pub neighbor_cells_f: Vec<[usize; 13]>,
     /// Precomputed 13 forward-neighbor cell indices per cell for `compute_g`.
     pub neighbor_cells_g: Vec<[usize; 13]>,
+    /// Precomputed 26 full-neighbor cell indices per cell for the parallel
+    /// atom-centric gradient path. Empty unless the `rayon` feature is built.
+    #[cfg(feature = "rayon")]
+    pub neighbor_cells_full: Vec<[usize; 26]>,
 
     // ---- State flags ----
     /// If true, skip pair-distance computations (constraints only during init).
@@ -352,6 +394,8 @@ impl PackContext {
             active_cells: Vec::new(),
             neighbor_cells_f: vec![[0; 13]; ncell_total],
             neighbor_cells_g: vec![[0; 13]; ncell_total],
+            #[cfg(feature = "rayon")]
+            neighbor_cells_full: vec![[0; 26]; ncell_total],
             init1: false,
             move_flag: false,
             parallel_pair_eval: false,
@@ -407,6 +451,10 @@ impl PackContext {
         self.active_cells.clear();
         self.neighbor_cells_f = vec![[0; 13]; nc];
         self.neighbor_cells_g = vec![[0; 13]; nc];
+        #[cfg(feature = "rayon")]
+        {
+            self.neighbor_cells_full = vec![[0; 26]; nc];
+        }
         self.rebuild_neighbor_cells();
     }
 
@@ -702,6 +750,20 @@ impl PackContext {
                 nbs_g[idx] = index_cell(&ncell, &self.ncells);
             }
             self.neighbor_cells_g[icell] = nbs_g;
+
+            #[cfg(feature = "rayon")]
+            {
+                let mut nbs_full = [0usize; 26];
+                for (idx, &(di, dj, dk)) in NEIGHBOR_OFFSETS_FULL.iter().enumerate() {
+                    let ncell = [
+                        cell_ind(ci as isize + di, nx),
+                        cell_ind(cj as isize + dj, ny),
+                        cell_ind(ck as isize + dk, nz),
+                    ];
+                    nbs_full[idx] = index_cell(&ncell, &self.ncells);
+                }
+                self.neighbor_cells_full[icell] = nbs_full;
+            }
         }
     }
 }

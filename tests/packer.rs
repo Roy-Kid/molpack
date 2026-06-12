@@ -448,3 +448,67 @@ fn molpack_add_restraint_idempotent_with_with_restraint() {
         assert!((a[2] - b[2]).abs() < 1e-12);
     }
 }
+
+// ── avoid_overlap: initial placement around a fixed solute ───────────────────
+
+/// Counts total GENCAN outer loops across all phases via a shared counter.
+struct LoopCounter(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+impl molpack::Handler for LoopCounter {
+    fn on_step(&mut self, _i: &molpack::StepInfo, _sys: &molpack::PackContext) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Solvent packed around a large fixed solute converges with far less work when
+/// `avoid_overlap` (default, Packmol-faithful) keeps the solvent out of the
+/// solute at the initial guess. Disabling it seeds solvent atoms *inside* the
+/// solute, inflating the initial overlap and forcing many extra outer loops —
+/// the `pack_solvprotein` slowdown in miniature. This locks in both that the
+/// `with_avoid_overlap` switch is honored and that the default reduces work.
+#[test]
+fn avoid_overlap_reduces_work_around_fixed_solute() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // Fixed solute: a dense 5×5×5 cluster (radius 1) filling the box centre,
+    // whose ±1-cell exclusion covers a large fraction of the free region.
+    let mut solute = Vec::new();
+    for ix in -2..=2 {
+        for iy in -2..=2 {
+            for iz in -2..=2 {
+                solute.push([ix as F * 2.0, iy as F * 2.0, iz as F * 2.0]);
+            }
+        }
+    }
+    let solute_radii = vec![1.0; solute.len()];
+
+    let run = |avoid: bool, counter: Arc<AtomicUsize>| {
+        let (c, r) = single_atom();
+        let free = Target::from_coords(&c, &r, 100).with_restraint(InsideBoxRestraint::new(
+            [-8.0, -8.0, -8.0],
+            [8.0, 8.0, 8.0],
+            [false; 3],
+        ));
+        let fixed = Target::from_coords(&solute, &solute_radii, 1).fixed_at([0.0, 0.0, 0.0]);
+        Molpack::new()
+            .with_seed(1234567)
+            .with_avoid_overlap(avoid)
+            .with_handler(LoopCounter(counter))
+            .pack_with_report(&[free, fixed], 200)
+    };
+
+    let (on, off) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let res_on = run(true, on.clone()).expect("avoid_overlap on should converge");
+    let res_off = run(false, off.clone()).expect("avoid_overlap off should converge");
+
+    // Same valid packing either way: 100 free atoms + 125 solute atoms.
+    assert_eq!(res_on.natoms(), 100 + 125);
+    assert_eq!(res_off.natoms(), 100 + 125);
+
+    // The fix's whole point: avoidance on (default) needs strictly fewer loops.
+    let (loops_on, loops_off) = (on.load(Ordering::Relaxed), off.load(Ordering::Relaxed));
+    assert!(
+        loops_on < loops_off,
+        "avoid_overlap should cut outer loops, got on={loops_on} off={loops_off}"
+    );
+}

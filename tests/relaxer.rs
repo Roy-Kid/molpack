@@ -6,8 +6,8 @@ use molpack::{
     F, InsideBoxRestraint, InsideSphereRestraint, Molpack, NullHandler, Relaxer, Target,
     TorsionMcRelaxer,
 };
-use molrs::atomistic::Atomistic;
-use molrs::molgraph::Atom;
+use molrs::system::atomistic::Atomistic;
+use molrs::system::molgraph::Atom;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 

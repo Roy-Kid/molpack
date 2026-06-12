@@ -25,8 +25,8 @@ impl Default for GencanParams {
         Self {
             epsgpsn: 1.0e-6,
             maxit: 20,
-            maxfc: 200, // 10 * maxit
-            delmin: 2.0,
+            maxfc: 200,     // 10 * maxit
+            delmin: 1.0e-2, // Packmol easygencan default (gencan.f: delmin = 1.d-2)
             iprint: 0,
             ncomp: 50,
         }

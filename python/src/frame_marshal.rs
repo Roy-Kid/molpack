@@ -9,7 +9,7 @@
 //! topology assembly lives in [`molpack::assemble`] so every binding gets an
 //! identical result.
 
-use molrs::block::{Block, Column, DType};
+use molrs::store::block::{Block, Column, DType};
 use molrs::types::{F, I, U};
 use ndarray::Array1;
 use numpy::IntoPyArray;

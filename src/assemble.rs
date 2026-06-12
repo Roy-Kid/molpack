@@ -11,7 +11,7 @@
 //! every binding gets identical output: bindings only marshal the frame across
 //! the language boundary, never re-derive it.
 
-use molrs::block::{Block, Column, DType};
+use molrs::store::block::{Block, Column, DType};
 use molrs::types::{F, I, U};
 use ndarray::{Array1, ArrayD, Axis, concatenate};
 

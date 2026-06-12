@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use molrs::Element;
-use molrs::region::simbox::SimBox;
+use molrs::spatial::region::simbox::SimBox;
 use molrs::types::F;
 use ndarray::Array1;
 use rand::SeedableRng;
@@ -76,6 +76,8 @@ const MOVEFRAC: F = 0.05;
 /// Atom radii are set to `tolerance / 2` for all atoms, matching Packmol's
 /// `radius(i) = dism/2.d0` (packmol.f90 line 283).
 const DEFAULT_TOLERANCE: F = 2.0;
+/// Default RNG seed (Packmol's `seed` default = 1234567, getinp.f90 line 33).
+const DEFAULT_SEED: u64 = 1_234_567;
 
 /// The packer.
 pub struct Molpack {
@@ -102,7 +104,8 @@ pub struct Molpack {
     /// Master switch for the stall-perturbation heuristic (inverts Packmol's
     /// `disable_movebad`: `true` = perturb enabled, `false` = disabled).
     perturb: bool,
-    /// Seed for the internal RNG. Default `0` (deterministic).
+    /// Seed for the internal RNG. Default `1_234_567` (Packmol's default;
+    /// deterministic — the same seed reproduces the same packing).
     seed: u64,
     /// Run the pair-kernel reductions on rayon. Off by default: see
     /// [`with_parallel_eval`][Self::with_parallel_eval].
@@ -117,6 +120,12 @@ pub struct Molpack {
     log_level: MolpackLogLevel,
     /// Print every N outer iterations when `log_level` includes progress.
     log_frequency: usize,
+    /// Reject initial random placements that overlap a fixed molecule
+    /// (Packmol's `avoid_overlap`, default on). Critical when packing a dense
+    /// solvent around a large fixed solute: without it ~15-20% of the solvent
+    /// seeds inside the solute, inflating the initial overlap ~2× and stalling
+    /// GENCAN. Has no effect when there are no fixed molecules.
+    avoid_overlap: bool,
 }
 
 impl Default for Molpack {
@@ -147,11 +156,12 @@ impl Molpack {
             perturb_fraction: MOVEFRAC,
             random_perturb: false,
             perturb: true,
-            seed: 0,
+            seed: DEFAULT_SEED,
             parallel_eval: false,
             periodic_box: None,
             log_level: MolpackLogLevel::Quiet,
             log_frequency: 1,
+            avoid_overlap: true,
         }
     }
 
@@ -194,6 +204,15 @@ impl Molpack {
     /// GENCAN inner iteration count (default `20`; Packmol `maxit`).
     pub fn with_inner_iterations(mut self, n: usize) -> Self {
         self.inner_iterations = n;
+        self
+    }
+
+    /// Whether to reject initial random placements that overlap a fixed
+    /// molecule (default `true`; Packmol's `avoid_overlap`). Leave on unless
+    /// you have a specific reason to allow solvent to seed inside a fixed
+    /// solute — disabling it can slow dense-solvation packing by 10× or more.
+    pub fn with_avoid_overlap(mut self, enabled: bool) -> Self {
+        self.avoid_overlap = enabled;
         self
     }
 
@@ -247,7 +266,8 @@ impl Molpack {
         self
     }
 
-    /// Seed for the internal RNG (default `0` — deterministic).
+    /// Seed for the internal RNG (default `1_234_567`, matching Packmol;
+    /// deterministic — the same seed reproduces the same packing).
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
@@ -596,6 +616,7 @@ impl Molpack {
             self.init_box_half_size,
             init_passes,
             pbc,
+            self.avoid_overlap,
             &movebad_cfg,
             &mut rng,
         );
@@ -697,7 +718,8 @@ impl Molpack {
         // Assemble the topology-complete result frame: replay each target's
         // template onto the packed coordinates (shared Rust core, so every
         // language binding gets an identical frame). Stamp the periodic box.
-        let positions = std::mem::take(&mut sys.xcart);
+        let xcart = std::mem::take(&mut sys.xcart);
+        let positions = positions_in_target_order(targets, &xcart, ntotat_free);
         let mut frame = crate::assemble::assemble_frame(targets, &positions);
         if let Some((min, max, flags)) = pbc {
             let lengths = Array1::from_vec(vec![max[0] - min[0], max[1] - min[1], max[2] - min[2]]);
@@ -774,6 +796,37 @@ fn reference_coords(target: &Target) -> &[[F; 3]] {
             }
         }
     }
+}
+
+/// Reorder packed coordinates from the packer's internal `xcart` layout
+/// (all free targets first, then all fixed targets) into the target-declared
+/// order that [`crate::assemble::assemble_frame`] expects (target-by-target,
+/// copy-by-copy, atom-by-atom).
+///
+/// Without this, a fixed target declared *before* a free target — e.g. a
+/// `fixed` protein in a solvation box — has its topology replayed onto the
+/// free atoms' coordinates, scrambling the rigid molecule. A no-op when no
+/// target is fixed (the free blocks are already in declared order).
+fn positions_in_target_order(
+    targets: &[Target],
+    xcart: &[[F; 3]],
+    n_free_atoms: usize,
+) -> Vec<[F; 3]> {
+    let mut out = Vec::with_capacity(xcart.len());
+    let mut free_cursor = 0usize;
+    let mut fixed_cursor = n_free_atoms;
+    for t in targets {
+        if t.fixed_at.is_some() {
+            let n = t.natoms();
+            out.extend_from_slice(&xcart[fixed_cursor..fixed_cursor + n]);
+            fixed_cursor += n;
+        } else {
+            let n = t.count * t.natoms();
+            out.extend_from_slice(&xcart[free_cursor..free_cursor + n]);
+            free_cursor += n;
+        }
+    }
+    out
 }
 
 /// Evaluate the packing objective once under **unscaled** radii (`radius_ini`),
@@ -1172,5 +1225,37 @@ pub fn run_phase(
         } else {
             PhaseOutcome::Continue
         }
+    }
+}
+
+#[cfg(test)]
+mod reorder_tests {
+    use super::*;
+
+    #[test]
+    fn fixed_target_declared_first_maps_to_its_xcart_block() {
+        // Target A: fixed, 2 atoms, declared first.
+        // Target B: free, 3 atoms x 2 copies = 6 atoms.
+        // Internal xcart is free-first/fixed-last: [B(0..6) | A(6..8)].
+        let a = Target::from_coords(&[[0.0; 3]; 2], &[1.0; 2], 1).fixed_at([0.0, 0.0, 0.0]);
+        let b = Target::from_coords(&[[0.0; 3]; 3], &[1.0; 3], 2);
+        let targets = vec![a, b];
+        // x-coordinate encodes the xcart slot index, so we can read the mapping.
+        let xcart: Vec<[F; 3]> = (0..8).map(|i| [i as F, 0.0, 0.0]).collect();
+        let out = positions_in_target_order(&targets, &xcart, 6);
+        let x: Vec<F> = out.iter().map(|p| p[0]).collect();
+        // Declared order: A's fixed block (slots 6,7) then B's free block (0..6).
+        assert_eq!(x, vec![6.0, 7.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn no_fixed_targets_is_identity() {
+        let a = Target::from_coords(&[[0.0; 3]; 2], &[1.0; 2], 1);
+        let b = Target::from_coords(&[[0.0; 3]; 3], &[1.0; 3], 2);
+        let targets = vec![a, b];
+        let xcart: Vec<[F; 3]> = (0..8).map(|i| [i as F, 0.0, 0.0]).collect();
+        let out = positions_in_target_order(&targets, &xcart, 8);
+        let x: Vec<F> = out.iter().map(|p| p[0]).collect();
+        assert_eq!(x, (0..8).map(|i| i as F).collect::<Vec<_>>());
     }
 }

@@ -340,3 +340,24 @@ class TestMolpackGlobalRestraint:
         for pos in result.positions:
             for k in range(3):
                 assert -0.1 <= pos[k] <= 30.1
+
+
+class TestParallelEval:
+    def test_rayon_enabled_in_wheel(self):
+        # The wheel is built with the `rayon` feature by default; if this
+        # fails the parallel evaluator was compiled out and scaling studies
+        # will silently flatline.
+        assert molpack.rayon_enabled() is True
+
+    def test_num_threads_positive(self):
+        assert molpack.num_threads() >= 1
+
+    def test_with_parallel_eval_does_not_raise_when_compiled(self):
+        # Fail-fast only triggers in a wheel built without rayon; here it must
+        # return a configured builder.
+        p = molpack.Molpack().with_parallel_eval(True)
+        assert p is not None
+
+    def test_init_thread_pool_rejects_zero(self):
+        with pytest.raises(ValueError):
+            molpack.init_thread_pool(0)

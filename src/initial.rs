@@ -15,7 +15,7 @@
 use molrs::types::F;
 use std::time::Instant;
 
-use crate::cell::{index_cell, setcell};
+use crate::cell::{cell_ind, index_cell, setcell};
 use crate::constraints::EvalMode;
 use crate::context::{NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat};
@@ -302,6 +302,7 @@ pub fn initial(
     sidemax: F,
     nloop0: usize,
     pbc: Option<([F; 3], [F; 3], [bool; 3])>,
+    avoid_overlap: bool,
     movebad_cfg: &MoveBadConfig<'_>,
     rng: &mut impl Rng,
 ) {
@@ -604,6 +605,9 @@ pub fn initial(
         sys.ntype,
         sys.ntotmol
     );
+    // Packmol's `fix` flag, gated by the `avoid_overlap` keyword: only reject
+    // placements near fixed atoms when avoidance is enabled and such atoms exist.
+    let has_fixed = avoid_overlap && sys.nfixedat > 0;
     {
         let mut ilubar = 0usize;
         for itype in 0..sys.ntype {
@@ -622,10 +626,16 @@ pub fn initial(
                 cm_hi[2]
             );
             for _imol in 0..nmols {
-                // Try up to MAX_GUESS_TRY random positions (restmol(false) only)
+                // Packmol initial.f90:396-423 (avoidoverlap, default .true.): retry the
+                // random COM until it both satisfies the region constraints AND does not
+                // land within a ±1-cell stencil of a fixed (e.g. solute) atom. Skipping
+                // the fixed-atom rejection seeds ~15-20% of a dense solvent inside a large
+                // fixed solute, inflating the initial overlap ~2× and stalling GENCAN.
                 let mut ntry = 0usize;
                 let mut fmol = 1.0 as F;
-                while fmol > precision && ntry < MAX_GUESS_TRY {
+                let mut overlap = false;
+                while (overlap || fmol > precision) && ntry < MAX_GUESS_TRY {
+                    overlap = false;
                     ntry += 1;
                     let rx: F = uniform01(rng);
                     let ry: F = uniform01(rng);
@@ -633,17 +643,45 @@ pub fn initial(
                     x[ilubar] = cm_lo[0] + rx * (cm_hi[0] - cm_lo[0]);
                     x[ilubar + 1] = cm_lo[1] + ry * (cm_hi[1] - cm_lo[1]);
                     x[ilubar + 2] = cm_lo[2] + rz * (cm_hi[2] - cm_lo[2]);
-                    restmol(
-                        itype,
-                        ilubar,
-                        x,
-                        sys,
-                        precision,
-                        movebad_cfg.gencan_maxit,
-                        false,
-                        &mut workspace,
-                    );
-                    fmol = sys.frest;
+                    if has_fixed {
+                        let pos = [x[ilubar], x[ilubar + 1], x[ilubar + 2]];
+                        let cell = setcell(
+                            &pos,
+                            &sys.pbc_min,
+                            &sys.pbc_length,
+                            &sys.cell_length,
+                            &sys.ncells,
+                            &sys.pbc_periodic,
+                        );
+                        'scan: for ic in -1isize..=1 {
+                            for jc in -1isize..=1 {
+                                for kc in -1isize..=1 {
+                                    let nc = [
+                                        cell_ind(cell[0] as isize + ic, sys.ncells[0]),
+                                        cell_ind(cell[1] as isize + jc, sys.ncells[1]),
+                                        cell_ind(cell[2] as isize + kc, sys.ncells[2]),
+                                    ];
+                                    if sys.latomfix[index_cell(&nc, &sys.ncells)] != NONE_IDX {
+                                        overlap = true;
+                                        break 'scan;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !overlap {
+                        restmol(
+                            itype,
+                            ilubar,
+                            x,
+                            sys,
+                            precision,
+                            movebad_cfg.gencan_maxit,
+                            false,
+                            &mut workspace,
+                        );
+                        fmol = sys.frest;
+                    }
                 }
                 ilubar += 3;
             }

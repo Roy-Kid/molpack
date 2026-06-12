@@ -29,12 +29,12 @@ pub struct Script {
     pub filetype: Option<String>,
     /// Output file path (`output` keyword). Required.
     pub output: PathBuf,
-    /// Maximum outer-loop iterations (`nloop` keyword). Default 400.
+    /// Maximum outer-loop iterations (`nloop` keyword). When unset, Packmol's
+    /// default of `200 * ntype` is used (getinp.f90:537-539).
     pub nloop: usize,
-    /// Whether to enforce minimum-distance overlap avoidance
-    /// (`avoid_overlap`). Parsed for compatibility; not yet wired to the
-    /// Molpack API.
-    #[allow(dead_code)]
+    /// Whether to reject initial random placements that overlap a fixed
+    /// molecule (`avoid_overlap`, default on). Wired through `Script::build`
+    /// to `Molpack::with_avoid_overlap`.
     pub avoid_overlap: bool,
     /// Periodic-boundary box (`pbc` keyword). When set, it seeds the
     /// packer's cell grid so the initial ±`sidemax` random placement
@@ -160,7 +160,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
     let mut seed: Option<u64> = None;
     let mut filetype: Option<String> = None;
     let mut output: Option<PathBuf> = None;
-    let mut nloop: usize = 400;
+    let mut nloop: Option<usize> = None;
     let mut avoid_overlap = true;
     let mut pbc: Option<PbcSpec> = None;
     let mut structures: Vec<Structure> = Vec::new();
@@ -222,7 +222,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                     State::TopLevel
                 }
                 "nloop" => {
-                    nloop = parse_usize(&tokens, 1, "nloop", lineno)?;
+                    nloop = Some(parse_usize(&tokens, 1, "nloop", lineno)?);
                     State::TopLevel
                 }
                 "avoid_overlap" => {
@@ -268,7 +268,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                     s.number = parse_usize(&tokens, 1, "number", lineno)?;
                     State::InStructure(s)
                 }
-                "center" => {
+                "center" | "centerofmass" => {
                     s.center = true;
                     State::InStructure(s)
                 }
@@ -385,7 +385,9 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
         seed,
         filetype,
         output: output.ok_or(ScriptError::MissingOutput)?,
-        nloop,
+        // Packmol default (getinp.f90:537-539): unset `nloop` resolves to
+        // 200 * ntype, where ntype is the number of structure types.
+        nloop: nloop.unwrap_or(200 * structures.len()),
         avoid_overlap,
         pbc,
         structures,
@@ -736,6 +738,25 @@ end structure
         let (pos, euler) = s.fixed.unwrap();
         assert_eq!(pos, [0.0, 20.0, 20.0]);
         assert!((euler[0] - 1.57).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_centerofmass_alias() {
+        // Official Packmol scripts (interface, solvprotein) spell the `center`
+        // keyword as `centerofmass`; the parser must treat them identically.
+        let src = "\
+tolerance 2.0
+filetype xyz
+output interface.xyz
+
+structure t3.xyz
+  number 1
+  centerofmass
+  fixed 0. 20. 20. 1.57 1.57 1.57
+end structure
+";
+        let inp = parse(src).expect("parse failed");
+        assert!(inp.structures[0].center);
     }
 
     #[test]

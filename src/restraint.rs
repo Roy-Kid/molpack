@@ -195,7 +195,7 @@ impl InsideBoxRestraint {
     /// not currently carry per-axis periodicity). Off-axis cells
     /// (triclinic tilts) are not representable as an axis-aligned
     /// restraint — write a custom `impl Restraint` for those.
-    pub fn from_simbox(simbox: &molrs::region::SimBox, periodic: [bool; 3]) -> Self {
+    pub fn from_simbox(simbox: &molrs::spatial::region::SimBox, periodic: [bool; 3]) -> Self {
         let origin = simbox.origin_view();
         let lengths = simbox.lengths();
         let o = [origin[0], origin[1], origin[2]];

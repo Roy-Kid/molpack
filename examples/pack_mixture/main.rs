@@ -23,7 +23,7 @@ use std::fs::create_dir_all;
 use std::path::PathBuf;
 
 use molpack::{InsideBoxRestraint, Molpack, ProgressHandler, Target, XYZHandler};
-use molrs_io::pdb::read_pdb_frame;
+use molrs_io::data::pdb::read_pdb_frame;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = env_logger::try_init();
