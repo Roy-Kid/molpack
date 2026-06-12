@@ -15,9 +15,8 @@ shape (direction-3 rule — see [`concepts`](crate::concepts)):
 3. [Custom `Handler`](#custom-handler)
 4. [Custom `Relaxer`](#custom-relaxer)
 5. [Testing discipline](#testing-discipline)
-6. [Benchmarking discipline](#benchmarking-discipline)
-7. [Common pitfalls](#common-pitfalls)
-8. [Contributing flow](#contributing-flow)
+6. [Common pitfalls](#common-pitfalls)
+7. [Contributing flow](#contributing-flow)
 
 ## Custom `Restraint`
 
@@ -378,7 +377,6 @@ Relaxer notes:
 | Integration test | `tests/<name>.rs` | `use molpack::{…};` only public API |
 | Gradient finite-difference | alongside unit test | ε=1e-5, tol=1e-3 |
 | Regression vs Packmol | `tests/examples_batch.rs` (`#[ignore]`) | Run with `--ignored --release` |
-| Microbench | `benches/<name>.rs` | criterion with `iter_batched` |
 
 Run all:
 
@@ -392,40 +390,6 @@ Rules:
 - Every new `Restraint` gets an FD gradient test.
 - Every new `Region` gets a boolean-algebra + signed-distance sign
   test and (for hot-path use) an analytic-gradient FD test.
-- Every hot-path change gets a microbench following the `fn` +
-  `caller` two-bench pattern (see `benches/run_phase.rs`).
-
-## Benchmarking discipline
-
-Catastrophic-regression alarm:
-
-```bash
-cargo bench --bench pack_end_to_end -- mixture
-```
-
-Five workloads available: `mixture` (~2s), `bilayer` (~10s),
-`interface` (~5s), `solvprotein` (~30s), `spherical` (~45 min —
-18k molecules).
-
-Microbenches (fast, run after any hot-path edit):
-
-```bash
-cargo bench --bench evaluate_unscaled
-cargo bench --bench run_iteration
-cargo bench --bench run_phase
-cargo bench --bench objective_dispatch
-```
-
-Performance gates:
-
-| Scope | Hard | Soft |
-|---|---|---|
-| Per-fn microbench | ≤ +1% | ≤ 0% |
-| Caller microbench (includes indirection) | ≤ +2% | ≤ +1% |
-| `pack_end_to_end` | ≤ +10% | ≤ +5% |
-
-Cross the soft gate → attach a flamegraph and a one-paragraph
-root-cause note. Cross the hard gate → tighten the change or roll back.
 
 ## Common pitfalls
 
@@ -460,6 +424,3 @@ root-cause note. Cross the hard gate → tighten the change or roll back.
    cargo clippy -- -D warnings
    cargo fmt --all --check
    ```
-4. Hot-path changes: run the relevant microbench plus
-   `cargo bench --bench pack_end_to_end -- mixture` before and after.
-   Attach numbers to the PR.

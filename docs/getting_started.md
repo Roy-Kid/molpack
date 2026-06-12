@@ -125,7 +125,7 @@ molpack examples/pack_mixture/mixture.inp
 molpack examples/pack_bilayer/bilayer-comment.inp
 molpack examples/pack_interface/interface.inp
 molpack examples/pack_solvprotein/solvprotein.inp
-molpack examples/pack_spherical/spherical.inp
+molpack examples/pack_spherical/spherical-comment.inp
 ```
 
 ---
@@ -168,11 +168,14 @@ Arguments to [`Molpack::pack`](crate::Molpack::pack):
 - `max_loops: usize` — outer-iteration budget per phase.
 
 Seed and every other tuning knob live on the builder (`.with_seed(n)`,
-`.with_tolerance(t)` etc.). `pack()` returns the packed `molrs::Frame`.
-Use `.with_lammps_output(true)`, `.with_log_level(level)`, and
+`.with_tolerance(t)` etc.). `pack()` returns the packed, topology-complete
+`molrs::Frame` — atom coordinates plus element and `mol_id`, with each
+molecule's topology replayed from its target template. Use
+`.with_lammps_output(true)`, `.with_log_level(level)`, and
 `.with_log_frequency(n)` for screen summaries/progress. Advanced callers
-that need structured convergence fields can call
-[`pack_with_report`](crate::Molpack::pack_with_report).
+that need structured convergence fields (`fdist`, `frest`, `converged`)
+can call [`pack_with_report`](crate::Molpack::pack_with_report), whose
+[`PackResult::frame`](crate::PackResult) is the same packed frame.
 
 ## Restraint scopes
 
@@ -253,7 +256,7 @@ Flexible molecules benefit from torsion-MC relaxation between outer
 optimizer calls. Attach a [`Relaxer`](crate::Relaxer) to a target:
 
 ```rust,no_run
-# use molrs::atomistic::Atomistic;
+# use molrs::system::atomistic::Atomistic;
 # use molpack::{InsideSphereRestraint, Target, TorsionMcRelaxer};
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 # let graph = Atomistic::new();
@@ -312,18 +315,11 @@ Zero-length axes return [`PackError::InvalidPBCBox`](crate::PackError).
 Five Packmol-equivalent workloads are checked in under `examples/`:
 
 ```bash
-cargo run -p molcrafts-molpack --release --example pack_mixture
-cargo run -p molcrafts-molpack --release --example pack_bilayer
-cargo run -p molcrafts-molpack --release --example pack_interface
-cargo run -p molcrafts-molpack --release --example pack_solvprotein
-cargo run -p molcrafts-molpack --release --example pack_spherical
-```
-
-Two heavier ad-hoc demonstrations (not in the regression suite):
-
-```bash
-cargo run -p molcrafts-molpack --release --example mc_fold_chain
-cargo run -p molcrafts-molpack --release --example pack_polymer_vesicle
+cargo run -p molcrafts-molpack --release --features io --example pack_mixture
+cargo run -p molcrafts-molpack --release --features io --example pack_bilayer
+cargo run -p molcrafts-molpack --release --features io --example pack_interface
+cargo run -p molcrafts-molpack --release --features io --example pack_solvprotein
+cargo run -p molcrafts-molpack --release --features io --example pack_spherical
 ```
 
 Set `MOLRS_PACK_EXAMPLE_PROGRESS=1` to enable the built-in

@@ -32,15 +32,21 @@ pip install molcrafts-molpack molcrafts-molrs
 ```
 
 `molcrafts-molrs` provides `molrs.Frame` plus PDB / XYZ readers — the
-Python wheel itself is I/O-free.
+Python wheel itself is I/O-free and relies on your installed
+`molcrafts-molrs` for all frame loading. Python 3.12 or newer is
+required.
 
 ```python
 import molpack
 print(molpack.Molpack)
 ```
 
-Pre-built wheels are published for CPython 3.12 and 3.13 on Linux,
-macOS, and Windows.
+Pre-built wheels are published for CPython 3.13 on Linux (manylinux
+x86-64) and macOS (a single universal2 wheel covering Apple Silicon and
+Intel). On any other platform or Python version — Windows, Linux
+aarch64, or a different interpreter — `pip` falls back to the published
+source distribution and builds the wheel locally, which needs a Rust
+toolchain.
 
 ## Build from source
 

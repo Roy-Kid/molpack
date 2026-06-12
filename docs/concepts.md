@@ -84,7 +84,7 @@ targets.
 
 Two-part design — builder + runner:
 
-- `Relaxer::build(&self, ref_coords) -> Box<dyn RelaxerRunner>` is
+- `Relaxer::spawn(&self, ref_coords) -> Box<dyn RelaxerRunner>` is
   called once at `pack()` entry.
 - `RelaxerRunner::on_iter(&mut self, coords, f_current, evaluate, rng)`
   runs between movebad and GENCAN each outer iteration; returns

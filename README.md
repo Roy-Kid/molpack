@@ -52,7 +52,8 @@ cat mixture.inp | molpack
 | `filetype <fmt>` | Input format for all structure files |
 | `output <path>` | Output file path (format inferred from extension) |
 | `nloop <n>` | Maximum outer-loop iterations. Default 400 |
-| `avoid_overlap <yes\|no>` | Parsed for compatibility |
+| `pbc x y z` / `pbc x0 y0 z0 x1 y1 z1` | Periodic box: side lengths from origin, or explicit min+max |
+| `avoid_overlap <no\|false\|0>` | Reject initial placements that land inside a fixed molecule (default on; faithful to Packmol's `initial.f90`) |
 | `structure <file>` … `end structure` | One block per molecule type |
 | `number <n>` | Copies to pack |
 | `inside\|outside box x0 y0 z0 x1 y1 z1` | Axis-aligned box restraint |
@@ -60,7 +61,7 @@ cat mixture.inp | molpack
 | `inside\|outside sphere cx cy cz r` | Sphere restraint |
 | `inside\|outside ellipsoid a1 a2 a3 b1 b2 b3 c` | Ellipsoid (center, semi-axes, exponent) |
 | `inside\|outside cylinder a1 a2 a3 d1 d2 d3 r l` | Finite cylinder (center, axis, radius, length) |
-| `over plane nx ny nz d` | Half-space (above) restraint |
+| `over\|above plane nx ny nz d` | Half-space (above) restraint |
 | `below plane nx ny nz d` | Half-space (below) restraint |
 | `center` | Center molecule at origin before packing |
 | `fixed x y z ex ey ez` | Fix molecule at position + Euler angles |
@@ -95,10 +96,15 @@ let target = Target::from_coords(&positions, &radii, 100)
     .with_name("water")
     .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
 
+// `pack` returns the packed, topology-complete `molrs::Frame`.
 let frame = Molpack::new()
     .with_tolerance(2.0)
     .with_seed(42)
     .pack(&[target], 200)?;
+
+// For full diagnostics, use `pack_with_report` → `PackResult`
+// (`frame`, `fdist`, `frest`, `converged`).
+let report = Molpack::new().with_seed(42).pack_with_report(&[target], 200)?;
 ```
 
 **Python**
@@ -124,35 +130,40 @@ frame = (
 
 ## Examples
 
+Five canonical workloads ship in `examples/` (they need the `io` feature
+to read the bundled structure files):
+
 ```bash
-cargo run --release --example pack_mixture
-cargo run --release --example pack_bilayer
-cargo run --release --example pack_spherical
-cargo run --release --example pack_interface
-cargo run --release --example pack_solvprotein
+cargo run --release --example pack_mixture     --features io   # 1000 water + 400 urea in a cube
+cargo run --release --example pack_bilayer     --features io   # membrane leaflets via per-atom plane restraints
+cargo run --release --example pack_interface   --features io   # water + chloroform around a fixed molecule
+cargo run --release --example pack_spherical   --features io   # concentric lipid/water shells (largest case)
+cargo run --release --example pack_solvprotein --features io   # fixed protein solvated in a sphere (avoid_overlap)
 ```
 
+The same workloads run through the CLI from their bundled `.inp` scripts,
+e.g. `cargo run --release --features cli --bin molpack -- examples/pack_mixture/mixture.inp`.
 Python equivalents are in [`python/examples/`](./python/examples/).
 
 ## Testing
 
 ```bash
-cargo test                                                               # unit + integration
-cargo test --release --test examples_batch -- --ignored                 # Packmol regression
-cargo bench --bench pack_end_to_end -- mixture                          # e2e benchmark
+cargo test                                                  # unit + integration
+cargo test --release --test examples_batch -- --ignored     # Packmol regression (all 5 workloads)
+cd python && maturin develop --release && pytest            # Python wheel
 ```
 
 ## Documentation
 
-- **Site** — [molcrafts.github.io/molpack](https://molcrafts.github.io/molpack/)
-- **Rust API** — `cargo doc --open` or [docs.rs](https://docs.rs/molcrafts-molpack)
-- **Python** — [`python/docs/`](./python/docs/)
-
-The site has four top-level tabs: **Home**, **Get Started** (install,
-getting started), **Guide** (concepts, examples, Packmol parity), and
-**Internals** (architecture, extending). The same long-form chapters
-are embedded in the rustdoc as `molpack::getting_started`,
-`molpack::concepts`, `molpack::architecture`, and `molpack::extending`.
+- **Guide** — the Markdown chapters under [`docs/`](./docs/): install,
+  getting started, concepts, examples, Packmol parity, architecture, and
+  extending.
+- **Rust API** — `cargo doc --open`, or [docs.rs](https://docs.rs/molcrafts-molpack).
+  The four long-form chapters (getting started, concepts, architecture,
+  extending) are also embedded in the rustdoc as
+  `molpack::getting_started`, `molpack::concepts`,
+  `molpack::architecture`, and `molpack::extending`.
+- **Python** — [`python/docs/`](./python/docs/).
 
 ## Contributing
 

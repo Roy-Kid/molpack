@@ -273,7 +273,8 @@ realistic workloads. Step 4 is the rayon parallelization point
 via `AtomicU64` (since `Cell<f64>` is not `Sync`).
 
 The `Arc<dyn Restraint>` virtual call in step 2 measured at +0.22% e2e
-versus the prior monomorphic dispatch — well inside the perf budget.
+versus the prior monomorphic dispatch — a negligible cost for the
+flexibility of user-defined restraints.
 
 ## Invariants and conventions
 

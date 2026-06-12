@@ -28,6 +28,9 @@ coordinates that satisfy all constraints.
     pip install molcrafts-molpack molcrafts-molrs
     ```
 
+See **[Install](install.md)** for prerequisites, available wheels, and the
+build-from-source flow.
+
 ## Quick start
 
 === "CLI"
@@ -78,21 +81,27 @@ coordinates that satisfy all constraints.
 
 ## Documentation map
 
+This guide has eight chapters. The four long-form chapters
+(getting started, concepts, architecture, extending) are also embedded in
+the crate rustdoc as `molpack::getting_started` and friends.
+
 **Get Started**
 
-- **[Install](install.md)** — CLI, Rust crate, Python binding.
-- **[Getting Started](getting_started.md)** — first pack, end to end.
+- **[Install](install.md)** — CLI, Rust crate, and Python binding.
+- **[Getting Started](getting_started.md)** — your first pack, end to end.
 
 **Guide**
 
 - **[Concepts](concepts.md)** — targets, restraints, regions, handlers, relaxers.
-- **[Examples](examples.md)** — five canonical workloads.
-- **[Packmol parity](packmol_parity.md)** — what is matched, how it is verified.
+- **[Examples](examples.md)** — the five canonical workloads.
+- **[Packmol parity](packmol_parity.md)** — what is matched, and how it is verified.
 
 **Internals**
 
 - **[Architecture](architecture.md)** — module map, data flow, loops, hot path.
 - **[Extending](extending.md)** — write your own `Restraint` / `Region` / `Handler` / `Relaxer`.
+
+This page is the eighth chapter.
 
 ## License
 
