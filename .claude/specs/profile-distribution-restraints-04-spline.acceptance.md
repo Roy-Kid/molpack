@@ -10,7 +10,7 @@ criteria:
       returns each tabulated rho*_i at its node xi_i within f64 round-off, and
       that value and deriv from the left- and right-adjacent segments agree at
       every interior node within tolerance (C1 continuity). Tests pass.
-    status: pending
+    status: verified
   - id: ac-002
     summary: Analytic spline derivative matches central finite difference
     type: code
@@ -19,7 +19,7 @@ criteria:
       A test compares TabulatedProfile::deriv(xi) against a central finite
       difference of TabulatedProfile::value across the grid interior and asserts
       agreement within the stated tolerance. Test passes.
-    status: pending
+    status: verified
   - id: ac-003
     summary: Tabulated Gaussian reproduces analytic harmonic U within tolerance
     type: code
@@ -29,7 +29,7 @@ criteria:
       grid, builds TabulatedProfile, and asserts u(xi, kt) matches the analytic
       harmonic U(xi) = (kT/2sigma^2)(xi-mu)^2 (up to the additive rho0 constant)
       within the stated interpolation tolerance. Test passes.
-    status: pending
+    status: verified
   - id: ac-004
     summary: Monotone input stays overshoot-free; floor and radial Jacobian hold
     type: code
@@ -40,7 +40,7 @@ criteria:
       zero-valued bin yields finite u and finite du_dxi via the density floor,
       and (c) a radial count histogram reproduces the intended uniform density
       only when the 4*pi*xi^2 shell Jacobian is applied. All tests pass.
-    status: pending
+    status: verified
 ---
 
 # Acceptance criteria

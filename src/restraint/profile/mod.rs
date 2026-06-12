@@ -10,6 +10,8 @@
 
 pub mod coordinate;
 pub mod distribution;
+pub mod spline;
 
 pub use coordinate::{Coordinate, CoordinateError, PbcWrap};
 pub use distribution::{DensityFloor, Distribution, InputKind, ProfilePenalty, ShellJacobian};
+pub use spline::TabulatedProfile;

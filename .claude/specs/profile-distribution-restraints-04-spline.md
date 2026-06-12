@@ -1,6 +1,6 @@
 ---
 title: Monotone cubic spline + Boltzmann inversion for tabulated profile restraints
-status: approved
+status: done
 created: 2026-06-12
 ---
 
@@ -52,16 +52,16 @@ The shell-Jacobian helper and `input_kind` / `density_floor` concepts are shared
 - `src/restraint/profile/mod.rs` — add `pub mod spline;` and re-export `TabulatedProfile` (module home created by `-02-coordinate`; this sub-spec only appends the declaration / re-export).
 
 ## Tasks
-- [ ] Write failing tests for grid validation (`src/restraint/profile/spline.rs`): rejects < 2 nodes, non-increasing ξ, non-finite or negative values
-- [ ] Write failing tests for node interpolation and C¹ continuity across interior segment boundaries (`src/restraint/profile/spline.rs`)
-- [ ] Write failing tests comparing analytic `deriv` against central finite difference of `value` over the grid interior (`src/restraint/profile/spline.rs`)
-- [ ] Write failing tests for monotone (overshoot-free) behavior on steep monotone input and flat extrapolation outside the grid (`src/restraint/profile/spline.rs`)
-- [ ] Write failing tests for Boltzmann inversion: tabulated Gaussian reproduces harmonic U within tolerance, zero bin yields finite `u` / `du_dxi` via floor, radial histogram reproduces intended density only with the ∝ξ² Jacobian (`src/restraint/profile/spline.rs`)
-- [ ] Implement `TabulatedProfile::new` with validation and histogram→density shell-Jacobian conversion in `src/restraint/profile/spline.rs`
-- [ ] Implement the monotone clamped cubic fit (Fritsch–Carlson limiter) and per-segment coefficient storage in `src/restraint/profile/spline.rs`
-- [ ] Implement `value`, `deriv` with flat extrapolation, and `u` / `du_dxi` with the density floor in `src/restraint/profile/spline.rs`
-- [ ] Add module-level and method docstrings per project doc style with units (ξ length, ρ* number density, U energy, kt energy) and wire `pub mod spline;` + re-export in `src/restraint/profile/mod.rs`
-- [ ] Run full check + test suite (`cargo fmt`, `cargo clippy -- -D warnings`, `cargo test -p molcrafts-molpack --lib --tests`)
+- [x] Write failing tests for grid validation (`src/restraint/profile/spline.rs`): rejects < 2 nodes, non-increasing ξ, non-finite or negative values
+- [x] Write failing tests for node interpolation and C¹ continuity across interior segment boundaries (`src/restraint/profile/spline.rs`)
+- [x] Write failing tests comparing analytic `deriv` against central finite difference of `value` over the grid interior (`src/restraint/profile/spline.rs`)
+- [x] Write failing tests for monotone (overshoot-free) behavior on steep monotone input and flat extrapolation outside the grid (`src/restraint/profile/spline.rs`)
+- [x] Write failing tests for Boltzmann inversion: tabulated Gaussian reproduces harmonic U within tolerance, zero bin yields finite `u` / `du_dxi` via floor, radial histogram reproduces intended density only with the ∝ξ² Jacobian (`src/restraint/profile/spline.rs`)
+- [x] Implement `TabulatedProfile::new` with validation and histogram→density shell-Jacobian conversion in `src/restraint/profile/spline.rs`
+- [x] Implement the monotone clamped cubic fit (Fritsch–Carlson limiter) and per-segment coefficient storage in `src/restraint/profile/spline.rs`
+- [x] Implement `value`, `deriv` with flat extrapolation, and `u` / `du_dxi` with the density floor in `src/restraint/profile/spline.rs`
+- [x] Add module-level and method docstrings per project doc style with units (ξ length, ρ* number density, U energy, kt energy) and wire `pub mod spline;` + re-export in `src/restraint/profile/mod.rs`
+- [x] Run full check + test suite (`cargo fmt`, `cargo clippy -- -D warnings`, `cargo test -p molcrafts-molpack --lib --tests`)
 
 ## Testing strategy
 Happy path:
