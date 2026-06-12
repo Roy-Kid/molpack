@@ -1,6 +1,6 @@
 ---
 title: Profile-restraint reaction coordinate ξ(x) with analytic gradient
-status: approved
+status: done
 created: 2026-06-12
 ---
 
@@ -81,13 +81,13 @@ singularity) so the returned gradient norm is bounded and never NaN/Inf.
 - `tests/coordinate.rs` (new)
 
 ## Tasks
-- [ ] Write failing analytic-vs-FD gradient tests for planar/radial/cylindrical/region-distance coordinates (tests/coordinate.rs)
-- [ ] Write failing r_guard finite-gradient tests asserting bounded, non-NaN ∇ξ at the centre and on the axis (tests/coordinate.rs)
-- [ ] Write failing minimum-image wrap test comparing ξ against a hand-computed wrapped delta (tests/coordinate.rs)
-- [ ] Implement Coordinate enum, fallible constructors (normal/axis normalization, degenerate-axis rejection), xi, and grad_xi in src/restraint/profile/coordinate.rs
-- [ ] Create src/restraint/profile/mod.rs, wire `pub mod coordinate;`, re-export Coordinate, and add `pub mod profile;` to src/restraint/mod.rs
-- [ ] Add docstrings with units (Å) and the ∇ξ derivation note on each variant
-- [ ] Run full check + test suite
+- [x] Write failing analytic-vs-FD gradient tests for planar/radial/cylindrical/region-distance coordinates (tests/coordinate.rs)
+- [x] Write failing r_guard finite-gradient tests asserting bounded, non-NaN ∇ξ at the centre and on the axis (tests/coordinate.rs)
+- [x] Write failing minimum-image wrap test comparing ξ against a hand-computed wrapped delta (tests/coordinate.rs)
+- [x] Implement Coordinate enum, fallible constructors (normal/axis normalization, degenerate-axis rejection), xi, and grad_xi in src/restraint/profile/coordinate.rs
+- [x] Create src/restraint/profile/mod.rs, wire `pub mod coordinate;`, re-export Coordinate, and add `pub mod profile;` to src/restraint/mod.rs
+- [x] Add docstrings with units (Å) and the ∇ξ derivation note on each variant
+- [x] Run full check + test suite
 
 ## Testing strategy
 - Happy path — for each of planar, radial, cylindrical, region-distance: evaluate `xi`

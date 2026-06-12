@@ -86,6 +86,7 @@ impl Restraint for Box<dyn Restraint> {
 }
 
 mod geometric;
+pub mod profile;
 
 pub use geometric::{
     AboveGaussianRestraint, AbovePlaneRestraint, BelowGaussianRestraint, BelowPlaneRestraint,

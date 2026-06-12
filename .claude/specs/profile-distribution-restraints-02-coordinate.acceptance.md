@@ -10,7 +10,9 @@ criteria:
       tests/coordinate.rs evaluates grad_xi at a representative off-singularity point
       and asserts each component agrees with a 3-point central finite difference of
       xi within the stated tolerance (<= 1e-6 absolute); the suite passes.
-    status: pending
+      (Implemented as inline `#[cfg(test)] mod tests` in coordinate.rs — keeps
+      the internal Coordinate type non-public until a later spec wires it.)
+    status: verified
   - id: ac-002
     summary: Inside r_guard, xi and grad_xi are finite with bounded gradient norm
     type: code
@@ -19,7 +21,7 @@ criteria:
       A test in tests/coordinate.rs evaluates a radial coordinate AT its centre and a
       cylindrical coordinate ON its axis and asserts xi and every grad_xi component are
       finite (no NaN/Inf) and the gradient norm is bounded (<= 1.0 + tol); the suite passes.
-    status: pending
+    status: verified
   - id: ac-003
     summary: Planar/radial/cylindrical xi uses minimum-image delta under an active periodic box
     type: code
@@ -29,7 +31,7 @@ criteria:
       point across the periodic boundary, and asserts the returned xi equals the
       hand-computed minimum-image (wrapped) value, not the raw distance; the suite
       passes.
-    status: pending
+    status: verified
 ---
 
 # Acceptance criteria
