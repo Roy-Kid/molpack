@@ -10,7 +10,7 @@ criteria:
       with a planar Gaussian returns scale·(kT/2σ²)(ξ−μ)² at sample points, and fg
       returns that same value while leaving g equal to its pre-seeded contents plus
       scale·(kT/σ²)(ξ−μ)·n̂ (additive, never overwritten); test passes.
-    status: pending
+    status: verified
   - id: ac-002
     summary: full coordinate×distribution analytic gradient matches finite difference
     type: code
@@ -20,7 +20,7 @@ criteria:
       region-distance} × {Gaussian, erf, tanh, exponential, tabulated} and asserts
       the fg analytic gradient agrees with a central finite difference of f
       componentwise within the stated tolerance for all 20 pairs; test passes.
-    status: pending
+    status: verified
   - id: ac-003
     summary: guard + floor compose to keep f and g finite at singular sites
     type: code
@@ -29,7 +29,7 @@ criteria:
       A test places a biased site exactly on the radial centre / cylindrical axis
       (inside r_guard) and another in a zero-density bin, and asserts f and every
       component of g are finite (no Inf/NaN) in both cases; test passes.
-    status: pending
+    status: verified
   - id: ac-004
     summary: Send+Sync+Debug, no interior mutability, linear in global scale
     type: code
@@ -39,7 +39,7 @@ criteria:
       Debug; a test asserts that doubling scale exactly doubles both f and the
       accumulated g (and periodic_box mirrors the coordinate's anchored box);
       test passes and the type holds no Cell/RefCell/Mutex/atomic field.
-    status: pending
+    status: verified
 ---
 
 # Acceptance criteria

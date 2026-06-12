@@ -1,6 +1,6 @@
 ---
 title: ProfileRestraint — compose coordinate × distribution into a Restraint
-status: approved
+status: done
 created: 2026-06-12
 ---
 
@@ -44,16 +44,16 @@ The objective integration is unchanged: the CSR loop in `accumulate_constraint_v
 
 ## Tasks
 
-- [ ] Write failing test: planar-Gaussian `f` returns scale·(kT/2σ²)(ξ−μ)² and `fg` returns the same value while accumulating g additively into a pre-seeded gradient (src/restraint/profile/tests/compose.rs)
-- [ ] Write failing test: full coordinate×distribution analytic-vs-FD gradient matrix — planar/radial/cylindrical/region-distance × Gaussian/erf/tanh/exponential/tabulated (src/restraint/profile/tests/compose.rs)
-- [ ] Write failing test: finite `f` and `g` for a site on the radial centre / cylindrical axis (inside r_guard) and a site in a zero-density bin (src/restraint/profile/tests/compose.rs)
-- [ ] Write failing test: doubling `scale` doubles `f` and `g`, and `periodic_box()` mirrors the coordinate's box when anchored (src/restraint/profile/tests/compose.rs)
-- [ ] Implement `ProfileRestraint` struct, `new` constructor, `Distribution` dispatch enum, and `Debug` derive in src/restraint/profile/mod.rs
-- [ ] Implement `Restraint::f` (ξ = coordinate.xi, U = distribution.u, return scale·U) in src/restraint/profile/mod.rs
-- [ ] Implement `Restraint::fg` with chain-rule gradient accumulated `g += scale·(dU/dξ)·∇ξ`, returning `f`, guarded per the -02 clamp and -03/-04 floor in src/restraint/profile/mod.rs
-- [ ] Implement `Restraint::periodic_box` override deferring to the coordinate's anchored box in src/restraint/profile/mod.rs
-- [ ] Add docstring documenting weight choice (`scale`, linear) and units (kT) on `ProfileRestraint` in src/restraint/profile/mod.rs
-- [ ] Run full check + test suite (`cargo fmt`, `cargo clippy -- -D warnings`, `cargo test -p molcrafts-molpack --lib --tests`)
+- [x] Write failing test: planar-Gaussian `f` returns scale·(kT/2σ²)(ξ−μ)² and `fg` returns the same value while accumulating g additively into a pre-seeded gradient (src/restraint/profile/tests/compose.rs)
+- [x] Write failing test: full coordinate×distribution analytic-vs-FD gradient matrix — planar/radial/cylindrical/region-distance × Gaussian/erf/tanh/exponential/tabulated (src/restraint/profile/tests/compose.rs)
+- [x] Write failing test: finite `f` and `g` for a site on the radial centre / cylindrical axis (inside r_guard) and a site in a zero-density bin (src/restraint/profile/tests/compose.rs)
+- [x] Write failing test: doubling `scale` doubles `f` and `g`, and `periodic_box()` mirrors the coordinate's box when anchored (src/restraint/profile/tests/compose.rs)
+- [x] Implement `ProfileRestraint` struct, `new` constructor, `Distribution` dispatch enum, and `Debug` derive in src/restraint/profile/mod.rs
+- [x] Implement `Restraint::f` (ξ = coordinate.xi, U = distribution.u, return scale·U) in src/restraint/profile/mod.rs
+- [x] Implement `Restraint::fg` with chain-rule gradient accumulated `g += scale·(dU/dξ)·∇ξ`, returning `f`, guarded per the -02 clamp and -03/-04 floor in src/restraint/profile/mod.rs
+- [x] Implement `Restraint::periodic_box` override deferring to the coordinate's anchored box in src/restraint/profile/mod.rs
+- [x] Add docstring documenting weight choice (`scale`, linear) and units (kT) on `ProfileRestraint` in src/restraint/profile/mod.rs
+- [x] Run full check + test suite (`cargo fmt`, `cargo clippy -- -D warnings`, `cargo test -p molcrafts-molpack --lib --tests`)
 
 ## Testing strategy
 
