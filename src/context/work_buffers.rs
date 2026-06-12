@@ -5,9 +5,26 @@ use molrs::types::F;
 /// Reusable mutable buffers shared across packing iterations.
 pub struct WorkBuffers {
     /// Cartesian gradient accumulator used by objective gradient evaluation.
-    /// The parallel pair kernel writes disjoint atom slots in place, so no
-    /// per-thread shadow buffers are needed.
     pub gxcar: Vec<[F; 3]>,
+    /// Per-rayon-worker scratch gradient buffers for the parallel pair-gradient
+    /// path. Flat, thread-major: worker `t` owns the contiguous region
+    /// `[t*ntotat .. (t+1)*ntotat)`. Each worker accumulates its half-stencil
+    /// pair forces here race-free (its region is touched by no other
+    /// concurrently-running task), then the regions are reduced into [`gxcar`].
+    /// Reusing one persistent buffer keeps the hot path allocation-free; it is
+    /// zeroed (in parallel) at the start of each gradient evaluation. Sized
+    /// lazily to `nthreads * ntotat`.
+    ///
+    /// [`gxcar`]: Self::gxcar
+    #[cfg(feature = "rayon")]
+    pub grad_partials: Vec<[F; 3]>,
+    /// Reused per-active-molecule descriptor list `(itype, icart0, ilubar,
+    /// ilugan)` for the parallel `expand_molecules` / `project_cartesian_gradient`
+    /// passes. Both rebuild it from the current `comptype` each call (cheap
+    /// index arithmetic, no trig); persisting the `Vec` keeps that hot rebuild
+    /// allocation-free.
+    #[cfg(feature = "rayon")]
+    pub mol_descs: Vec<(usize, usize, usize, usize)>,
     /// Temporary radius backup used by movebad/radius scaling paths.
     pub radiuswork: Vec<F>,
     /// Per-molecule score buffer used by flashsort/movebad ranking.
@@ -36,6 +53,10 @@ impl WorkBuffers {
     pub fn new(ntotat: usize) -> Self {
         Self {
             gxcar: vec![[0.0; 3]; ntotat],
+            #[cfg(feature = "rayon")]
+            grad_partials: Vec::new(),
+            #[cfg(feature = "rayon")]
+            mol_descs: Vec::new(),
             radiuswork: vec![0.0; ntotat],
             fmol: Vec::new(),
             flash_ind: Vec::new(),

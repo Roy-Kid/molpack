@@ -97,6 +97,13 @@ name = "pack_spherical"
 path = "examples/pack_spherical/main.rs"
 required-features = ["io"]
 
+# Parallel-scaling measurement harness (molpack-jcc paper figure). Needs rayon,
+# not io.
+[[example]]
+name = "mt_scaling"
+path = "examples/mt_scaling/main.rs"
+required-features = ["rayon"]
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

@@ -66,7 +66,7 @@ fn pbc_wrap_delta(dx: F, dy: F, dz: F, pbc: &PbcConstants) -> (F, F, F) {
 
 /// Per-atom hot-path state pulled out once before the inner `jcart` loop
 /// inside `fparc` / `gparc` / `fgparc` (and the rayon variants `fparc_stats`
-/// and `accumulate_force_on_owner`).
+/// and `fgparc_into`).
 ///
 /// Before this type, each of those four kernels had the same 15-line
 /// prologue: read `atom_props[icart]`, derive `fixed_i`, `use_short_i`,
@@ -392,24 +392,10 @@ fn expand_molecules(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
 #[cfg(feature = "rayon")]
 fn expand_molecules_parallel(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
     // Cheap serial pass: one descriptor per active molecule (pure index
-    // arithmetic, no trig). Mirrors the serial loop's comptype skipping and
-    // its `ilubar`/`ilugan` compaction.
-    let mut descs: Vec<(usize, usize, usize, usize)> = Vec::with_capacity(sys.ntotmol);
-    let mut ilubar = 0usize;
-    let mut ilugan = sys.ntotmol * 3;
-    let mut icart = 0usize;
-    for itype in 0..sys.ntype {
-        if !sys.comptype[itype] {
-            icart += sys.nmols[itype] * sys.natoms[itype];
-            continue;
-        }
-        for _ in 0..sys.nmols[itype] {
-            descs.push((itype, icart, ilubar, ilugan));
-            icart += sys.natoms[itype];
-            ilubar += 3;
-            ilugan += 3;
-        }
-    }
+    // arithmetic, no trig). Reuses the persistent workspace buffer so the
+    // rebuild is allocation-free.
+    let mut descs = std::mem::take(&mut sys.work.mol_descs);
+    fill_active_mol_descs(&mut descs, sys);
 
     // Move the two write targets out of `sys` so the context can be shared
     // immutably across threads while molecules write disjoint slots through a
@@ -514,7 +500,34 @@ fn expand_molecules_parallel(x: &[F], sys: &mut PackContext, mode: ExpandMode) -
         }
     }
 
+    sys.work.mol_descs = descs;
     f_total
+}
+
+/// Fill `descs` with one `(itype, icart0, ilubar, ilugan)` descriptor per
+/// **active** molecule (clearing any previous contents first), mirroring the
+/// serial expand/project loops' `comptype` skipping and `ilubar`/`ilugan`
+/// compaction. `ilugan` (the Euler-angle offset) starts at `ntotmol*3`, which
+/// is correct for both full and per-type compact `x` (`SwapState::set_type`
+/// shrinks `ntotmol` to the phase's molecule count).
+#[cfg(feature = "rayon")]
+fn fill_active_mol_descs(descs: &mut Vec<(usize, usize, usize, usize)>, sys: &PackContext) {
+    descs.clear();
+    let mut ilubar = 0usize;
+    let mut ilugan = sys.ntotmol * 3;
+    let mut icart = 0usize;
+    for itype in 0..sys.ntype {
+        if !sys.comptype[itype] {
+            icart += sys.nmols[itype] * sys.natoms[itype];
+            continue;
+        }
+        for _ in 0..sys.nmols[itype] {
+            descs.push((itype, icart, ilubar, ilugan));
+            icart += sys.natoms[itype];
+            ilubar += 3;
+            ilugan += 3;
+        }
+    }
 }
 
 #[inline(always)]
@@ -795,84 +808,103 @@ fn accumulate_pair_fg(sys: &mut PackContext) -> F {
     f
 }
 
-/// Parallel counterpart to [`accumulate_pair_fg`], implemented as an
-/// *atom-centric* reduction. rayon work-steals over `active_cells`, and each
-/// cell's task accumulates the **complete** pair force for every atom it owns
-/// straight into that atom's `sys.work.gxcar` slot. Because every atom lives in
-/// exactly one cell, these writes are disjoint across tasks, so the previous
-/// design's per-thread `ntotat`-sized gradient buffers — zeroed and merged
-/// every evaluation at O(threads × ntotat) cost — are gone entirely.
+/// Base pointer into the per-worker scratch gradient buffer
+/// ([`crate::context::WorkBuffers::grad_partials`]). `*mut [F; 3]` is not
+/// `Send`/`Sync`; this wrapper asserts each worker only ever dereferences its
+/// own `[t*ntotat .. (t+1)*ntotat)` region, which is disjoint across the
+/// concurrently-running tasks (keyed by the unique rayon pool thread index).
+#[cfg(feature = "rayon")]
+#[derive(Clone, Copy)]
+struct PartialPtr {
+    base: *mut [F; 3],
+    ntotat: usize,
+}
+// SAFETY: see type doc — regions are keyed by the unique pool thread index, so
+// no two concurrently-running tasks alias the same slot.
+#[cfg(feature = "rayon")]
+unsafe impl Send for PartialPtr {}
+#[cfg(feature = "rayon")]
+unsafe impl Sync for PartialPtr {}
+#[cfg(feature = "rayon")]
+impl PartialPtr {
+    /// # Safety
+    /// `t` must be the calling worker's unique pool index and `i < ntotat`.
+    #[inline(always)]
+    unsafe fn slot<'a>(self, t: usize, i: usize) -> &'a mut [F; 3] {
+        unsafe { &mut *self.base.add(t * self.ntotat + i) }
+    }
+}
+
+/// Parallel counterpart to [`accumulate_pair_fg`]. rayon work-steals over
+/// `active_cells` using the **same 13-neighbor half-stencil the serial path
+/// walks** ([`PackContext::neighbor_cells_g`]), so each unordered pair is
+/// visited exactly once — none of the ~2× redundant distance work an
+/// atom-centric full-stencil pass incurs.
 ///
-/// Each owner reads a full 26-neighbor stencil ([`PackContext::neighbor_cells_full`])
-/// plus its own cell. The pair *energy* is counted once per unordered pair via
-/// the `i < j` tie-break, so summing over owners reproduces the serial total;
-/// the *force* is collected once per owning atom (the partner contributes the
-/// equal-and-opposite term when it is the owner). Gated on `!move_flag` (the
+/// Race freedom *without* that redundancy comes from per-worker scratch buffers
+/// ([`crate::context::WorkBuffers::grad_partials`]): worker `t` accumulates
+/// every `gi += d` / `gj -= d` half-stencil write into its own private region
+/// `[t*ntotat .. (t+1)*ntotat)`, so no two concurrently-running tasks touch the
+/// same slot even though a half-stencil writes into neighbor cells. After the
+/// sweep the regions are reduced into `sys.work.gxcar` (which already holds the
+/// constraint gradient from `expand_molecules`). The zeroing and the reduction
+/// are themselves parallel and cost O(ntotat) wall-clock when `nthreads ≈
+/// cores`.
+///
+/// The contribution set is identical to the serial path (same pairs, same
+/// signs); only the summation order differs, within the tolerance the
+/// `parallel_equivalence` tests pin. Gated on `!move_flag` by the caller (the
 /// per-atom `fdist_atom` bookkeeping is intentionally skipped).
 #[cfg(feature = "rayon")]
 fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
-    // Split the borrow: move the gradient buffer — which already holds the
-    // constraint gradient from earlier in `compute_fg` — out of `sys` so the
-    // context can be shared immutably across rayon threads while each thread
-    // writes disjoint atom slots through a raw pointer.
-    let mut grad = std::mem::take(&mut sys.work.gxcar);
+    let ntotat = sys.ntotat;
+    let nthreads = rayon::current_num_threads().max(1);
+
+    // Per-worker scratch: take it out of `sys` so the context can be shared
+    // immutably across tasks while each worker writes its own region through a
+    // raw pointer. Sized to `nthreads * ntotat` and zeroed in parallel (each
+    // worker clears its own region).
+    let mut partials = std::mem::take(&mut sys.work.grad_partials);
+    if partials.len() != nthreads * ntotat {
+        partials.resize(nthreads * ntotat, [0.0; 3]);
+    }
+    partials
+        .par_chunks_mut(ntotat.max(1))
+        .for_each(|region| region.fill([0.0; 3]));
+
     let pbc = pbc_constants(sys);
     let sys_ro: &PackContext = sys;
-
-    /// `*mut [F; 3]` is not `Send`/`Sync`; this wrapper asserts the pointer is
-    /// only ever dereferenced at indices that are disjoint across rayon tasks.
-    /// The slot accessor takes `self`, so closures capture the whole (Sync)
-    /// wrapper rather than the bare pointer field.
-    #[derive(Clone, Copy)]
-    struct GradPtr(*mut [F; 3]);
-    // SAFETY: each atom belongs to exactly one cell and tasks are keyed by
-    // cell, so no two tasks deref the same index; within a task only one
-    // `&mut` to a given slot is live at a time.
-    unsafe impl Send for GradPtr {}
-    unsafe impl Sync for GradPtr {}
-    impl GradPtr {
-        /// # Safety
-        /// `i` must be in bounds and not aliased by another live `&mut`.
-        #[inline(always)]
-        unsafe fn slot<'a>(self, i: usize) -> &'a mut [F; 3] {
-            unsafe { &mut *self.0.add(i) }
-        }
-    }
-    let grad_ptr = GradPtr(grad.as_mut_ptr());
+    let pptr = PartialPtr {
+        base: partials.as_mut_ptr(),
+        ntotat,
+    };
 
     let (f_total, fdist_max) = sys_ro
         .active_cells
         .par_iter()
         .map(|&icell| {
-            let neighbors = &sys_ro.neighbor_cells_full[icell];
+            // The worker's private region index. Inside a rayon parallel
+            // closure this is always `Some(0..nthreads)`.
+            let t = rayon::current_thread_index().unwrap_or(0);
+            let neighbors = &sys_ro.neighbor_cells_g[icell];
             let mut f_local: F = 0.0;
             let mut fdist_local: F = 0.0;
             let mut icart_id = sys_ro.latomfirst[icell];
             while icart_id != NONE_IDX {
                 let icart = icart_id as usize;
-                // SAFETY: `icart` belongs only to `icell`; no other rayon task
-                // touches this slot during this evaluation, and the previous
-                // iteration's `gi` has been dropped.
-                let gi: &mut [F; 3] = unsafe { grad_ptr.slot(icart) };
-                // Own cell: every other atom in the same list (skips self).
-                let (f0, d0) =
-                    accumulate_force_on_owner(icart, sys_ro.latomfirst[icell], sys_ro, gi, &pbc);
-                f_local += f0;
-                if d0 > fdist_local {
-                    fdist_local = d0;
+                // Same cell: forward atoms only (latomnext), each pair once.
+                let (df, dfd) = fgparc_into(icart, sys_ro.latomnext[icart], sys_ro, pptr, t, &pbc);
+                f_local += df;
+                if dfd > fdist_local {
+                    fdist_local = dfd;
                 }
-                // The 26 surrounding cells.
+                // The 13 forward neighbor cells.
                 for &ncell in neighbors {
-                    let (fc, dc) = accumulate_force_on_owner(
-                        icart,
-                        sys_ro.latomfirst[ncell],
-                        sys_ro,
-                        gi,
-                        &pbc,
-                    );
-                    f_local += fc;
-                    if dc > fdist_local {
-                        fdist_local = dc;
+                    let (df, dfd) =
+                        fgparc_into(icart, sys_ro.latomfirst[ncell], sys_ro, pptr, t, &pbc);
+                    f_local += df;
+                    if dfd > fdist_local {
+                        fdist_local = dfd;
                     }
                 }
                 icart_id = sys_ro.latomnext[icart];
@@ -881,31 +913,57 @@ fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
         })
         .reduce(|| (0.0 as F, 0.0 as F), |a, b| (a.0 + b.0, a.1.max(b.1)));
 
+    // Reduce the per-worker regions into the constraint gradient already in
+    // gxcar. Parallel over atom chunks; within a chunk each worker region is
+    // read as a contiguous slice (cache-friendly).
+    let mut grad = std::mem::take(&mut sys.work.gxcar);
+    let chunk = ntotat.div_ceil(nthreads).max(1);
+    {
+        let partials_ref: &[[F; 3]] = &partials;
+        grad.par_chunks_mut(chunk)
+            .enumerate()
+            .for_each(|(ci, gchunk)| {
+                let start = ci * chunk;
+                let len = gchunk.len();
+                for t in 0..nthreads {
+                    let base = t * ntotat + start;
+                    let region = &partials_ref[base..base + len];
+                    for (g, p) in gchunk.iter_mut().zip(region) {
+                        g[0] += p[0];
+                        g[1] += p[1];
+                        g[2] += p[2];
+                    }
+                }
+            });
+    }
+
     sys.work.gxcar = grad;
+    sys.work.grad_partials = partials;
     (f_total, fdist_max)
 }
 
-/// Accumulate the pair force exerted on owner atom `icart` by every atom in the
-/// linked list starting at `first_jcart` (skipping `icart` itself), writing the
-/// result into `gi` (`&mut sys.work.gxcar[icart]`).
+/// [`fgparc`] for the parallel half-stencil path: identical pair math and the
+/// same `gi += d` / `gj -= d` writes (each unordered pair once), but the writes
+/// land in worker `t`'s private scratch region via `pptr` instead of
+/// `sys.work.gxcar`, and the `move_flag` per-atom bookkeeping is omitted (the
+/// caller gates on `!move_flag`). Reads a shared `&PackContext`; returns
+/// `(penalty_sum, fdist_max)`.
 ///
-/// Returns `(energy, fdist_max)`. The energy counts each unordered pair once via
-/// the `icart < jcart` tie-break, so summing over every owner reproduces the
-/// serial total. The force written is the full force on `icart`; the partner
-/// atom collects the equal-and-opposite term when *it* is the owner, satisfying
-/// Newton's third law without any cross-atom writes. Used only by the parallel
-/// gradient path, so `move_flag` per-atom bookkeeping is out of scope.
+/// `gi` (slot `icart`) and `gj` (slot `jcart`) are always distinct atoms — the
+/// same-molecule skip rules out `icart == jcart` — and each `&mut` is scoped so
+/// the two never coexist, so the disjoint raw writes carry no aliasing hazard.
 #[cfg(feature = "rayon")]
 #[inline(always)]
-fn accumulate_force_on_owner(
+fn fgparc_into(
     icart: usize,
     first_jcart: u32,
     sys: &PackContext,
-    gi: &mut [F; 3],
+    pptr: PartialPtr,
+    t: usize,
     pbc: &PbcConstants,
 ) -> (F, F) {
-    let mut energy: F = 0.0;
-    let mut fdist_max: F = 0.0;
+    let mut result: F = 0.0;
+    let mut local_fdist: F = 0.0;
     let mut jcart_id = first_jcart;
     let xi = sys.xcart[icart];
     let hot = AtomHotState::load(icart, sys);
@@ -913,10 +971,6 @@ fn accumulate_force_on_owner(
     while jcart_id != NONE_IDX {
         let jcart = jcart_id as usize;
         let next = sys.latomnext[jcart];
-        if jcart == icart {
-            jcart_id = next;
-            continue;
-        }
         let props_j = sys.atom_props[jcart];
         if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
             jcart_id = next;
@@ -932,20 +986,30 @@ fn accumulate_force_on_owner(
         let datom = dx * dx + dy * dy + dz * dz;
         let rsum = hot.props.radius + props_j.radius;
         let tol = rsum * rsum;
-        // Tie-break so each unordered pair contributes its energy exactly once.
-        let count_energy = icart < jcart;
 
         if datom < tol {
             let penalty = datom - tol;
             let scale = hot.props.fscale * props_j.fscale;
-            if count_energy {
-                energy += scale * penalty * penalty;
-            }
-            // Force on i is `+d`; the partner gets `-d` when it owns the pair.
+            result += scale * penalty * penalty;
+
             let dtemp = scale * 4.0 * penalty;
-            gi[0] += dtemp * dx;
-            gi[1] += dtemp * dy;
-            gi[2] += dtemp * dz;
+            let xdiff0 = dtemp * dx;
+            let xdiff1 = dtemp * dy;
+            let xdiff2 = dtemp * dz;
+            // SAFETY: `t` is this worker's unique region; `icart`/`jcart` are
+            // distinct in-bounds atoms; each `&mut` is dropped before the next.
+            {
+                let gi = unsafe { pptr.slot(t, icart) };
+                gi[0] += xdiff0;
+                gi[1] += xdiff1;
+                gi[2] += xdiff2;
+            }
+            {
+                let gj = unsafe { pptr.slot(t, jcart) };
+                gj[0] -= xdiff0;
+                gj[1] -= xdiff1;
+                gj[2] -= xdiff2;
+            }
 
             if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
                 let short_rsum = hot.shrad_i + sys.short_radius[jcart];
@@ -955,13 +1019,24 @@ fn accumulate_force_on_owner(
                     let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
                     sr_scale *= (tol * tol) / (short_tol * short_tol);
                     let sr_pair_scale = scale * sr_scale;
-                    if count_energy {
-                        energy += sr_pair_scale * short_penalty * short_penalty;
-                    }
+                    result += sr_pair_scale * short_penalty * short_penalty;
+
                     let dtemp2 = sr_pair_scale * 4.0 * short_penalty;
-                    gi[0] += dtemp2 * dx;
-                    gi[1] += dtemp2 * dy;
-                    gi[2] += dtemp2 * dz;
+                    let xdiff0 = dtemp2 * dx;
+                    let xdiff1 = dtemp2 * dy;
+                    let xdiff2 = dtemp2 * dz;
+                    {
+                        let gi = unsafe { pptr.slot(t, icart) };
+                        gi[0] += xdiff0;
+                        gi[1] += xdiff1;
+                        gi[2] += xdiff2;
+                    }
+                    {
+                        let gj = unsafe { pptr.slot(t, jcart) };
+                        gj[0] -= xdiff0;
+                        gj[1] -= xdiff1;
+                        gj[2] -= xdiff2;
+                    }
                 }
             }
         }
@@ -969,14 +1044,14 @@ fn accumulate_force_on_owner(
         let rsum_ini = hot.props.radius_ini + props_j.radius_ini;
         let tol_ini = rsum_ini * rsum_ini;
         let violation = tol_ini - datom;
-        if violation > fdist_max {
-            fdist_max = violation;
+        if violation > local_fdist {
+            local_fdist = violation;
         }
 
         jcart_id = next;
     }
 
-    (energy, fdist_max)
+    (result, local_fdist)
 }
 
 /// Atom-pair gradient accumulation into `sys.work.gxcar`.
@@ -1201,6 +1276,17 @@ fn fparc_stats(icart: usize, first_jcart: u32, sys: &PackContext, pbc: &PbcConst
 }
 
 fn project_cartesian_gradient(x: &[F], sys: &mut PackContext, g: &mut [F]) {
+    // Each active molecule projects its atoms' Cartesian gradient onto its own
+    // 6 DOF (COM + Euler), writing only its own disjoint `g` slots — so this
+    // parallelizes per molecule with no cross-task writes. The dominant cost is
+    // `eulerrmat_derivatives` (trig) per molecule, which otherwise serializes
+    // and caps `compute_fg` scaling once the pair kernel is parallel.
+    #[cfg(feature = "rayon")]
+    if sys.parallel_pair_eval && !sys.move_flag {
+        project_cartesian_gradient_parallel(x, sys, g);
+        return;
+    }
+
     g.iter_mut().for_each(|v| *v = 0.0);
 
     let mut k1 = 0usize;
@@ -1246,6 +1332,83 @@ fn project_cartesian_gradient(x: &[F], sys: &mut PackContext, g: &mut [F]) {
             k1 += 3;
         }
     }
+}
+
+/// Parallel counterpart to [`project_cartesian_gradient`]. Each active molecule
+/// is an independent task: it accumulates its 6 gradient components into local
+/// registers, then writes them once into its own `g[ilubar..ilubar+3]` (COM)
+/// and `g[ilugan..ilugan+3]` (Euler) slots. Those ranges are disjoint across
+/// molecules, so the writes need no synchronization. Because each molecule's
+/// accumulation order is identical to the serial loop's (same atoms, same axis
+/// order) and no slot is summed across molecules, the result is **bit-identical**
+/// to the serial path — only the inter-molecule visitation order changes.
+#[cfg(feature = "rayon")]
+fn project_cartesian_gradient_parallel(x: &[F], sys: &mut PackContext, g: &mut [F]) {
+    g.iter_mut().for_each(|v| *v = 0.0);
+
+    let mut descs = std::mem::take(&mut sys.work.mol_descs);
+    fill_active_mol_descs(&mut descs, sys);
+    let sys_ro: &PackContext = sys;
+
+    /// Base pointer to `g`. Each task writes only its molecule's COM/Euler
+    /// slots, which are disjoint across molecules. The accessor takes `self` so
+    /// the closure captures the whole (Sync) wrapper, not the bare pointer.
+    #[derive(Clone, Copy)]
+    struct GPtr(*mut F);
+    // SAFETY: per-molecule `ilubar`/`ilugan` ranges are disjoint, so no two
+    // tasks write the same `g` index.
+    unsafe impl Send for GPtr {}
+    unsafe impl Sync for GPtr {}
+    impl GPtr {
+        /// # Safety
+        /// `i` must index a slot owned solely by the calling task.
+        #[inline(always)]
+        unsafe fn write(self, i: usize, v: F) {
+            unsafe {
+                *self.0.add(i) = v;
+            }
+        }
+    }
+    let gptr = GPtr(g.as_mut_ptr());
+
+    descs
+        .par_iter()
+        .for_each(|&(itype, icart0, ilubar, ilugan)| {
+            let beta = x[ilugan];
+            let gama = x[ilugan + 1];
+            let teta = x[ilugan + 2];
+            let (dv1beta, dv1gama, dv1teta, dv2beta, dv2gama, dv2teta, dv3beta, dv3gama, dv3teta) =
+                eulerrmat_derivatives(beta, gama, teta);
+
+            let idbase = sys_ro.idfirst[itype];
+            let na = sys_ro.natoms[itype];
+            let mut gcom = [0.0 as F; 3];
+            let mut gang = [0.0 as F; 3];
+            for iatom in 0..na {
+                let gx = sys_ro.work.gxcar[icart0 + iatom];
+                let cr = sys_ro.coor[idbase + iatom];
+                for k in 0..3 {
+                    gcom[k] += gx[k];
+                }
+                for k in 0..3 {
+                    gang[0] +=
+                        (cr[0] * dv1beta[k] + cr[1] * dv2beta[k] + cr[2] * dv3beta[k]) * gx[k];
+                    gang[1] +=
+                        (cr[0] * dv1gama[k] + cr[1] * dv2gama[k] + cr[2] * dv3gama[k]) * gx[k];
+                    gang[2] +=
+                        (cr[0] * dv1teta[k] + cr[1] * dv2teta[k] + cr[2] * dv3teta[k]) * gx[k];
+                }
+            }
+            // SAFETY: `ilubar`/`ilugan` index this molecule's own disjoint slots.
+            unsafe {
+                for k in 0..3 {
+                    gptr.write(ilubar + k, gcom[k]);
+                    gptr.write(ilugan + k, gang[k]);
+                }
+            }
+        });
+
+    sys.work.mol_descs = descs;
 }
 
 #[inline]
