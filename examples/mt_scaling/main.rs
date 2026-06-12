@@ -8,16 +8,18 @@
 //! serial path and on the rayon path at 1/2/4/8 worker threads, and prints
 //!
 //! ```text
-//! atoms,mode,threads,us_per_eval,speedup_vs_serial
+//! atoms,kernel,mode,threads,us_per_eval,speedup_vs_serial
 //! ```
 //!
-//! to stdout — the exact schema `molpack-jcc/bench/fig_parallel.py` reads for
-//! `fig_parallel_kernel.png`.
+//! to stdout — the schema `molpack-jcc/bench/fig_mt_scaling.py` reads for
+//! `fig_parallel_kernel.{pdf,png}`. The default size ladder reaches the
+//! million-atom regime, where the parallel kernel dominates and scaling
+//! approaches the machine ceiling.
 //!
 //! Run (needs the rayon feature):
 //! ```sh
 //! cargo run --release --example mt_scaling --features rayon
-//! cargo run --release --example mt_scaling --features rayon -- 3000 15000 60000 180000
+//! cargo run --release --example mt_scaling --features rayon -- 60000 1000000
 //! ```
 //!
 //! Each `compute_fg` is fed a freshly jittered `x`, so the geometry cache
@@ -26,7 +28,7 @@
 
 use std::time::{Duration, Instant};
 
-use molpack::objective::{compute_f, compute_fg};
+use molpack::objective::compute_fg;
 use molpack::{F, PackContext};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -179,37 +181,23 @@ fn build_mixture(target_atoms: usize, seed: u64) -> (PackContext, Vec<F>) {
     (sys, x)
 }
 
-/// Which evaluation kernel to time.
-#[derive(Clone, Copy)]
-enum Kernel {
-    /// Fused function + gradient (`compute_fg`) — what GENCAN's gradient steps
-    /// drive; the parallel path uses the 26-neighbor atom-centric stencil.
-    Fg,
-    /// Function only (`compute_f`) — what the line search drives; the parallel
-    /// path uses the 13-neighbor half-stencil (no redundant work).
-    F,
-}
-
-/// One timing repetition: run a kernel over [`TIME_BUDGET`], jittering one
-/// coordinate each call so the geometry cache misses and the full kernel runs
-/// every time. Returns mean microseconds per evaluation for this rep.
-fn time_rep(kernel: Kernel, sys: &mut PackContext, x: &mut [F], g: &mut [F]) -> F {
+/// One timing repetition: run `compute_fg` (the fused function+gradient pass
+/// GENCAN drives on every inner iteration) until [`TIME_BUDGET`] elapses,
+/// jittering one coordinate each call so the geometry cache misses and the full
+/// kernel runs every time. Returns mean microseconds per evaluation for this
+/// rep. The budget is checked every iteration (not every Nth) so a single
+/// million-atom evaluation, which already exceeds the budget on its own, does
+/// not force a long minimum batch.
+fn time_rep(sys: &mut PackContext, x: &mut [F], g: &mut [F]) -> F {
     let mut iters = 0u64;
     // jitter step chosen tiny so the system barely drifts over the run.
     let step = 1e-7;
     let t0 = Instant::now();
     loop {
         x[0] += step;
-        match kernel {
-            Kernel::Fg => {
-                std::hint::black_box(compute_fg(x, sys, g));
-            }
-            Kernel::F => {
-                std::hint::black_box(compute_f(x, sys));
-            }
-        }
+        std::hint::black_box(compute_fg(x, sys, g));
         iters += 1;
-        if iters % 16 == 0 && t0.elapsed() >= TIME_BUDGET {
+        if t0.elapsed() >= TIME_BUDGET {
             break;
         }
     }
@@ -219,28 +207,28 @@ fn time_rep(kernel: Kernel, sys: &mut PackContext, x: &mut [F], g: &mut [F]) -> 
 
 /// Per (size, kernel): measure the serial baseline and every parallel
 /// thread-count **back-to-back within each rep** so they share the same thermal
-/// state, then report, per thread-count, the *best within-rep speed-up* across
+/// state, then report, per thread-count, the *median* within-rep speed-up across
 /// [`REPS`] reps. Comparing serial and parallel from the same rep cancels the
 /// sustained-load throttling that otherwise depresses many-thread numbers (the
 /// 1-thread baseline heats the chip far less than an 8-thread run), making the
 /// scaling curve reproducible across invocations.
-fn run_size(target_atoms: usize, kernel: Kernel, tag: &str) {
-    // One context per config (serial + one per thread count). Each keeps its
-    // own jittered `x`; building once avoids re-randomizing between reps.
-    let (mut serial_sys, mut serial_x) = build_mixture(target_atoms, 0x5eed);
-    serial_sys.parallel_pair_eval = false;
-    let ntotat = serial_sys.ntotat;
+///
+/// A **single** context is shared across all configs (only `parallel_pair_eval`
+/// and the rayon pool differ) — at million-atom sizes one context's cell lists
+/// and gradient buffers already run to ~1 GB, so building one per thread count
+/// would not fit. The continuously jittered `x` drifts by < 1e-3 Å over a run,
+/// negligible for the kernel cost.
+fn run_size(target_atoms: usize) {
+    let (mut sys, mut x) = build_mixture(target_atoms, 0x5eed);
+    let ntotat = sys.ntotat;
 
-    let mut par: Vec<(PackContext, Vec<F>, rayon::ThreadPool)> = THREADS
+    let pools: Vec<rayon::ThreadPool> = THREADS
         .iter()
         .map(|&nt| {
-            let (mut sys, x) = build_mixture(target_atoms, 0x5eed);
-            sys.parallel_pair_eval = true;
-            let pool = rayon::ThreadPoolBuilder::new()
+            rayon::ThreadPoolBuilder::new()
                 .num_threads(nt)
                 .build()
-                .expect("build rayon pool");
-            (sys, x, pool)
+                .expect("build rayon pool")
         })
         .collect();
 
@@ -248,27 +236,32 @@ fn run_size(target_atoms: usize, kernel: Kernel, tag: &str) {
     let mut speedups: Vec<Vec<F>> = vec![Vec::with_capacity(REPS); THREADS.len()];
     let mut par_us: Vec<Vec<F>> = vec![Vec::with_capacity(REPS); THREADS.len()];
 
-    // Warm up every config once so all worker threads are P-core-resident and
-    // clocked up before the first timed rep.
-    warmup(kernel, &mut serial_sys, &mut serial_x);
-    for (sys, x, pool) in par.iter_mut() {
-        pool.install(|| warmup(kernel, sys, x));
+    // Warm up serial then each pool size so worker threads are P-core-resident
+    // and clocked up before the first timed rep.
+    sys.parallel_pair_eval = false;
+    warmup(&mut sys, &mut x);
+    for pool in &pools {
+        sys.parallel_pair_eval = true;
+        pool.install(|| warmup(&mut sys, &mut x));
     }
 
     for _ in 0..REPS {
-        let s = time_kernel_one(kernel, &mut serial_sys, &mut serial_x);
+        sys.parallel_pair_eval = false;
+        let s = time_kernel_one(&mut sys, &mut x);
         serial_us.push(s);
-        for (i, (sys, x, pool)) in par.iter_mut().enumerate() {
-            let p = pool.install(|| time_kernel_one(kernel, sys, x));
+        for (i, pool) in pools.iter().enumerate() {
+            sys.parallel_pair_eval = true;
+            let p = pool.install(|| time_kernel_one(&mut sys, &mut x));
             speedups[i].push(s / p); // within-rep ratio → thermally fair
             par_us[i].push(p);
         }
     }
 
-    println!("{ntotat},{tag},serial,1,{:.1},1.00", median(&mut serial_us));
+    // CSV schema kept stable (`kernel` column = "fg") for the figure script.
+    println!("{ntotat},fg,serial,1,{:.1},1.00", median(&mut serial_us));
     for (i, &nt) in THREADS.iter().enumerate() {
         println!(
-            "{ntotat},{tag},parallel,{nt},{:.1},{:.2}",
+            "{ntotat},fg,parallel,{nt},{:.1},{:.2}",
             median(&mut par_us[i]),
             median(&mut speedups[i])
         );
@@ -291,26 +284,19 @@ fn median(v: &mut [F]) -> F {
 }
 
 /// One timing rep (see [`time_rep`]).
-fn time_kernel_one(kernel: Kernel, sys: &mut PackContext, x: &mut [F]) -> F {
+fn time_kernel_one(sys: &mut PackContext, x: &mut [F]) -> F {
     let mut g = vec![0.0; x.len()];
-    time_rep(kernel, sys, x, &mut g)
+    time_rep(sys, x, &mut g)
 }
 
-/// Busy warm-up: drive the kernel for [`WARMUP`] without recording timings.
-fn warmup(kernel: Kernel, sys: &mut PackContext, x: &mut [F]) {
+/// Busy warm-up: drive `compute_fg` for [`WARMUP`] without recording timings.
+fn warmup(sys: &mut PackContext, x: &mut [F]) {
     let mut g = vec![0.0; x.len()];
     let step = 1e-7;
     let t0 = Instant::now();
     loop {
         x[0] += step;
-        match kernel {
-            Kernel::Fg => {
-                std::hint::black_box(compute_fg(x, sys, &mut g));
-            }
-            Kernel::F => {
-                std::hint::black_box(compute_f(x, sys));
-            }
-        }
+        std::hint::black_box(compute_fg(x, sys, &mut g));
         if t0.elapsed() >= WARMUP {
             break;
         }
@@ -319,8 +305,14 @@ fn warmup(kernel: Kernel, sys: &mut PackContext, x: &mut [F]) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Default ladder is log-spaced from a few hundred atoms to a million, so the
+    // speed-up-vs-size curve shows both the small-system regime where the rayon
+    // overhead makes parallel *slower* than serial and the large-system plateau
+    // where the speed-up saturates.
     let sizes: Vec<usize> = if args.is_empty() {
-        vec![3000, 15000, 60000, 180000]
+        vec![
+            300, 1_000, 3_000, 10_000, 30_000, 100_000, 300_000, 1_000_000,
+        ]
     } else {
         args.iter()
             .map(|s| s.parse().expect("size must be an integer"))
@@ -329,9 +321,6 @@ fn main() {
 
     println!("atoms,kernel,mode,threads,us_per_eval,speedup_vs_serial");
     for &s in &sizes {
-        run_size(s, Kernel::Fg, "fg");
-    }
-    for &s in &sizes {
-        run_size(s, Kernel::F, "f");
+        run_size(s);
     }
 }
