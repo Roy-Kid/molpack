@@ -95,7 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Target order matches Packmol: water_inner → lipid_inner → lipid_outer → water_outer
     let targets = vec![water_inner, lipid_inner, lipid_outer, water_outer];
-    let mut packer = Molpack::new().with_seed(1_234_567);
+    let mut packer = Molpack::new();
     if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
         packer = packer.with_handler(ProgressHandler::new());
     }

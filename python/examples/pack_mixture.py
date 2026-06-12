@@ -29,13 +29,7 @@ def main() -> None:
     urea = molpack.Target(urea_frame, count=400).with_name("urea").with_restraint(box)
 
     show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
-    packer = (
-        molpack.Molpack()
-        .with_tolerance(2.0)
-        .with_precision(0.01)
-        .with_progress(show_progress)
-        .with_seed(1_234_567)
-    )
+    packer = molpack.Molpack().with_progress(show_progress)
 
     result = packer.pack_with_report([water, urea], max_loops=400)
 

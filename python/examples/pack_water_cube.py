@@ -27,14 +27,8 @@ def main() -> None:
         .with_restraint(molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
     )
 
-    packer = (
-        molpack.Molpack()
-        .with_tolerance(2.0)
-        .with_precision(0.01)
-        .with_progress(False)
-        .with_seed(42)
-    )
-    result = packer.pack_with_report([water], max_loops=200)
+    packer = molpack.Molpack()
+    result = packer.pack_with_report([water])
 
     print(f"converged = {result.converged}")
     print(f"natoms    = {result.natoms}")

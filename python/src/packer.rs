@@ -122,6 +122,7 @@ pub struct PyPacker {
     pub(crate) perturb_fraction: Option<F>,
     pub(crate) random_perturb: Option<bool>,
     pub(crate) perturb: Option<bool>,
+    pub(crate) avoid_overlap: Option<bool>,
     pub(crate) seed: Option<u64>,
     pub(crate) parallel_eval: Option<bool>,
     pub(crate) progress: bool,
@@ -145,6 +146,7 @@ impl Default for PyPacker {
             perturb_fraction: None,
             random_perturb: None,
             perturb: None,
+            avoid_overlap: None,
             seed: None,
             parallel_eval: None,
             progress: false,
@@ -218,6 +220,16 @@ impl PyPacker {
     fn with_perturb(&self, enabled: bool) -> Self {
         let mut cloned = self.clone_fields();
         cloned.perturb = Some(enabled);
+        cloned
+    }
+
+    /// Reject initial random placements that overlap a fixed molecule
+    /// (Packmol ``avoid_overlap``). Default ``True`` and you should leave it
+    /// that way — it is only useful to *disable* avoidance. Critical for dense
+    /// solvation of a large fixed solute; harmless when nothing is fixed.
+    fn with_avoid_overlap(&self, enabled: bool) -> Self {
+        let mut cloned = self.clone_fields();
+        cloned.avoid_overlap = Some(enabled);
         cloned
     }
 
@@ -373,6 +385,9 @@ impl PyPacker {
         if let Some(v) = self.perturb {
             packer = packer.with_perturb(v);
         }
+        if let Some(v) = self.avoid_overlap {
+            packer = packer.with_avoid_overlap(v);
+        }
         if let Some(v) = self.seed {
             packer = packer.with_seed(v);
         }
@@ -434,6 +449,7 @@ impl PyPacker {
             perturb_fraction: self.perturb_fraction,
             random_perturb: self.random_perturb,
             perturb: self.perturb,
+            avoid_overlap: self.avoid_overlap,
             seed: self.seed,
             parallel_eval: self.parallel_eval,
             progress: self.progress,

@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(box_restraint)
         .with_name("urea");
 
-    let mut packer = Molpack::new().with_seed(1_234_567);
+    let mut packer = Molpack::new();
     if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
         packer = packer.with_handler(ProgressHandler::new());
     }

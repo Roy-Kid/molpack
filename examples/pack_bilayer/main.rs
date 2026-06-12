@@ -67,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_name("lipid_high");
 
     let targets = vec![water_low, water_high, lipid_low, lipid_high];
-    let mut packer = Molpack::new().with_seed(1_234_567);
+    let mut packer = Molpack::new();
     if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
         packer = packer.with_handler(ProgressHandler::new());
     }

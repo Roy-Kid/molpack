@@ -215,7 +215,8 @@ class TestMolpack:
         p10 = p1.with_progress(False)
         p11 = p1.with_seed(42)
         p12 = p1.with_parallel_eval(True)
-        for later in (p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12):
+        p13 = p1.with_avoid_overlap(False)
+        for later in (p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13):
             assert later is not p1
 
 
@@ -244,6 +245,24 @@ class TestMolpackPack:
         frame = self._packer().with_seed(42).pack([self._make_target()], max_loops=50)
 
         assert frame["atoms"].nrows == 3
+
+    def test_with_avoid_overlap_honored(self):
+        # A fixed solute plus free solvent packs whether avoidance is on (the
+        # default) or explicitly disabled — the flag must flow through to the
+        # core without error and still yield a valid packing.
+        fixed = molpack.Target(_make_frame(), 1).fixed_at([10.0, 10.0, 10.0])
+        free = self._make_target(count=5)
+
+        default_on = self._packer().pack_with_report([free, fixed], max_loops=60)
+        explicit_off = (
+            self._packer()
+            .with_avoid_overlap(False)
+            .pack_with_report([free, fixed], max_loops=60)
+        )
+
+        for result in (default_on, explicit_off):
+            assert result.natoms == 6  # 5 free + 1 fixed
+            assert isinstance(result.converged, bool)
 
     def test_result_elements_match_positions(self):
         result = (
