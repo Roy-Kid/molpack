@@ -10,7 +10,7 @@ criteria:
       u(xi, kt) at representative xi and asserts |du_dxi − fd| within the
       stated tolerance (e.g. rel <= 1e-6 at h≈1e-5) for Gaussian, ErfStep,
       TanhStep, and Exponential; the test passes.
-    status: pending
+    status: verified
   - id: ac-002
     summary: Gaussian equals harmonic forms; exponential force is constant kT/λ
     type: code
@@ -19,7 +19,7 @@ criteria:
       A test asserts Gaussian u == (kT/2σ²)(ξ−μ)² and du_dxi == (kT/σ²)(ξ−μ)
       to floating tolerance, and Exponential du_dxi == kT/λ (constant,
       independent of ξ) at several ξ≥0; the test passes.
-    status: pending
+    status: verified
   - id: ac-003
     summary: Radial histogram-with-Jacobian equals density U; omitting it differs
     type: code
@@ -30,7 +30,7 @@ criteria:
       ProfilePenalty(VolumetricDensity) U(ξ) to floating tolerance, AND
       treating the histogram as a density yields a different U whose dU/dξ
       differs by the predicted +2kT/ξ; the test passes.
-    status: pending
+    status: verified
   - id: ac-004
     summary: Zero-density region gives finite capped U and finite du_dxi
     type: code
@@ -40,7 +40,7 @@ criteria:
       erf/tanh tail) and asserts U is finite and equals
       U_max = −kT·ln(ρ_min/ρ₀), and du_dxi is finite with no Inf/NaN; the
       test passes.
-    status: pending
+    status: verified
 ---
 
 # Acceptance criteria

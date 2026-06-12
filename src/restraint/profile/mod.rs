@@ -1,10 +1,15 @@
-//! Profile-restraint family: a reaction coordinate ξ(x) plus (in later
-//! sub-specs) the distribution/penalty math and the composed `Restraint`.
+//! Profile-restraint family: a reaction coordinate ξ(x) plus the
+//! distribution/penalty math and (in a later sub-spec) the composed `Restraint`.
 //!
-//! This module currently exposes only the leaf geometry layer — the
-//! [`Coordinate`] reaction coordinate with its analytic gradient. Later siblings
-//! append the penalty (`-03`/`-04`) and the composed restraint (`-05`).
+//! Two leaf layers are exposed so far: the [`Coordinate`] reaction coordinate
+//! with its analytic gradient ([`coordinate`]), and the closed-form
+//! target-distribution penalties — Boltzmann inversion with shell-volume
+//! Jacobian and density floor ([`distribution`], [`ProfilePenalty`]). The
+//! tabulated/spline profiles (`-04`) and the composed `Restraint` (`-05`) are
+//! later siblings.
 
 pub mod coordinate;
+pub mod distribution;
 
 pub use coordinate::{Coordinate, CoordinateError, PbcWrap};
+pub use distribution::{DensityFloor, Distribution, InputKind, ProfilePenalty, ShellJacobian};

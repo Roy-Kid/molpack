@@ -29,6 +29,10 @@ molrs_io = { path = "../molrs/molrs-io", version = "0.1.0", package = "molcrafts
 rand = "0.9"
 ndarray = "0.17"
 log = "0.4"
+# Provides `erf` for the profile-distribution penalties (the error-function
+# interface profile); `erf` is not in Rust stable std. Already in the lockfile
+# as a transitive dep of molrs-core, so this adds no new download.
+libm = "0.2"
 
 # Opt-in parallelism:
 rayon = { version = "1.11", optional = true }

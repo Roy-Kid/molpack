@@ -1,6 +1,6 @@
 ---
 title: Profile distribution penalties — closed-form Boltzmann inversion with Jacobian and floor
-status: approved
+status: done
 created: 2026-06-12
 ---
 
@@ -61,15 +61,15 @@ Lifecycle/ownership: every type is a plain `Copy` value built by the caller (-05
 - `src/restraint/profile/mod.rs` — add `pub mod distribution;` and re-export the public types (file created by `-02-coordinate`; this sub-spec only appends the declaration / re-export line).
 
 ## Tasks
-- [ ] Write failing tests for closed-form `du_dxi` vs central finite difference, all four distributions (src/restraint/profile/distribution.rs)
-- [ ] Write failing tests for Gaussian≡harmonic (U, dU/dξ vs (kT/2σ²)(ξ−μ)², (kT/σ²)(ξ−μ)) and Exponential≡constant-force (dU/dξ == kT/λ) (src/restraint/profile/distribution.rs)
-- [ ] Write failing tests for histogram-vs-density Jacobian equivalence on a radial profile and for the spurious-force case when the shell factor is omitted (src/restraint/profile/distribution.rs)
-- [ ] Write failing tests for the density floor: zero-density input yields finite U == U_max and finite (non-NaN/Inf) du_dxi (src/restraint/profile/distribution.rs)
-- [ ] Implement `Distribution` enum with exact `u`/`du_dxi` closed forms for Gaussian, ErfStep, TanhStep, Exponential (src/restraint/profile/distribution.rs)
-- [ ] Implement `ShellJacobian` (`log_shell_correction`, `d_log_shell`) and `InputKind` with `CountHistogram` default-safe (src/restraint/profile/distribution.rs)
-- [ ] Implement `DensityFloor` cap (`U_max = −kT·ln(ρ_min/ρ₀)`) and the `ProfilePenalty` façade composing inversion, Jacobian division, and floor (src/restraint/profile/distribution.rs)
-- [ ] Add module-level docstrings with units and a `pub mod distribution;` + re-export in src/restraint/profile/mod.rs
-- [ ] Run full check + test suite (cargo fmt, cargo clippy -- -D warnings, cargo test -p molcrafts-molpack --lib --tests)
+- [x] Write failing tests for closed-form `du_dxi` vs central finite difference, all four distributions (src/restraint/profile/distribution.rs)
+- [x] Write failing tests for Gaussian≡harmonic (U, dU/dξ vs (kT/2σ²)(ξ−μ)², (kT/σ²)(ξ−μ)) and Exponential≡constant-force (dU/dξ == kT/λ) (src/restraint/profile/distribution.rs)
+- [x] Write failing tests for histogram-vs-density Jacobian equivalence on a radial profile and for the spurious-force case when the shell factor is omitted (src/restraint/profile/distribution.rs)
+- [x] Write failing tests for the density floor: zero-density input yields finite U == U_max and finite (non-NaN/Inf) du_dxi (src/restraint/profile/distribution.rs)
+- [x] Implement `Distribution` enum with exact `u`/`du_dxi` closed forms for Gaussian, ErfStep, TanhStep, Exponential (src/restraint/profile/distribution.rs)
+- [x] Implement `ShellJacobian` (`log_shell_correction`, `d_log_shell`) and `InputKind` with `CountHistogram` default-safe (src/restraint/profile/distribution.rs)
+- [x] Implement `DensityFloor` cap (`U_max = −kT·ln(ρ_min/ρ₀)`) and the `ProfilePenalty` façade composing inversion, Jacobian division, and floor (src/restraint/profile/distribution.rs)
+- [x] Add module-level docstrings with units and a `pub mod distribution;` + re-export in src/restraint/profile/mod.rs
+- [x] Run full check + test suite (cargo fmt, cargo clippy -- -D warnings, cargo test -p molcrafts-molpack --lib --tests)
 
 ## Testing strategy
 - Happy path: each `Distribution.u`/`du_dxi` returns the documented closed form at representative interior ξ (Gaussian near and far from μ; erf/tanh below, at, and above ξ₀ on both rising and falling sides; exponential at several ξ≥0).
