@@ -1,6 +1,6 @@
 ---
 title: Wire profile-distribution restraints into the .inp script layer
-status: approved
+status: done
 created: 2026-06-12
 ---
 
@@ -55,14 +55,14 @@ A measured-profile test helper (bin packed site positions along ξ, normalize, c
 
 ## Tasks
 
-- [ ] Write failing parser round-trip tests for the `profile` keyword (`src/script/parser.rs` `#[cfg(test)]`): `profile gaussian plane <nx ny nz> <x0 y0 z0> mu <μ> sigma <σ>` parses to `RestraintSpec::Profile` with correct distribution/geometry/params and default `Histogram`; an explicit `density` flag flips `input_kind`; the same line inside `atoms <idx…> … end atoms` lands on the atom group's restraints
-- [ ] Write failing lowering test (`src/script/build.rs` `#[cfg(test)]` or `tests/profile_pack_e2e.rs`) asserting a parsed profile spec lowers to a `ProfileRestraint` whose coordinate + distribution match the keyword args, checked via its `f`/`fg` at known points
-- [ ] Write failing end-to-end pack tests in `tests/profile_pack_e2e.rs` (new) with a measured-profile helper: single-component planar Gaussian → ρ(z) within tolerance; radial count-histogram → in tolerance only with the ξ² Jacobian and out of tolerance without it; two-component opposite-erf → asymmetric per-component layout; zero-density-region target → completes with finite forces, no NaN
-- [ ] Add the `RestraintSpec::Profile` variant to the enum in `src/script/parser.rs` (carrying distribution kind, geometry params, `input_kind`, optional table source)
-- [ ] Implement `parse_profile()` in `src/script/parser.rs` (extracting to `src/script/parser_profile.rs` if the file crosses 800 LOC) and wire `"profile"` dispatch arms into `State::InStructure` and `State::InAtoms`
-- [ ] Implement the `RestraintSpec::Profile` arm in `restraint_from_spec` (`src/script/build.rs`), importing `ProfileRestraint` and building it from the lowered coordinate + distribution + input_kind
-- [ ] Add a `profile`-keyword parity assertion in `python/tests/test_script_keywords.py` only if that file already asserts keyword coverage
-- [ ] Run full check + test suite (`cargo fmt`, `cargo clippy -- -D warnings`, `cargo test -p molcrafts-molpack --lib --tests`)
+- [x] Write failing parser round-trip tests for the `profile` keyword (`src/script/parser.rs` `#[cfg(test)]`): `profile gaussian plane <nx ny nz> <x0 y0 z0> mu <μ> sigma <σ>` parses to `RestraintSpec::Profile` with correct distribution/geometry/params and default `Histogram`; an explicit `density` flag flips `input_kind`; the same line inside `atoms <idx…> … end atoms` lands on the atom group's restraints
+- [x] Write failing lowering test (`src/script/build.rs` `#[cfg(test)]` or `tests/profile_pack_e2e.rs`) asserting a parsed profile spec lowers to a `ProfileRestraint` whose coordinate + distribution match the keyword args, checked via its `f`/`fg` at known points
+- [x] Write failing end-to-end pack tests in `tests/profile_pack_e2e.rs` (new) with a measured-profile helper: single-component planar Gaussian → ρ(z) within tolerance; radial count-histogram → in tolerance only with the ξ² Jacobian and out of tolerance without it; two-component opposite-erf → asymmetric per-component layout; zero-density-region target → completes with finite forces, no NaN
+- [x] Add the `RestraintSpec::Profile` variant to the enum in `src/script/parser.rs` (carrying distribution kind, geometry params, `input_kind`, optional table source)
+- [x] Implement `parse_profile()` in `src/script/parser.rs` (extracting to `src/script/parser_profile.rs` if the file crosses 800 LOC) and wire `"profile"` dispatch arms into `State::InStructure` and `State::InAtoms`
+- [x] Implement the `RestraintSpec::Profile` arm in `restraint_from_spec` (`src/script/build.rs`), importing `ProfileRestraint` and building it from the lowered coordinate + distribution + input_kind
+- [ ] Add a `profile`-keyword parity assertion in `python/tests/test_script_keywords.py` only if that file already asserts keyword coverage *(N/A — `python/tests/test_script_keywords.py` does not exist; the keyword flows through `Script::lower` with no new PyO3 surface)*
+- [x] Run full check + test suite (`cargo fmt`, `cargo clippy -- -D warnings`, `cargo test -p molcrafts-molpack --lib --tests`)
 
 ## Testing strategy
 

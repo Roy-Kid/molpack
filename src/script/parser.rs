@@ -11,6 +11,9 @@
 use std::path::PathBuf;
 
 use super::error::ScriptError;
+use super::parser_profile::{
+    ProfileDistribution, ProfileGeometry, ProfileInputKind, parse_profile,
+};
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Public AST
@@ -147,6 +150,19 @@ pub enum RestraintSpec {
         axis: [f64; 3],
         radius: f64,
         length: f64,
+    },
+    /// `profile <distribution> <geometry> <params> [density|histogram]` — bias
+    /// the selected sites toward a target 1-D spatial distribution. Lowered to a
+    /// [`ProfileRestraint`](crate::restraint::profile::ProfileRestraint).
+    Profile {
+        /// Target-distribution shape (gaussian / erf / tanh / exponential /
+        /// tabulated) with its own numeric parameters.
+        dist: ProfileDistribution,
+        /// Reaction-coordinate geometry (plane / radial / cylinder).
+        geometry: ProfileGeometry,
+        /// Whether a tabulated input is a density or a count histogram
+        /// (default histogram); ignored by the analytic shapes.
+        input_kind: ProfileInputKind,
     },
 }
 
@@ -298,6 +314,11 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                     s.mol_restraints.push(r);
                     State::InStructure(s)
                 }
+                "profile" => {
+                    let r = parse_profile(&tokens, lineno)?;
+                    s.mol_restraints.push(r);
+                    State::InStructure(s)
+                }
                 "atoms" => {
                     let indices = tokens[1..]
                         .iter()
@@ -361,6 +382,14 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                 }
                 "below" => {
                     let r = parse_plane_below(&tokens, lineno)?;
+                    group.restraints.push(r);
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
+                }
+                "profile" => {
+                    let r = parse_profile(&tokens, lineno)?;
                     group.restraints.push(r);
                     State::InAtoms {
                         structure: s,
@@ -596,7 +625,12 @@ fn parse_pbc(tokens: &[&str], lineno: usize) -> Result<PbcSpec, ScriptError> {
 // Numeric helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-fn parse_f64(tokens: &[&str], idx: usize, ctx: &str, lineno: usize) -> Result<f64, ScriptError> {
+pub(super) fn parse_f64(
+    tokens: &[&str],
+    idx: usize,
+    ctx: &str,
+    lineno: usize,
+) -> Result<f64, ScriptError> {
     let tok = tokens
         .get(idx)
         .ok_or_else(|| parse_err(lineno, format!("`{ctx}` — missing value at position {idx}")))?;
@@ -625,7 +659,7 @@ fn parse_usize(
         .map_err(|_| parse_err(lineno, format!("`{ctx}` — `{tok}` is not a valid integer")))
 }
 
-fn parse_vec3(
+pub(super) fn parse_vec3(
     tokens: &[&str],
     start: usize,
     ctx: &str,
@@ -638,7 +672,7 @@ fn parse_vec3(
     ])
 }
 
-fn parse_err(lineno: usize, message: impl Into<String>) -> ScriptError {
+pub(super) fn parse_err(lineno: usize, message: impl Into<String>) -> ScriptError {
     ScriptError::Parse {
         line: lineno,
         message: message.into(),
@@ -1017,5 +1051,197 @@ end structure
         let src = "output out.pdb\n\nstructure mol.pdb\n  number 1\n  \
                    inside cylinder 0. 0. 0. 0. 0. 0. 2. 8.\nend structure\n";
         assert!(parse(src).is_err(), "zero cylinder axis must be rejected");
+    }
+
+    // ── ac-001: `profile` keyword round-trip ─────────────────────────────────
+
+    #[test]
+    fn parse_profile_gaussian_plane_defaults_to_histogram() {
+        let spec = parse_one_restraint("profile gaussian plane 0. 0. 1. 0. 0. 0. mu 10. sigma 2.");
+        match spec {
+            RestraintSpec::Profile {
+                dist,
+                geometry,
+                input_kind,
+            } => {
+                assert_eq!(
+                    geometry,
+                    ProfileGeometry::Plane {
+                        normal: [0.0, 0.0, 1.0],
+                        point: [0.0, 0.0, 0.0],
+                    }
+                );
+                assert_eq!(
+                    dist,
+                    ProfileDistribution::Gaussian {
+                        mu: 10.0,
+                        sigma: 2.0,
+                    }
+                );
+                // §6.2 default-safe: unflagged input is a histogram.
+                assert_eq!(input_kind, ProfileInputKind::Histogram);
+            }
+            other => panic!("expected Profile, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_profile_density_flag_flips_input_kind() {
+        let spec =
+            parse_one_restraint("profile tabulated radial 0. 0. 0. density 1. 0.9 3. 0.5 5. 0.1");
+        match spec {
+            RestraintSpec::Profile {
+                dist,
+                geometry,
+                input_kind,
+            } => {
+                assert_eq!(geometry, ProfileGeometry::Radial { center: [0.0; 3] });
+                assert_eq!(input_kind, ProfileInputKind::Density);
+                match dist {
+                    ProfileDistribution::Tabulated { nodes } => {
+                        assert_eq!(nodes, vec![(1.0, 0.9), (3.0, 0.5), (5.0, 0.1)]);
+                    }
+                    other => panic!("expected Tabulated, got {other:?}"),
+                }
+            }
+            other => panic!("expected Profile, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_profile_histogram_flag_is_explicit_and_case_insensitive() {
+        let spec = parse_one_restraint("profile tabulated radial 0. 0. 0. HISTOGRAM 1. 0.9 3. 0.5");
+        assert!(matches!(
+            spec,
+            RestraintSpec::Profile {
+                input_kind: ProfileInputKind::Histogram,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_profile_erf_plane_with_falling_side() {
+        let spec =
+            parse_one_restraint("profile erf plane 1. 0. 0. 5. 0. 0. xi0 5. width 1.5 falling");
+        match spec {
+            RestraintSpec::Profile { dist, .. } => assert_eq!(
+                dist,
+                ProfileDistribution::Erf {
+                    xi0: 5.0,
+                    w: 1.5,
+                    rising: false,
+                }
+            ),
+            other => panic!("expected Profile, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_profile_exponential_radial() {
+        let spec = parse_one_restraint("profile exponential radial 1. 2. 3. lambda 2.5");
+        match spec {
+            RestraintSpec::Profile { dist, geometry, .. } => {
+                assert_eq!(
+                    geometry,
+                    ProfileGeometry::Radial {
+                        center: [1.0, 2.0, 3.0],
+                    }
+                );
+                assert_eq!(dist, ProfileDistribution::Exponential { lambda: 2.5 });
+            }
+            other => panic!("expected Profile, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_profile_inside_atoms_block_scopes_indices() {
+        let src = "\
+output out.pdb
+
+structure mol.pdb
+  number 1
+  atoms 3 7 9
+    profile gaussian plane 0. 0. 1. 0. 0. 0. mu 4. sigma 1.
+  end atoms
+end structure
+";
+        let inp = parse(src).expect("parse failed");
+        let s = &inp.structures[0];
+        // The molecule-wide restraint list is untouched.
+        assert!(s.mol_restraints.is_empty());
+        assert_eq!(s.atom_groups.len(), 1);
+        let group = &s.atom_groups[0];
+        assert_eq!(group.atom_indices, vec![3, 7, 9]);
+        assert_eq!(group.restraints.len(), 1);
+        assert!(matches!(
+            group.restraints[0],
+            RestraintSpec::Profile {
+                geometry: ProfileGeometry::Plane { .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_profile_rejects_bad_token_with_lineno() {
+        // sigma is not a number → Parse error carrying the offending line.
+        let src = "\
+output out.pdb
+
+structure mol.pdb
+  number 1
+  profile gaussian plane 0. 0. 1. 0. 0. 0. mu 10. sigma oops
+end structure
+";
+        let err = parse(src).expect_err("should fail");
+        match err {
+            ScriptError::Parse { line, .. } => assert_eq!(line, 5),
+            other => panic!("expected Parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_profile_rejects_unknown_distribution() {
+        let src = "\
+output out.pdb
+
+structure mol.pdb
+  number 1
+  profile wibble plane 0. 0. 1. 0. 0. 0.
+end structure
+";
+        assert!(parse(src).is_err(), "unknown distribution must be rejected");
+    }
+
+    #[test]
+    fn parse_profile_rejects_radial_histogram_node_at_origin() {
+        // Radial + histogram + xi=0 is the shell singularity the spline layer
+        // refuses; the parser must reject it up front.
+        let src = "\
+output out.pdb
+
+structure mol.pdb
+  number 1
+  profile tabulated radial 0. 0. 0. 0. 1. 3. 0.5
+end structure
+";
+        assert!(
+            parse(src).is_err(),
+            "radial histogram node at xi=0 must be rejected"
+        );
+    }
+
+    #[test]
+    fn parse_profile_rejects_non_positive_sigma() {
+        let src = "\
+output out.pdb
+
+structure mol.pdb
+  number 1
+  profile gaussian plane 0. 0. 1. 0. 0. 0. mu 4. sigma 0.
+end structure
+";
+        assert!(parse(src).is_err(), "non-positive sigma must be rejected");
     }
 }

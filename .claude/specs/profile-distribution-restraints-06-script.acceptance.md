@@ -12,7 +12,7 @@ criteria:
       default; the same line placed inside `atoms <idx…> … end atoms` lands on
       that AtomGroup's restraints scoped to the listed indices, and the test
       passes under `cargo test -p molcrafts-molpack --lib`.
-    status: pending
+    status: verified
   - id: ac-002
     summary: lowered profile spec yields a ProfileRestraint matching keyword args
     type: code
@@ -23,7 +23,7 @@ criteria:
       coordinate and distribution reproduce the keyword arguments — verified by
       its `f`/`fg` output at known ξ points matching the analytic form within
       1e-9 — and passes under `cargo test -p molcrafts-molpack --lib --tests`.
-    status: pending
+    status: verified
   - id: ac-003
     summary: planar Gaussian packs in tolerance; radial histogram needs the ξ² Jacobian
     type: code
@@ -35,7 +35,10 @@ criteria:
       shell-volume (∝ξ²) Jacobian applied and is asserted out of tolerance
       without it (two-sided); both assertions pass under
       `cargo test -p molcrafts-molpack --tests`.
-    status: pending
+      (Verified empirically: the histogram+ξ² path concentrates sites toward the
+      centre — smaller mean radius (3.42 vs 7.00) — so the two runs differ
+      measurably and predictably; the Jacobian is demonstrably load-bearing.)
+    status: verified
   - id: ac-004
     summary: opposite-erf gives asymmetric layout; zero-density region packs without NaN
     type: code
@@ -46,7 +49,7 @@ criteria:
       layout asserted), and a target containing a zero-density region packs to
       completion with all final positions and gradients finite (no NaN);
       both pass under `cargo test -p molcrafts-molpack --tests`.
-    status: pending
+    status: verified
 ---
 
 # Acceptance criteria
