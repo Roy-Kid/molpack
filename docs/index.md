@@ -57,10 +57,7 @@ build-from-source flow.
         .with_name("water")
         .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
 
-    let frame = Molpack::new()
-        .with_tolerance(2.0)
-        .with_seed(42)
-        .pack(&[target], 200)?;
+    let frame = Molpack::new().pack(&[target], 200)?;
     ```
 
 === "Python"
@@ -76,7 +73,7 @@ build-from-source flow.
         .with_name("water")
         .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
     )
-    frame = Molpack().with_tolerance(2.0).with_seed(42).pack([water], max_loops=200)
+    frame = Molpack().pack([water], max_loops=200)
     ```
 
 ## Documentation map

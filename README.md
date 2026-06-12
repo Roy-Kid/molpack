@@ -97,14 +97,13 @@ let target = Target::from_coords(&positions, &radii, 100)
     .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
 
 // `pack` returns the packed, topology-complete `molrs::Frame`.
-let frame = Molpack::new()
-    .with_tolerance(2.0)
-    .with_seed(42)
-    .pack(&[target], 200)?;
+// Every tuning knob has a Packmol-matching default, so `new().pack(...)`
+// is a complete call; `200` is the outer-loop budget.
+let frame = Molpack::new().pack(&[target], 200)?;
 
 // For full diagnostics, use `pack_with_report` → `PackResult`
 // (`frame`, `fdist`, `frest`, `converged`).
-let report = Molpack::new().with_seed(42).pack_with_report(&[target], 200)?;
+let report = Molpack::new().pack_with_report(&[target], 200)?;
 ```
 
 **Python**
@@ -120,12 +119,7 @@ water = (
     .with_name("water")
     .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
 )
-frame = (
-    Molpack()
-    .with_tolerance(2.0)
-    .with_seed(42)
-    .pack([water], max_loops=200)
-)
+frame = Molpack().pack([water], max_loops=200)
 ```
 
 ## Examples

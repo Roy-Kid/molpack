@@ -151,11 +151,9 @@ let target = Target::from_coords(&water_positions, &water_radii, 100)
     .with_name("water")
     .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
 
-let frame = Molpack::new()
-    .with_tolerance(2.0)
-    .with_precision(0.01)
-    .with_seed(42)
-    .pack(&[target], 200)?;
+// Every tuning knob has a Packmol-matching default, so `new().pack(...)`
+// is a complete call; `200` is the outer-loop budget.
+let frame = Molpack::new().pack(&[target], 200)?;
 
 let natoms = frame.get("atoms").and_then(|b| b.nrows()).unwrap_or(0);
 println!("packed {natoms} atoms");
@@ -212,7 +210,6 @@ calling `with_restraint` on every target:
 # let t_b = Target::from_coords(pos, rad, 100);
 let frame = Molpack::new()
     .with_global_restraint(InsideSphereRestraint::new([20.0; 3], 30.0))
-    .with_seed(42)
     .pack(&[t_a, t_b], 200)?;
 # Ok::<(), molpack::PackError>(())
 ```
@@ -232,7 +229,7 @@ Use the builder to enable LAMMPS-style screen output:
 let mut packer = Molpack::new()
     .with_log_level(MolpackLogLevel::Progress)
     .with_log_frequency(10);
-# let _ = packer.with_seed(42).pack(&[target], 200);
+# let _ = packer.pack(&[target], 200);
 ```
 
 Attach [`Handler`](crate::Handler) implementations for trajectory output,
@@ -245,7 +242,7 @@ custom observation, or early-stop logic. Built-ins:
 let mut packer = Molpack::new()
     .with_handler(XYZHandler::new("traj.xyz", /* every = */ 10))
     .with_handler(EarlyStopHandler::new(/* threshold = */ 1e-4));
-# let _ = packer.with_seed(42).pack(&[target], 200);
+# let _ = packer.pack(&[target], 200);
 ```
 
 Write your own — see the [`extending`](crate::extending) module.
@@ -345,12 +342,7 @@ water = (
     .with_name("water")
     .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
 )
-frame = (
-    Molpack()
-    .with_tolerance(2.0)
-    .with_seed(42)
-    .pack([water], max_loops=200)
-)
+frame = Molpack().pack([water], max_loops=200)
 ```
 
 The Python API mirrors the Rust builder surface one-for-one. The
