@@ -20,12 +20,10 @@ name = "molpack"
 # Path deps are for local development; `version` fields are used by
 # `cargo publish` to resolve against the crates.io registry.
 #
-# Library-required:
-molrs = { path = "../molrs/molrs-core", version = "0.1.0", package = "molcrafts-molrs-core", default-features = false }
-# Only required when the `io` (or `cli`) feature is enabled. Front-ends that
-# bring their own frame loader — notably the PyO3 wheel, which delegates to
-# molrs's Python bindings — opt out and avoid the static-link cost.
-molrs_io = { path = "../molrs/molrs-io", version = "0.1.0", package = "molcrafts-molrs-io", default-features = false, optional = true }
+# Library-required. The merged `molcrafts-molrs` crate exposes its former member
+# crates as feature-gated modules: `core` is always on (re-exported at the crate
+# root), while `io` and `ff` are opt-in via the molpack features below.
+molrs = { path = "../molrs/molrs", version = "0.1.3", package = "molcrafts-molrs", default-features = false }
 rand = "0.9"
 ndarray = "0.17"
 log = "0.4"
@@ -43,16 +41,21 @@ clap = { version = "4", features = ["derive"], optional = true }
 [features]
 default = []
 rayon = ["dep:rayon", "molrs/rayon"]
-# Pulls in molrs-io for the built-in script loader, example programs, and the
-# molpack CLI. PyO3 / WASM front-ends typically leave this off and provide
-# their own frame loader through `Script::lower` + `Target::from_frame_parts`.
-io = ["dep:molrs_io"]
+# Pulls in molrs's `io` module for the built-in script loader, example programs,
+# and the molpack CLI. PyO3 / WASM front-ends typically leave this off and
+# provide their own frame loader through `Script::lower` + `Target::from_frame_parts`.
+io = ["molrs/io"]
 # Enables the `molpack` binary and its integration tests.
 cli = ["dep:clap", "io"]
+# Force-field geometry relaxer: enables molrs's `ff` module (MMFF typifier +
+# L-BFGS minimizer) so packing can relax flexible-molecule internal geometry.
+ff = ["molrs/ff"]
 
 [dev-dependencies]
 # Used by the example programs under `examples/`.
 env_logger = "0.11"
+# Criterion harness for the benchmark suite under `benches/`.
+criterion = "0.5"
 
 [[bin]]
 name = "molpack"

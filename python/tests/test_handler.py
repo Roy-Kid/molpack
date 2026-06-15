@@ -4,22 +4,27 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import molrs
 import numpy as np
 import pytest
 
 import molpack
 
 
-def _two_water_frame() -> dict:
+def _two_water_frame() -> molrs.Frame:
     """Two trivially distinct atoms so packing has something to do."""
-    return {
-        "atoms": {
-            "x": np.array([0.0, 1.5]),
-            "y": np.array([0.0, 0.0]),
-            "z": np.array([0.0, 0.0]),
-            "element": ["O", "H"],
+    return molrs.Frame.from_dict(
+        {
+            "blocks": {
+                "atoms": {
+                    "x": np.array([0.0, 1.5]),
+                    "y": np.array([0.0, 0.0]),
+                    "z": np.array([0.0, 0.0]),
+                    "element": ["O", "H"],
+                }
+            }
         }
-    }
+    )
 
 
 def _packer() -> molpack.Molpack:

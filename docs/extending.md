@@ -148,95 +148,47 @@ a restraint the input grammar can't express — a few lines, no recompile — an
 then, once it earns its place, swap in the native equivalent with the driver
 script unchanged.
 
-Suppose you want to bias a site toward a **target spatial distribution** — say a
-surfactant head group onto a Gaussian band measured by reflectometry. This is a
-*profile-distribution* restraint: bias selected sites toward a target `ρ*(ξ)` by
-Boltzmann inversion `U(ξ) = −kT·ln(ρ*/ρ₀)`. For a Gaussian
-`ρ*(z) ∝ exp(−(z−μ)²/2σ²)` along a plane normal the penalty is the harmonic well
-`U(z) = (kT/2σ²)(z−μ)²`, and the whole restraint is ten lines:
+A duck-typed restraint is any object exposing `f` and `fg`. The Python protocol
+differs from the Rust trait in exactly one way: `fg` **returns**
+`(energy, (gx, gy, gz))` instead of accumulating into a `&mut [F; 3]` — the
+binding does the `+=` for you. The contracts are otherwise identical: `fg`
+returns the energy, the gradient is the chain rule `(dU/dξ)·∇ξ`, a linear-energy
+penalty rides `scale` (a quadratic one `scale2`). A missing `f` or `fg` is
+rejected at attach time with a `TypeError`, and an exception raised inside `fg`
+propagates back out of `pack`. The `PlaneTether` above, duck-typed in Python:
 
 ```python
 import numpy as np
 
-class PlanarGaussian:
-    """Bias a site toward a Gaussian band at depth mu (width sigma) along n."""
-    def __init__(self, normal, point, mu, sigma, kt=1.0):
+class PlaneTether:
+    """Pull a site toward the plane z = offset (a per-site geometric bias)."""
+    def __init__(self, normal, offset, k):
         n = np.asarray(normal, float)
-        self.n = n / np.linalg.norm(n)
-        self.x0 = np.asarray(point, float)
-        self.mu = mu
-        self.k = kt / (sigma * sigma)              # spring kT/sigma^2
+        self.n, self.offset, self.k = n / np.linalg.norm(n), offset, k
 
-    def _xi(self, x):
-        return float(self.n @ (np.asarray(x, float) - self.x0))
-
-    def f(self, x, scale, scale2):                 # energy
-        d = self._xi(x) - self.mu
+    def f(self, x, scale, scale2):
+        d = float(self.n @ np.asarray(x, float)) - self.offset
         return scale * 0.5 * self.k * d * d
 
-    def fg(self, x, scale, scale2):                # energy + gradient
-        d = self._xi(x) - self.mu
-        g = scale * self.k * d * self.n            # (dU/dxi) * n_hat
+    def fg(self, x, scale, scale2):
+        d = float(self.n @ np.asarray(x, float)) - self.offset
+        g = scale * self.k * d * self.n
         return scale * 0.5 * self.k * d * d, (float(g[0]), float(g[1]), float(g[2]))
 ```
 
-The Python protocol differs from the Rust trait in exactly one way: `fg`
-**returns** `(energy, (gx, gy, gz))` instead of accumulating into a
-`&mut [F; 3]` — the binding does the `+=` for you. The contracts are otherwise
-identical: `fg` returns the energy, the gradient is the chain rule
-`(dU/dξ)·∇ξ`, and a linear-energy penalty like this rides `scale` (not
-`scale2`). A missing `f` or `fg` is rejected at attach time with a `TypeError`,
-and an exception raised inside `fg` propagates back out of `pack`.
+Attach it with `with_atom_restraint` (a site subset) or `with_restraint` (every
+copy), and pack.
 
-Attach it to a **site subset** — never the whole molecule, which would distort
-it — and pack:
-
-```python
-import molpack, molrs
-
-frame = molrs.read_pdb("palmitoil.pdb")
-target = (
-    molpack.Target(frame, count=64)
-    .with_name("surfactant")
-    .with_restraint(molpack.InsideBoxRestraint([0, 0, 0], [40, 40, 30]))
-    .with_atom_restraint([30, 31], PlanarGaussian([0, 0, 1], [0, 0, 0], mu=6, sigma=2))
-)
-packed = molpack.Molpack().with_seed(7).pack_with_report([target], max_loops=400)
-```
-
-The bias converts the flat box distribution into a band at the target depth —
-blue is a bare `inside box`, green adds the profile restraint:
-
-![Density profile along the plane normal: a bare box restraint fills the slab uniformly (blue); the profile Gaussian localizes sites at z = μ (green), tracking the target ρ*(z) (dashed).](img/fig_profile_density.png)
-
-The realized band sits exactly on the target depth (mean within ~0.1 of μ). It
-is *narrower* than σ because packing is energy **minimization**, not thermal
-sampling: the restraint sets *where* the band sits, the subsequent MD ensemble
-sets its width. This is the spec's "soft, not exact" property — a soft bias
-*approaches* ρ\* while competing with the overlap term.
-
-#### Sink it to Rust
-
-Once the physics is right, the same shape is already a first-class native
-restraint — no new Python class, just the `profile` script keyword, reachable
-from the same program through `molpack.load_script`:
-
-```text
-structure palmitoil.pdb
-  number 64
-  inside box 0 0 0 40 40 30
-  atoms 31 32
-    profile gaussian plane 0. 0. 1.  0. 0. 0.  mu 6. sigma 2. density
-  end atoms
-end structure
-```
-
-The native restraint runs inline in the compiled hot loop (no per-site Python
-call) and adds the production hardening the minimal prototype skips — a density
-floor / energy cap and the shell-volume Jacobian for radial/cylindrical
-coordinates. For a restraint that touches every atom this is several-fold
-faster. The runnable prototype is `python/examples/pack_profile_monolayer.py`;
-the Python-vs-native timing is `python/examples/profile_speed_py_vs_rust.py`.
+> **A per-site field cannot reproduce a distribution.** It is tempting to build a
+> per-site penalty from a target density `ρ*` (e.g. Boltzmann inversion
+> `U = −kT·ln ρ*`) to make sites *follow* `ρ*`. This fails under packing's energy
+> **minimisation**: `∑ᵢ U(xᵢ)` is minimised by driving *every* site to the single
+> minimum of `U` — the mode of `ρ*` — so the sites collapse onto the peak instead
+> of spreading over the distribution. To drive a whole species onto a target
+> profile, use a **collective** restraint (`Target.with_collective_restraint`,
+> e.g. the built-in `ProfileMatch`), whose penalty is a function of the entire
+> group and whose gradient couples the copies, so the fixed point is *empirical
+> distribution = target*.
 
 ## Custom `Region`
 

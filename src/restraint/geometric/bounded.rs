@@ -1,10 +1,10 @@
 //! Bounded-region restraints (Packmol kinds 2–9): cube, box, sphere, ellipsoid.
 //!
 //! Moved verbatim from the original single-file `src/restraint.rs`; each
-//! `impl Restraint` resolves the trait through the unchanged
+//! `impl AtomRestraint` resolves the trait through the unchanged
 //! `crate::restraint` path.
 
-use crate::restraint::Restraint;
+use crate::restraint::AtomRestraint;
 use molrs::types::F;
 
 /// Packmol kind 2 — quadratic penalty forcing atom inside axis-aligned cube.
@@ -20,7 +20,7 @@ impl InsideCubeRestraint {
     }
 }
 
-impl Restraint for InsideCubeRestraint {
+impl AtomRestraint for InsideCubeRestraint {
     fn f(&self, pos: &[F; 3], scale: F, _scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let (xmin, ymin, zmin) = (self.origin[0], self.origin[1], self.origin[2]);
@@ -108,7 +108,7 @@ impl InsideBoxRestraint {
     /// supplies the `periodic` flags explicitly (the `SimBox` type does
     /// not currently carry per-axis periodicity). Off-axis cells
     /// (triclinic tilts) are not representable as an axis-aligned
-    /// restraint — write a custom `impl Restraint` for those.
+    /// restraint — write a custom `impl AtomRestraint` for those.
     pub fn from_simbox(simbox: &molrs::spatial::region::SimBox, periodic: [bool; 3]) -> Self {
         let origin = simbox.origin_view();
         let lengths = simbox.lengths();
@@ -121,7 +121,7 @@ impl InsideBoxRestraint {
     }
 }
 
-impl Restraint for InsideBoxRestraint {
+impl AtomRestraint for InsideBoxRestraint {
     fn f(&self, pos: &[F; 3], scale: F, _scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let a1 = (x - self.min[0]).min(0.0);
@@ -186,7 +186,7 @@ impl InsideSphereRestraint {
     }
 }
 
-impl Restraint for InsideSphereRestraint {
+impl AtomRestraint for InsideSphereRestraint {
     fn f(&self, pos: &[F; 3], _scale: F, scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let c = self.center;
@@ -232,7 +232,7 @@ impl InsideEllipsoidRestraint {
     }
 }
 
-impl Restraint for InsideEllipsoidRestraint {
+impl AtomRestraint for InsideEllipsoidRestraint {
     fn f(&self, pos: &[F; 3], _scale: F, scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let c = self.center;
@@ -277,7 +277,7 @@ impl OutsideCubeRestraint {
     }
 }
 
-impl Restraint for OutsideCubeRestraint {
+impl AtomRestraint for OutsideCubeRestraint {
     fn f(&self, pos: &[F; 3], scale: F, _scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let (xmin, ymin, zmin) = (self.origin[0], self.origin[1], self.origin[2]);
@@ -339,7 +339,7 @@ impl OutsideBoxRestraint {
     }
 }
 
-impl Restraint for OutsideBoxRestraint {
+impl AtomRestraint for OutsideBoxRestraint {
     fn f(&self, pos: &[F; 3], scale: F, _scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let (xmin, ymin, zmin) = (self.min[0], self.min[1], self.min[2]);
@@ -401,7 +401,7 @@ impl OutsideSphereRestraint {
     }
 }
 
-impl Restraint for OutsideSphereRestraint {
+impl AtomRestraint for OutsideSphereRestraint {
     fn f(&self, pos: &[F; 3], _scale: F, scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let c = self.center;
@@ -455,7 +455,7 @@ impl OutsideEllipsoidRestraint {
     }
 }
 
-impl Restraint for OutsideEllipsoidRestraint {
+impl AtomRestraint for OutsideEllipsoidRestraint {
     fn f(&self, pos: &[F; 3], _scale: F, scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let c = self.center;

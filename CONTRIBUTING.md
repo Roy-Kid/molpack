@@ -7,7 +7,7 @@ development environment, run tests, and get a PR merged.
 
 **Prerequisites:**
 - Rust 1.85+ (`rustup update stable`)
-- Python 3.9+ with `maturin` and `pytest` for the Python bindings
+- Python 3.12+ with `maturin` and `pytest` for the Python bindings (the wheel's `requires-python` is `>=3.12`)
 - The [molrs](https://github.com/MolCrafts/molrs) repo checked out as a sibling:
 
 ```
@@ -58,9 +58,9 @@ cd python && pytest -v
 
 ## Adding a new restraint type
 
-1. Add a struct to `src/restraint.rs` with semantically-named fields
+1. Add a struct under `src/restraint/` with semantically-named fields — alongside the existing geometric restraints in `src/restraint/geometric/`, or as a new submodule (see `src/restraint/profile/` for a composed example)
 2. Implement `Restraint` (both `f` and `fg`; `fg` must match the gradient of `f`)
-3. Export it from `src/lib.rs`
+3. Re-export it from `src/restraint/mod.rs`, then from the crate root in `src/lib.rs`
 4. Add a unit test in `tests/restraint.rs`
 5. Document it in `docs/concepts.md` under the restraint table
 

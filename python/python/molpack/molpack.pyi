@@ -63,6 +63,58 @@ class BelowPlaneRestraint:
     def __init__(self, normal: Sequence[float], distance: float) -> None: ...
     def __repr__(self) -> str: ...
 
+# Collective (distribution-matching) restraints — drive a species' aggregate
+# spatial distribution toward a target profile rather than confining each atom.
+class GaussianPlane:
+    def __init__(
+        self,
+        normal: Sequence[float],
+        offset: float,
+        strength: float,
+        mu: float,
+        sigma: float,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class GaussianPoint:
+    def __init__(
+        self, center: Sequence[float], strength: float, mu: float, sigma: float
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class ExponentialPlane:
+    def __init__(
+        self,
+        normal: Sequence[float],
+        offset: float,
+        strength: float,
+        lambda_: float,
+    ) -> None: ...
+
+class ExponentialPoint:
+    def __init__(
+        self, center: Sequence[float], strength: float, lambda_: float
+    ) -> None: ...
+
+class TabulatedPlane:
+    def __init__(
+        self,
+        normal: Sequence[float],
+        offset: float,
+        strength: float,
+        xs: Sequence[float],
+        rho: Sequence[float],
+    ) -> None: ...
+
+class TabulatedPoint:
+    def __init__(
+        self,
+        center: Sequence[float],
+        strength: float,
+        xs: Sequence[float],
+        rho: Sequence[float],
+    ) -> None: ...
+
 # Built-in restraint union — accepted wherever a native `*Restraint` is
 # expected. Custom duck-typed objects (see `Restraint` Protocol in the
 # package root) are also accepted.
@@ -72,6 +124,12 @@ type BuiltinRestraint = (
     | OutsideSphereRestraint
     | AbovePlaneRestraint
     | BelowPlaneRestraint
+    | GaussianPlane
+    | GaussianPoint
+    | ExponentialPlane
+    | ExponentialPoint
+    | TabulatedPlane
+    | TabulatedPoint
 )
 
 class _RestraintLike(Protocol):
@@ -101,6 +159,7 @@ class Target:
     def with_atom_restraint(
         self, indices: Sequence[int], restraint: AnyRestraint | object
     ) -> Self: ...
+    def with_relaxer(self, relaxer: TorsionMcRelaxer | LBFGSRelaxer) -> Self: ...
     def with_perturb_budget(self, budget: int) -> Self: ...
     def with_centering(self, mode: CenteringMode) -> Self: ...
     def with_rotation_bound(
@@ -120,6 +179,39 @@ class Target:
     def radii(self) -> list[float]: ...
     @property
     def is_fixed(self) -> bool: ...
+    def __repr__(self) -> str: ...
+
+# ---------------------------------------------------------------------------
+# In-loop relaxers (relaxation-assisted packing)
+# ---------------------------------------------------------------------------
+
+class TorsionMcRelaxer:
+    """Monte-Carlo torsion-angle relaxer — engine-free, force-field-free.
+
+    Built from a molecule ``frame`` (needs its bond topology); folds one chain
+    during packing by proposing random rotations about its rotatable bonds and
+    accepting them against the packer objective (Metropolis). Attach with
+    ``Target.with_relaxer`` (requires ``count == 1``).
+    """
+
+    def __init__(self, frame: Any) -> None: ...
+    def with_temperature(self, t: float) -> Self: ...
+    def with_steps(self, n: int) -> Self: ...
+    def with_max_delta(self, rad: float) -> Self: ...
+    def with_self_avoidance(self, radius: float) -> Self: ...
+    def __repr__(self) -> str: ...
+
+class LBFGSRelaxer:
+    """Force-field L-BFGS geometry relaxer (``ff`` feature).
+
+    Built from a ``molrs``/``molpy`` force field; minimizes one molecule's
+    internal geometry during packing. Attach with ``Target.with_relaxer``
+    (requires ``count == 1``).
+    """
+
+    def __init__(self, forcefield: Any) -> None: ...
+    def with_fmax(self, fmax: float) -> Self: ...
+    def with_max_steps(self, max_steps: int) -> Self: ...
     def __repr__(self) -> str: ...
 
 # ---------------------------------------------------------------------------
@@ -216,6 +308,10 @@ class Molpack:
     def with_log_level(self, level: str) -> Self: ...
     def with_log_frequency(self, n: int) -> Self: ...
     def with_handler(self, handler: _HandlerLike | object) -> Self: ...
+    def with_xyz_output(self, path: str, every: int = 1) -> Self:
+        """Record the packing trajectory to a multi-frame XYZ file via molpack's
+        built-in ``XYZHandler`` (a frame every ``every`` loops; loop 0 included)."""
+        ...
     def with_global_restraint(self, restraint: AnyRestraint | object) -> Self: ...
     def pack(self, targets: list[Target], max_loops: int = 200) -> Any: ...
     def pack_with_report(

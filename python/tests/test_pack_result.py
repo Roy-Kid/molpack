@@ -17,15 +17,19 @@ def _col(frame, block: str, name: str) -> np.ndarray:
 def _make_frame(
     positions: np.ndarray,
     elements: list[str],
-) -> dict:
-    return {
-        "atoms": {
-            "x": positions[:, 0].copy(),
-            "y": positions[:, 1].copy(),
-            "z": positions[:, 2].copy(),
-            "element": elements,
+) -> molrs.Frame:
+    return molrs.Frame.from_dict(
+        {
+            "blocks": {
+                "atoms": {
+                    "x": positions[:, 0].copy(),
+                    "y": positions[:, 1].copy(),
+                    "z": positions[:, 2].copy(),
+                    "element": elements,
+                }
+            }
         }
-    }
+    )
 
 
 def _make_tiny_pack() -> molpack.PackResult:
@@ -85,19 +89,23 @@ class TestFrameTopology:
     """End-to-end: a template's topology is replayed onto packed coordinates."""
 
     @staticmethod
-    def _diatomic_with_bond() -> dict:
-        return {
-            "atoms": {
-                "type": np.array(["A", "B"]),
-                "charge": np.array([0.1, -0.1]),
-                "mass": np.array([12.0, 1.0]),
-                "element": np.array(["C", "H"]),
-                "x": np.array([0.0, 1.0]),
-                "y": np.array([0.0, 0.0]),
-                "z": np.array([0.0, 0.0]),
-            },
-            "bonds": {"atomi": np.array([0]), "atomj": np.array([1])},
-        }
+    def _diatomic_with_bond() -> molrs.Frame:
+        return molrs.Frame.from_dict(
+            {
+                "blocks": {
+                    "atoms": {
+                        "type": np.array(["A", "B"]),
+                        "charge": np.array([0.1, -0.1]),
+                        "mass": np.array([12.0, 1.0]),
+                        "element": np.array(["C", "H"]),
+                        "x": np.array([0.0, 1.0]),
+                        "y": np.array([0.0, 0.0]),
+                        "z": np.array([0.0, 0.0]),
+                    },
+                    "bonds": {"atomi": np.array([0]), "atomj": np.array([1])},
+                }
+            }
+        )
 
     def _pack(self, copies: int, box: bool = False) -> molpack.PackResult:
         target = molpack.Target(self._diatomic_with_bond(), copies).with_restraint(
@@ -154,14 +162,18 @@ class TestMolpackErrorPaths:
     def test_invalid_pbc_raises_typed_error(self):
         # Zero-length axis on a periodic box is rejected at pack().
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
-        frame = {
-            "atoms": {
-                "x": positions[:, 0],
-                "y": positions[:, 1],
-                "z": positions[:, 2],
-                "element": ["X"],
+        frame = molrs.Frame.from_dict(
+            {
+                "blocks": {
+                    "atoms": {
+                        "x": positions[:, 0],
+                        "y": positions[:, 1],
+                        "z": positions[:, 2],
+                        "element": ["X"],
+                    }
+                }
             }
-        }
+        )
         target = molpack.Target(frame, 1).with_restraint(
             molpack.InsideBoxRestraint(
                 [0.0, 0.0, 0.0], [0.0, 10.0, 10.0], periodic=(True, True, True)
@@ -179,14 +191,18 @@ class TestMolpackErrorPaths:
 class TestMultipleRestraints:
     def test_stacked_restraints(self):
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
-        frame = {
-            "atoms": {
-                "x": positions[:, 0],
-                "y": positions[:, 1],
-                "z": positions[:, 2],
-                "element": ["X"],
+        frame = molrs.Frame.from_dict(
+            {
+                "blocks": {
+                    "atoms": {
+                        "x": positions[:, 0],
+                        "y": positions[:, 1],
+                        "z": positions[:, 2],
+                        "element": ["X"],
+                    }
+                }
             }
-        }
+        )
         target = (
             molpack.Target(frame, 3)
             .with_restraint(

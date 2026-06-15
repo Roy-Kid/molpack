@@ -1,6 +1,6 @@
 //! Concrete geometric restraint types (Packmol kinds 2–15).
 //!
-//! The 14 structs `impl Restraint` with their value/gradient bodies moved
+//! The 14 structs `impl AtomRestraint` with their value/gradient bodies moved
 //! verbatim from the original single-file `src/restraint.rs`. They are split
 //! across two leaf modules purely to stay within the per-file LOC budget:
 //! [`bounded`] holds the cube/box/sphere/ellipsoid pairs (kinds 2–9) and

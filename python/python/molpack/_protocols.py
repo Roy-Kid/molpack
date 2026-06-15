@@ -30,24 +30,32 @@ class Handler(Protocol):
 
 @runtime_checkable
 class Restraint(Protocol):
-    """Custom-restraint contract.
+    """Custom-restraint contract — the group-level extension point.
 
-    ``x`` is a 3-tuple of floats in Å. ``scale`` is the linear scaling
-    factor (≈ distance tolerance); ``scale2`` is its square — both are
-    supplied so the restraint can pick whichever matches the penalty's
-    polynomial degree (linear vs quadratic overshoot).
+    A duck-typed restraint sees **every copy** of a species at once: ``coords``
+    is a sequence of ``(x, y, z)`` tuples (Å), one per copy. This lets the
+    penalty depend on the *joint* configuration — e.g. matching the empirical
+    density of the group to a target distribution — so its gradient may couple
+    the copies together. ``scale`` is the linear scaling factor (≈ distance
+    tolerance); ``scale2`` is its square — both are supplied so the restraint
+    can pick whichever matches the penalty's polynomial degree (linear vs
+    quadratic overshoot).
+
+    ``fg`` returns ``(energy, grads)`` where ``grads`` has the same length as
+    ``coords`` and ``grads[i]`` is the ``(gx, gy, gz)`` gradient of the penalty
+    with respect to ``coords[i]``.
     """
 
     def f(
         self,
-        x: tuple[float, float, float],
+        coords: list[tuple[float, float, float]],
         scale: float,
         scale2: float,
     ) -> float: ...
 
     def fg(
         self,
-        x: tuple[float, float, float],
+        coords: list[tuple[float, float, float]],
         scale: float,
         scale2: float,
-    ) -> tuple[float, tuple[float, float, float]]: ...
+    ) -> tuple[float, list[tuple[float, float, float]]]: ...

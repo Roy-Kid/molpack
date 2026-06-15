@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::cell::{cell_ind, icell_to_cell, index_cell};
 use crate::constraints::{Constraints, EvalMode, EvalOutput};
-use crate::restraint::Restraint;
+use crate::restraint::{AtomRestraint, Restraint};
 use molrs::Element;
 use molrs::types::F;
 
@@ -201,12 +201,17 @@ pub struct PackContext {
 
     // ---- Restraints ----
     /// All restraints pool: `restraints[irest]`.
-    pub restraints: Vec<Arc<dyn Restraint>>,
+    pub restraints: Vec<Arc<dyn AtomRestraint>>,
     /// CSR offsets for per-atom restraint indices:
     /// restraints of atom `icart` are in `iratom_data[iratom_offsets[icart]..iratom_offsets[icart+1]]`.
     pub iratom_offsets: Vec<usize>,
     /// Flattened per-atom restraint indices.
     pub iratom_data: Vec<RestraintRef>,
+    /// Group-level restraints, paired with the (0-based) type they act on:
+    /// `(itype, restraint)`. Evaluated once per group in the objective with the
+    /// coordinates of all copies of `itype`; the coupled gradient is scattered
+    /// back into `work.gxcar`. Empty in the common (no collective restraint) case.
+    pub collective: Vec<(usize, Arc<dyn Restraint>)>,
 
     // ---- Cell list bookkeeping ----
     /// Type index per atom: `ibtype[icart]` (0-based type index).
@@ -226,7 +231,7 @@ pub struct PackContext {
     /// Per-axis periodicity flags. `pbc_periodic[k] == true` means axis
     /// `k` wraps in the pair-kernel minimum image and the cell list;
     /// `false` means the cell list clamps and no wrap is applied. Set
-    /// from restraints that override `Restraint::periodic_box()`.
+    /// from restraints that override `AtomRestraint::periodic_box()`.
     pub pbc_periodic: [bool; 3],
 
     // ---- Linked cell lists ----
@@ -336,6 +341,7 @@ impl PackContext {
             restraints: Vec::new(),
             iratom_offsets: vec![0; ntotat + 1],
             iratom_data: Vec::new(),
+            collective: Vec::new(),
             ibtype: vec![0; ntotat],
             ibmol: vec![0; ntotat],
             fixedatom: vec![false; ntotat],

@@ -3,13 +3,14 @@
 //! [`PyTarget`] describes one type of molecule to pack: its template
 //! geometry, topology, and the number of copies.
 //!
-//! The constructor accepts any frame-like object with an ``"atoms"`` block —
-//! ``molrs.Frame``, ``molpy.Frame``, or a plain ``dict`` — and converts it to a
-//! Rust [`molrs::Frame`] (see [`crate::frame_marshal`]). The full frame, with
-//! topology, is handed to the core [`Target`], which owns the assembly. The
-//! binding never re-derives the result frame; it only marshals data.
+//! The constructor accepts a real molrs/molpy `Frame` (``molrs.Frame`` or
+//! ``molpy.Frame``) carrying an ``"atoms"`` block. The frame crosses the
+//! language boundary **zero-copy** through its stable-FFI capsule (see
+//! [`crate::interop`]) — no dict marshalling, no consumer-side data type. The
+//! full frame, with topology, is handed to the core [`Target`], which owns the
+//! assembly.
 
-use crate::constraint::extract_restraint;
+use crate::constraint::{extract_collective_restraint, extract_restraint, try_atom_builtin};
 use crate::helpers::NpF;
 use crate::types::{PyAngle, PyAxis, PyCenteringMode};
 use molpack::F;
@@ -23,7 +24,7 @@ use pyo3::types::PyAny;
 /// Shared by [`PyTarget::new`] and the script loader. The frame is converted to
 /// a Rust [`molrs::Frame`] so the core retains its full topology.
 pub(crate) fn target_from_frame(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Target> {
-    let rust_frame = crate::frame_marshal::pyframe_to_rust(frame)?;
+    let rust_frame = crate::interop::owned_frame_from_py(frame)?;
     let atoms = rust_frame
         .get("atoms")
         .ok_or_else(|| PyValueError::new_err(r#"frame must have an "atoms" block"#))?;
@@ -47,9 +48,10 @@ impl PyTarget {
     ///
     /// Parameters
     /// ----------
-    /// frame : Frame-like
-    ///     Any object with ``frame["atoms"]`` returning a block.
-    ///     Supports ``molrs.Frame``, ``molpy.Frame``, and plain dicts.
+    /// frame : molrs.Frame | molpy.Frame
+    ///     A molrs/molpy frame with an ``"atoms"`` block (``x`` / ``y`` / ``z``
+    ///     columns). Resolved zero-copy via its FFI capsule — a plain ``dict``
+    ///     is no longer accepted; build a ``molrs.Frame`` first.
     /// count : int
     ///     Number of copies to pack.
     ///
@@ -68,11 +70,73 @@ impl PyTarget {
         }
     }
 
+    /// Attach a restraint to this target — the single unified extension point.
+    ///
+    /// Accepts:
+    ///
+    /// * a built-in **geometric** restraint (:class:`InsideBoxRestraint`,
+    ///   :class:`InsideSphereRestraint`, :class:`OutsideSphereRestraint`,
+    ///   :class:`AbovePlaneRestraint`, :class:`BelowPlaneRestraint`) — its
+    ///   ``f`` / ``fg`` see **one atom** at a time;
+    /// * a built-in **distribution** restraint (:class:`GaussianPlane`,
+    ///   :class:`GaussianPoint`, :class:`ExponentialPlane`,
+    ///   :class:`ExponentialPoint`, :class:`TabulatedPlane`,
+    ///   :class:`TabulatedPoint`);
+    /// * any object with callable ``f`` / ``fg`` — the duck-typed extension
+    ///   point.
+    ///
+    /// For the geometric built-ins ``f(x, scale, scale2)`` /
+    /// ``fg(x, scale, scale2)`` see a single atom's ``(x, y, z)``. For the
+    /// distribution and custom (duck-typed) restraints,
+    /// ``f(coords, scale, scale2)`` / ``fg(coords, scale, scale2)`` see **every
+    /// copy's** ``(x, y, z)`` (``coords`` is the full list) and ``fg`` returns
+    /// ``(energy, [(gx, gy, gz), ...])`` — one gradient triple per copy.
     fn with_restraint(&self, restraint: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
-        let r = extract_restraint(restraint)?;
-        Ok(PyTarget {
-            inner: self.inner.clone().with_restraint(r),
-        })
+        if let Some(atom_r) = try_atom_builtin(restraint) {
+            Ok(PyTarget {
+                inner: self.inner.clone().with_restraint(atom_r),
+            })
+        } else {
+            let group_r = extract_collective_restraint(restraint)?;
+            Ok(PyTarget {
+                inner: self.inner.clone().with_collective_restraint(group_r),
+            })
+        }
+    }
+
+    /// Attach an in-loop geometry relaxer (relaxation-assisted packing).
+    ///
+    /// Accepts either built-in relaxer:
+    ///
+    /// * :class:`TorsionMcRelaxer` — engine-free Monte-Carlo torsion sampling
+    ///   (always available);
+    /// * :class:`LBFGSRelaxer` — force-field L-BFGS minimization (`ff` feature).
+    ///
+    /// Requires ``count == 1`` — every copy shares the reference geometry the
+    /// relaxer rewrites, so a relaxed target packs one molecule.
+    fn with_relaxer(&self, relaxer: &Bound<'_, PyAny>) -> PyResult<Self> {
+        if self.inner.count != 1 {
+            return Err(PyValueError::new_err(format!(
+                "with_relaxer requires count == 1 (all copies share the reference \
+                 geometry the relaxer rewrites), got count = {}",
+                self.inner.count
+            )));
+        }
+        // Torsion-MC relaxer is core (no feature gate).
+        if let Ok(tm) = relaxer.extract::<crate::relaxer::PyTorsionMcRelaxer>() {
+            return Ok(PyTarget {
+                inner: self.inner.clone().with_relaxer(tm.inner),
+            });
+        }
+        #[cfg(feature = "ff")]
+        if let Ok(lb) = relaxer.extract::<crate::relaxer::PyLBFGSRelaxer>() {
+            return Ok(PyTarget {
+                inner: self.inner.clone().with_relaxer(lb.inner),
+            });
+        }
+        Err(PyValueError::new_err(
+            "with_relaxer expects a TorsionMcRelaxer or LBFGSRelaxer",
+        ))
     }
 
     /// Attach a restraint to selected atoms of every copy.

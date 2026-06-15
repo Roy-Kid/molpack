@@ -1,5 +1,6 @@
 """molpack — Packmol-grade molecular packing with Python bindings."""
 
+from . import relaxer
 from ._protocols import Handler, Restraint
 from .molpack import (
     AbovePlaneRestraint,
@@ -10,9 +11,14 @@ from .molpack import (
     ConflictingPeriodicBoxesError,
     ConstraintsFailedError,
     EmptyMoleculeError,
+    ExponentialPlane,
+    ExponentialPoint,
+    GaussianPlane,
+    GaussianPoint,
     InsideBoxRestraint,
     InsideSphereRestraint,
     InvalidPBCBoxError,
+    LBFGSRelaxer,
     MaxIterationsError,
     Molpack,
     NoTargetsError,
@@ -21,7 +27,10 @@ from .molpack import (
     PackResult,
     ScriptJob,
     StepInfo,
+    TabulatedPlane,
+    TabulatedPoint,
     Target,
+    TorsionMcRelaxer,
     init_thread_pool,
     load_script,
     num_threads,
@@ -39,11 +48,21 @@ __all__ = [
     "OutsideSphereRestraint",
     "AbovePlaneRestraint",
     "BelowPlaneRestraint",
+    # Group-level distribution-matching restraints
+    "GaussianPlane",
+    "GaussianPoint",
+    "ExponentialPlane",
+    "ExponentialPoint",
+    "TabulatedPlane",
+    "TabulatedPoint",
     # Core
     "Target",
     "Molpack",
     "PackResult",
     "StepInfo",
+    # Relaxation-assisted packing (in-loop, per-molecule relaxers)
+    "TorsionMcRelaxer",
+    "LBFGSRelaxer",
     # Script loader (`.inp` input)
     "ScriptJob",
     "load_script",
@@ -54,6 +73,8 @@ __all__ = [
     # Duck-type protocols
     "Handler",
     "Restraint",
+    # Post-pack whole-system relaxation (LAMMPS via molpy)
+    "relaxer",
     # Errors
     "PackError",
     "ConstraintsFailedError",

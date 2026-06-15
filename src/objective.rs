@@ -145,6 +145,7 @@ pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
         let mut f = accumulate_constraint_values_from_xcart(sys);
         if !sys.init1 {
             f += accumulate_pair_f(sys);
+            f += accumulate_collective_f(sys);
         }
         return f;
     }
@@ -161,6 +162,7 @@ pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
     }
 
     f += accumulate_pair_f(sys);
+    f += accumulate_collective_f(sys);
     update_cached_geometry(x, sys);
 
     f
@@ -183,6 +185,7 @@ pub fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
         let mut f = accumulate_constraint_values_and_gradients_from_xcart(sys);
         if !sys.init1 {
             f += accumulate_pair_fg(sys);
+            f += accumulate_collective_fg(sys);
         }
         project_cartesian_gradient(x, sys, g);
         return f;
@@ -196,12 +199,115 @@ pub fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
 
     if !sys.init1 {
         f += accumulate_pair_fg(sys);
+        f += accumulate_collective_fg(sys);
     }
 
     update_cached_geometry(x, sys);
     project_cartesian_gradient(x, sys, g);
 
     f
+}
+
+/// Contribution of one *i*–*j* atom pair to the packing objective.
+///
+/// `grad` is the force to **add** to atom *i* and **subtract** from atom *j*
+/// (Newton's third law); it folds the main and short-range terms together and
+/// stays `[0; 3]` whenever the pair doesn't overlap or `GRAD` is `false`.
+/// `overlap` is `datom < tol` — callers use it to skip the gradient write for
+/// the common non-overlapping pair. `violation` is `tol_ini - datom`, only
+/// meaningful (and only computed) when `VIOLATION` is `true`.
+#[derive(Clone, Copy)]
+struct PairContribution {
+    energy: F,
+    grad: [F; 3],
+    violation: F,
+    overlap: bool,
+}
+
+/// The single source of truth for per-pair packing physics: the distance
+/// penalty, its gradient, the short-range correction, and the overlap
+/// violation. Every neighbor-walk variant (serial/parallel, value-only/fused,
+/// move-tracking or not) calls this — they differ only in *where* they apply
+/// the result, never in the formula.
+///
+/// Returns `None` when the pair is skipped (same molecule, or both fixed). The
+/// two const generics let each caller drop the work it doesn't need at zero
+/// runtime cost: `GRAD` removes the force math for value-only passes,
+/// `VIOLATION` removes the `fdist` term for the gradient-only pass.
+///
+/// Per-atom reads go through `sys.atom_props` — an AoS mirror packing the hot
+/// fields into one cache line per atom (see [`AtomProps`]).
+#[inline(always)]
+fn pair_term<const GRAD: bool, const VIOLATION: bool>(
+    hot: &AtomHotState,
+    xi: [F; 3],
+    jcart: usize,
+    sys: &PackContext,
+    pbc: &PbcConstants,
+) -> Option<PairContribution> {
+    let props_j = sys.atom_props[jcart];
+    // Skip same molecule.
+    if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+        return None;
+    }
+    // Skip two fixed atoms (only matters if the system has any at all).
+    if hot.fixed_i && (props_j.flags & ATOM_FLAG_FIXED != 0) {
+        return None;
+    }
+
+    let xj = sys.xcart[jcart];
+    let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
+    let datom = dx * dx + dy * dy + dz * dz;
+    let rsum = hot.props.radius + props_j.radius;
+    let tol = rsum * rsum;
+
+    let mut energy: F = 0.0;
+    let mut grad = [0.0; 3];
+    let overlap = datom < tol;
+
+    if overlap {
+        let penalty = datom - tol;
+        let scale = hot.props.fscale * props_j.fscale;
+        energy += scale * penalty * penalty;
+        if GRAD {
+            let dtemp = scale * 4.0 * penalty;
+            grad[0] += dtemp * dx;
+            grad[1] += dtemp * dy;
+            grad[2] += dtemp * dz;
+        }
+        if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
+            let short_rsum = hot.shrad_i + sys.short_radius[jcart];
+            let short_tol = short_rsum * short_rsum;
+            if datom < short_tol {
+                let short_penalty = datom - short_tol;
+                let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
+                sr_scale *= (tol * tol) / (short_tol * short_tol);
+                let sr_pair_scale = scale * sr_scale;
+                energy += sr_pair_scale * short_penalty * short_penalty;
+                if GRAD {
+                    let dtemp2 = sr_pair_scale * 4.0 * short_penalty;
+                    grad[0] += dtemp2 * dx;
+                    grad[1] += dtemp2 * dy;
+                    grad[2] += dtemp2 * dz;
+                }
+            }
+        }
+    }
+
+    let violation = if VIOLATION {
+        let rsum_ini = hot.props.radius_ini + props_j.radius_ini;
+        let tol_ini = rsum_ini * rsum_ini;
+        tol_ini - datom
+    } else {
+        0.0
+    };
+
+    Some(PairContribution {
+        energy,
+        grad,
+        violation,
+        overlap,
+    })
 }
 
 /// Atom-pair distance penalty function.
@@ -227,55 +333,20 @@ fn fparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstan
     while jcart_id != NONE_IDX {
         let jcart = jcart_id as usize;
         let next = sys.latomnext[jcart];
-        let props_j = sys.atom_props[jcart];
-        // Skip same molecule
-        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
-            jcart_id = next;
-            continue;
-        }
-        // Skip two fixed atoms (only if the system has any at all).
-        if hot.fixed_i && (props_j.flags & ATOM_FLAG_FIXED != 0) {
-            jcart_id = next;
-            continue;
-        }
-
-        let xj = sys.xcart[jcart];
-        let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
-        let datom = dx * dx + dy * dy + dz * dz;
-        let rsum = hot.props.radius + props_j.radius;
-        let tol = rsum * rsum;
-
-        if datom < tol {
-            let penalty = datom - tol;
-            let scale = hot.props.fscale * props_j.fscale;
-            result += scale * penalty * penalty;
-            if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
-                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
-                let short_tol = short_rsum * short_rsum;
-                if datom < short_tol {
-                    let penalty = datom - short_tol;
-                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
-                    sr_scale *= (tol * tol) / (short_tol * short_tol);
-                    result += scale * sr_scale * penalty * penalty;
+        if let Some(c) = pair_term::<false, true>(&hot, xi, jcart, sys, pbc) {
+            result += c.energy;
+            if c.violation > local_fdist {
+                local_fdist = c.violation;
+            }
+            if move_flag {
+                if c.violation > sys.fdist_atom[icart] {
+                    sys.fdist_atom[icart] = c.violation;
+                }
+                if c.violation > sys.fdist_atom[jcart] {
+                    sys.fdist_atom[jcart] = c.violation;
                 }
             }
         }
-
-        let rsum_ini = hot.props.radius_ini + props_j.radius_ini;
-        let tol_ini = rsum_ini * rsum_ini;
-        let violation = tol_ini - datom;
-        if violation > local_fdist {
-            local_fdist = violation;
-        }
-        if move_flag {
-            if violation > sys.fdist_atom[icart] {
-                sys.fdist_atom[icart] = violation;
-            }
-            if violation > sys.fdist_atom[jcart] {
-                sys.fdist_atom[jcart] = violation;
-            }
-        }
-
         jcart_id = next;
     }
 
@@ -294,6 +365,7 @@ pub fn compute_g(x: &[F], sys: &mut PackContext, g: &mut [F]) {
         accumulate_constraint_gradient_from_xcart(sys);
         if !sys.init1 {
             accumulate_pair_g(sys);
+            let _ = accumulate_collective_fg(sys);
         }
         project_cartesian_gradient(x, sys, g);
         return;
@@ -307,117 +379,62 @@ pub fn compute_g(x: &[F], sys: &mut PackContext, g: &mut [F]) {
 
     if !sys.init1 {
         accumulate_pair_g(sys);
+        let _ = accumulate_collective_fg(sys);
     }
 
     update_cached_geometry(x, sys);
     project_cartesian_gradient(x, sys, g);
 }
 
-/// Expand all active molecules into `sys.xcart`, applying either constraint values
-/// (`computef`) or constraint gradients (`computeg`), and rebuilding the cell list.
-#[inline]
+/// Expand all active molecules into `sys.xcart`, applying either constraint
+/// values (`computef`) or constraint gradients (`computeg`), and rebuilding the
+/// cell list.
+///
+/// One phase-structured implementation shared by the serial and rayon paths.
+/// **Phase A** rebuilds each molecule's Cartesian coordinates (`eulerrmat` +
+/// `compcart`) and evaluates its box/restraint constraints, writing **disjoint**
+/// per-atom `xcart` / `gxcar` (and, under `move_flag`, `frest_atom`) slots — so it
+/// has no cross-task write conflict and parallelises cleanly. **Phase B** replays
+/// the linked-cell insertion serially in the identical molecule/atom order (that
+/// insertion mutates a shared list and is inherently serial). The *only*
+/// difference between a serial and a parallel run is whether Phase A iterates
+/// with `iter` or `par_iter` — see [`expand_reduce`]. There is no second
+/// algorithm, and the resulting cell lists are bit-identical either way.
 fn expand_molecules(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
-    // Per-molecule Cartesian rebuild + constraint evaluation is independent
-    // across molecules, so it parallelises cleanly. The cell-list insertion
-    // that follows is a serial linked-list build and stays serial. Gated on
-    // `!move_flag` so the per-atom `frest_atom` bookkeeping (movebad only)
-    // keeps the simple serial path.
-    #[cfg(feature = "rayon")]
-    if sys.parallel_pair_eval && !sys.move_flag {
-        return expand_molecules_parallel(x, sys, mode);
-    }
-
-    let mut f = 0.0;
-    let mut ilubar = 0usize;
-    let mut ilugan = sys.ntotmol * 3;
-    let mut icart = 0usize;
-
-    // Packmol computef/computeg loop only over free types (1..ntype).
-    for itype in 0..sys.ntype {
-        if !sys.comptype[itype] {
-            icart += sys.nmols[itype] * sys.natoms[itype];
-            continue;
-        }
-
-        for _imol in 0..sys.nmols[itype] {
-            let xcm = [x[ilubar], x[ilubar + 1], x[ilubar + 2]];
-            let beta = x[ilugan];
-            let gama = x[ilugan + 1];
-            let teta = x[ilugan + 2];
-            let (v1, v2, v3) = eulerrmat(beta, gama, teta);
-            let idatom_base = sys.idfirst[itype];
-
-            for iatom in 0..sys.natoms[itype] {
-                let idatom = idatom_base + iatom;
-                let pos = compcart(&xcm, &sys.coor[idatom], &v1, &v2, &v3);
-                sys.xcart[icart] = pos;
-
-                match mode {
-                    ExpandMode::F => {
-                        f += accumulate_constraint_value(icart, &pos, sys);
-                    }
-                    ExpandMode::G => {
-                        accumulate_constraint_gradient(icart, &pos, sys);
-                    }
-                    ExpandMode::FG => {
-                        f += accumulate_constraint_value(icart, &pos, sys);
-                        accumulate_constraint_gradient(icart, &pos, sys);
-                    }
-                }
-
-                if !sys.init1 {
-                    insert_atom_in_cell(icart, &pos, sys);
-                }
-
-                icart += 1;
-            }
-
-            ilugan += 3;
-            ilubar += 3;
-        }
-    }
-
-    f
-}
-
-/// Parallel counterpart to [`expand_molecules`]. Each molecule independently
-/// rebuilds its atoms' Cartesian coordinates (`eulerrmat` + `compcart`) and
-/// evaluates their box/restraint constraints, writing disjoint `xcart` /
-/// `gxcar` slots — so the heavy per-step rebuild that GENCAN triggers on every
-/// evaluation runs on rayon instead of serially capping the speed-up. The
-/// linked-cell insertion that depends on a strict insertion order is replayed
-/// serially afterwards in the identical molecule/atom order, so the cell lists
-/// (and therefore the downstream pair kernel) are bit-identical to the serial
-/// path. Gated on `!move_flag` by the caller.
-#[cfg(feature = "rayon")]
-fn expand_molecules_parallel(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
     // Cheap serial pass: one descriptor per active molecule (pure index
-    // arithmetic, no trig). Reuses the persistent workspace buffer so the
-    // rebuild is allocation-free.
+    // arithmetic, no trig), reusing the persistent workspace buffer.
     let mut descs = std::mem::take(&mut sys.work.mol_descs);
     fill_active_mol_descs(&mut descs, sys);
 
-    // Move the two write targets out of `sys` so the context can be shared
-    // immutably across threads while molecules write disjoint slots through a
-    // raw pointer (the constraint reads — coor, restraints, iratom — stay on
-    // the shared `&PackContext`).
+    // Move the per-atom write targets out of `sys` so Phase A can share
+    // `&PackContext` immutably while each molecule writes its own disjoint slots
+    // through raw pointers (constraint reads — coor, restraints, iratom — stay on
+    // the shared borrow). Sound for the serial `iter` path too: it just runs the
+    // per-molecule closures sequentially.
     let mut xcart = std::mem::take(&mut sys.xcart);
     let mut gxcar = std::mem::take(&mut sys.work.gxcar);
+    let mut frest_atom = std::mem::take(&mut sys.frest_atom);
     let scale = sys.scale;
     let scale2 = sys.scale2;
-    let sys_ro: &PackContext = sys;
+    let move_flag = sys.move_flag;
+    // Per-atom `frest_atom` bookkeeping is movebad-only; that path always runs
+    // serially, so it never races even though the parallel branch could write it.
+    let parallel = sys.parallel_pair_eval && !move_flag;
 
     #[derive(Clone, Copy)]
     struct Slots {
         xcart: *mut [F; 3],
         gxcar: *mut [F; 3],
+        frest_atom: *mut F,
     }
-    // SAFETY: each molecule owns a disjoint, contiguous `icart` range, so no
-    // two tasks write the same slot. Accessors take `self` so closures capture
-    // the whole (Sync) wrapper, not the bare pointer fields.
+    // SAFETY: each molecule owns a disjoint, contiguous `icart` range, so no two
+    // tasks ever write the same slot.
     unsafe impl Send for Slots {}
     unsafe impl Sync for Slots {}
     impl Slots {
+        // Accessors take `self` so a closure that calls them captures the whole
+        // (`Sync`) wrapper, not its bare `*mut` fields (which would make the
+        // closure non-`Sync` and break `par_iter`).
         /// # Safety
         /// `i` must be in bounds and owned solely by the calling task.
         #[inline(always)]
@@ -430,15 +447,25 @@ fn expand_molecules_parallel(x: &[F], sys: &mut PackContext, mode: ExpandMode) -
         unsafe fn gxcar_at<'a>(self, i: usize) -> &'a mut [F; 3] {
             unsafe { &mut *self.gxcar.add(i) }
         }
+        /// # Safety
+        /// `i` must be in bounds and owned solely by the calling task.
+        #[inline(always)]
+        unsafe fn frest_atom_at(self, i: usize) -> *mut F {
+            unsafe { self.frest_atom.add(i) }
+        }
     }
     let slots = Slots {
         xcart: xcart.as_mut_ptr(),
         gxcar: gxcar.as_mut_ptr(),
+        frest_atom: frest_atom.as_mut_ptr(),
     };
 
-    let (f_total, frest_max) = descs
-        .par_iter()
-        .map(|&(itype, icart0, ilubar, ilugan)| {
+    // Run Phase A in an inner scope so the shared `&PackContext` borrow (held by
+    // the closure) is released before we move the buffers back into `sys`.
+    let (f_total, frest_max) = {
+        let sys_ro: &PackContext = sys;
+        // Phase A, per molecule — independent, so it runs under `iter`/`par_iter`.
+        let body = |&(itype, icart0, ilubar, ilugan): &(usize, usize, usize, usize)| -> (F, F) {
             let (v1, v2, v3) = eulerrmat(x[ilugan], x[ilugan + 1], x[ilugan + 2]);
             let xcm = [x[ilubar], x[ilubar + 1], x[ilubar + 2]];
             let idbase = sys_ro.idfirst[itype];
@@ -457,7 +484,7 @@ fn expand_molecules_parallel(x: &[F], sys: &mut PackContext, mode: ExpandMode) -
                 if start == end {
                     continue;
                 }
-                // Value (F / FG): same `.f` call order as the serial path.
+                // Value (F / FG): same `.f` call order as the legacy serial loop.
                 if matches!(mode, ExpandMode::F | ExpandMode::FG) {
                     let mut fplus = 0.0;
                     for &irest in &sys_ro.iratom_data[start..end] {
@@ -466,6 +493,12 @@ fn expand_molecules_parallel(x: &[F], sys: &mut PackContext, mode: ExpandMode) -
                     f_local += fplus;
                     if fplus > frest_local {
                         frest_local = fplus;
+                    }
+                    if move_flag {
+                        // SAFETY: disjoint per-atom slot.
+                        unsafe {
+                            *slots.frest_atom_at(icart) += fplus;
+                        }
                     }
                 }
                 // Gradient (G / FG): accumulate into this atom's own slot.
@@ -478,17 +511,20 @@ fn expand_molecules_parallel(x: &[F], sys: &mut PackContext, mode: ExpandMode) -
                 }
             }
             (f_local, frest_local)
-        })
-        .reduce(|| (0.0 as F, 0.0 as F), |a, b| (a.0 + b.0, a.1.max(b.1)));
+        };
+        expand_reduce(&descs, &body, parallel)
+    };
 
+    // Restore the moved-out buffers before the (serial) cell-insertion phase.
     sys.xcart = xcart;
     sys.work.gxcar = gxcar;
+    sys.frest_atom = frest_atom;
     if frest_max > sys.frest {
         sys.frest = frest_max;
     }
 
-    // Phase B: serial linked-cell insertion in the identical order the serial
-    // path uses, so the resulting lists are bit-identical.
+    // Phase B: serial linked-cell insertion in the identical order, so the lists
+    // are bit-identical no matter how Phase A iterated.
     if !sys.init1 {
         for &(itype, icart0, _, _) in &descs {
             let na = sys.natoms[itype];
@@ -504,13 +540,47 @@ fn expand_molecules_parallel(x: &[F], sys: &mut PackContext, mode: ExpandMode) -
     f_total
 }
 
+/// Run the independent per-molecule Phase-A `body` over `descs` and reduce to
+/// `(f_total, frest_max)`. This is the single place where the serial and
+/// parallel expand paths diverge: `par_iter` when `parallel`, plain `iter`
+/// otherwise — the only `iter`-vs-`par_iter` switch in the expand pass.
+#[cfg(feature = "rayon")]
+fn expand_reduce<B>(descs: &[(usize, usize, usize, usize)], body: &B, parallel: bool) -> (F, F)
+where
+    B: Fn(&(usize, usize, usize, usize)) -> (F, F) + Sync,
+{
+    use rayon::prelude::*;
+    if parallel {
+        descs
+            .par_iter()
+            .map(body)
+            .reduce(|| (0.0 as F, 0.0 as F), |a, b| (a.0 + b.0, a.1.max(b.1)))
+    } else {
+        descs
+            .iter()
+            .map(body)
+            .fold((0.0 as F, 0.0 as F), |a, b| (a.0 + b.0, a.1.max(b.1)))
+    }
+}
+
+/// Non-rayon build: the expand pass is always serial.
+#[cfg(not(feature = "rayon"))]
+fn expand_reduce<B>(descs: &[(usize, usize, usize, usize)], body: &B, _parallel: bool) -> (F, F)
+where
+    B: Fn(&(usize, usize, usize, usize)) -> (F, F),
+{
+    descs
+        .iter()
+        .map(body)
+        .fold((0.0 as F, 0.0 as F), |a, b| (a.0 + b.0, a.1.max(b.1)))
+}
+
 /// Fill `descs` with one `(itype, icart0, ilubar, ilugan)` descriptor per
 /// **active** molecule (clearing any previous contents first), mirroring the
-/// serial expand/project loops' `comptype` skipping and `ilubar`/`ilugan`
-/// compaction. `ilugan` (the Euler-angle offset) starts at `ntotmol*3`, which
-/// is correct for both full and per-type compact `x` (`SwapState::set_type`
-/// shrinks `ntotmol` to the phase's molecule count).
-#[cfg(feature = "rayon")]
+/// expand/project loops' `comptype` skipping and `ilubar`/`ilugan` compaction.
+/// `ilugan` (the Euler-angle offset) starts at `ntotmol*3`, which is correct for
+/// both full and per-type compact `x` (`SwapState::set_type` shrinks `ntotmol`
+/// to the phase's molecule count).
 fn fill_active_mol_descs(descs: &mut Vec<(usize, usize, usize, usize)>, sys: &PackContext) {
     descs.clear();
     let mut ilubar = 0usize;
@@ -631,6 +701,79 @@ fn accumulate_constraint_values_and_gradients_from_xcart(sys: &mut PackContext) 
     }
 
     f
+}
+
+/// Starting `icart` of free type `itype` — prefix sum of `nmols·natoms` over
+/// preceding types. Cheap (`ntype` is small) and used only by collective terms.
+#[inline]
+fn type_icart_start(sys: &PackContext, itype: usize) -> usize {
+    let mut start = 0usize;
+    for t in 0..itype {
+        start += sys.nmols[t] * sys.natoms[t];
+    }
+    start
+}
+
+/// Sum of all collective (group-level) restraint penalties. Each restraint is
+/// evaluated once over **all copies** of its type (gathered from `sys.xcart`).
+/// Read-only — used by the value-only `compute_f` paths.
+fn accumulate_collective_f(sys: &PackContext) -> F {
+    if sys.collective.is_empty() {
+        return 0.0;
+    }
+    let (scale, scale2) = (sys.scale, sys.scale2);
+    let mut total = 0.0;
+    for (itype, r) in &sys.collective {
+        let itype = *itype;
+        if !sys.comptype[itype] {
+            continue;
+        }
+        let start = type_icart_start(sys, itype);
+        let len = sys.nmols[itype] * sys.natoms[itype];
+        if len == 0 {
+            continue;
+        }
+        total += r.f(&sys.xcart[start..start + len], scale, scale2);
+    }
+    total
+}
+
+/// Value + gradient of all collective restraints. The coupled gradient is
+/// scattered into `sys.work.gxcar` so the subsequent `project_cartesian_gradient`
+/// maps it onto each molecule's COM/Euler DOF (monatomic species → identity on z).
+/// Returns the summed penalty value. Used by `compute_fg` (value) and
+/// `compute_g` (gradient; value discarded).
+fn accumulate_collective_fg(sys: &mut PackContext) -> F {
+    if sys.collective.is_empty() {
+        return 0.0;
+    }
+    let (scale, scale2) = (sys.scale, sys.scale2);
+    // Move the list out so `sys.xcart` (read) and `sys.work.gxcar` (write) are
+    // borrowed as disjoint fields without aliasing the whole `sys`.
+    let collective = std::mem::take(&mut sys.collective);
+    let mut total = 0.0;
+    for (itype, r) in &collective {
+        let itype = *itype;
+        if !sys.comptype[itype] {
+            continue;
+        }
+        let start = type_icart_start(sys, itype);
+        let len = sys.nmols[itype] * sys.natoms[itype];
+        if len == 0 {
+            continue;
+        }
+        let coords: Vec<[F; 3]> = sys.xcart[start..start + len].to_vec();
+        let mut grads = vec![[0.0 as F; 3]; len];
+        total += r.fg(&coords, scale, scale2, &mut grads);
+        for (k, g) in grads.iter().enumerate() {
+            let gc = &mut sys.work.gxcar[start + k];
+            gc[0] += g[0];
+            gc[1] += g[1];
+            gc[2] += g[2];
+        }
+    }
+    sys.collective = collective;
+    total
 }
 
 #[inline(always)]
@@ -971,83 +1114,29 @@ fn fgparc_into(
     while jcart_id != NONE_IDX {
         let jcart = jcart_id as usize;
         let next = sys.latomnext[jcart];
-        let props_j = sys.atom_props[jcart];
-        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
-            jcart_id = next;
-            continue;
-        }
-        if hot.fixed_i && (props_j.flags & ATOM_FLAG_FIXED != 0) {
-            jcart_id = next;
-            continue;
-        }
-
-        let xj = sys.xcart[jcart];
-        let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
-        let datom = dx * dx + dy * dy + dz * dz;
-        let rsum = hot.props.radius + props_j.radius;
-        let tol = rsum * rsum;
-
-        if datom < tol {
-            let penalty = datom - tol;
-            let scale = hot.props.fscale * props_j.fscale;
-            result += scale * penalty * penalty;
-
-            let dtemp = scale * 4.0 * penalty;
-            let xdiff0 = dtemp * dx;
-            let xdiff1 = dtemp * dy;
-            let xdiff2 = dtemp * dz;
-            // SAFETY: `t` is this worker's unique region; `icart`/`jcart` are
-            // distinct in-bounds atoms; each `&mut` is dropped before the next.
-            {
-                let gi = unsafe { pptr.slot(t, icart) };
-                gi[0] += xdiff0;
-                gi[1] += xdiff1;
-                gi[2] += xdiff2;
-            }
-            {
-                let gj = unsafe { pptr.slot(t, jcart) };
-                gj[0] -= xdiff0;
-                gj[1] -= xdiff1;
-                gj[2] -= xdiff2;
-            }
-
-            if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
-                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
-                let short_tol = short_rsum * short_rsum;
-                if datom < short_tol {
-                    let short_penalty = datom - short_tol;
-                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
-                    sr_scale *= (tol * tol) / (short_tol * short_tol);
-                    let sr_pair_scale = scale * sr_scale;
-                    result += sr_pair_scale * short_penalty * short_penalty;
-
-                    let dtemp2 = sr_pair_scale * 4.0 * short_penalty;
-                    let xdiff0 = dtemp2 * dx;
-                    let xdiff1 = dtemp2 * dy;
-                    let xdiff2 = dtemp2 * dz;
-                    {
-                        let gi = unsafe { pptr.slot(t, icart) };
-                        gi[0] += xdiff0;
-                        gi[1] += xdiff1;
-                        gi[2] += xdiff2;
-                    }
-                    {
-                        let gj = unsafe { pptr.slot(t, jcart) };
-                        gj[0] -= xdiff0;
-                        gj[1] -= xdiff1;
-                        gj[2] -= xdiff2;
-                    }
+        if let Some(c) = pair_term::<true, true>(&hot, xi, jcart, sys, pbc) {
+            result += c.energy;
+            if c.overlap {
+                // SAFETY: `t` is this worker's unique region; `icart`/`jcart`
+                // are distinct in-bounds atoms; each `&mut` is dropped before
+                // the next.
+                {
+                    let gi = unsafe { pptr.slot(t, icart) };
+                    gi[0] += c.grad[0];
+                    gi[1] += c.grad[1];
+                    gi[2] += c.grad[2];
+                }
+                {
+                    let gj = unsafe { pptr.slot(t, jcart) };
+                    gj[0] -= c.grad[0];
+                    gj[1] -= c.grad[1];
+                    gj[2] -= c.grad[2];
                 }
             }
+            if c.violation > local_fdist {
+                local_fdist = c.violation;
+            }
         }
-
-        let rsum_ini = hot.props.radius_ini + props_j.radius_ini;
-        let tol_ini = rsum_ini * rsum_ini;
-        let violation = tol_ini - datom;
-        if violation > local_fdist {
-            local_fdist = violation;
-        }
-
         jcart_id = next;
     }
 
@@ -1065,58 +1154,18 @@ fn gparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstan
     while jcart_id != NONE_IDX {
         let jcart = jcart_id as usize;
         let next = sys.latomnext[jcart];
-        let props_j = sys.atom_props[jcart];
-        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
-            jcart_id = next;
-            continue;
-        }
-        if hot.fixed_i && (props_j.flags & ATOM_FLAG_FIXED != 0) {
-            jcart_id = next;
-            continue;
-        }
-
-        let rsum = hot.props.radius + props_j.radius;
-        let tol = rsum * rsum;
-        let xj = sys.xcart[jcart];
-        let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
-        let datom = dx * dx + dy * dy + dz * dz;
-
-        if datom < tol {
-            let scale = hot.props.fscale * props_j.fscale;
-            let dtemp = scale * 4.0 * (datom - tol);
-            let xdiff0 = dtemp * dx;
-            let xdiff1 = dtemp * dy;
-            let xdiff2 = dtemp * dz;
-            let gi = &mut sys.work.gxcar[icart];
-            gi[0] += xdiff0;
-            gi[1] += xdiff1;
-            gi[2] += xdiff2;
-            let gj = &mut sys.work.gxcar[jcart];
-            gj[0] -= xdiff0;
-            gj[1] -= xdiff1;
-            gj[2] -= xdiff2;
-            if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
-                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
-                let short_tol = short_rsum * short_rsum;
-                if datom < short_tol {
-                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
-                    sr_scale *= (tol * tol) / (short_tol * short_tol);
-                    let dtemp2 = scale * 4.0 * sr_scale * (datom - short_tol);
-                    let xdiff0 = dtemp2 * dx;
-                    let xdiff1 = dtemp2 * dy;
-                    let xdiff2 = dtemp2 * dz;
-                    let gi = &mut sys.work.gxcar[icart];
-                    gi[0] += xdiff0;
-                    gi[1] += xdiff1;
-                    gi[2] += xdiff2;
-                    let gj = &mut sys.work.gxcar[jcart];
-                    gj[0] -= xdiff0;
-                    gj[1] -= xdiff1;
-                    gj[2] -= xdiff2;
-                }
+        if let Some(c) = pair_term::<true, false>(&hot, xi, jcart, sys, pbc) {
+            if c.overlap {
+                let gi = &mut sys.work.gxcar[icart];
+                gi[0] += c.grad[0];
+                gi[1] += c.grad[1];
+                gi[2] += c.grad[2];
+                let gj = &mut sys.work.gxcar[jcart];
+                gj[0] -= c.grad[0];
+                gj[1] -= c.grad[1];
+                gj[2] -= c.grad[2];
             }
         }
-
         jcart_id = next;
     }
 }
@@ -1137,81 +1186,30 @@ fn fgparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConsta
     while jcart_id != NONE_IDX {
         let jcart = jcart_id as usize;
         let next = sys.latomnext[jcart];
-        let props_j = sys.atom_props[jcart];
-        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
-            jcart_id = next;
-            continue;
-        }
-        if hot.fixed_i && (props_j.flags & ATOM_FLAG_FIXED != 0) {
-            jcart_id = next;
-            continue;
-        }
-
-        let xj = sys.xcart[jcart];
-        let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
-        let datom = dx * dx + dy * dy + dz * dz;
-        let rsum = hot.props.radius + props_j.radius;
-        let tol = rsum * rsum;
-
-        if datom < tol {
-            let penalty = datom - tol;
-            let scale = hot.props.fscale * props_j.fscale;
-            result += scale * penalty * penalty;
-
-            let dtemp = scale * 4.0 * penalty;
-            let xdiff0 = dtemp * dx;
-            let xdiff1 = dtemp * dy;
-            let xdiff2 = dtemp * dz;
-            let gi = &mut sys.work.gxcar[icart];
-            gi[0] += xdiff0;
-            gi[1] += xdiff1;
-            gi[2] += xdiff2;
-            let gj = &mut sys.work.gxcar[jcart];
-            gj[0] -= xdiff0;
-            gj[1] -= xdiff1;
-            gj[2] -= xdiff2;
-
-            if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
-                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
-                let short_tol = short_rsum * short_rsum;
-                if datom < short_tol {
-                    let short_penalty = datom - short_tol;
-                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
-                    sr_scale *= (tol * tol) / (short_tol * short_tol);
-                    let sr_pair_scale = scale * sr_scale;
-                    result += sr_pair_scale * short_penalty * short_penalty;
-
-                    let dtemp2 = sr_pair_scale * 4.0 * short_penalty;
-                    let xdiff0 = dtemp2 * dx;
-                    let xdiff1 = dtemp2 * dy;
-                    let xdiff2 = dtemp2 * dz;
-                    let gi = &mut sys.work.gxcar[icart];
-                    gi[0] += xdiff0;
-                    gi[1] += xdiff1;
-                    gi[2] += xdiff2;
-                    let gj = &mut sys.work.gxcar[jcart];
-                    gj[0] -= xdiff0;
-                    gj[1] -= xdiff1;
-                    gj[2] -= xdiff2;
+        if let Some(c) = pair_term::<true, true>(&hot, xi, jcart, sys, pbc) {
+            result += c.energy;
+            if c.overlap {
+                let gi = &mut sys.work.gxcar[icart];
+                gi[0] += c.grad[0];
+                gi[1] += c.grad[1];
+                gi[2] += c.grad[2];
+                let gj = &mut sys.work.gxcar[jcart];
+                gj[0] -= c.grad[0];
+                gj[1] -= c.grad[1];
+                gj[2] -= c.grad[2];
+            }
+            if c.violation > local_fdist {
+                local_fdist = c.violation;
+            }
+            if move_flag {
+                if c.violation > sys.fdist_atom[icart] {
+                    sys.fdist_atom[icart] = c.violation;
+                }
+                if c.violation > sys.fdist_atom[jcart] {
+                    sys.fdist_atom[jcart] = c.violation;
                 }
             }
         }
-
-        let rsum_ini = hot.props.radius_ini + props_j.radius_ini;
-        let tol_ini = rsum_ini * rsum_ini;
-        let violation = tol_ini - datom;
-        if violation > local_fdist {
-            local_fdist = violation;
-        }
-        if move_flag {
-            if violation > sys.fdist_atom[icart] {
-                sys.fdist_atom[icart] = violation;
-            }
-            if violation > sys.fdist_atom[jcart] {
-                sys.fdist_atom[jcart] = violation;
-            }
-        }
-
         jcart_id = next;
     }
 
@@ -1230,136 +1228,43 @@ fn fparc_stats(icart: usize, first_jcart: u32, sys: &PackContext, pbc: &PbcConst
     while jcart_id != NONE_IDX {
         let jcart = jcart_id as usize;
         let next = sys.latomnext[jcart];
-        let props_j = sys.atom_props[jcart];
-        if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
-            jcart_id = next;
-            continue;
-        }
-        if hot.fixed_i && (props_j.flags & ATOM_FLAG_FIXED != 0) {
-            jcart_id = next;
-            continue;
-        }
-
-        let xj = sys.xcart[jcart];
-        let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
-        let datom = dx * dx + dy * dy + dz * dz;
-        let rsum = hot.props.radius + props_j.radius;
-        let tol = rsum * rsum;
-
-        if datom < tol {
-            let penalty = datom - tol;
-            let scale = hot.props.fscale * props_j.fscale;
-            result += scale * penalty * penalty;
-            if hot.has_short && (hot.use_short_i || (props_j.flags & ATOM_FLAG_SHORT != 0)) {
-                let short_rsum = hot.shrad_i + sys.short_radius[jcart];
-                let short_tol = short_rsum * short_rsum;
-                if datom < short_tol {
-                    let penalty = datom - short_tol;
-                    let mut sr_scale = (hot.shscl_i * sys.short_radius_scale[jcart]).sqrt();
-                    sr_scale *= (tol * tol) / (short_tol * short_tol);
-                    result += scale * sr_scale * penalty * penalty;
-                }
+        if let Some(c) = pair_term::<false, true>(&hot, xi, jcart, sys, pbc) {
+            result += c.energy;
+            if c.violation > fdist_max {
+                fdist_max = c.violation;
             }
         }
-
-        let rsum_ini = hot.props.radius_ini + props_j.radius_ini;
-        let tol_ini = rsum_ini * rsum_ini;
-        let violation = tol_ini - datom;
-        if violation > fdist_max {
-            fdist_max = violation;
-        }
-
         jcart_id = next;
     }
 
     (result, fdist_max)
 }
 
+/// Project each active molecule's atom Cartesian gradient onto its own 6 DOF
+/// (COM + Euler), writing only its own **disjoint** `g[ilubar..]` / `g[ilugan..]`
+/// slots. Because no slot is summed across molecules and each molecule's
+/// accumulation order matches the legacy serial loop's (same atoms, same axis
+/// order), the result is **bit-identical** whether Phase A iterates with `iter`
+/// or `par_iter` — the only difference between the serial and parallel paths
+/// (see [`project_for_each`]). The dominant cost is `eulerrmat_derivatives`
+/// (trig) per molecule.
 fn project_cartesian_gradient(x: &[F], sys: &mut PackContext, g: &mut [F]) {
-    // Each active molecule projects its atoms' Cartesian gradient onto its own
-    // 6 DOF (COM + Euler), writing only its own disjoint `g` slots — so this
-    // parallelizes per molecule with no cross-task writes. The dominant cost is
-    // `eulerrmat_derivatives` (trig) per molecule, which otherwise serializes
-    // and caps `compute_fg` scaling once the pair kernel is parallel.
-    #[cfg(feature = "rayon")]
-    if sys.parallel_pair_eval && !sys.move_flag {
-        project_cartesian_gradient_parallel(x, sys, g);
-        return;
-    }
-
-    g.iter_mut().for_each(|v| *v = 0.0);
-
-    let mut k1 = 0usize;
-    let mut k2 = sys.ntotmol * 3;
-    let mut icart = 0usize;
-
-    for itype in 0..sys.ntype {
-        if !sys.comptype[itype] {
-            icart += sys.nmols[itype] * sys.natoms[itype];
-            continue;
-        }
-
-        for _imol in 0..sys.nmols[itype] {
-            let beta = x[k2];
-            let gama = x[k2 + 1];
-            let teta = x[k2 + 2];
-
-            let (dv1beta, dv1gama, dv1teta, dv2beta, dv2gama, dv2teta, dv3beta, dv3gama, dv3teta) =
-                eulerrmat_derivatives(beta, gama, teta);
-
-            let idatom_base = sys.idfirst[itype];
-            for iatom in 0..sys.natoms[itype] {
-                let idatom = idatom_base + iatom;
-                let cr = sys.coor[idatom];
-
-                for k in 0..3 {
-                    g[k1 + k] += sys.work.gxcar[icart][k];
-                }
-
-                for k in 0..3 {
-                    g[k2] += (cr[0] * dv1beta[k] + cr[1] * dv2beta[k] + cr[2] * dv3beta[k])
-                        * sys.work.gxcar[icart][k];
-                    g[k2 + 1] += (cr[0] * dv1gama[k] + cr[1] * dv2gama[k] + cr[2] * dv3gama[k])
-                        * sys.work.gxcar[icart][k];
-                    g[k2 + 2] += (cr[0] * dv1teta[k] + cr[1] * dv2teta[k] + cr[2] * dv3teta[k])
-                        * sys.work.gxcar[icart][k];
-                }
-
-                icart += 1;
-            }
-
-            k2 += 3;
-            k1 += 3;
-        }
-    }
-}
-
-/// Parallel counterpart to [`project_cartesian_gradient`]. Each active molecule
-/// is an independent task: it accumulates its 6 gradient components into local
-/// registers, then writes them once into its own `g[ilubar..ilubar+3]` (COM)
-/// and `g[ilugan..ilugan+3]` (Euler) slots. Those ranges are disjoint across
-/// molecules, so the writes need no synchronization. Because each molecule's
-/// accumulation order is identical to the serial loop's (same atoms, same axis
-/// order) and no slot is summed across molecules, the result is **bit-identical**
-/// to the serial path — only the inter-molecule visitation order changes.
-#[cfg(feature = "rayon")]
-fn project_cartesian_gradient_parallel(x: &[F], sys: &mut PackContext, g: &mut [F]) {
     g.iter_mut().for_each(|v| *v = 0.0);
 
     let mut descs = std::mem::take(&mut sys.work.mol_descs);
     fill_active_mol_descs(&mut descs, sys);
-    let sys_ro: &PackContext = sys;
+    let move_flag = sys.move_flag;
+    let parallel = sys.parallel_pair_eval && !move_flag;
 
-    /// Base pointer to `g`. Each task writes only its molecule's COM/Euler
-    /// slots, which are disjoint across molecules. The accessor takes `self` so
-    /// the closure captures the whole (Sync) wrapper, not the bare pointer.
     #[derive(Clone, Copy)]
     struct GPtr(*mut F);
-    // SAFETY: per-molecule `ilubar`/`ilugan` ranges are disjoint, so no two
-    // tasks write the same `g` index.
+    // SAFETY: per-molecule `ilubar`/`ilugan` ranges are disjoint, so no two tasks
+    // write the same `g` index.
     unsafe impl Send for GPtr {}
     unsafe impl Sync for GPtr {}
     impl GPtr {
+        // Takes `self` so a closure that calls it captures the whole (`Sync`)
+        // wrapper, not the bare `*mut` field.
         /// # Safety
         /// `i` must index a slot owned solely by the calling task.
         #[inline(always)]
@@ -1371,9 +1276,10 @@ fn project_cartesian_gradient_parallel(x: &[F], sys: &mut PackContext, g: &mut [
     }
     let gptr = GPtr(g.as_mut_ptr());
 
-    descs
-        .par_iter()
-        .for_each(|&(itype, icart0, ilubar, ilugan)| {
+    // Inner scope so the shared `&PackContext` borrow ends before `sys` is reused.
+    {
+        let sys_ro: &PackContext = sys;
+        let body = |&(itype, icart0, ilubar, ilugan): &(usize, usize, usize, usize)| {
             let beta = x[ilugan];
             let gama = x[ilugan + 1];
             let teta = x[ilugan + 2];
@@ -1406,9 +1312,37 @@ fn project_cartesian_gradient_parallel(x: &[F], sys: &mut PackContext, g: &mut [
                     gptr.write(ilugan + k, gang[k]);
                 }
             }
-        });
+        };
+        project_for_each(&descs, &body, parallel);
+    }
 
     sys.work.mol_descs = descs;
+}
+
+/// Run the independent per-molecule projection `body` over `descs`. The single
+/// place the serial and parallel projection paths diverge: `par_iter` when
+/// `parallel`, plain `iter` otherwise. No reduction — each task writes disjoint
+/// `g` slots.
+#[cfg(feature = "rayon")]
+fn project_for_each<B>(descs: &[(usize, usize, usize, usize)], body: &B, parallel: bool)
+where
+    B: Fn(&(usize, usize, usize, usize)) + Sync,
+{
+    use rayon::prelude::*;
+    if parallel {
+        descs.par_iter().for_each(body);
+    } else {
+        descs.iter().for_each(body);
+    }
+}
+
+/// Non-rayon build: projection is always serial.
+#[cfg(not(feature = "rayon"))]
+fn project_for_each<B>(descs: &[(usize, usize, usize, usize)], body: &B, _parallel: bool)
+where
+    B: Fn(&(usize, usize, usize, usize)),
+{
+    descs.iter().for_each(body);
 }
 
 #[inline]

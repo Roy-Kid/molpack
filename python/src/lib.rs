@@ -24,7 +24,7 @@
 
 use pyo3::prelude::*;
 
-mod frame_marshal;
+mod interop;
 
 mod helpers;
 use helpers::register_errors;
@@ -34,8 +34,9 @@ use types::{PyAngle, PyAxis, PyCenteringMode};
 
 mod constraint;
 use constraint::{
-    PyAbovePlaneRestraint, PyBelowPlaneRestraint, PyInsideBoxRestraint, PyInsideSphereRestraint,
-    PyOutsideSphereRestraint,
+    PyAbovePlaneRestraint, PyBelowPlaneRestraint, PyExponentialPlane, PyExponentialPoint,
+    PyGaussianPlane, PyGaussianPoint, PyInsideBoxRestraint, PyInsideSphereRestraint,
+    PyOutsideSphereRestraint, PyTabulatedPlane, PyTabulatedPoint,
 };
 
 mod handler;
@@ -43,6 +44,8 @@ use handler::PyStepInfo;
 
 mod target;
 use target::PyTarget;
+
+mod relaxer;
 
 mod packer;
 use packer::{PyPackResult, PyPacker};
@@ -64,11 +67,21 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyOutsideSphereRestraint>()?;
     m.add_class::<PyAbovePlaneRestraint>()?;
     m.add_class::<PyBelowPlaneRestraint>()?;
+    m.add_class::<PyGaussianPlane>()?;
+    m.add_class::<PyGaussianPoint>()?;
+    m.add_class::<PyExponentialPlane>()?;
+    m.add_class::<PyExponentialPoint>()?;
+    m.add_class::<PyTabulatedPlane>()?;
+    m.add_class::<PyTabulatedPoint>()?;
 
     m.add_class::<PyTarget>()?;
     m.add_class::<PyPacker>()?;
     m.add_class::<PyPackResult>()?;
     m.add_class::<PyStepInfo>()?;
+
+    m.add_class::<relaxer::PyTorsionMcRelaxer>()?;
+    #[cfg(feature = "ff")]
+    m.add_class::<relaxer::PyLBFGSRelaxer>()?;
 
     m.add_class::<PyScriptJob>()?;
     m.add_function(wrap_pyfunction!(load_script, m)?)?;

@@ -10,6 +10,7 @@
 //!
 //! - [`TorsionMcRelaxer`]: Monte Carlo torsion angle sampling for flexible molecules.
 
+use molrs::Frame;
 use molrs::chem::rotatable::{
     RotatableBond, atom_id_to_index, detect_rotatable_bonds_with_downstream,
 };
@@ -22,22 +23,34 @@ use std::f64::consts::PI;
 use crate::numerics::near_zero_norm_floor;
 use crate::random::uniform01_core;
 
+/// Force-field geometry relaxer (L-BFGS over a molrs `Potential`), `ff` feature.
+#[cfg(feature = "ff")]
+mod lbfgs;
+#[cfg(feature = "ff")]
+pub use lbfgs::LBFGSRelaxer;
+
 // ── Traits ──────────────────────────────────────────────────────────────────
 
 /// Per-target in-loop relaxer. Stored on `Target` (immutable config).
 /// Creates a stateful runner inside `pack()`.
 ///
-/// Analogous to `Restraint` (objective-function penalties) but operates on
+/// Analogous to `AtomRestraint` (objective-function penalties) but operates on
 /// a different axis: a `Relaxer` modifies the **reference geometry** of the
-/// molecule (e.g. torsion MC on a polymer backbone), while a `Restraint`
+/// molecule (e.g. torsion MC on a polymer backbone), while a `AtomRestraint`
 /// adds a penalty term to the per-atom objective.
 pub trait Relaxer: Send + Sync + CloneRelaxer {
-    /// Spawn a stateful runner for this relaxer. Called once at the
-    /// start of `pack()`. Implementations typically return a boxed
-    /// struct that owns the MC acceptance counters and other runtime
-    /// state — config (`self`) is immutable; runtime lives in the
-    /// returned runner.
-    fn spawn(&self, ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner>;
+    /// Spawn a stateful runner for this relaxer. Called once at the start of
+    /// `pack()`. Implementations typically return a boxed struct that owns the
+    /// MC acceptance counters and other runtime state — config (`self`) is
+    /// immutable; runtime lives in the returned runner.
+    ///
+    /// `frame` is the target's molecule template (full topology + per-atom
+    /// types/charges), `None` for coordinate-only targets. A force-field relaxer
+    /// ([`LBFGSRelaxer`]) compiles its potential against it here — building the
+    /// neighbour list and calling `to_potentials` — so a `LBFGSRelaxer(ff)` need
+    /// not know the molecule until packing starts. Relaxers that work on
+    /// coordinates alone (e.g. [`TorsionMcRelaxer`]) ignore it.
+    fn spawn(&self, frame: Option<&Frame>, ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner>;
 }
 
 /// Clone-box helper for trait objects.
@@ -65,7 +78,7 @@ impl std::fmt::Debug for Box<dyn Relaxer> {
 
 /// Runtime state for a relaxer. Created by `Relaxer::build()`, used inside `pack()`.
 ///
-/// Analogous to calling `Restraint::f()`/`fg()` during evaluation,
+/// Analogous to calling `AtomRestraint::f()`/`fg()` during evaluation,
 /// but stateful (MC acceptance counters, temperature schedule, etc.).
 pub trait RelaxerRunner: Send {
     /// Called between movebad and pgencan in each iteration.
@@ -76,6 +89,10 @@ pub trait RelaxerRunner: Send {
     /// - `rng`: shared random number generator
     ///
     /// Returns `Some(new_coords)` if any modification accepted, `None` otherwise.
+    /// Accepted `new_coords` must keep the molecule's centroid at the origin:
+    /// the packer places each copy by COM + Euler rotation of this reference
+    /// conformer, so a non-centered return would shift every placement. Use
+    /// [`recenter`] before returning.
     fn on_iter(
         &mut self,
         coords: &[[F; 3]],
@@ -170,7 +187,7 @@ impl TorsionMcRelaxer {
 }
 
 impl Relaxer for TorsionMcRelaxer {
-    fn spawn(&self, _ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner> {
+    fn spawn(&self, _frame: Option<&Frame>, _ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner> {
         Box::new(TorsionMcRelaxerRunner {
             bonds: self.bonds.clone(),
             max_delta: self.max_delta,
@@ -398,7 +415,7 @@ fn rotate_around_bond(coords: &mut [[F; 3]], bond: &RotatableBond, angle: F) {
 }
 
 /// Re-center coordinates at their geometric center.
-fn recenter(coords: &mut [[F; 3]]) {
+pub(crate) fn recenter(coords: &mut [[F; 3]]) {
     let n = coords.len() as F;
     if n < 1.0 {
         return;
@@ -566,7 +583,7 @@ mod tests {
             .with_temperature(1.0)
             .with_steps(5);
 
-        let mut runner = hook.spawn(&coords);
+        let mut runner = hook.spawn(None, &coords);
         let mut rng = rand::rng();
 
         let result = runner.on_iter(&coords, 100.0, &mut |_| 50.0, &mut rng);
@@ -624,7 +641,7 @@ mod tests {
             .with_steps(5);
 
         // radius=0.0 (default), evaluate always returns 0 → all moves accepted
-        let mut runner = hook.spawn(&coords);
+        let mut runner = hook.spawn(None, &coords);
         let mut rng = rand::rng();
         let result = runner.on_iter(&coords, 0.0, &mut |_| 0.0, &mut rng);
         assert!(result.is_some());
@@ -641,7 +658,7 @@ mod tests {
             .with_temperature(0.0) // greedy: only accept improvements
             .with_steps(50);
 
-        let mut runner = hook.spawn(&coords);
+        let mut runner = hook.spawn(None, &coords);
         let mut rng = rand::rng();
 
         // Run with evaluate returning 0 — self-avoidance is the only signal.

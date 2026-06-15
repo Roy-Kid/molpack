@@ -9,9 +9,9 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
 
+use molrs::io::data::sdf::SDFReader;
+use molrs::io::reader::FrameReader;
 use molrs::store::frame::Frame;
-use molrs_io::data::sdf::SDFReader;
-use molrs_io::reader::FrameReader;
 
 use super::error::ScriptError;
 
@@ -52,10 +52,10 @@ pub fn read_frame(path: &Path, filetype_hint: Option<&str>) -> Result<Frame, Scr
         })?;
 
     match fmt.as_str() {
-        "pdb" => molrs_io::data::pdb::read_pdb_frame(path)
+        "pdb" => molrs::io::data::pdb::read_pdb_frame(path)
             .map_err(|e| io_err(path, format!("reading PDB: {e}"))),
 
-        "xyz" => molrs_io::data::xyz::read_xyz_frame(path)
+        "xyz" => molrs::io::data::xyz::read_xyz_frame(path)
             .map_err(|e| io_err(path, format!("reading XYZ: {e}"))),
 
         "sdf" | "mol" => {
@@ -68,7 +68,7 @@ pub fn read_frame(path: &Path, filetype_hint: Option<&str>) -> Result<Frame, Scr
         }
 
         "lammps_dump" | "lammpstrj" => {
-            let mut frames = molrs_io::trajectory::lammps_dump::read_lammps_dump(path)
+            let mut frames = molrs::io::trajectory::lammps_dump::read_lammps_dump(path)
                 .map_err(|e| io_err(path, format!("reading LAMMPS dump: {e}")))?;
             if frames.is_empty() {
                 return Err(io_err(path, "LAMMPS dump contains no frames"));
@@ -76,7 +76,7 @@ pub fn read_frame(path: &Path, filetype_hint: Option<&str>) -> Result<Frame, Scr
             Ok(frames.swap_remove(0))
         }
 
-        "lammps_data" | "data" => molrs_io::data::lammps_data::read_lammps_data(path)
+        "lammps_data" | "data" => molrs::io::data::lammps_data::read_lammps_data(path)
             .map_err(|e| io_err(path, format!("reading LAMMPS data: {e}"))),
 
         other => Err(io_err(path, format!("unsupported input format `{other}`"))),
@@ -100,7 +100,7 @@ pub fn write_frame(path: &Path, frame: &Frame) -> Result<(), ScriptError> {
             let file =
                 File::create(path).map_err(|e| io_err(path, format!("creating PDB: {e}")))?;
             let mut writer = BufWriter::new(file);
-            molrs_io::data::pdb::write_pdb_frame(&mut writer, frame)
+            molrs::io::data::pdb::write_pdb_frame(&mut writer, frame)
                 .map_err(|e| io_err(path, format!("writing PDB: {e}")))
         }
 
@@ -108,12 +108,12 @@ pub fn write_frame(path: &Path, frame: &Frame) -> Result<(), ScriptError> {
             let file =
                 File::create(path).map_err(|e| io_err(path, format!("creating XYZ: {e}")))?;
             let mut writer = BufWriter::new(file);
-            molrs_io::data::xyz::write_xyz_frame(&mut writer, frame)
+            molrs::io::data::xyz::write_xyz_frame(&mut writer, frame)
                 .map_err(|e| io_err(path, format!("writing XYZ: {e}")))
         }
 
         "lammpstrj" => {
-            molrs_io::trajectory::lammps_dump::write_lammps_dump(path, std::slice::from_ref(frame))
+            molrs::io::trajectory::lammps_dump::write_lammps_dump(path, std::slice::from_ref(frame))
                 .map_err(|e| io_err(path, format!("writing LAMMPS dump: {e}")))
         }
 

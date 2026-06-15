@@ -26,7 +26,6 @@ EXAMPLE_SCRIPTS = [
     "pack_interface.py",
     "pack_spherical.py",
     "pack_solvprotein.py",
-    "pack_profile_monolayer.py",
 ]
 
 # Maps every example script to the PDB fixtures it depends on.

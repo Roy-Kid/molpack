@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::frame::frame_to_coords_and_elements;
 use crate::relaxer::Relaxer;
-use crate::restraint::Restraint;
+use crate::restraint::{AtomRestraint, Restraint};
 use molrs::types::F;
 
 /// Cartesian axis selector used in `Target::with_rotation_bound` and
@@ -94,11 +94,16 @@ pub struct Target {
     /// Optional name for logging.
     pub name: Option<String>,
     /// Restraints applied to every atom of every molecule copy.
-    pub molecule_restraints: Vec<Arc<dyn Restraint>>,
+    pub molecule_restraints: Vec<Arc<dyn AtomRestraint>>,
     /// Per-atom-subset restraints: `(atom_indices_0_based, restraint)`.
     /// Each entry holds the 0-based atom indices (converted from Packmol's
     /// 1-based convention at registration time) and the restraint applied to them.
-    pub atom_restraints: Vec<(Vec<usize>, Arc<dyn Restraint>)>,
+    pub atom_restraints: Vec<(Vec<usize>, Arc<dyn AtomRestraint>)>,
+    /// Group-level restraints evaluated over **all copies** of this type at
+    /// once (e.g. distribution matching). Unlike [`molecule_restraints`], these
+    /// couple the copies through their joint coordinate, so they cannot be
+    /// expressed as a per-atom [`AtomRestraint`]. See [`Restraint`].
+    pub collective_restraints: Vec<Arc<dyn Restraint>>,
     /// Optional structure-level limit for the perturbation heuristic
     /// (Packmol's `maxmove`).
     pub perturb_budget: Option<usize>,
@@ -163,6 +168,7 @@ impl Target {
             name: None,
             molecule_restraints: Vec::new(),
             atom_restraints: Vec::new(),
+            collective_restraints: Vec::new(),
             perturb_budget: None,
             centering: CenteringMode::Auto,
             rotation_bound: [None, None, None],
@@ -178,7 +184,7 @@ impl Target {
     }
 
     /// Attach a restraint applied to every atom of every molecule copy.
-    pub fn with_restraint(mut self, r: impl Restraint + 'static) -> Self {
+    pub fn with_restraint(mut self, r: impl AtomRestraint + 'static) -> Self {
         self.molecule_restraints.push(Arc::new(r));
         self
     }
@@ -192,8 +198,24 @@ impl Target {
     /// selects the first three atoms. If you are porting from a Packmol
     /// `.inp` file (which uses 1-based indices), subtract 1 at the
     /// call site.
-    pub fn with_atom_restraint(mut self, indices: &[usize], r: impl Restraint + 'static) -> Self {
+    pub fn with_atom_restraint(
+        mut self,
+        indices: &[usize],
+        r: impl AtomRestraint + 'static,
+    ) -> Self {
         self.atom_restraints.push((indices.to_vec(), Arc::new(r)));
+        self
+    }
+
+    /// Attach a group-level restraint evaluated over all copies of this type at
+    /// once (e.g. distribution matching). The restraint sees every copy's
+    /// coordinate jointly and returns a coupled gradient.
+    ///
+    /// Here `Restraint` is the **group/collective** trait
+    /// ([`crate::restraint::Restraint`]) — it sees every copy's coordinate at
+    /// once, not the per-atom [`AtomRestraint`].
+    pub fn with_collective_restraint(mut self, r: impl Restraint + 'static) -> Self {
+        self.collective_restraints.push(Arc::new(r));
         self
     }
 

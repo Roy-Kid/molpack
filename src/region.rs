@@ -6,7 +6,7 @@
 //!
 //! Regions compose into boolean combinations via `And` / `Or` / `Not`
 //! (pure type algebra — zero runtime cost beyond the component evaluations).
-//! Any `Region` lifts to a soft-penalty `Restraint` via [`RegionRestraint`]:
+//! Any `Region` lifts to a soft-penalty `AtomRestraint` via [`RegionRestraint`]:
 //! `penalty(x) = scale2 * max(0, signed_distance(x))²`.
 //!
 //! # Example
@@ -21,18 +21,18 @@
 //! assert!(!shell.contains(&[3.0, 0.0, 0.0]));  // inside inner sphere
 //! assert!(!shell.contains(&[15.0, 0.0, 0.0])); // outside outer sphere
 //!
-//! // Lift to a Restraint for packing
+//! // Lift to a AtomRestraint for packing
 //! let restraint = RegionRestraint(shell);
 //! ```
 //!
 //! Direction-3 rule (spec §0 bullet 9): `Region` is a **separate trait**
-//! from `Restraint`; composition operators (`.and()` etc.) live on `Region`,
-//! not on `Restraint`. Plugin vs built-in `Region` are type-equal via
+//! from `AtomRestraint`; composition operators (`.and()` etc.) live on `Region`,
+//! not on `AtomRestraint`. Plugin vs built-in `Region` are type-equal via
 //! user `impl Region`.
 
 use molrs::types::F;
 
-use crate::restraint::Restraint;
+use crate::restraint::AtomRestraint;
 
 // ============================================================================
 // Core trait
@@ -179,7 +179,7 @@ pub trait RegionExt: Region + Sized {
         Not(self)
     }
 
-    /// Lift this region into a soft-penalty [`Restraint`]. Equivalent
+    /// Lift this region into a soft-penalty [`AtomRestraint`]. Equivalent
     /// to wrapping in [`RegionRestraint`] manually.
     fn into_restraint(self) -> RegionRestraint<Self> {
         RegionRestraint(self)
@@ -189,10 +189,10 @@ pub trait RegionExt: Region + Sized {
 impl<R: Region + Sized> RegionExt for R {}
 
 // ============================================================================
-// RegionRestraint — lift any Region to a quadratic-exterior-penalty Restraint
+// RegionRestraint — lift any Region to a quadratic-exterior-penalty AtomRestraint
 // ============================================================================
 
-/// Wraps a `Region` as a soft-penalty `Restraint` with quadratic
+/// Wraps a `Region` as a soft-penalty `AtomRestraint` with quadratic
 /// exterior penalty:
 ///
 /// ```text
@@ -206,7 +206,7 @@ impl<R: Region + Sized> RegionExt for R {}
 /// # Example
 /// ```
 /// use molpack::region::{InsideSphereRegion, RegionExt};
-/// use molpack::{RegionRestraint, Restraint};
+/// use molpack::{RegionRestraint, AtomRestraint};
 ///
 /// let shell = InsideSphereRegion::new([0.0; 3], 10.0)
 ///     .and(InsideSphereRegion::new([0.0; 3], 5.0).not());
@@ -227,7 +227,7 @@ pub struct RegionRestraint<R: Region>(pub R);
 )]
 pub type FromRegion<R> = RegionRestraint<R>;
 
-impl<R: Region + 'static> Restraint for RegionRestraint<R> {
+impl<R: Region + 'static> AtomRestraint for RegionRestraint<R> {
     fn f(&self, x: &[F; 3], _scale: F, scale2: F) -> F {
         let d = self.0.signed_distance(x);
         let v = d.max(0.0);
@@ -513,7 +513,7 @@ mod tests {
         }
     }
 
-    // ── FromRegion lifts to Restraint ────────────────────────────────────────
+    // ── FromRegion lifts to AtomRestraint ────────────────────────────────────────
 
     #[test]
     fn from_region_penalty_zero_inside() {

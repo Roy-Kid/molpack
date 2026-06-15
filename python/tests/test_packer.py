@@ -1,3 +1,4 @@
+import molrs
 import numpy as np
 import pytest
 
@@ -8,31 +9,39 @@ from molpack import Angle, Axis, CenteringMode
 def _make_frame(
     n: int = 1,
     elements: list[str] | None = None,
-) -> dict:
-    """Minimal frame dict with n atoms at the origin."""
+) -> molrs.Frame:
+    """Minimal frame with n atoms at the origin."""
     if elements is None:
         elements = ["X"] * n
     positions = np.zeros((n, 3), dtype=np.float64)
-    return {
-        "atoms": {
-            "x": positions[:, 0].copy(),
-            "y": positions[:, 1].copy(),
-            "z": positions[:, 2].copy(),
-            "element": elements,
+    return molrs.Frame.from_dict(
+        {
+            "blocks": {
+                "atoms": {
+                    "x": positions[:, 0].copy(),
+                    "y": positions[:, 1].copy(),
+                    "z": positions[:, 2].copy(),
+                    "element": elements,
+                }
+            }
         }
-    }
+    )
 
 
-def _make_two_atom_frame() -> dict:
+def _make_two_atom_frame() -> molrs.Frame:
     positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float64)
-    return {
-        "atoms": {
-            "x": positions[:, 0].copy(),
-            "y": positions[:, 1].copy(),
-            "z": positions[:, 2].copy(),
-            "element": ["O", "H"],
+    return molrs.Frame.from_dict(
+        {
+            "blocks": {
+                "atoms": {
+                    "x": positions[:, 0].copy(),
+                    "y": positions[:, 1].copy(),
+                    "z": positions[:, 2].copy(),
+                    "element": ["O", "H"],
+                }
+            }
         }
-    }
+    )
 
 
 class TestTargetConstructor:
@@ -56,43 +65,40 @@ class TestTargetConstructor:
 
     def test_missing_atoms_block_raises(self):
         with pytest.raises((ValueError, KeyError)):
-            molpack.Target({}, 1)
+            molpack.Target(molrs.Frame.from_dict({"blocks": {}}), 1)
 
     def test_missing_x_column_raises(self):
-        frame = {
-            "atoms": {
-                "y": np.array([0.0]),
-                "z": np.array([0.0]),
-                "element": ["X"],
+        frame = molrs.Frame.from_dict(
+            {
+                "blocks": {
+                    "atoms": {
+                        "y": np.array([0.0]),
+                        "z": np.array([0.0]),
+                        "element": ["X"],
+                    }
+                }
             }
-        }
+        )
         with pytest.raises(ValueError, match='"x"'):
             molpack.Target(frame, 1)
 
     def test_mismatched_lengths_raises(self):
-        frame = {
-            "atoms": {
-                "x": np.array([0.0, 1.0], dtype=np.float64),
-                "y": np.array([0.0], dtype=np.float64),
-                "z": np.array([0.0, 0.0], dtype=np.float64),
-                "element": ["X", "X"],
-            }
-        }
+        # ``molrs.Frame.from_dict`` enforces uniform column lengths at
+        # construction, so the ValueError now fires at frame build (before
+        # ``Target``) — same exception type the test has always asserted.
         with pytest.raises(ValueError):
-            molpack.Target(frame, 1)
-
-    def test_accepts_plain_dict_frame(self):
-        frame = {
-            "atoms": {
-                "x": [0.0, 1.0],
-                "y": [0.0, 0.0],
-                "z": [0.0, 0.0],
-                "element": ["C", "H"],
-            }
-        }
-        t = molpack.Target(frame, 3)
-        assert t.natoms == 2
-        assert t.elements == ["C", "H"]
+            molrs.Frame.from_dict(
+                {
+                    "blocks": {
+                        "atoms": {
+                            "x": np.array([0.0, 1.0], dtype=np.float64),
+                            "y": np.array([0.0], dtype=np.float64),
+                            "z": np.array([0.0, 0.0], dtype=np.float64),
+                            "element": ["X", "X"],
+                        }
+                    }
+                }
+            )
 
 
 class TestTargetBuilder:
@@ -276,14 +282,18 @@ class TestMolpackPack:
         assert all(e == "X" for e in result.elements)
 
     def test_result_elements_from_frame(self):
-        frame = {
-            "atoms": {
-                "x": np.array([0.0, 0.96, -0.24], dtype=np.float64),
-                "y": np.array([0.0, 0.0, 0.93], dtype=np.float64),
-                "z": np.zeros(3, dtype=np.float64),
-                "element": ["O", "H", "H"],
+        frame = molrs.Frame.from_dict(
+            {
+                "blocks": {
+                    "atoms": {
+                        "x": np.array([0.0, 0.96, -0.24], dtype=np.float64),
+                        "y": np.array([0.0, 0.0, 0.93], dtype=np.float64),
+                        "z": np.zeros(3, dtype=np.float64),
+                        "element": ["O", "H", "H"],
+                    }
+                }
             }
-        }
+        )
         target = (
             molpack.Target(frame, count=2)
             .with_name("water")

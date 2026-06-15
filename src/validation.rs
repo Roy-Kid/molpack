@@ -5,7 +5,7 @@ use std::env;
 use std::sync::Arc;
 
 use crate::numerics::numeric_controls;
-use crate::restraint::Restraint;
+use crate::restraint::AtomRestraint;
 use crate::target::Target;
 
 /// Quantified violation metrics for one packed configuration.
@@ -55,7 +55,7 @@ struct ExpandedMol<'a> {
 
 #[derive(Clone, Default)]
 struct AtomRestraints {
-    restraints: Vec<Arc<dyn Restraint>>,
+    restraints: Vec<Arc<dyn AtomRestraint>>,
 }
 
 /// Validate packed coordinates against target specification.

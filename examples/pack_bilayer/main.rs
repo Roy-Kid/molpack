@@ -19,7 +19,7 @@ use molpack::{
     AbovePlaneRestraint, BelowPlaneRestraint, InsideBoxRestraint, Molpack, ProgressHandler, Target,
     XYZHandler,
 };
-use molrs_io::data::pdb::read_pdb_frame;
+use molrs::io::data::pdb::read_pdb_frame;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = env_logger::try_init();

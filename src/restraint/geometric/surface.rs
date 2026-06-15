@@ -1,10 +1,10 @@
 //! Surface restraints (Packmol kinds 10–15): plane, cylinder, Gaussian.
 //!
 //! Moved verbatim from the original single-file `src/restraint.rs`; each
-//! `impl Restraint` resolves the trait through the unchanged
+//! `impl AtomRestraint` resolves the trait through the unchanged
 //! `crate::restraint` path.
 
-use crate::restraint::Restraint;
+use crate::restraint::AtomRestraint;
 use molrs::types::F;
 
 /// Packmol kind 10 — quadratic penalty forcing atom above plane `n·x >= d`.
@@ -20,7 +20,7 @@ impl AbovePlaneRestraint {
     }
 }
 
-impl Restraint for AbovePlaneRestraint {
+impl AtomRestraint for AbovePlaneRestraint {
     fn f(&self, pos: &[F; 3], scale: F, _scale2: F) -> F {
         let n = self.normal;
         let w = n[0] * pos[0] + n[1] * pos[1] + n[2] * pos[2] - self.distance;
@@ -54,7 +54,7 @@ impl BelowPlaneRestraint {
     }
 }
 
-impl Restraint for BelowPlaneRestraint {
+impl AtomRestraint for BelowPlaneRestraint {
     fn f(&self, pos: &[F; 3], scale: F, _scale2: F) -> F {
         let n = self.normal;
         let w = n[0] * pos[0] + n[1] * pos[1] + n[2] * pos[2] - self.distance;
@@ -101,7 +101,7 @@ impl InsideCylinderRestraint {
     }
 }
 
-impl Restraint for InsideCylinderRestraint {
+impl AtomRestraint for InsideCylinderRestraint {
     fn f(&self, pos: &[F; 3], _scale: F, scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let c = self.center;
@@ -185,7 +185,7 @@ impl OutsideCylinderRestraint {
     }
 }
 
-impl Restraint for OutsideCylinderRestraint {
+impl AtomRestraint for OutsideCylinderRestraint {
     fn f(&self, pos: &[F; 3], _scale: F, scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let c = self.center;
@@ -270,7 +270,7 @@ impl AboveGaussianRestraint {
     }
 }
 
-impl Restraint for AboveGaussianRestraint {
+impl AtomRestraint for AboveGaussianRestraint {
     fn f(&self, pos: &[F; 3], scale: F, _scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let e1 = -(x - self.cx).powi(2) / (2.0 * self.sx.powi(2));
@@ -327,7 +327,7 @@ impl BelowGaussianRestraint {
     }
 }
 
-impl Restraint for BelowGaussianRestraint {
+impl AtomRestraint for BelowGaussianRestraint {
     fn f(&self, pos: &[F; 3], scale: F, _scale2: F) -> F {
         let (x, y, z) = (pos[0], pos[1], pos[2]);
         let e1 = -(x - self.cx).powi(2) / (2.0 * self.sx.powi(2));

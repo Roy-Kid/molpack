@@ -70,7 +70,9 @@ cat mixture.inp | molpack
 All 12 box/cube/sphere/ellipsoid/cylinder/plane restraints are reachable from
 both whole-molecule and `atoms … end atoms` blocks. The Gaussian-surface
 restraints (`AboveGaussianRestraint` / `BelowGaussianRestraint`) are available
-through the Rust/Python API but not yet exposed as `.inp` keywords.
+through the Rust/Python API but not yet exposed as `.inp` keywords. To drive a
+whole species onto a target spatial distribution, use the collective
+`ProfileMatch` restraint via the Rust/Python API (`with_collective_restraint`).
 
 **Extended format support** — beyond Packmol's PDB/XYZ, molpack also reads SDF/MOL, LAMMPS dump, and LAMMPS data files. Set `filetype` to `sdf`, `lammps_dump`, or `lammps_data`, or use the matching file extension:
 
@@ -139,11 +141,17 @@ The same workloads run through the CLI from their bundled `.inp` scripts,
 e.g. `cargo run --release --features cli --bin molpack -- examples/pack_mixture/mixture.inp`.
 Python equivalents are in [`python/examples/`](./python/examples/).
 
+Two measurement harnesses also live under `examples/` (used for the
+molpack-jcc paper figures): `mt_scaling` (parallel speed-up-vs-size sweep,
+needs `--features rayon`) and `validate_packed` (scores an external packed file
+against its `.inp` through molpack's validator, needs `--features io`).
+
 ## Testing
 
 ```bash
 cargo test                                                  # unit + integration
 cargo test --release --test examples_batch -- --ignored     # Packmol regression (all 5 workloads)
+cargo bench --bench pack_end_to_end --features io           # criterion perf baseline
 cd python && maturin develop --release && pytest            # Python wheel
 ```
 

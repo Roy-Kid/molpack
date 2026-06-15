@@ -4,8 +4,10 @@
 //! `bench_mixture.py` paper bench).
 //!
 //! For each system size it times one `compute_fg` evaluation (the fused
-//! function+gradient pass GENCAN drives on every inner iteration) on the
-//! serial path and on the rayon path at 1/2/4/8 worker threads, and prints
+//! function+gradient pass GENCAN drives on every inner iteration) using the
+//! *same* rayon kernel at 1/2/4/8 worker threads — the 1-worker run is the
+//! serial baseline, so the speed-up isolates thread scaling rather than mixing
+//! in the separate (phase-structured) serial code path — and prints
 //!
 //! ```text
 //! atoms,kernel,mode,threads,us_per_eval,speedup_vs_serial
@@ -42,11 +44,11 @@ const NUMBER_DENSITY: F = 0.06;
 const THREADS: [usize; 4] = [1, 2, 4, 8];
 /// Wall-time spent in each timing repetition.
 const TIME_BUDGET: Duration = Duration::from_millis(150);
-/// Repetitions per (size, mode, threads) point. Each rep measures the serial
-/// baseline and every parallel thread-count back-to-back and forms a within-rep
-/// speed-up ratio; the reported number is the **median** of those ratios across
-/// reps — robust to both the throttled-serial outliers that inflate a `max` and
-/// the throttled-parallel outliers that deflate a `min`.
+/// Repetitions per (size, threads) point. Each rep times the *same* kernel at
+/// every worker count back-to-back and forms a within-rep speed-up ratio against
+/// the single-worker time; the reported number is the **median** of those ratios
+/// across reps — robust to both the throttled-baseline outliers that inflate a
+/// `max` and the throttled-parallel outliers that deflate a `min`.
 const REPS: usize = 7;
 /// Busy warm-up run (untimed) before timing each config. It keeps the worker
 /// thread(s) resident on performance cores and ramps the clock up — crucially,
@@ -205,19 +207,23 @@ fn time_rep(sys: &mut PackContext, x: &mut [F], g: &mut [F]) -> F {
     (secs / iters as f64) * 1e6
 }
 
-/// Per (size, kernel): measure the serial baseline and every parallel
-/// thread-count **back-to-back within each rep** so they share the same thermal
-/// state, then report, per thread-count, the *median* within-rep speed-up across
-/// [`REPS`] reps. Comparing serial and parallel from the same rep cancels the
-/// sustained-load throttling that otherwise depresses many-thread numbers (the
-/// 1-thread baseline heats the chip far less than an 8-thread run), making the
-/// scaling curve reproducible across invocations.
+/// Per size: time the *same* kernel at every worker count **back-to-back within
+/// each rep** so they share the same thermal state, then report, per worker
+/// count, the *median* within-rep speed-up against the single-worker time across
+/// [`REPS`] reps. Taking the ratio from the same rep cancels the sustained-load
+/// throttling that otherwise depresses many-thread numbers (one worker heats the
+/// chip far less than an 8-worker run), making the scaling curve reproducible
+/// across invocations.
 ///
-/// A **single** context is shared across all configs (only `parallel_pair_eval`
-/// and the rayon pool differ) — at million-atom sizes one context's cell lists
-/// and gradient buffers already run to ~1 GB, so building one per thread count
-/// would not fit. The continuously jittered `x` drifts by < 1e-3 Å over a run,
-/// negligible for the kernel cost.
+/// The baseline is the single-worker run of the **identical** kernel, not the
+/// separate serial code path, so the ratio reflects parallelism only — an
+/// algorithm change can never leak into the reported speed-up.
+///
+/// A **single** context is shared across all configs (only the rayon pool
+/// differs) — at million-atom sizes one context's cell lists and gradient
+/// buffers already run to ~1 GB, so building one per worker count would not fit.
+/// The continuously jittered `x` drifts by < 1e-3 Å over a run, negligible for
+/// the kernel cost.
 fn run_size(target_atoms: usize) {
     let (mut sys, mut x) = build_mixture(target_atoms, 0x5eed);
     let ntotat = sys.ntotat;
@@ -232,33 +238,45 @@ fn run_size(target_atoms: usize) {
         })
         .collect();
 
-    let mut serial_us: Vec<F> = Vec::with_capacity(REPS);
+    let mut base_us: Vec<F> = Vec::with_capacity(REPS);
     let mut speedups: Vec<Vec<F>> = vec![Vec::with_capacity(REPS); THREADS.len()];
     let mut par_us: Vec<Vec<F>> = vec![Vec::with_capacity(REPS); THREADS.len()];
 
-    // Warm up serial then each pool size so worker threads are P-core-resident
-    // and clocked up before the first timed rep.
-    sys.parallel_pair_eval = false;
-    warmup(&mut sys, &mut x);
+    // CRITICAL FAIRNESS: every point — including the serial baseline — runs the
+    // *identical* kernel (`parallel_pair_eval = true`). Only the rayon worker
+    // count differs, so the ratio measures thread scaling alone, never an
+    // algorithm change. (Using the serial code path `parallel_pair_eval = false`
+    // as the baseline would compare two *different* implementations: the
+    // single-worker run would then be spuriously faster/slower than serial for
+    // reasons unrelated to parallelism.) Warm up each pool size so its workers
+    // are P-core-resident and clocked up before the first timed rep.
+    sys.parallel_pair_eval = true;
     for pool in &pools {
-        sys.parallel_pair_eval = true;
         pool.install(|| warmup(&mut sys, &mut x));
     }
 
     for _ in 0..REPS {
-        sys.parallel_pair_eval = false;
-        let s = time_kernel_one(&mut sys, &mut x);
-        serial_us.push(s);
-        for (i, pool) in pools.iter().enumerate() {
-            sys.parallel_pair_eval = true;
-            let p = pool.install(|| time_kernel_one(&mut sys, &mut x));
-            speedups[i].push(s / p); // within-rep ratio → thermally fair
-            par_us[i].push(p);
+        // Time the same kernel at every worker count back-to-back so all points
+        // share the same thermal state. THREADS[0] == 1 is the single-worker
+        // baseline: same code path, no parallelism, so its self-ratio is 1.0 by
+        // construction (strong-scaling convention S(1) = 1).
+        sys.parallel_pair_eval = true;
+        let mut t: Vec<F> = Vec::with_capacity(pools.len());
+        for pool in &pools {
+            t.push(pool.install(|| time_kernel_one(&mut sys, &mut x)));
+        }
+        let base = t[0];
+        base_us.push(base);
+        for (i, &ti) in t.iter().enumerate() {
+            speedups[i].push(base / ti); // within-rep ratio → thermally fair
+            par_us[i].push(ti);
         }
     }
 
-    // CSV schema kept stable (`kernel` column = "fg") for the figure script.
-    println!("{ntotat},fg,serial,1,{:.1},1.00", median(&mut serial_us));
+    // CSV schema kept stable (`kernel` column = "fg") for the figure script. The
+    // `serial` row is the single-worker run of the *same* parallel kernel, so
+    // every speed-up isolates thread scaling.
+    println!("{ntotat},fg,serial,1,{:.1},1.00", median(&mut base_us));
     for (i, &nt) in THREADS.iter().enumerate() {
         println!(
             "{ntotat},fg,parallel,{nt},{:.1},{:.2}",

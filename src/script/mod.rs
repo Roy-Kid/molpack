@@ -37,7 +37,6 @@ mod error;
 #[cfg(feature = "io")]
 mod io;
 mod parser;
-mod parser_profile;
 
 #[cfg(feature = "io")]
 pub use build::BuildResult;
@@ -46,4 +45,3 @@ pub use error::ScriptError;
 #[cfg(feature = "io")]
 pub use io::{read_frame, write_frame};
 pub use parser::{AtomGroup, PbcSpec, RestraintSpec, Script, Structure, parse};
-pub use parser_profile::{ProfileDistribution, ProfileGeometry, ProfileInputKind};

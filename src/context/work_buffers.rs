@@ -19,11 +19,10 @@ pub struct WorkBuffers {
     #[cfg(feature = "rayon")]
     pub grad_partials: Vec<[F; 3]>,
     /// Reused per-active-molecule descriptor list `(itype, icart0, ilubar,
-    /// ilugan)` for the parallel `expand_molecules` / `project_cartesian_gradient`
-    /// passes. Both rebuild it from the current `comptype` each call (cheap
-    /// index arithmetic, no trig); persisting the `Vec` keeps that hot rebuild
-    /// allocation-free.
-    #[cfg(feature = "rayon")]
+    /// ilugan)` for the phase-structured `expand_molecules` /
+    /// `project_cartesian_gradient` passes. Both rebuild it from the current
+    /// `comptype` each call (cheap index arithmetic, no trig); persisting the
+    /// `Vec` keeps that hot rebuild allocation-free.
     pub mol_descs: Vec<(usize, usize, usize, usize)>,
     /// Temporary radius backup used by movebad/radius scaling paths.
     pub radiuswork: Vec<F>,
@@ -55,7 +54,6 @@ impl WorkBuffers {
             gxcar: vec![[0.0; 3]; ntotat],
             #[cfg(feature = "rayon")]
             grad_partials: Vec::new(),
-            #[cfg(feature = "rayon")]
             mol_descs: Vec::new(),
             radiuswork: vec![0.0; ntotat],
             fmol: Vec::new(),

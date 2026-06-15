@@ -71,7 +71,7 @@ fn runner_modifies_coords() {
         .with_temperature(10.0)
         .with_steps(50);
 
-    let mut runner = hook.spawn(&coords);
+    let mut runner = hook.spawn(None, &coords);
     let mut rng = rand::rng();
     let result = runner.on_iter(&coords, 1000.0, &mut |_| 999.0, &mut rng);
 
@@ -93,7 +93,7 @@ fn runner_acceptance_rate_between_0_and_1() {
         .with_temperature(1.0)
         .with_steps(100);
 
-    let mut runner = hook.spawn(&coords);
+    let mut runner = hook.spawn(None, &coords);
     let mut rng = rand::rng();
     let _ = runner.on_iter(&coords, 100.0, &mut |_| 50.0, &mut rng);
 

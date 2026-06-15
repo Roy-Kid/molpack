@@ -1,20 +1,20 @@
-//! Restraint trait and concrete soft-penalty types for molecular packing.
+//! `AtomRestraint` trait and concrete soft-penalty types for molecular packing.
 //!
 //! Each `*Restraint` struct is a **concrete, independent type** holding its own
 //! geometric parameters — no `Builtin*` wrapper, no tagged-union `{kind, params[9]}`
-//! blob, no builder pattern. User extensions `impl Restraint` identically and sit
+//! blob, no builder pattern. User extensions `impl AtomRestraint` identically and sit
 //! beside the 14 Packmol-originals in type space.
 //!
 //! Numerical equivalence to the Fortran `comprest.f90` (value) and `gwalls.f90`
 //! (gradient) is preserved branch-for-branch; see `docs/packmol_parity.md`.
 //!
-//! **Gradient convention**: `Restraint::fg` accumulates INTO `g` with `+=`.
+//! **Gradient convention**: `AtomRestraint::fg` accumulates INTO `g` with `+=`.
 //! Do not overwrite; many restraints may contribute to the same atom.
 //!
 //! **Two-scale contract** (Packmol convention): linear penalties
 //! (box / cube / plane, kinds 2/3/6/7/10/11) use `scale`; quadratic penalties
 //! (sphere / ellipsoid / cylinder / gaussian, kinds 4/5/8/9/12/13/14/15) use
-//! `scale2`. Each `impl Restraint` decides internally which to consume.
+//! `scale2`. Each `impl AtomRestraint` decides internally which to consume.
 //!
 //! Direction-3 rule (see spec §0 bullet 9): all molrs-pack extension points
 //! follow `pub trait X` + N concrete pub structs that `impl X`; user-defined
@@ -43,7 +43,7 @@ use molrs::types::F;
 /// `Debug` is required on concrete impls so `Target` / `Molpack` remain
 /// printable for diagnostics. All built-in restraints derive it; user types
 /// should do the same.
-pub trait Restraint: Send + Sync + std::fmt::Debug {
+pub trait AtomRestraint: Send + Sync + std::fmt::Debug {
     fn f(&self, x: &[F; 3], scale: F, scale2: F) -> F;
     fn fg(&self, x: &[F; 3], scale: F, scale2: F, g: &mut [F; 3]) -> F;
     fn is_parallel_safe(&self) -> bool {
@@ -61,8 +61,8 @@ pub trait Restraint: Send + Sync + std::fmt::Debug {
     }
 }
 
-/// Blanket impl so `Box<dyn Restraint>` itself implements the trait.
-impl Restraint for Box<dyn Restraint> {
+/// Blanket impl so `Box<dyn AtomRestraint>` itself implements the trait.
+impl AtomRestraint for Box<dyn AtomRestraint> {
     #[inline]
     fn f(&self, x: &[F; 3], scale: F, scale2: F) -> F {
         (**self).f(x, scale, scale2)
@@ -85,9 +85,13 @@ impl Restraint for Box<dyn Restraint> {
     }
 }
 
+mod collective;
 mod geometric;
-pub mod profile;
 
+pub use collective::{
+    ExponentialPlane, ExponentialPoint, GaussianPlane, GaussianPoint, Restraint, TabulatedPlane,
+    TabulatedPoint,
+};
 pub use geometric::{
     AboveGaussianRestraint, AbovePlaneRestraint, BelowGaussianRestraint, BelowPlaneRestraint,
     InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint, InsideEllipsoidRestraint,

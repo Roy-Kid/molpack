@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use molpack::objective::{compute_f, compute_fg, compute_g};
 use molpack::{
-    AboveGaussianRestraint, AbovePlaneRestraint, BelowGaussianRestraint, BelowPlaneRestraint, F,
-    InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint, InsideEllipsoidRestraint,
-    InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint, OutsideCylinderRestraint,
-    OutsideEllipsoidRestraint, OutsideSphereRestraint, PackContext, Restraint,
+    AboveGaussianRestraint, AbovePlaneRestraint, AtomRestraint, BelowGaussianRestraint,
+    BelowPlaneRestraint, F, InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint,
+    InsideEllipsoidRestraint, InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint,
+    OutsideCylinderRestraint, OutsideEllipsoidRestraint, OutsideSphereRestraint, PackContext,
 };
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
 /// active — the helper asserts `f(pos) > 0` so a vacuous "penalty inactive,
 /// gradient trivially zero" pass cannot masquerade as a real check.
 fn check_restraint_gradient(
-    restraint: std::sync::Arc<dyn Restraint>,
+    restraint: std::sync::Arc<dyn AtomRestraint>,
     pos: [F; 3],
     h: F,
     tol: F,
@@ -106,7 +106,7 @@ fn check_restraint_gradient(
 // ── f ↔ fg parity for the remaining restraint kinds ─────────────────────────
 //
 // The dedicated tests above cover kinds 3/4/5/9/10/12/14. These cover the
-// other seven concrete restraints so that every `Restraint` impl has its
+// other seven concrete restraints so that every `AtomRestraint` impl has its
 // `fg` pinned against its `f` by finite difference. Each atom is positioned
 // where the penalty is genuinely active (and, for the linear-penalty box /
 // cube kinds, off every median plane so the FD step does not straddle the

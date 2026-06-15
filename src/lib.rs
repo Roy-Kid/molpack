@@ -7,8 +7,9 @@
 //! output for five canonical workloads.
 //!
 //! This crate was split out of the molrs workspace in 2026 and is now
-//! maintained independently. It still depends on `molcrafts-molrs-core` and
-//! `molcrafts-molrs-io` for shared data structures and file I/O.
+//! maintained independently. It depends on the unified `molcrafts-molrs` crate
+//! for shared data structures (always-on `core`) and, behind feature flags, its
+//! file I/O (`io`) and force-field (`ff`) modules.
 //!
 //! ## Documentation map
 //!
@@ -18,14 +19,14 @@
 //! - [`getting_started`] — install, hello-world packing, the three
 //!   restraint scopes, handlers, relaxers, PBC, running the canonical
 //!   examples.
-//! - [`concepts`] — every abstraction defined in one place: `Restraint`,
+//! - [`concepts`] — every abstraction defined in one place: `AtomRestraint`,
 //!   `Region`, `Relaxer`, `Handler`, `Objective`, `Target`, `Molpack`,
 //!   `PackContext`; the scope equivalence law; the two-scale contract;
 //!   the direction-3 extension pattern.
 //! - [`architecture`] — module map, dependency graph, core-type
 //!   relationships, full `pack()` lifecycle diagram, hot-path
 //!   `evaluate()` walkthrough, invariants, design decisions.
-//! - [`extending`] — tutorials for writing your own `Restraint` /
+//! - [`extending`] — tutorials for writing your own `AtomRestraint` /
 //!   `Region` / `Handler` / `Relaxer`; testing + benchmarking
 //!   discipline; common pitfalls; contributing flow.
 //!
@@ -63,23 +64,27 @@
 //! |---|---|
 //! | Builder | [`Molpack`], [`MolpackLogLevel`], [`PackResult`] |
 //! | Target  | [`Target`], [`CenteringMode`] |
-//! | Restraint trait + 14 concrete structs | [`Restraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…Restraint` |
+//! | AtomRestraint trait + 14 concrete structs | [`AtomRestraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…AtomRestraint` |
 //! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
 //! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`PhaseInfo`], [`PhaseReport`] |
-//! | Relaxer trait + built-in | [`Relaxer`], [`RelaxerRunner`], [`TorsionMcRelaxer`] (aliased to `TorsionMcHook`) |
+//! | Relaxer trait + built-ins | [`Relaxer`], [`RelaxerRunner`], [`TorsionMcRelaxer`] (aliased to `TorsionMcHook`), `LBFGSRelaxer` (`ff` feature) |
 //! | Errors | [`PackError`] |
 //! | Validation | [`validate_from_targets`], [`ValidationReport`], [`ViolationMetrics`] |
 //! | Examples harness | [`ExampleCase`], [`build_targets`], [`example_dir_from_manifest`], [`render_packmol_input`] |
 //!
 //! ## Feature flags
 //!
-//! - `rayon` — opt into the parallel evaluator (also forwards to `molrs-core`).
-//! - `io` — pull in molrs-io so [`script::Script::build`] can read PDB / SDF /
-//!   XYZ / LAMMPS files directly. PyO3 / WASM / embedding hosts that bring
-//!   their own loader leave this off and use [`script::Script::lower`] with
-//!   [`script::StructurePlan::apply`] instead.
+//! - `rayon` — opt into the parallel evaluator (also forwards to `molrs`'s
+//!   `rayon`).
+//! - `io` — pull in molrs's `io` module so [`script::Script::build`] can read
+//!   PDB / SDF / XYZ / LAMMPS files directly. PyO3 / WASM / embedding hosts that
+//!   bring their own loader leave this off and use [`script::Script::lower`]
+//!   with [`script::StructurePlan::apply`] instead.
 //! - `cli` — build the `molpack` binary and its integration tests (pulls in
 //!   `clap` and implies `io`).
+//! - `ff` — pull in molrs's `ff` module (MMFF typifier + L-BFGS) and enable the
+//!   `LBFGSRelaxer`, which relaxes a flexible molecule's internal geometry
+//!   during packing under a caller-supplied force field.
 //!
 //! Precision is fixed at `f64` via `molrs::types::F`.
 
@@ -127,11 +132,17 @@ pub use region::{
 #[allow(deprecated)]
 pub use region::{BBox, FromRegion};
 pub use relaxer::{Relaxer, RelaxerRunner, TorsionMcRelaxer};
+// Force-field geometry relaxer + the molrs `Potential` trait it relaxes against
+// (named in `LBFGSRelaxer::new`). Gated on the `ff` feature.
+#[cfg(feature = "ff")]
+pub use molrs::ff::potential::Potential;
+#[cfg(feature = "ff")]
+pub use relaxer::LBFGSRelaxer;
 pub use restraint::{
-    AboveGaussianRestraint, AbovePlaneRestraint, BelowGaussianRestraint, BelowPlaneRestraint,
-    InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint, InsideEllipsoidRestraint,
-    InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint, OutsideCylinderRestraint,
-    OutsideEllipsoidRestraint, OutsideSphereRestraint, Restraint,
+    AboveGaussianRestraint, AbovePlaneRestraint, AtomRestraint, BelowGaussianRestraint,
+    BelowPlaneRestraint, InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint,
+    InsideEllipsoidRestraint, InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint,
+    OutsideCylinderRestraint, OutsideEllipsoidRestraint, OutsideSphereRestraint,
 };
 #[allow(deprecated)]
 pub use target::FixedPlacement;
@@ -185,12 +196,13 @@ pub mod prelude {
     pub use crate::{
         // Region + combinators + lift
         Aabb,
-        // Restraint trait + 14 concrete impls
+        // AtomRestraint trait + 14 concrete impls
         AboveGaussianRestraint,
         AbovePlaneRestraint,
         And,
         // Target + centering + angle / axis / placement
         Angle,
+        AtomRestraint,
         Axis,
         BelowGaussianRestraint,
         BelowPlaneRestraint,
@@ -230,10 +242,13 @@ pub mod prelude {
         // Relaxer
         Relaxer,
         RelaxerRunner,
-        Restraint,
         StepInfo,
         Target,
         TorsionMcRelaxer,
         XYZHandler,
     };
+    // Force-field relaxer (gated; cannot live in the `use` group above because a
+    // single item in a brace group cannot carry its own `cfg`).
+    #[cfg(feature = "ff")]
+    pub use crate::LBFGSRelaxer;
 }

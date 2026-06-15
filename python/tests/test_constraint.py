@@ -34,16 +34,21 @@ class TestConstraintStackingOnTarget:
     """Stacking multiple restraints via Target.with_restraint() calls."""
 
     def _make_frame(self):
+        import molrs
         import numpy as np
 
-        return {
-            "atoms": {
-                "x": np.array([0.0]),
-                "y": np.array([0.0]),
-                "z": np.array([0.0]),
-                "element": ["O"],
+        return molrs.Frame.from_dict(
+            {
+                "blocks": {
+                    "atoms": {
+                        "x": np.array([0.0]),
+                        "y": np.array([0.0]),
+                        "z": np.array([0.0]),
+                        "element": ["O"],
+                    }
+                }
             }
-        }
+        )
 
     def test_two_restraints(self):
         frame = self._make_frame()

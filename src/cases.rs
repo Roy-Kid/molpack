@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use molrs_io::data::pdb::read_pdb_frame;
+use molrs::io::data::pdb::read_pdb_frame;
 
 use crate::target::{Angle, CenteringMode, Target};
 use crate::{

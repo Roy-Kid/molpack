@@ -48,12 +48,12 @@ impl PyPackResult {
     /// The frame — full topology replayed onto the packed coordinates, plus the
     /// periodic box if one was declared via :meth:`Molpack.with_periodic_box` —
     /// is assembled by the Rust core (:mod:`molpack.assemble`), so every
-    /// language binding returns an identical result. This getter only marshals
-    /// that frame across the language boundary. Force fields are out of scope —
-    /// merge them separately.
+    /// language binding returns an identical result. This getter hands it back
+    /// as a ``molrs.Frame`` through a zero-copy FFI capsule (no marshalling).
+    /// Force fields are out of scope — merge them separately.
     #[getter]
     fn frame<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        crate::frame_marshal::rust_frame_to_py(py, &self.inner.frame, self.box_bounds)
+        crate::interop::frame_to_py(py, &self.inner.frame, self.box_bounds)
     }
 
     #[getter]
@@ -133,6 +133,9 @@ pub struct PyPacker {
     pub(crate) periodic_box: Option<([F; 3], [F; 3])>,
     pub(crate) py_handlers: Vec<Py<pyo3::types::PyAny>>,
     pub(crate) global_restraints: Vec<Py<pyo3::types::PyAny>>,
+    /// Built-in XYZ trajectory recorder: `(path, every)`. Installs molpack's
+    /// native [`molpack::XYZHandler`] at pack time.
+    pub(crate) xyz_output: Option<(String, usize)>,
 }
 
 impl Default for PyPacker {
@@ -155,6 +158,7 @@ impl Default for PyPacker {
             periodic_box: None,
             py_handlers: Vec::new(),
             global_restraints: Vec::new(),
+            xyz_output: None,
         }
     }
 }
@@ -309,6 +313,32 @@ impl PyPacker {
         cloned
     }
 
+    /// Record the packing trajectory to a multi-frame XYZ file using molpack's
+    /// built-in :rust:`XYZHandler` recorder.
+    ///
+    /// A frame is written on every ``every``-th loop (loop 0 included); each
+    /// frame is extended-XYZ with a ``mol`` column so copies are distinguishable.
+    /// Unlike a Python :meth:`with_handler`, this runs in Rust with direct access
+    /// to the live coordinates, so it can record the geometry trajectory.
+    ///
+    /// Parameters
+    /// ----------
+    /// path : str
+    ///     Output ``.xyz`` path (truncated/created).
+    /// every : int, default 1
+    ///     Write cadence in packing loops (must be >= 1).
+    #[pyo3(signature = (path, every = 1))]
+    fn with_xyz_output(&self, path: &str, every: usize) -> PyResult<Self> {
+        if every < 1 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "every must be >= 1",
+            ));
+        }
+        let mut cloned = self.clone_fields();
+        cloned.xyz_output = Some((path.to_owned(), every));
+        Ok(cloned)
+    }
+
     /// Append a global restraint — applied to every atom of every target
     /// at ``pack()`` time. Equivalent to calling
     /// ``target.with_restraint(r)`` on every target.
@@ -326,7 +356,7 @@ impl PyPacker {
         max_loops: usize,
     ) -> PyResult<Bound<'py, PyAny>> {
         let result = self.pack_report_inner(py, targets, max_loops)?;
-        crate::frame_marshal::rust_frame_to_py(py, &result.inner.frame, self.periodic_box)
+        crate::interop::frame_to_py(py, &result.inner.frame, self.periodic_box)
     }
 
     #[pyo3(signature = (targets, max_loops=200))]
@@ -420,6 +450,11 @@ impl PyPacker {
             packer = packer.with_handler(wrapper);
         }
 
+        // Built-in XYZ trajectory recorder (runs in Rust with live coordinates).
+        if let Some((ref path, every)) = self.xyz_output {
+            packer = packer.with_handler(molpack::XYZHandler::new(path.clone(), every));
+        }
+
         let result = packer.pack_with_report(&rust_targets, max_loops);
 
         // Python exceptions take priority: any PackError from this run is
@@ -462,6 +497,7 @@ impl PyPacker {
                 .iter()
                 .map(|r| r.clone_ref(py))
                 .collect(),
+            xyz_output: self.xyz_output.clone(),
         })
     }
 }

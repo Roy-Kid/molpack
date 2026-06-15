@@ -36,9 +36,10 @@ Modules:
 | Feature | Pulls in |
 |---|---|
 | `default` | nothing |
-| `io` | `molrs_io` (PDB / XYZ / SDF / LAMMPS readers) |
+| `io` | `molrs/io` (PDB / XYZ / SDF / LAMMPS readers) |
 | `cli` | `clap` + `io` (binary + integration tests) |
 | `rayon` | `rayon` + `molrs/rayon` (parallel evaluation) |
+| `ff` | `molrs/ff` (MMFF + L-BFGS) — enables `ForceFieldRelaxer` |
 
 The Python wheel is built **without** `io` — the wheel relies on the user's `molrs` Python package
 for frame loading, then builds targets from the loaded frame (the PyO3
@@ -68,7 +69,7 @@ for frame loading, then builds targets from the loaded frame (the PyO3
 - `cargo test -p molcrafts-molpack --release --test examples_batch -- --ignored` — Packmol regression.
   Requires test data: `bash ../molrs/scripts/fetch-test-data.sh` (one time).
 - `cd python && maturin develop --release && pytest` — Python wheel.
-- `cargo bench --bench pack_end_to_end -- mixture` — perf baseline.
+- `cargo bench --bench pack_end_to_end --features io -- mixture` — perf baseline (the bench reads bundled example PDBs, so `io` is required).
 
 ## Repo layout
 
@@ -93,4 +94,6 @@ workspace/
 └── molpack/    ← this repo
 ```
 
-The root `Cargo.toml` uses path deps on `../molrs/molrs-core` and `../molrs/molrs-io`.
+The root `Cargo.toml` uses a single path dep on `../molrs/molrs` (the unified
+`molcrafts-molrs` crate); `core` is always-on, while `io` and `ff` are pulled in
+through the matching molpack features above.

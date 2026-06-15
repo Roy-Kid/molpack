@@ -22,7 +22,7 @@ use crate::initial::{SwapState, init_xcart_from_x, initial};
 use crate::movebad::{MoveBadConfig, movebad};
 use crate::numerics::objective_small_floor;
 use crate::relaxer::RelaxerRunner;
-use crate::restraint::Restraint;
+use crate::restraint::AtomRestraint;
 use crate::target::{CenteringMode, Target};
 
 /// Result of a packing run.
@@ -85,7 +85,7 @@ pub struct Molpack {
     /// Global restraints — broadcast to every target at `pack()` time
     /// (semantic equivalence to calling `target.with_restraint(r.clone())`
     /// on every target; no separate global-storage code path).
-    global_restraints: Vec<Arc<dyn Restraint>>,
+    global_restraints: Vec<Arc<dyn AtomRestraint>>,
     precision: F,
     discale: F,
     /// Minimum atom-atom distance (Packmol's `tolerance`/`dism`). Default 2.0 Å.
@@ -183,7 +183,7 @@ impl Molpack {
     /// Implementation mirrors the equivalence — no separate "global
     /// restraint" storage path in `PackContext`; the restraint is cloned
     /// into each target's `molecule_restraints` when `pack()` is invoked.
-    pub fn with_global_restraint(mut self, r: impl Restraint + 'static) -> Self {
+    pub fn with_global_restraint(mut self, r: impl AtomRestraint + 'static) -> Self {
         self.global_restraints.push(Arc::new(r));
         self
     }
@@ -385,7 +385,7 @@ impl Molpack {
         };
         // Derive the system periodic box from two independent sources:
         //   1. `Molpack::with_periodic_box` — global PBC (script `pbc`).
-        //   2. `Restraint::periodic_box` — per-restraint declarations,
+        //   2. `AtomRestraint::periodic_box` — per-restraint declarations,
         //      e.g. `InsideBoxRestraint` with any axis marked periodic.
         //
         // The two must not disagree; if both are present they must
@@ -560,6 +560,15 @@ impl Molpack {
             sys.iratom_data.extend(atom_restraints);
         }
 
+        // Group-level (collective) restraints: one entry per (free type, restraint).
+        // The free target's position is its 0-based type index `itype`.
+        sys.collective.clear();
+        for (itype, target) in free_targets.iter().enumerate() {
+            for r in &target.collective_restraints {
+                sys.collective.push((itype, std::sync::Arc::clone(r)));
+            }
+        }
+
         // Handle fixed molecules: place them using eulerfixed
         let free_atoms = ntotat_free;
         let mut fixed_icart = free_atoms;
@@ -636,7 +645,14 @@ impl Molpack {
                 let base = sys.idfirst[i];
                 let na = sys.natoms[i];
                 let ref_slice = &sys.coor[base..base + na];
-                let runners = t.relaxers.iter().map(|r| r.spawn(ref_slice)).collect();
+                // Pass the molecule template (full topology) so a force-field
+                // relaxer can compile its potential; `None` for coord-only targets.
+                let frame = t.template.as_ref();
+                let runners = t
+                    .relaxers
+                    .iter()
+                    .map(|r| r.spawn(frame, ref_slice))
+                    .collect();
                 (i, runners)
             })
             .collect();
@@ -746,7 +762,7 @@ impl Molpack {
 /// `derive_periodic_box` and its callers.
 type PeriodicSpec = ([F; 3], [F; 3], [bool; 3]);
 
-/// Scan every restraint on every target for a `Restraint::periodic_box`
+/// Scan every restraint on every target for a `AtomRestraint::periodic_box`
 /// override. Returns `Ok(None)` if no restraint declares one, `Ok(Some(...))`
 /// if exactly one unique declaration exists (duplicates with identical
 /// bounds + flags are allowed — they come from `with_global_restraint`

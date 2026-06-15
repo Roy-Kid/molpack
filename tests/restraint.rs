@@ -2,10 +2,10 @@
 //! violated, and gradient points in the correct direction.
 
 use molpack::{
-    AboveGaussianRestraint, AbovePlaneRestraint, BelowGaussianRestraint, BelowPlaneRestraint, F,
-    InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint, InsideEllipsoidRestraint,
-    InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint, OutsideCylinderRestraint,
-    OutsideEllipsoidRestraint, OutsideSphereRestraint, Restraint,
+    AboveGaussianRestraint, AbovePlaneRestraint, AtomRestraint, BelowGaussianRestraint,
+    BelowPlaneRestraint, F, InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint,
+    InsideEllipsoidRestraint, InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint,
+    OutsideCylinderRestraint, OutsideEllipsoidRestraint, OutsideSphereRestraint,
 };
 
 const TOL: F = 1e-6;
@@ -15,13 +15,13 @@ const SCALE2: F = 0.01;
 // ── helpers ────────────────────────────────────────────────────────────────
 
 /// Accumulate gradient only (ignore returned value).
-fn grad(r: &dyn Restraint, pos: &[F; 3], g: &mut [F; 3]) {
+fn grad(r: &dyn AtomRestraint, pos: &[F; 3], g: &mut [F; 3]) {
     let _ = r.fg(pos, SCALE, SCALE2, g);
 }
 
 /// Assert that the gradient at `pos` pushes the atom toward the satisfied
 /// region (each nonzero gradient component opposes the violation).
-fn assert_gradient_opposes_violation(r: &dyn Restraint, pos: &[F; 3], label: &str) {
+fn assert_gradient_opposes_violation(r: &dyn AtomRestraint, pos: &[F; 3], label: &str) {
     let h: F = 1e-4;
     let mut g = [0.0 as F; 3];
     grad(r, pos, &mut g);
@@ -316,7 +316,7 @@ fn gradient_accumulates() {
 
 // ── Phase B.6 acceptance: user-plugin type equality + scope equivalence ────
 
-/// User-defined `Restraint` — identical in shape to the 14 built-ins.
+/// User-defined `AtomRestraint` — identical in shape to the 14 built-ins.
 /// Demonstrates direction-3: no ceremony to plug in your own geometry.
 #[derive(Debug, Clone, Copy)]
 struct MyHalfSpaceRestraint {
@@ -324,7 +324,7 @@ struct MyHalfSpaceRestraint {
     z_min: F,
 }
 
-impl Restraint for MyHalfSpaceRestraint {
+impl AtomRestraint for MyHalfSpaceRestraint {
     fn f(&self, pos: &[F; 3], _scale: F, scale2: F) -> F {
         let v = (self.z_min - pos[2]).max(0.0);
         scale2 * v * v

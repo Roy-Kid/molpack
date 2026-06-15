@@ -60,8 +60,5 @@ site/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# JCC paper (separate project, not part of the code release)
-molpack-jcc/
-
 # Local Claude worktrees (transient)
 .claude/worktrees/
