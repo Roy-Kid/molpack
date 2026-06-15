@@ -107,13 +107,6 @@ name = "mt_scaling"
 path = "examples/mt_scaling/main.rs"
 required-features = ["rayon"]
 
-# Scores an external packed file against a `.inp` through molpack's validator
-# (molpack-jcc accuracy benchmark). Reads structure files, so needs io.
-[[example]]
-name = "validate_packed"
-path = "examples/validate_packed/main.rs"
-required-features = ["io"]
-
 [profile.release]
 lto = "thin"
 codegen-units = 1

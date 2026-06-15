@@ -23,6 +23,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `molrs_io::` import paths become `molrs::io::`. Behavior-preserving — the
   Packmol regression suite is unchanged.
 
+### Removed
+- The `validate_packed` example harness (external-file accuracy scorer for the
+  molpack-jcc figures); dropped from `examples/` and `Cargo.toml`.
+
 ## [0.1.0] - 2026-06-13
 
 Inaugural release of `molcrafts-molpack`.

@@ -141,10 +141,8 @@ The same workloads run through the CLI from their bundled `.inp` scripts,
 e.g. `cargo run --release --features cli --bin molpack -- examples/pack_mixture/mixture.inp`.
 Python equivalents are in [`python/examples/`](./python/examples/).
 
-Two measurement harnesses also live under `examples/` (used for the
-molpack-jcc paper figures): `mt_scaling` (parallel speed-up-vs-size sweep,
-needs `--features rayon`) and `validate_packed` (scores an external packed file
-against its `.inp` through molpack's validator, needs `--features io`).
+A measurement harness also lives under `examples/`: `mt_scaling` (parallel
+speed-up-vs-size sweep, needs `--features rayon`).
 
 ## Testing
 

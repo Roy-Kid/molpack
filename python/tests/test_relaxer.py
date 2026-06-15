@@ -92,21 +92,10 @@ def _packed_dimers():
         .pack_with_report([target], max_loops=50)
     )
 
-    # `style.def_type(...)` works at runtime (def_style returns the chainable
-    # ForceField); the installed molpy stub annotates def_style -> Style, which lacks
-    # def_type, so ty flags it. Suppress on the def_type line until the molpy stub is
-    # fixed upstream.
     ff = ForceField("cc")
-    atom_style = ff.def_style(AtomStyle(name="full"))
-    carbon = atom_style.def_type(  # ty: ignore[unresolved-attribute]
-        "C", mass=12.011
-    )
-    bond_style = ff.def_style(BondStyle(name="harmonic"))
-    bond_style.def_type(  # ty: ignore[unresolved-attribute]
-        carbon, carbon, k=300.0, r0=1.5
-    )
-    pair_style = ff.def_style(PairStyle(name="lj/cut/coul/cut"))
-    pair_style.def_type(  # ty: ignore[unresolved-attribute]
+    carbon = ff.def_style(AtomStyle(name="full")).def_type("C", mass=12.011)
+    ff.def_style(BondStyle(name="harmonic")).def_type(carbon, carbon, k=300.0, r0=1.5)
+    ff.def_style(PairStyle(name="lj/cut/coul/cut")).def_type(
         carbon, carbon, epsilon=0.05, sigma=3.4
     )
     return result, ff
@@ -121,8 +110,7 @@ def test_relax_pack_result_returns_relaxed_frame() -> None:
 
     assert isinstance(relaxed, molrs.Frame)
     assert len(relaxed["atoms"].view("x")) == result.natoms  # nothing lost
-    # `.box` exists at runtime; the installed molrs Frame stub omits it.
-    assert relaxed.box is not None  # box preserved  # ty: ignore[unresolved-attribute]
+    assert relaxed.box is not None  # box preserved
     xyz = np.stack(
         [
             np.asarray(relaxed["atoms"].view("x")),
