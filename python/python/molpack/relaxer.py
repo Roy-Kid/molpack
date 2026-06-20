@@ -7,7 +7,7 @@ is a different axis — it takes the **finished** packed box and hands the whole
 assembled frame to an external engine (LAMMPS) for an energy minimisation or a
 short MD settle, returning the relaxed frame.
 
-The work is delegated to :class:`molpy.engine.LAMMPS` (``molcrafts-molpy``,
+The work is delegated to :class:`molpy.engine.LAMMPSEngine` (``molcrafts-molpy``,
 a hard dependency of molpack).
 
 Example::
@@ -25,7 +25,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from molpy.engine import LAMMPS
+from molpy.engine import LAMMPSEngine
 
 if TYPE_CHECKING:
     import molrs
@@ -41,7 +41,7 @@ def _frame_of(target: Any) -> molrs.Frame:
 class LAMMPSRelaxer:
     """Relax a packed system with LAMMPS (minimisation or short MD).
 
-    A thin, force-field-bound façade over :class:`molpy.engine.LAMMPS`.  The
+    A thin, force-field-bound façade over :class:`molpy.engine.LAMMPSEngine`.  The
     force field is fixed at construction; each call accepts a packed result (or
     a bare frame) and returns a new relaxed :class:`~molrs.Frame` — the input is
     never mutated.
@@ -117,8 +117,8 @@ class LAMMPSRelaxer:
         return getattr(engine, mode)(_frame_of(target), self.ff, **options)
 
     def _engine(self) -> Any:
-        """Construct the backing :class:`molpy.engine.LAMMPS`."""
-        return LAMMPS(self.executable, launcher=self.launcher)
+        """Construct the backing :class:`molpy.engine.LAMMPSEngine`."""
+        return LAMMPSEngine(self.executable, launcher=self.launcher)
 
     def __repr__(self) -> str:
         binary = self.executable or "auto"
