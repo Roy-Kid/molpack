@@ -293,15 +293,6 @@ pub struct PackContext {
     // ---- Debug: call counters (zeroed per pgencan call) ----
     ncf: usize,
     ncg: usize,
-
-    /// Cached [`GeometryKey`] for the current cell.
-    ///
-    /// Deliberately last. It is read once per objective evaluation, not per
-    /// pair, and it is ~130 bytes: placing it among the cell-geometry fields
-    /// pushed the pair kernel's hot reads onto different cache lines and cost
-    /// 11% on `compute_f` — as much as caching it saved elsewhere. Cold fields
-    /// belong at the end of a struct this wide.
-    geometry_cache: GeometryKey,
 }
 
 impl PackContext {
@@ -377,12 +368,6 @@ impl PackContext {
             frame: molrs::Frame::new(),
             ncf: 0,
             ncg: 0,
-            geometry_cache: GeometryKey {
-                celldim: [1; 3],
-                pbc: [false; 3],
-                h: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-                origin: [0.0; 3],
-            },
         }
     }
 
@@ -413,7 +398,6 @@ impl PackContext {
 
     /// Resize cell list arrays after ncells is set.
     pub fn resize_cell_arrays(&mut self) {
-        self.refresh_geometry_key();
         let nc = self.grid.n_cells();
         debug_assert!(
             nc < NONE_IDX as usize,
@@ -751,24 +735,10 @@ impl PackContext {
     /// Everything the cell list depends on: the partition and the lattice it
     /// partitions. Comparing this is what lets a repeated evaluation at the
     /// same coordinates reuse the previous cell assignment.
-    ///
-    /// Returns the cached value, refreshed by
-    /// [`resize_cell_arrays`](Self::resize_cell_arrays) — which every call site
-    /// already runs after changing the cell. Deriving it on demand cost a dozen
-    /// ndarray index operations per objective evaluation to reproduce something
-    /// that only changes when the cell does; `run_iteration`, which times
-    /// exactly that kind of per-step constant on an empty system, measured it
-    /// at +11%.
-    #[inline(always)]
     pub fn geometry_key(&self) -> GeometryKey {
-        self.geometry_cache
-    }
-
-    /// Recompute the cached [`GeometryKey`] from the current cell.
-    fn refresh_geometry_key(&mut self) {
         let h = self.simbox.h_view();
         let o = self.simbox.origin_view();
-        self.geometry_cache = GeometryKey {
+        GeometryKey {
             celldim: self.grid.celldim(),
             pbc: self.grid.pbc(),
             h: [
@@ -783,7 +753,7 @@ impl PackContext {
                 h[[2, 2]],
             ],
             origin: [o[0], o[1], o[2]],
-        };
+        }
     }
 }
 
