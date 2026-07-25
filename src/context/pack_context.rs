@@ -211,6 +211,8 @@ pub struct PackContext {
     /// minimum image: the pair kernel calls
     /// [`SimBox::shortest_vector_impl`], which honours `pbc` per axis.
     pub simbox: SimBox,
+    /// Cached [`GeometryKey`] for the current cell.
+    geometry_cache: GeometryKey,
     /// Partition of [`simbox`](Self::simbox) into cells, in fractional space.
     ///
     /// Wraps on periodic axes and clamps on non-periodic ones, so an atom
@@ -344,6 +346,12 @@ impl PackContext {
             ibmol: vec![0; ntotat],
             fixedatom: vec![false; ntotat],
             comptype: vec![true; ntype],
+            geometry_cache: GeometryKey {
+                celldim: [1; 3],
+                pbc: [false; 3],
+                h: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                origin: [0.0; 3],
+            },
             simbox,
             grid,
             latomfirst: vec![NONE_IDX; ncell_total],
@@ -398,6 +406,7 @@ impl PackContext {
 
     /// Resize cell list arrays after ncells is set.
     pub fn resize_cell_arrays(&mut self) {
+        self.refresh_geometry_key();
         let nc = self.grid.n_cells();
         debug_assert!(
             nc < NONE_IDX as usize,
@@ -735,10 +744,24 @@ impl PackContext {
     /// Everything the cell list depends on: the partition and the lattice it
     /// partitions. Comparing this is what lets a repeated evaluation at the
     /// same coordinates reuse the previous cell assignment.
+    ///
+    /// Returns the cached value, refreshed by
+    /// [`resize_cell_arrays`](Self::resize_cell_arrays) — which every call site
+    /// already runs after changing the cell. Deriving it on demand cost a dozen
+    /// ndarray index operations per objective evaluation to reproduce something
+    /// that only changes when the cell does; `run_iteration`, which times
+    /// exactly that kind of per-step constant on an empty system, measured it
+    /// at +11%.
+    #[inline(always)]
     pub fn geometry_key(&self) -> GeometryKey {
+        self.geometry_cache
+    }
+
+    /// Recompute the cached [`GeometryKey`] from the current cell.
+    fn refresh_geometry_key(&mut self) {
         let h = self.simbox.h_view();
         let o = self.simbox.origin_view();
-        GeometryKey {
+        self.geometry_cache = GeometryKey {
             celldim: self.grid.celldim(),
             pbc: self.grid.pbc(),
             h: [
@@ -753,7 +776,7 @@ impl PackContext {
                 h[[2, 2]],
             ],
             origin: [o[0], o[1], o[2]],
-        }
+        };
     }
 }
 
