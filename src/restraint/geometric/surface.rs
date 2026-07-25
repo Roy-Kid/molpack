@@ -39,6 +39,10 @@ impl AtomRestraint for AbovePlaneRestraint {
         }
         self.f(pos, scale, scale2)
     }
+
+    fn plane_normal(&self) -> Option<[F; 3]> {
+        Some(self.normal)
+    }
 }
 
 /// Packmol kind 11 — quadratic penalty forcing atom below plane `n·x <= d`.
@@ -72,6 +76,10 @@ impl AtomRestraint for BelowPlaneRestraint {
             g[2] += 2.0 * n[2] * ds;
         }
         self.f(pos, scale, scale2)
+    }
+
+    fn plane_normal(&self) -> Option<[F; 3]> {
+        Some(self.normal)
     }
 }
 

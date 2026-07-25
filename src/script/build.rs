@@ -83,7 +83,10 @@ impl Script {
             packer = packer.with_seed(seed);
         }
         if let Some(pbc) = self.pbc {
-            packer = packer.with_periodic_box(pbc.min, pbc.max);
+            packer = packer.with_periodic_box(pbc.min, pbc.max, [true; 3]);
+        }
+        if let Some(cell) = self.cell {
+            packer = packer.with_cell(cell.lengths, cell.angles_deg, cell.pbc);
         }
 
         let structures: Vec<StructurePlan> = self

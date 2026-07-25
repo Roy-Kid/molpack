@@ -65,7 +65,7 @@
 //! | Builder | [`Molpack`], [`MolpackLogLevel`], [`PackResult`] |
 //! | Target  | [`Target`], [`CenteringMode`] |
 //! | AtomRestraint trait + 14 concrete structs | [`AtomRestraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…AtomRestraint` |
-//! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
+//! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideCellRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
 //! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`PhaseInfo`], [`PhaseReport`] |
 //! | Optimizer (`ff`) | [`OptimizeSelect`] + `Molpack::with_optimizer` + molrs [`Optimizer`] / [`TorsionMcOptimizer`] |
 //! | Errors | [`PackError`] |
@@ -90,7 +90,6 @@
 pub mod assemble;
 #[cfg(feature = "io")]
 pub mod cases;
-pub mod cell;
 pub mod constraints;
 pub mod context;
 pub mod error;
@@ -125,8 +124,8 @@ pub use molrs::Element;
 pub use molrs::types::F;
 pub use packer::{Molpack, PackResult};
 pub use region::{
-    Aabb, And, InsideBoxRegion, InsideSphereRegion, Not, Or, OutsideSphereRegion, Region,
-    RegionExt, RegionRestraint,
+    Aabb, And, InsideBoxRegion, InsideCellRegion, InsideSphereRegion, Not, Or, OutsideSphereRegion,
+    Region, RegionExt, RegionRestraint,
 };
 // In-loop optimizers require molrs `ff` (Optimizer trait + Potential).
 #[cfg(feature = "ff")]
@@ -207,6 +206,7 @@ pub mod prelude {
         Handler,
         InsideBoxRegion,
         InsideBoxRestraint,
+        InsideCellRegion,
         InsideCubeRestraint,
         InsideCylinderRestraint,
         InsideEllipsoidRestraint,

@@ -50,10 +50,11 @@ fn single_atom_system(nmol: usize) -> PackContext {
 }
 
 fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
-    sys.ncells = [cell_n, cell_n, cell_n];
-    sys.cell_length = [cell_len; 3];
-    sys.pbc_min = [0.0; 3];
-    sys.pbc_length = [cell_len * cell_n as F; 3];
+    let side = cell_len * cell_n as F;
+    sys.simbox =
+        molrs::spatial::region::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
+            .expect("cell");
+    sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
     sys.resize_cell_arrays();
 }
 

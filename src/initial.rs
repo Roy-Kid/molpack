@@ -12,10 +12,12 @@
 //!   8. Random angles
 //!   9. Phase 2: constraint-only GENCAN per type (reduced x!)
 
+use molrs::spatial::neighbors::CellGrid;
+use molrs::spatial::region::simbox::SimBox;
 use molrs::types::F;
+use ndarray::array;
 use std::time::Instant;
 
-use crate::cell::{cell_ind, index_cell, setcell};
 use crate::constraints::EvalMode;
 use crate::context::{NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat};
@@ -301,7 +303,7 @@ pub fn initial(
     discale: F,
     sidemax: F,
     nloop0: usize,
-    pbc: Option<([F; 3], [F; 3], [bool; 3])>,
+    cell: Option<SimBox>,
     avoid_overlap: bool,
     movebad_cfg: &MoveBadConfig<'_>,
     rng: &mut impl Rng,
@@ -515,23 +517,22 @@ pub fn initial(
 
     // ── 6. Setup periodic box + cell grid + fixed atoms ──────────────────────
     // Packmol initial.f90 lines 272-317
-    if let Some((pbc_min, pbc_max, pbc_periodic)) = pbc {
-        sys.pbc_min = pbc_min;
-        sys.pbc_length = [
-            pbc_max[0] - pbc_min[0],
-            pbc_max[1] - pbc_min[1],
-            pbc_max[2] - pbc_min[2],
-        ];
-        sys.pbc_periodic = pbc_periodic;
-    } else {
-        sys.pbc_min = sys.sizemin;
-        sys.pbc_length = [
-            sys.sizemax[0] - sys.sizemin[0],
-            sys.sizemax[1] - sys.sizemin[1],
-            sys.sizemax[2] - sys.sizemin[2],
-        ];
-        sys.pbc_periodic = [false; 3];
-    }
+    // Caller-declared cell if there is one, else a non-periodic box around the
+    // atoms found in phase 1.
+    sys.simbox = match cell {
+        Some(bx) => bx,
+        None => SimBox::ortho(
+            array![
+                sys.sizemax[0] - sys.sizemin[0],
+                sys.sizemax[1] - sys.sizemin[1],
+                sys.sizemax[2] - sys.sizemin[2]
+            ],
+            array![sys.sizemin[0], sys.sizemin[1], sys.sizemin[2]],
+            [false; 3],
+        )
+        .expect("fallback cell must have positive extent on every axis"),
+    };
+    let periodic = sys.simbox.pbc();
 
     let cell_side = if radmax > 0.0 {
         discale * 1.01 * radmax
@@ -543,12 +544,12 @@ pub fn initial(
         t0.elapsed().as_secs_f64(),
         cell_side
     );
-    // Raw grid resolution: one cell per `cell_side` along each axis.
-    let raw = [
-        ((sys.pbc_length[0] / cell_side).floor() as usize).max(1),
-        ((sys.pbc_length[1] / cell_side).floor() as usize).max(1),
-        ((sys.pbc_length[2] / cell_side).floor() as usize).max(1),
-    ];
+    // Raw grid resolution: one cell per `cell_side` along each lattice
+    // direction. Sized from plane distances rather than edge lengths, which is
+    // what keeps cells at least `cell_side` wide once the cell is tilted.
+    let raw = CellGrid::for_cutoff(&sys.simbox, cell_side)
+        .celldim()
+        .map(|d| d as usize);
     // Cap the total cell count. With no spatial constraint the fallback box is
     // ±`sidemax` (default 1000 Å) wide, which drives the raw grid to ~10⁹ cells
     // and OOMs `resize_cell_arrays` (each cell costs ~120 B across the cell
@@ -562,15 +563,13 @@ pub fn initial(
     } else {
         1.0
     };
-    for (k, &raw_k) in raw.iter().enumerate() {
-        sys.ncells[k] = ((raw_k as f64 / shrink).floor() as usize).max(1);
-        sys.cell_length[k] = sys.pbc_length[k] / sys.ncells[k] as F;
-    }
+    let dims = raw.map(|raw_k| ((raw_k as f64 / shrink).floor() as u32).max(1));
+    sys.grid = CellGrid::with_dims(dims, periodic);
     log::debug!(
-        "[{:.3}s] ncells={:?}  cell_length={:?}",
+        "[{:.3}s] celldim={:?}  periodic={:?}",
         t0.elapsed().as_secs_f64(),
-        sys.ncells,
-        sys.cell_length
+        sys.grid.celldim(),
+        periodic
     );
 
     sys.resize_cell_arrays();
@@ -578,15 +577,7 @@ pub fn initial(
     // Add fixed atoms to latomfix (Packmol lines 303-318)
     for icart in free_atoms..sys.ntotat {
         let pos = sys.xcart[icart];
-        let cell = setcell(
-            &pos,
-            &sys.pbc_min,
-            &sys.pbc_length,
-            &sys.cell_length,
-            &sys.ncells,
-            &sys.pbc_periodic,
-        );
-        let icell = index_cell(&cell, &sys.ncells);
+        let icell = sys.grid.cell_of(&sys.simbox, pos);
         if sys.latomfix[icell] == NONE_IDX {
             sys.fixed_cells.push(icell);
         }
@@ -645,29 +636,16 @@ pub fn initial(
                     x[ilubar + 2] = cm_lo[2] + rz * (cm_hi[2] - cm_lo[2]);
                     if has_fixed {
                         let pos = [x[ilubar], x[ilubar + 1], x[ilubar + 2]];
-                        let cell = setcell(
-                            &pos,
-                            &sys.pbc_min,
-                            &sys.pbc_length,
-                            &sys.cell_length,
-                            &sys.ncells,
-                            &sys.pbc_periodic,
-                        );
-                        'scan: for ic in -1isize..=1 {
-                            for jc in -1isize..=1 {
-                                for kc in -1isize..=1 {
-                                    let nc = [
-                                        cell_ind(cell[0] as isize + ic, sys.ncells[0]),
-                                        cell_ind(cell[1] as isize + jc, sys.ncells[1]),
-                                        cell_ind(cell[2] as isize + kc, sys.ncells[2]),
-                                    ];
-                                    if sys.latomfix[index_cell(&nc, &sys.ncells)] != NONE_IDX {
-                                        overlap = true;
-                                        break 'scan;
-                                    }
-                                }
-                            }
-                        }
+                        // Reject a seed that lands in, or next to, a cell
+                        // holding fixed atoms. The stencil drops out-of-range
+                        // offsets on non-periodic axes instead of wrapping to
+                        // the opposite face, so this no longer inspects cells
+                        // on the far side of a confined direction.
+                        let icell = sys.grid.cell_of(&sys.simbox, pos);
+                        let mut stencil = [0usize; 27];
+                        let n = sys.grid.stencil_all(icell, &mut stencil);
+                        overlap = sys.latomfix[icell] != NONE_IDX
+                            || stencil[..n].iter().any(|&nc| sys.latomfix[nc] != NONE_IDX);
                     }
                     if !overlap {
                         restmol(

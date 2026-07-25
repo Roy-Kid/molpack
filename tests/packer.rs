@@ -166,7 +166,7 @@ fn with_periodic_box_caps_cell_grid() {
     let target = Target::from_coords(&coords, &radii, 4); // no restraints at all
     let result = Molpack::new()
         .with_seed(42)
-        .with_periodic_box([0.0; 3], [30.0; 3])
+        .with_periodic_box([0.0; 3], [30.0; 3], [true; 3])
         .pack_with_report(&[target], 2);
     assert!(
         result.is_ok(),
@@ -185,7 +185,7 @@ fn with_periodic_box_and_restraint_agree() {
     );
     let result = Molpack::new()
         .with_seed(42)
-        .with_periodic_box([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
+        .with_periodic_box([0.0, 0.0, 0.0], [30.0, 30.0, 30.0], [true; 3])
         .pack_with_report(&[target], 2);
     assert!(result.is_ok(), "expected agreement, got: {result:?}");
     assert_eq!(result.unwrap().natoms(), 6);
@@ -199,7 +199,7 @@ fn with_periodic_box_conflicts_with_restraint() {
         .with_restraint(InsideBoxRestraint::new([0.0; 3], [30.0; 3], [true; 3]));
     let result = Molpack::new()
         .with_seed(42)
-        .with_periodic_box([0.0; 3], [40.0; 3])
+        .with_periodic_box([0.0; 3], [40.0; 3], [true; 3])
         .pack_with_report(&[target], 2);
     assert!(
         matches!(result, Err(PackError::ConflictingPeriodicBoxes { .. })),
@@ -213,7 +213,7 @@ fn with_periodic_box_rejects_zero_extent() {
     let target = Target::from_coords(&coords, &radii, 1);
     let result = Molpack::new()
         .with_seed(42)
-        .with_periodic_box([0.0; 3], [10.0, 0.0, 10.0])
+        .with_periodic_box([0.0; 3], [10.0, 0.0, 10.0], [true; 3])
         .pack_with_report(&[target], 2);
     assert!(
         matches!(result, Err(PackError::InvalidPBCBox { .. })),
@@ -245,7 +245,7 @@ fn pbc_shifted_origin_box_packs_within_bounds() {
     let result = Molpack::new()
         .with_tolerance(tolerance)
         .with_seed(0xCAFE)
-        .with_periodic_box(min, max)
+        .with_periodic_box(min, max, [true; 3])
         .pack_with_report(&[target], 5)
         .expect("shifted-origin PBC pack should succeed");
 

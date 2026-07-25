@@ -6,7 +6,7 @@ use std::sync::Arc;
 use molrs::Element;
 use molrs::spatial::region::simbox::SimBox;
 use molrs::types::F;
-use ndarray::Array1;
+use ndarray::{Array1, array};
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
@@ -117,6 +117,11 @@ pub struct Molpack {
     /// present, they must match exactly or `pack()` returns
     /// [`PackError::ConflictingPeriodicBoxes`].
     periodic_box: Option<PeriodicSpec>,
+    /// Caller-declared packing lattice, from [`with_cell`][Self::with_cell] or
+    /// [`with_cell_matrix`][Self::with_cell_matrix] (script `cell`). Mutually
+    /// exclusive with a periodic *box*: a box is a lattice, so declaring both
+    /// is a contradiction rather than something to reconcile.
+    cell: Option<CellDecl>,
     /// Built-in LAMMPS-style screen output detail.
     log_level: MolpackLogLevel,
     /// Print every N outer iterations when `log_level` includes progress.
@@ -163,6 +168,7 @@ impl Molpack {
             seed: DEFAULT_SEED,
             parallel_eval: false,
             periodic_box: None,
+            cell: None,
             log_level: MolpackLogLevel::Quiet,
             log_frequency: 1,
             avoid_overlap: true,
@@ -253,18 +259,51 @@ impl Molpack {
         self
     }
 
-    /// Declare a global periodic-boundary box (Packmol `pbc`). Every axis
-    /// is treated as periodic. When set, the packer's cell grid is built
-    /// from `max - min`, bypassing the fallback that derives a box from
-    /// post-Phase-1 atom positions — which can be ±`sidemax` wide when
-    /// the script has no spatial constraints and drives `ncells` to
-    /// 10⁸+ cells.
+    /// Declare a global periodic-boundary box (Packmol `pbc`) with per-axis
+    /// periodicity.
     ///
-    /// If any restraint also declares a `periodic_box()`, the two must
-    /// match exactly (bounds + flags) or `pack()` returns
+    /// `pbc` is per axis rather than all-or-nothing. Forcing every axis
+    /// periodic makes an interface or slab — periodic in the surface plane,
+    /// confined along the normal — wrap along the confined direction, which
+    /// both distorts the minimum image and makes the packing stall.
+    ///
+    /// When set, the cell grid is built from `max - min`, bypassing the
+    /// fallback that derives a box from post-Phase-1 atom positions — which can
+    /// be ±`sidemax` wide when the script has no spatial constraints.
+    ///
+    /// If any restraint also declares a `periodic_box()`, the two must match
+    /// exactly (bounds + flags) or `pack()` returns
     /// [`PackError::ConflictingPeriodicBoxes`].
-    pub fn with_periodic_box(mut self, min: [F; 3], max: [F; 3]) -> Self {
-        self.periodic_box = Some((min, max, [true; 3]));
+    pub fn with_periodic_box(mut self, min: [F; 3], max: [F; 3], pbc: [bool; 3]) -> Self {
+        self.periodic_box = Some((min, max, pbc));
+        self
+    }
+
+    /// Declare the packing cell by lengths and angles, crystallographic style.
+    ///
+    /// This is the entry point Packmol has no equivalent for: it supports
+    /// orthorhombic periodic boundaries only, so a hexagonal or triclinic cell
+    /// has to be approximated by an enclosing box and cropped, which loses
+    /// density at the boundary, or expanded into a rectangular supercell, which
+    /// inflates the atom count.
+    ///
+    /// Angles are in degrees. The cell is validated in [`pack`][Self::pack]
+    /// so the builder stays infallible.
+    pub fn with_cell(mut self, lengths: [F; 3], angles_deg: [F; 3], pbc: [bool; 3]) -> Self {
+        self.cell = Some(CellDecl::LengthsAngles {
+            lengths,
+            angles_deg,
+            pbc,
+        });
+        self
+    }
+
+    /// Declare the packing cell by its lattice matrix.
+    ///
+    /// `h` holds the lattice vectors as columns, matching the `SimBox`
+    /// convention (`cart = origin + H · frac`).
+    pub fn with_cell_matrix(mut self, h: [[F; 3]; 3], origin: [F; 3], pbc: [bool; 3]) -> Self {
+        self.cell = Some(CellDecl::Matrix { h, origin, pbc });
         self
     }
 
@@ -421,7 +460,32 @@ impl Molpack {
                 return Err(PackError::InvalidPBCBox { min, max });
             }
         }
-        let pbc = match (self.periodic_box, derive_periodic_box(targets)?) {
+        let derived = derive_periodic_box(targets)?;
+        let derived_cell = derive_cell(targets)?;
+        let declared_cell = match (self.cell, derived_cell) {
+            (None, other) | (other, None) => other,
+            (Some(builder), Some(restraint)) => {
+                let from_builder = builder.resolve()?;
+                let from_restraint = restraint.resolve()?;
+                if cells_agree(&from_builder, &from_restraint) {
+                    Some(builder)
+                } else {
+                    return Err(PackError::InvalidCell {
+                        detail: "the cell declared on the packer and the cell declared by a \
+                                 restraint describe different lattices"
+                            .to_string(),
+                    });
+                }
+            }
+        };
+        if declared_cell.is_some() && (self.periodic_box.is_some() || derived.is_some()) {
+            return Err(PackError::InvalidCell {
+                detail: "a declared cell and a periodic box are mutually exclusive; \
+                         drop the `pbc` declaration or express it as the cell"
+                    .to_string(),
+            });
+        }
+        let pbc = match (self.periodic_box, derived) {
             (None, derived) => derived,
             (Some(global), None) => Some(global),
             (Some(global), Some(derived)) if global == derived => Some(global),
@@ -640,6 +704,23 @@ impl Molpack {
             movebadrandom: self.random_perturb,
             gencan_maxit: self.inner_iterations,
         };
+        // One cell for the whole run: a declared lattice if there is one, else
+        // the periodic box, else nothing (initial() then bounds the atoms).
+        let cell = match (declared_cell, pbc) {
+            (Some(decl), _) => Some(decl.resolve()?),
+            (None, Some((min, max, periodic))) => Some(
+                SimBox::ortho(
+                    array![max[0] - min[0], max[1] - min[1], max[2] - min[2]],
+                    array![min[0], min[1], min[2]],
+                    periodic,
+                )
+                .map_err(|_| PackError::InvalidPBCBox { min, max })?,
+            ),
+            (None, None) => None,
+        };
+        if let Some(bx) = cell.as_ref() {
+            reject_planes_across_periodic_axes(targets, bx)?;
+        }
         initial(
             &mut x,
             &mut sys,
@@ -647,7 +728,7 @@ impl Molpack {
             self.discale,
             self.init_box_half_size,
             init_passes,
-            pbc,
+            cell,
             self.avoid_overlap,
             &movebad_cfg,
             &mut rng,
@@ -771,6 +852,58 @@ impl Molpack {
 /// `derive_periodic_box` and its callers.
 type PeriodicSpec = ([F; 3], [F; 3], [bool; 3]);
 
+/// A packing cell as the caller declared it, resolved to a [`SimBox`] in
+/// [`Molpack::pack`] so the builder can stay infallible.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CellDecl {
+    LengthsAngles {
+        lengths: [F; 3],
+        angles_deg: [F; 3],
+        pbc: [bool; 3],
+    },
+    Matrix {
+        h: [[F; 3]; 3],
+        origin: [F; 3],
+        pbc: [bool; 3],
+    },
+}
+
+impl CellDecl {
+    fn resolve(self) -> Result<SimBox, PackError> {
+        let (h, origin, pbc) = match self {
+            CellDecl::LengthsAngles {
+                lengths,
+                angles_deg,
+                pbc,
+            } => (
+                SimBox::matrix_from_lengths_angles(lengths, angles_deg).map_err(|_| {
+                    PackError::InvalidCell {
+                        detail: format!(
+                            "lengths {lengths:?} and angles {angles_deg:?} do not describe a cell"
+                        ),
+                    }
+                })?,
+                [0.0; 3],
+                pbc,
+            ),
+            CellDecl::Matrix { h, origin, pbc } => (
+                array![
+                    [h[0][0], h[0][1], h[0][2]],
+                    [h[1][0], h[1][1], h[1][2]],
+                    [h[2][0], h[2][1], h[2][2]]
+                ],
+                origin,
+                pbc,
+            ),
+        };
+        SimBox::new(h, array![origin[0], origin[1], origin[2]], pbc).map_err(|_| {
+            PackError::InvalidCell {
+                detail: "lattice matrix is singular".to_string(),
+            }
+        })
+    }
+}
+
 /// Scan every restraint on every target for a `AtomRestraint::periodic_box`
 /// override. Returns `Ok(None)` if no restraint declares one, `Ok(Some(...))`
 /// if exactly one unique declaration exists (duplicates with identical
@@ -779,6 +912,90 @@ type PeriodicSpec = ([F; 3], [F; 3], [bool; 3]);
 /// Returns `Err(ConflictingPeriodicBoxes)` when two declarations disagree
 /// and `Err(InvalidPBCBox)` if the declared box has a non-positive extent
 /// on any axis.
+/// Reject a half-space restraint declared across a periodic lattice direction.
+///
+/// A plane splits space in two. Under periodicity along lattice vector `a`,
+/// translating a point by `a` must leave it on the same side, which holds only
+/// when the normal is orthogonal to `a`. Packmol evaluates such a constraint
+/// anyway, in the frame of whichever cell the origin sits in, so whether it is
+/// satisfied depends on where the user put the origin. There is no
+/// interpretation to salvage — the declaration is refused, naming the axis.
+fn reject_planes_across_periodic_axes(targets: &[Target], bx: &SimBox) -> Result<(), PackError> {
+    let pbc = bx.pbc();
+    if !pbc.iter().any(|&p| p) {
+        return Ok(());
+    }
+    let h = bx.h_view();
+    // Lattice vectors are the columns of H.
+    let lattice = |k: usize| [h[[0, k]], h[[1, k]], h[[2, k]]];
+
+    for target in targets {
+        let restraints = target
+            .molecule_restraints
+            .iter()
+            .chain(target.atom_restraints.iter().map(|(_, r)| r));
+        for r in restraints {
+            let Some(n) = r.plane_normal() else { continue };
+            let n_norm = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            if n_norm <= 0.0 {
+                continue;
+            }
+            for (k, &periodic) in pbc.iter().enumerate() {
+                if !periodic {
+                    continue;
+                }
+                let a = lattice(k);
+                let a_norm = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+                let cos = (n[0] * a[0] + n[1] * a[1] + n[2] * a[2]) / (n_norm * a_norm);
+                if cos.abs() > 1e-9 {
+                    return Err(PackError::PlaneAcrossPeriodicAxis { axis: k, normal: n });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Do two lattices describe the same cell?
+fn cells_agree(a: &SimBox, b: &SimBox) -> bool {
+    let (ha, hb) = (a.h_view(), b.h_view());
+    let (oa, ob) = (a.origin_view(), b.origin_view());
+    let tol: F = 1e-9;
+    (0..3).all(|i| (0..3).all(|j| (ha[[i, j]] - hb[[i, j]]).abs() <= tol))
+        && (0..3).all(|k| (oa[k] - ob[k]).abs() <= tol)
+        && a.pbc() == b.pbc()
+}
+
+/// Scan every restraint on every target for an `AtomRestraint::declared_cell`.
+///
+/// Mirrors [`derive_periodic_box`]: at most one distinct lattice may be
+/// declared across the whole system, otherwise the packing has no
+/// well-defined cell.
+fn derive_cell(targets: &[Target]) -> Result<Option<CellDecl>, PackError> {
+    let mut found: Option<CellDecl> = None;
+    for target in targets {
+        let restraints = target
+            .molecule_restraints
+            .iter()
+            .chain(target.atom_restraints.iter().map(|(_, r)| r));
+        for r in restraints {
+            if let Some((h, origin, pbc)) = r.declared_cell() {
+                let candidate = CellDecl::Matrix { h, origin, pbc };
+                match found {
+                    None => found = Some(candidate),
+                    Some(existing) if existing == candidate => {}
+                    Some(_) => {
+                        return Err(PackError::InvalidCell {
+                            detail: "restraints declare more than one lattice".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(found)
+}
+
 fn derive_periodic_box(targets: &[Target]) -> Result<Option<PeriodicSpec>, PackError> {
     let mut found: Option<PeriodicSpec> = None;
     for target in targets {

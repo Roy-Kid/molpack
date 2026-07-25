@@ -16,10 +16,11 @@ use molpack::{F, InsideBoxRestraint, PackContext};
 // ── setup helpers (mirror tests/gradient.rs patterns) ──────────────────────
 
 fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
-    sys.ncells = [cell_n, cell_n, cell_n];
-    sys.cell_length = [cell_len; 3];
-    sys.pbc_min = [0.0; 3];
-    sys.pbc_length = [cell_len * cell_n as F; 3];
+    let side = cell_len * cell_n as F;
+    sys.simbox =
+        molrs::spatial::region::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
+            .expect("cell");
+    sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
     sys.resize_cell_arrays();
 }
 
@@ -60,7 +61,7 @@ fn mixed_system() -> (PackContext, Vec<F>) {
 }
 
 fn force_cache_miss(sys: &mut PackContext) {
-    sys.work.cached_geometry_valid = false;
+    sys.work.cached_geometry = None;
 }
 
 // ── compute_f cache ────────────────────────────────────────────────────────
@@ -219,7 +220,7 @@ fn move_flag_true_bypasses_cache() {
 
     // Warm the cache at normal (move_flag=false) state.
     let _ = compute_f(&x, &mut sys);
-    assert!(sys.work.cached_geometry_valid);
+    assert!(sys.work.cached_geometry.is_some());
 
     // Now turn on move_flag and reset per-atom trackers.
     sys.move_flag = true;
