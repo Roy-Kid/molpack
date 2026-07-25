@@ -27,13 +27,22 @@ enum ExpandMode {
 /// `SimBox` keeps an orthorhombic fast path, so the common case still costs
 /// three `round`s.
 struct PbcConstants {
-    bx: SimBox,
+    /// `None` when no axis wraps.
+    ///
+    /// A free-boundary pack is the common case and wants its displacements back
+    /// untouched. Carrying `None` buys two things: the pair loop returns
+    /// immediately instead of paying three periodicity branches per pair to
+    /// learn there is nothing to do, and the `SimBox` — which owns two
+    /// `Array2`s — is not cloned at all on a path rebuilt once per objective
+    /// evaluation.
+    bx: Option<SimBox>,
 }
 
 #[inline(always)]
 fn pbc_constants(sys: &PackContext) -> PbcConstants {
+    let any_periodic = sys.pbc_periodic().iter().any(|&p| p);
     PbcConstants {
-        bx: sys.simbox.clone(),
+        bx: any_periodic.then(|| sys.simbox.clone()),
     }
 }
 
@@ -43,8 +52,13 @@ fn pbc_constants(sys: &PackContext) -> PbcConstants {
 /// the image of `d` measured from the origin.
 #[inline(always)]
 fn pbc_wrap_delta(dx: F, dy: F, dz: F, pbc: &PbcConstants) -> (F, F, F) {
-    let d = pbc.bx.shortest_vector_impl([0.0, 0.0, 0.0], [dx, dy, dz]);
-    (d[0], d[1], d[2])
+    match &pbc.bx {
+        None => (dx, dy, dz),
+        Some(bx) => {
+            let d = bx.shortest_vector_impl([0.0, 0.0, 0.0], [dx, dy, dz]);
+            (d[0], d[1], d[2])
+        }
+    }
 }
 
 // Parallel pair evaluation is user-selected via

@@ -24,13 +24,12 @@ Modules:
 | `src/script/` | `.inp` parsing (`parser.rs`) + lowering to Targets/plans (`build.rs`) + format readers/writers (`io.rs`, `io` feature) + errors (`error.rs`) |
 | `src/target.rs` | `Target` builder (coords/radii + restraints + relaxer + centering/orientation); `Axis` / `Angle` / `Placement` / `CenteringMode` |
 | `src/restraint/` | `AtomRestraint` trait + per-atom geometric restraints (`geometric/`) and collective distribution-matching restraints (`collective/`) |
-| `src/region.rs` | `Region` predicate trait + `And`/`Or`/`Not` combinators + `RegionRestraint` lift + `Aabb` |
+| `src/region.rs` | `Region` predicate trait + `And`/`Or`/`Not` combinators + `RegionRestraint` lift + `Aabb` + `InsideCellRegion` (primitive cell, any lattice) |
 | `src/objective.rs` | objective value + gradient over targets (pair terms, PBC, rayon paths); `Objective` impl |
 | `src/constraints/` | `Constraints` container + `EvalMode` / `EvalOutput` evaluation entrypoint |
 | `src/packer.rs` | `Molpack` builder + `pack()` orchestration + inner-loop driver (move / relax / evaluate); `PackResult` |
 | `src/gencan/` | bound-constrained optimizer: GENCAN/SPG driver (`mod.rs`), CG (`cg.rs`), SPG (`spg.rs`) |
-| `src/cell.rs` | linked-cell neighbor lookup + PBC wrap |
-| `src/context/` | packing runtime `PackContext` + model/state views + reusable work buffers |
+| `src/context/` | packing runtime `PackContext` (carries the `SimBox` + molrs `CellGrid` and the forward-neighbour table) + model/state views + reusable work buffers |
 | `src/initial.rs`, `src/movebad.rs` | initial placement; `movebad` escape moves |
 | `src/relaxer/` | in-loop per-molecule relaxers: `Relaxer` / `TorsionMcRelaxer` (`mod.rs`), `LBFGSRelaxer` (`lbfgs.rs`, `ff` feature) |
 | `src/handler.rs` | `Handler` trait + built-in progress / log / XYZ / early-stop handlers |
