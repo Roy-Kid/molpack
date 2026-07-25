@@ -122,6 +122,11 @@ required-features = ["rayon"]
 # bench synthesizes its own geometry in-process, so none require the `io`
 # feature. Each sets `harness = false` for the criterion `main` entry point.
 [[bench]]
+name = "collective_eval"
+path = "benches/collective_eval.rs"
+harness = false
+
+[[bench]]
 name = "pair_kernel"
 path = "benches/pair_kernel.rs"
 harness = false

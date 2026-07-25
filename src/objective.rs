@@ -755,27 +755,41 @@ fn accumulate_collective_fg(sys: &mut PackContext) -> F {
     // Move the list out so `sys.xcart` (read) and `sys.work.gxcar` (write) are
     // borrowed as disjoint fields without aliasing the whole `sys`.
     let collective = std::mem::take(&mut sys.collective);
+
+    // Resolve every group's slice first: `type_icart_start` borrows all of
+    // `sys`, and the loop below needs two of its fields split apart.
+    let spans: Vec<(usize, usize)> = collective
+        .iter()
+        .map(|(itype, _)| *itype)
+        .map(|itype| {
+            if !sys.comptype[itype] {
+                return (0, 0);
+            }
+            let len = sys.nmols[itype] * sys.natoms[itype];
+            (type_icart_start(sys, itype), len)
+        })
+        .collect();
+
+    // Split borrow: coordinates are read in place and the coupled gradient is
+    // accumulated straight into the scatter buffer. The restraint contract is
+    // `+=` into `grads`, which is exactly what `gxcar` wants, so neither the
+    // coordinates nor the gradients need a staging copy — they used to cost
+    // two allocations plus two passes per evaluation per group, ~200 us for a
+    // 30k-atom species, on a path GENCAN calls thousands of times.
+    let PackContext { xcart, work, .. } = sys;
     let mut total = 0.0;
-    for (itype, r) in &collective {
-        let itype = *itype;
-        if !sys.comptype[itype] {
-            continue;
-        }
-        let start = type_icart_start(sys, itype);
-        let len = sys.nmols[itype] * sys.natoms[itype];
+    for ((start, len), (_, r)) in spans.iter().copied().zip(collective.iter()) {
         if len == 0 {
             continue;
         }
-        let coords: Vec<[F; 3]> = sys.xcart[start..start + len].to_vec();
-        let mut grads = vec![[0.0 as F; 3]; len];
-        total += r.fg(&coords, scale, scale2, &mut grads);
-        for (k, g) in grads.iter().enumerate() {
-            let gc = &mut sys.work.gxcar[start + k];
-            gc[0] += g[0];
-            gc[1] += g[1];
-            gc[2] += g[2];
-        }
+        total += r.fg(
+            &xcart[start..start + len],
+            scale,
+            scale2,
+            &mut work.gxcar[start..start + len],
+        );
     }
+
     sys.collective = collective;
     total
 }
