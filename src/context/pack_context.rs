@@ -957,3 +957,66 @@ mod atom_props_tests {
         assert_eq!(sys.n_short_radius, 2);
     }
 }
+
+#[cfg(test)]
+mod neighbor_table_tests {
+    use super::*;
+
+    fn ctx_with_grid(celldim: [u32; 3], pbc: [bool; 3]) -> PackContext {
+        let mut sys = PackContext::new(1, 1, 1);
+        sys.simbox = SimBox::cube(10.0, array![0.0, 0.0, 0.0], pbc).expect("cell");
+        sys.grid = CellGrid::with_dims(celldim, pbc);
+        sys.resize_cell_arrays();
+        sys
+    }
+
+    /// Every unordered pair of adjacent cells appears exactly once, so the
+    /// table holds 13 entries per cell on a fully periodic grid — the same
+    /// total the fixed 13-offset table carried.
+    #[test]
+    fn periodic_grid_holds_thirteen_forward_neighbours_per_cell() {
+        let sys = ctx_with_grid([4, 4, 4], [true; 3]);
+        let n = sys.grid.n_cells();
+        assert_eq!(sys.neighbor_cells.len(), 13 * n);
+    }
+
+    /// What the move from offset-based to index-based forwardness actually
+    /// changed: the *distribution*. Cell 0 sees all 26 of its neighbours as
+    /// forward, the last cell sees none. Total work is unchanged, but it is no
+    /// longer flat across cells, which is what a rayon-over-cells traversal
+    /// divides up.
+    #[test]
+    fn forward_counts_are_uneven_while_the_total_is_not() {
+        let sys = ctx_with_grid([4, 4, 4], [true; 3]);
+        let counts: Vec<usize> = (0..sys.grid.n_cells())
+            .map(|i| sys.neighbors(i).len())
+            .collect();
+        assert_eq!(counts.iter().sum::<usize>(), 13 * counts.len());
+        assert_eq!(*counts.iter().max().expect("non-empty"), 26);
+        assert_eq!(*counts.iter().min().expect("non-empty"), 0);
+    }
+
+    /// A non-periodic axis has no wrap-around neighbours, so the table is
+    /// smaller than the periodic case rather than padded with far-side cells
+    /// the way an unconditional wrap would leave it.
+    #[test]
+    fn a_non_periodic_axis_drops_its_wrap_neighbours() {
+        let periodic = ctx_with_grid([4, 4, 4], [true; 3]);
+        let confined = ctx_with_grid([4, 4, 4], [true, true, false]);
+        assert!(
+            confined.neighbor_cells.len() < periodic.neighbor_cells.len(),
+            "confining an axis must remove neighbour entries, got {} vs {}",
+            confined.neighbor_cells.len(),
+            periodic.neighbor_cells.len()
+        );
+    }
+
+    /// Two cells on an axis: the aliasing case that double-counted under a
+    /// fixed `{0, +1}` offset set.
+    #[test]
+    fn two_cells_on_an_axis_are_paired_once() {
+        let sys = ctx_with_grid([2, 1, 1], [true; 3]);
+        assert_eq!(sys.neighbors(0), &[1]);
+        assert_eq!(sys.neighbors(1), &[] as &[u32]);
+    }
+}
