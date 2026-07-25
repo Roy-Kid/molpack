@@ -668,3 +668,92 @@ fn fused_function_and_gradient_matches_separate_evaluation() {
         assert!(err < 1e-10, "g mismatch at {i}: {a} vs {b} (err={err})");
     }
 }
+
+// ── collective restraints through the full objective ───────────────────────
+//
+// The unit tests next to each collective restraint check its own `f`/`fg`
+// against a finite difference on a bare coordinate array. Nothing exercised the
+// step that puts it into the objective: resolving each species' slice of
+// `xcart`, skipping inactive types, accumulating the coupled gradient into the
+// scatter buffer, and projecting that onto the molecules' COM/Euler DOF. That
+// path was silently untested — including through a rewrite of it.
+
+#[test]
+fn collective_restraint_gradient_matches_finite_difference_through_the_objective() {
+    use molpack::restraint::GaussianPlane;
+
+    // Five monatomic molecules strung along z, biased toward a Gaussian
+    // profile about the plane z = 0. The gradient of a distribution-matching
+    // penalty is coupled across every copy, so this also checks that the
+    // scatter lands on the right molecule.
+    let nmol = 5;
+    let mut sys = single_atom_system(nmol);
+    // `init1` short-circuits both the pair terms and the collective ones, so it
+    // has to be off here — with it on the check would pass while measuring
+    // nothing, which is how this path stayed untested.
+    sys.init1 = false;
+    sys.collective = vec![(
+        0usize,
+        Arc::new(GaussianPlane::new([0.0, 0.0, 1.0], 0.0, 1.0, 0.0, 3.0)) as Arc<_>,
+    )];
+
+    let mut x = vec![0.0; 6 * nmol];
+    // Spaced well beyond the 2 Å contact distance so the pair term stays at
+    // zero and the finite difference sees the collective term alone.
+    for m in 0..nmol {
+        x[3 * m] = 0.5 * m as F;
+        x[3 * m + 1] = -0.3 * m as F;
+        x[3 * m + 2] = 6.0 * m as F - 12.0;
+    }
+
+    let f0 = compute_f(&x, &mut sys);
+    assert!(
+        f0 > 1e-9,
+        "collective penalty inactive (f={f0}) — the check would be vacuous"
+    );
+
+    let mut g = vec![0.0; x.len()];
+    compute_g(&x, &mut sys, &mut g);
+
+    for i in 0..3 * nmol {
+        let gfd = finite_diff(&x, &mut sys, i, 1e-6);
+        let err = (g[i] - gfd).abs();
+        assert!(
+            err < 1e-5,
+            "collective gradient mismatch at var {i}: analytic={} fd={gfd} err={err}",
+            g[i]
+        );
+    }
+}
+
+#[test]
+fn an_inactive_species_contributes_no_collective_gradient() {
+    use molpack::restraint::GaussianPlane;
+
+    let nmol = 4;
+    let mut sys = single_atom_system(nmol);
+    sys.init1 = false;
+    sys.collective = vec![(
+        0usize,
+        Arc::new(GaussianPlane::new([0.0, 0.0, 1.0], 0.0, 1.0, 0.0, 3.0)) as Arc<_>,
+    )];
+    let mut x = vec![0.0; 6 * nmol];
+    for m in 0..nmol {
+        x[3 * m + 2] = 6.0 * m as F - 9.0;
+    }
+
+    let mut g_on = vec![0.0; x.len()];
+    compute_g(&x, &mut sys, &mut g_on);
+    assert!(
+        g_on.iter().any(|v| v.abs() > 1e-9),
+        "expected a non-zero gradient while the species is active"
+    );
+
+    sys.comptype = vec![false];
+    let mut g_off = vec![0.0; x.len()];
+    compute_g(&x, &mut sys, &mut g_off);
+    assert!(
+        g_off.iter().all(|v| v.abs() < 1e-12),
+        "an inactive species must contribute nothing"
+    );
+}
