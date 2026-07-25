@@ -30,7 +30,9 @@
 //! not on `AtomRestraint`. Plugin vs built-in `Region` are type-equal via
 //! user `impl Region`.
 
+use molrs::spatial::region::simbox::SimBox;
 use molrs::types::F;
+use ndarray::array;
 
 use crate::restraint::AtomRestraint;
 
@@ -45,6 +47,10 @@ pub struct Aabb {
     pub min: [F; 3],
     pub max: [F; 3],
 }
+
+/// A lattice declaration: `(H, origin, pbc)`, with the lattice vectors as the
+/// columns of `H`.
+pub type CellDeclaration = ([[F; 3]; 3], [F; 3], [bool; 3]);
 
 /// Geometric predicate with signed-distance function.
 pub trait Region: Send + Sync + std::fmt::Debug {
@@ -73,6 +79,17 @@ pub trait Region: Send + Sync + std::fmt::Debug {
             g[k] = (self.signed_distance(&xp) - self.signed_distance(&xm)) / (2.0 * h);
         }
         g
+    }
+
+    /// The packing lattice this region defines, if it defines one.
+    ///
+    /// A region confined to a primitive cell also *is* the cell: returning it
+    /// here lets the packer pick up the lattice from the same declaration that
+    /// confines the molecules, instead of making the caller state it twice and
+    /// keeping the two in sync. Returns `(H, origin, pbc)` with the lattice
+    /// vectors as columns of `H`.
+    fn declared_cell(&self) -> Option<CellDeclaration> {
+        None
     }
 
     /// Axis-aligned bounding box of the region. Used as an initialization
@@ -228,6 +245,10 @@ impl<R: Region + 'static> AtomRestraint for RegionRestraint<R> {
             g[2] += coeff * grad[2];
         }
         self.f(x, scale, scale2)
+    }
+
+    fn declared_cell(&self) -> Option<CellDeclaration> {
+        self.0.declared_cell()
     }
 }
 
@@ -390,6 +411,175 @@ impl Region for OutsideSphereRegion {
 // ============================================================================
 // Tests
 // ============================================================================
+
+// ============================================================================
+// Primitive cell
+// ============================================================================
+
+/// The primitive cell of a lattice, or a fractional sub-slice of it.
+///
+/// This is the region an orthorhombic packer cannot express. Membership is
+/// decided in fractional coordinates, so the cell may be hexagonal, monoclinic
+/// or fully triclinic; distances are reported in Ångström, measured
+/// perpendicular to the bounding lattice planes, so the penalty is comparable
+/// with every other restraint regardless of how tilted the cell is.
+///
+/// Declaring this region also declares the lattice — see
+/// [`Region::declared_cell`] — so a caller writes the cell once.
+#[derive(Debug, Clone)]
+pub struct InsideCellRegion {
+    bx: SimBox,
+    lo: [F; 3],
+    hi: [F; 3],
+    /// Interplanar spacing along each reciprocal direction: the factor turning
+    /// a fractional offset into an Ångström distance from that pair of faces.
+    spacing: [F; 3],
+    /// Unit outward normal of each face pair, i.e. the normalised rows of H⁻¹.
+    normal: [[F; 3]; 3],
+    pbc: [bool; 3],
+}
+
+impl InsideCellRegion {
+    /// Cell from lengths (Å) and angles (degrees).
+    pub fn from_lengths_angles(
+        lengths: [F; 3],
+        angles_deg: [F; 3],
+        pbc: [bool; 3],
+    ) -> Option<Self> {
+        let h = SimBox::matrix_from_lengths_angles(lengths, angles_deg).ok()?;
+        Self::from_simbox(SimBox::new(h, array![0.0, 0.0, 0.0], pbc).ok()?)
+    }
+
+    /// Cell from a lattice matrix whose **columns** are the lattice vectors.
+    pub fn from_matrix(h: [[F; 3]; 3], origin: [F; 3], pbc: [bool; 3]) -> Option<Self> {
+        let matrix = array![
+            [h[0][0], h[0][1], h[0][2]],
+            [h[1][0], h[1][1], h[1][2]],
+            [h[2][0], h[2][1], h[2][2]]
+        ];
+        Self::from_simbox(SimBox::new(matrix, array![origin[0], origin[1], origin[2]], pbc).ok()?)
+    }
+
+    /// Cell from an existing [`SimBox`].
+    pub fn from_simbox(bx: SimBox) -> Option<Self> {
+        let inv = bx.inv_view();
+        let mut spacing = [0.0; 3];
+        let mut normal = [[0.0; 3]; 3];
+        for k in 0..3 {
+            let row = [inv[[k, 0]], inv[[k, 1]], inv[[k, 2]]];
+            let norm = (row[0] * row[0] + row[1] * row[1] + row[2] * row[2]).sqrt();
+            if norm <= 0.0 || !norm.is_finite() {
+                return None;
+            }
+            spacing[k] = 1.0 / norm;
+            normal[k] = [row[0] / norm, row[1] / norm, row[2] / norm];
+        }
+        let pbc = bx.pbc();
+        Some(Self {
+            bx,
+            lo: [0.0; 3],
+            hi: [1.0; 3],
+            spacing,
+            normal,
+            pbc,
+        })
+    }
+
+    /// Restrict to a fractional sub-slice, e.g. the middle third along `c`.
+    ///
+    /// Bounds outside `[0, 1]` are accepted — a slab may deliberately sit
+    /// proud of the cell — but `lo` must stay below `hi` on every axis.
+    pub fn with_fractional_bounds(mut self, lo: [F; 3], hi: [F; 3]) -> Option<Self> {
+        if (0..3).any(|k| lo[k] >= hi[k] || !lo[k].is_finite() || !hi[k].is_finite()) {
+            return None;
+        }
+        self.lo = lo;
+        self.hi = hi;
+        Some(self)
+    }
+
+    /// Signed distance to the nearest bounding plane, and which face won.
+    ///
+    /// Returns `(distance, axis, sign)` where `sign` is `+1` when the point is
+    /// past the `hi` face and `-1` when past the `lo` face.
+    ///
+    /// Every axis carries faces, including periodic ones. Under periodicity a
+    /// molecule at fractional `1.04` is the same configuration as one at
+    /// `0.04` — the pair kernel's minimum image cannot tell them apart — so the
+    /// excursion is not a physical defect. It is still confined, because a
+    /// packer has to emit coordinates someone can use: with nothing holding
+    /// them, molecules drift across hundreds of lattice images (measured: ±1500
+    /// Å from a ±`sidemax` initial placement) and every consumer then has to
+    /// wrap before the result means anything.
+    ///
+    /// Because the penalty is quadratic rather than a hard wall, equilibrium
+    /// leaves sub-tolerance excursions past a face — the same behaviour as
+    /// every other `Inside*` restraint.
+    #[inline]
+    fn nearest_face(&self, x: &[F; 3]) -> (F, usize, F) {
+        let f = self.bx.make_fractional_raw_arr3(*x);
+        let mut best = (F::NEG_INFINITY, 0usize, 1.0 as F);
+        for (k, &fk) in f.iter().enumerate() {
+            let below = (self.lo[k] - fk) * self.spacing[k];
+            if below > best.0 {
+                best = (below, k, -1.0);
+            }
+            let above = (fk - self.hi[k]) * self.spacing[k];
+            if above > best.0 {
+                best = (above, k, 1.0);
+            }
+        }
+        best
+    }
+}
+
+impl Region for InsideCellRegion {
+    fn contains(&self, x: &[F; 3]) -> bool {
+        self.nearest_face(x).0 <= 0.0
+    }
+
+    fn signed_distance(&self, x: &[F; 3]) -> F {
+        self.nearest_face(x).0
+    }
+
+    fn signed_distance_grad(&self, x: &[F; 3]) -> [F; 3] {
+        let (_, axis, sign) = self.nearest_face(x);
+        let n = self.normal[axis];
+        [sign * n[0], sign * n[1], sign * n[2]]
+    }
+
+    fn declared_cell(&self) -> Option<CellDeclaration> {
+        let h = self.bx.h_view();
+        let o = self.bx.origin_view();
+        Some((
+            [
+                [h[[0, 0]], h[[0, 1]], h[[0, 2]]],
+                [h[[1, 0]], h[[1, 1]], h[[1, 2]]],
+                [h[[2, 0]], h[[2, 1]], h[[2, 2]]],
+            ],
+            [o[0], o[1], o[2]],
+            self.pbc,
+        ))
+    }
+
+    fn bounding_box(&self) -> Option<Aabb> {
+        let mut min = [F::INFINITY; 3];
+        let mut max = [F::NEG_INFINITY; 3];
+        for i in 0..8 {
+            let frac = array![
+                if i & 1 == 0 { self.lo[0] } else { self.hi[0] },
+                if i & 2 == 0 { self.lo[1] } else { self.hi[1] },
+                if i & 4 == 0 { self.lo[2] } else { self.hi[2] },
+            ];
+            let corner = self.bx.make_cartesian(frac.view());
+            for k in 0..3 {
+                min[k] = min[k].min(corner[k]);
+                max[k] = max[k].max(corner[k]);
+            }
+        }
+        Some(Aabb { min, max })
+    }
+}
 
 #[cfg(test)]
 mod tests {

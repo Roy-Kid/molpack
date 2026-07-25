@@ -438,7 +438,24 @@ impl Molpack {
             }
         }
         let derived = derive_periodic_box(targets)?;
-        if self.cell.is_some() && (self.periodic_box.is_some() || derived.is_some()) {
+        let derived_cell = derive_cell(targets)?;
+        let declared_cell = match (self.cell, derived_cell) {
+            (None, other) | (other, None) => other,
+            (Some(builder), Some(restraint)) => {
+                let from_builder = builder.resolve()?;
+                let from_restraint = restraint.resolve()?;
+                if cells_agree(&from_builder, &from_restraint) {
+                    Some(builder)
+                } else {
+                    return Err(PackError::InvalidCell {
+                        detail: "the cell declared on the packer and the cell declared by a \
+                                 restraint describe different lattices"
+                            .to_string(),
+                    });
+                }
+            }
+        };
+        if declared_cell.is_some() && (self.periodic_box.is_some() || derived.is_some()) {
             return Err(PackError::InvalidCell {
                 detail: "a declared cell and a periodic box are mutually exclusive; \
                          drop the `pbc` declaration or express it as the cell"
@@ -666,7 +683,7 @@ impl Molpack {
         };
         // One cell for the whole run: a declared lattice if there is one, else
         // the periodic box, else nothing (initial() then bounds the atoms).
-        let cell = match (self.cell, pbc) {
+        let cell = match (declared_cell, pbc) {
             (Some(decl), _) => Some(decl.resolve()?),
             (None, Some((min, max, periodic))) => Some(
                 SimBox::ortho(
@@ -883,6 +900,46 @@ impl CellDecl {
 /// Returns `Err(ConflictingPeriodicBoxes)` when two declarations disagree
 /// and `Err(InvalidPBCBox)` if the declared box has a non-positive extent
 /// on any axis.
+/// Do two lattices describe the same cell?
+fn cells_agree(a: &SimBox, b: &SimBox) -> bool {
+    let (ha, hb) = (a.h_view(), b.h_view());
+    let (oa, ob) = (a.origin_view(), b.origin_view());
+    let tol: F = 1e-9;
+    (0..3).all(|i| (0..3).all(|j| (ha[[i, j]] - hb[[i, j]]).abs() <= tol))
+        && (0..3).all(|k| (oa[k] - ob[k]).abs() <= tol)
+        && a.pbc() == b.pbc()
+}
+
+/// Scan every restraint on every target for an `AtomRestraint::declared_cell`.
+///
+/// Mirrors [`derive_periodic_box`]: at most one distinct lattice may be
+/// declared across the whole system, otherwise the packing has no
+/// well-defined cell.
+fn derive_cell(targets: &[Target]) -> Result<Option<CellDecl>, PackError> {
+    let mut found: Option<CellDecl> = None;
+    for target in targets {
+        let restraints = target
+            .molecule_restraints
+            .iter()
+            .chain(target.atom_restraints.iter().map(|(_, r)| r));
+        for r in restraints {
+            if let Some((h, origin, pbc)) = r.declared_cell() {
+                let candidate = CellDecl::Matrix { h, origin, pbc };
+                match found {
+                    None => found = Some(candidate),
+                    Some(existing) if existing == candidate => {}
+                    Some(_) => {
+                        return Err(PackError::InvalidCell {
+                            detail: "restraints declare more than one lattice".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(found)
+}
+
 fn derive_periodic_box(targets: &[Target]) -> Result<Option<PeriodicSpec>, PackError> {
     let mut found: Option<PeriodicSpec> = None;
     for target in targets {

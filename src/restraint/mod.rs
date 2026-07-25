@@ -59,6 +59,16 @@ pub trait AtomRestraint: Send + Sync + std::fmt::Debug {
     fn periodic_box(&self) -> Option<([F; 3], [F; 3], [bool; 3])> {
         None
     }
+
+    /// The packing lattice this restraint defines, if it defines one.
+    ///
+    /// The non-orthorhombic counterpart of [`periodic_box`](Self::periodic_box):
+    /// a restraint confining atoms to a primitive cell also states what that
+    /// cell is, so the lattice and the confinement come from one declaration.
+    /// Returns `(H, origin, pbc)` with lattice vectors as columns of `H`.
+    fn declared_cell(&self) -> Option<crate::region::CellDeclaration> {
+        None
+    }
 }
 
 /// Blanket impl so `Box<dyn AtomRestraint>` itself implements the trait.
@@ -82,6 +92,10 @@ impl AtomRestraint for Box<dyn AtomRestraint> {
     #[inline]
     fn periodic_box(&self) -> Option<([F; 3], [F; 3], [bool; 3])> {
         (**self).periodic_box()
+    }
+
+    fn declared_cell(&self) -> Option<crate::region::CellDeclaration> {
+        (**self).declared_cell()
     }
 }
 
