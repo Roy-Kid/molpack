@@ -303,7 +303,7 @@ pub fn initial(
     discale: F,
     sidemax: F,
     nloop0: usize,
-    pbc: Option<([F; 3], [F; 3], [bool; 3])>,
+    cell: Option<SimBox>,
     avoid_overlap: bool,
     movebad_cfg: &MoveBadConfig<'_>,
     rng: &mut impl Rng,
@@ -517,35 +517,22 @@ pub fn initial(
 
     // ── 6. Setup periodic box + cell grid + fixed atoms ──────────────────────
     // Packmol initial.f90 lines 272-317
-    let (origin, lengths, periodic) = match pbc {
-        Some((pbc_min, pbc_max, pbc_periodic)) => (
-            pbc_min,
-            [
-                pbc_max[0] - pbc_min[0],
-                pbc_max[1] - pbc_min[1],
-                pbc_max[2] - pbc_min[2],
-            ],
-            pbc_periodic,
-        ),
-        None => (
-            sys.sizemin,
-            [
+    // Caller-declared cell if there is one, else a non-periodic box around the
+    // atoms found in phase 1.
+    sys.simbox = match cell {
+        Some(bx) => bx,
+        None => SimBox::ortho(
+            array![
                 sys.sizemax[0] - sys.sizemin[0],
                 sys.sizemax[1] - sys.sizemin[1],
-                sys.sizemax[2] - sys.sizemin[2],
+                sys.sizemax[2] - sys.sizemin[2]
             ],
+            array![sys.sizemin[0], sys.sizemin[1], sys.sizemin[2]],
             [false; 3],
-        ),
+        )
+        .expect("fallback cell must have positive extent on every axis"),
     };
-    // An orthorhombic cell for now — this is where a caller-supplied lattice
-    // will enter. Everything downstream already works from `SimBox`, so a
-    // hexagonal or triclinic cell needs no further change here.
-    sys.simbox = SimBox::ortho(
-        array![lengths[0], lengths[1], lengths[2]],
-        array![origin[0], origin[1], origin[2]],
-        periodic,
-    )
-    .expect("packing cell must have positive extent on every axis");
+    let periodic = sys.simbox.pbc();
 
     let cell_side = if radmax > 0.0 {
         discale * 1.01 * radmax

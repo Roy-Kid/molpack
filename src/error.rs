@@ -14,6 +14,8 @@ pub enum PackError {
     /// A restraint declared a periodic box whose `max - min` is
     /// non-positive on at least one axis.
     InvalidPBCBox { min: [F; 3], max: [F; 3] },
+    /// A declared packing cell is unusable, or contradicts a periodic box.
+    InvalidCell { detail: String },
     /// Two or more restraints declared periodic boxes with different
     /// bounds or different per-axis periodicity flags. Only one periodic
     /// box is allowed per packing run.
@@ -34,6 +36,7 @@ impl fmt::Display for PackError {
             }
             PackError::NoTargets => write!(f, "No targets provided"),
             PackError::EmptyMolecule(i) => write!(f, "Target {i} has no atoms"),
+            PackError::InvalidCell { detail } => write!(f, "invalid packing cell: {detail}"),
             PackError::InvalidPBCBox { min, max } => write!(
                 f,
                 "Invalid PBC box: min={:?}, max={:?} (all max-min components must be > 0)",

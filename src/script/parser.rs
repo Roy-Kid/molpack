@@ -40,6 +40,9 @@ pub struct Script {
     /// packer's cell grid so the initial ±`sidemax` random placement
     /// never drives `ncells` to anything astronomical.
     pub pbc: Option<PbcSpec>,
+    /// Packing cell declared by lengths and angles (`cell` keyword). Mutually
+    /// exclusive with `pbc` — a box is just a cell with all angles at 90°.
+    pub cell: Option<CellSpec>,
     pub structures: Vec<Structure>,
 }
 
@@ -54,6 +57,18 @@ pub struct Script {
 pub struct PbcSpec {
     pub min: [f64; 3],
     pub max: [f64; 3],
+}
+
+/// Packing cell declared at the top level via
+/// `cell a b c alpha beta gamma [pbc x y z]`.
+///
+/// This is the keyword Packmol has no counterpart for: its `pbc` accepts
+/// orthorhombic boundaries only.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellSpec {
+    pub lengths: [f64; 3],
+    pub angles_deg: [f64; 3],
+    pub pbc: [bool; 3],
 }
 
 /// One `structure … end structure` block.
@@ -163,6 +178,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
     let mut nloop: Option<usize> = None;
     let mut avoid_overlap = true;
     let mut pbc: Option<PbcSpec> = None;
+    let mut cell: Option<CellSpec> = None;
     let mut structures: Vec<Structure> = Vec::new();
 
     enum State {
@@ -235,6 +251,10 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                 }
                 "pbc" => {
                     pbc = Some(parse_pbc(&tokens, lineno)?);
+                    State::TopLevel
+                }
+                "cell" => {
+                    cell = Some(parse_cell(&tokens, lineno)?);
                     State::TopLevel
                 }
                 "structure" => {
@@ -390,6 +410,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
         nloop: nloop.unwrap_or(200 * structures.len()),
         avoid_overlap,
         pbc,
+        cell,
         structures,
     })
 }
@@ -553,6 +574,61 @@ fn parse_plane_below(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, Sc
 /// Parse `pbc` in either the 3-value (`pbc X Y Z`) or 6-value
 /// (`pbc X0 Y0 Z0  X1 Y1 Z1`) form — matching packmol `getinp.f90`
 /// lines 175-191.
+/// Parse `cell a b c alpha beta gamma` with an optional trailing
+/// `periodic <x> <y> <z>` (each `yes`/`no`; default periodic on every axis).
+fn parse_cell(tokens: &[&str], lineno: usize) -> Result<CellSpec, ScriptError> {
+    if tokens.len() < 7 {
+        return Err(parse_err(
+            lineno,
+            format!(
+                "`cell` expects 6 values (a b c alpha beta gamma), got {}",
+                tokens.len() - 1
+            ),
+        ));
+    }
+    let lengths = parse_vec3(tokens, 1, "cell lengths", lineno)?;
+    let angles_deg = parse_vec3(tokens, 4, "cell angles", lineno)?;
+    if lengths.iter().any(|&v| v <= 0.0) {
+        return Err(parse_err(
+            lineno,
+            format!("`cell` lengths must be positive; got {lengths:?}"),
+        ));
+    }
+    if angles_deg.iter().any(|&v| v <= 0.0 || v >= 180.0) {
+        return Err(parse_err(
+            lineno,
+            format!("`cell` angles must lie in (0, 180) degrees; got {angles_deg:?}"),
+        ));
+    }
+
+    let mut pbc = [true; 3];
+    if tokens.len() > 7 {
+        if !tokens[7].eq_ignore_ascii_case("periodic") || tokens.len() != 11 {
+            return Err(parse_err(
+                lineno,
+                "`cell` takes an optional trailing `periodic <x> <y> <z>`",
+            ));
+        }
+        for (k, flag) in pbc.iter_mut().enumerate() {
+            *flag = match tokens[8 + k].to_ascii_lowercase().as_str() {
+                "yes" | "true" | "1" => true,
+                "no" | "false" | "0" => false,
+                other => {
+                    return Err(parse_err(
+                        lineno,
+                        format!("`cell periodic` axis {k} expects yes/no, got `{other}`"),
+                    ));
+                }
+            };
+        }
+    }
+    Ok(CellSpec {
+        lengths,
+        angles_deg,
+        pbc,
+    })
+}
+
 fn parse_pbc(tokens: &[&str], lineno: usize) -> Result<PbcSpec, ScriptError> {
     // tokens[0] == "pbc"; the remaining tokens carry the numeric payload.
     match tokens.len() - 1 {
