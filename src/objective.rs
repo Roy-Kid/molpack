@@ -4,7 +4,7 @@
 use crate::constraints::{EvalMode, EvalOutput};
 use crate::context::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat, eulerrmat_derivatives};
-use molrs::spatial::region::simbox::SimBox;
+use molrs::spatial::region::simbox::Mic;
 use molrs::types::F;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -26,39 +26,31 @@ enum ExpandMode {
 /// may be tilted, in which case the wrap is not a per-axis operation at all.
 /// `SimBox` keeps an orthorhombic fast path, so the common case still costs
 /// three `round`s.
+/// Minimum-image state pulled out once per objective evaluation.
+///
+/// A `Copy` value rather than a borrow or a clone of the cell. The pair loops
+/// hold `&mut PackContext`, so borrowing `sys.simbox` would conflict, and
+/// cloning it costs two `Array2` allocations on a path rebuilt constantly.
+/// `Mic::simplified` folds a non-periodic cell into a variant that returns the
+/// displacement untouched, so a free-boundary pack — the common case — pays
+/// one match arm instead of three periodicity branches per pair.
+#[derive(Clone, Copy)]
 struct PbcConstants {
-    /// `None` when no axis wraps.
-    ///
-    /// A free-boundary pack is the common case and wants its displacements back
-    /// untouched. Carrying `None` buys two things: the pair loop returns
-    /// immediately instead of paying three periodicity branches per pair to
-    /// learn there is nothing to do, and the `SimBox` — which owns two
-    /// `Array2`s — is not cloned at all on a path rebuilt once per objective
-    /// evaluation.
-    bx: Option<SimBox>,
+    mic: Mic,
 }
 
 #[inline(always)]
 fn pbc_constants(sys: &PackContext) -> PbcConstants {
-    let any_periodic = sys.pbc_periodic().iter().any(|&p| p);
     PbcConstants {
-        bx: any_periodic.then(|| sys.simbox.clone()),
+        mic: sys.simbox.mic().simplified(),
     }
 }
 
 /// Minimum image of a displacement.
-///
-/// The convention depends only on the displacement, so the kernel is asked for
-/// the image of `d` measured from the origin.
 #[inline(always)]
 fn pbc_wrap_delta(dx: F, dy: F, dz: F, pbc: &PbcConstants) -> (F, F, F) {
-    match &pbc.bx {
-        None => (dx, dy, dz),
-        Some(bx) => {
-            let d = bx.shortest_vector_impl([0.0, 0.0, 0.0], [dx, dy, dz]);
-            (d[0], d[1], d[2])
-        }
-    }
+    let d = pbc.mic.apply([dx, dy, dz]);
+    (d[0], d[1], d[2])
 }
 
 // Parallel pair evaluation is user-selected via
