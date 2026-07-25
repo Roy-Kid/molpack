@@ -15,8 +15,6 @@ from molpack import (
     GaussianPlane, GaussianPoint,
     ExponentialPlane, ExponentialPoint,
     TabulatedPlane, TabulatedPoint,
-    # In-loop relaxers
-    TorsionMcRelaxer, LBFGSRelaxer,
     # Script loader (`.inp`)
     ScriptJob, load_script,
     # Parallel evaluation
@@ -32,9 +30,6 @@ from molpack import (
     InvalidPBCBoxError,
     ConflictingPeriodicBoxesError,
 )
-
-# Post-pack whole-system relaxation (optional molpy/LAMMPS backend)
-from molpack.relaxer import LAMMPSRelaxer
 ```
 
 ---
@@ -90,9 +85,6 @@ Target(frame, count: int)
   Accepts a geometric built-in, a collective (distribution-matching)
   restraint, or any duck-typed `f`/`fg` object — see [Restraints](#restraints).
 - `.with_atom_restraint(indices: Sequence[int], r)` — 0-based indices.
-- `.with_relaxer(relaxer)` — attach an in-loop geometry relaxer
-  (`TorsionMcRelaxer` or `LBFGSRelaxer`); requires `count == 1`. See
-  [In-loop relaxers](#in-loop-relaxers).
 - `.with_perturb_budget(n: int)` — per-target perturbation budget.
 - `.with_centering(mode: CenteringMode)`.
 - `.with_rotation_bound(axis: Axis, center: Angle, half_width: Angle)`.
@@ -253,79 +245,6 @@ radial distance to a point ($\xi = \lVert\mathbf{x} - \text{center}\rVert$).
 `lambda_` must be `> 0`; tabulated `xs` must be strictly ascending
 (≥ 2 points) with non-negative `rho` of positive total mass. Invalid
 arguments raise `ValueError` at construction.
-
----
-
-## In-loop relaxers
-
-Relaxation-assisted packing: attach to a `Target` via
-`target.with_relaxer(r)` to reshape a single molecule's reference
-geometry *during* the pack loop. Both require the target's `count == 1`
-(every copy shares the reference geometry the relaxer rewrites). Immutable.
-
-### `TorsionMcRelaxer(frame)`
-
-Monte-Carlo torsion-angle sampling — engine-free and force-field-free.
-Rotatable bonds are detected from the frame's bond topology; proposed
-rotations are accepted against the packer objective (Metropolis).
-
-- `.with_temperature(t: float)` — Metropolis temperature (default 1.0).
-- `.with_steps(n: int)` — MC steps proposed per packing iteration (default 10).
-- `.with_max_delta(rad: float)` — max per-step rotation, radians (default π/6).
-- `.with_self_avoidance(radius: float)` — quadratic overlap penalty on
-  non-bonded intramolecular pairs closer than `2 * radius`; `0.0`
-  disables (default).
-
-```python
-from molpack import Target, TorsionMcRelaxer
-
-chain = TorsionMcRelaxer(frame).with_steps(20).with_self_avoidance(1.5)
-target = Target(frame, count=1).with_relaxer(chain)
-```
-
-### `LBFGSRelaxer(forcefield)`  *(requires the `ff` feature)*
-
-Force-field L-BFGS geometry minimization. Built from a
-`molrs.ForceField` / `molpy.ForceField` (zero-copy FFI capsule); the
-potential is compiled lazily against the molecule's frame when packing
-starts.
-
-- `.with_fmax(fmax: float)` — stop when the max per-atom force drops
-  below `fmax` (kcal/mol/Å; default 0.05).
-- `.with_max_steps(max_steps: int)` — L-BFGS iteration cap per
-  relaxation call (default 500).
-
----
-
-## Post-pack relaxation
-
-### `LAMMPSRelaxer` *(from `molpack.relaxer`)*
-
-Whole-system relaxation of a **finished** packed box via LAMMPS — a
-different axis from the in-loop relaxers above. A thin façade over
-`molpy.engine.LAMMPSEngine`, imported **lazily** so `import molpack`
-never requires molpy.
-
-```python
-LAMMPSRelaxer(
-    ff,                              # a typified molpy ForceField
-    *,
-    executable: str | None = None,   # None auto-detects lmp / lmp_serial / lmp_mpi
-    launcher: list[str] | None = None,   # e.g. ["mpirun", "-np", "8"]
-    pair_style: str = "lj/cut/coul/cut 10.0",
-    atom_style: str = "full",
-    units: str = "real",
-    workdir: str | Path | None = None,
-)
-```
-
-- `.minimize(target, **options) -> molrs.Frame` — energy minimisation.
-- `.md(target, **options) -> molrs.Frame` — short MD settle.
-- `.relax(target, **options)` — alias for `minimize` (also `__call__`).
-
-`target` is a `PackResult` (its `.frame` is used) or a bare
-`molrs.Frame` carrying a periodic box; the input is never mutated.
-Raises `ImportError` if `molcrafts-molpy` is not installed.
 
 ---
 

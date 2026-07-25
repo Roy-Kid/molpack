@@ -45,8 +45,6 @@ use handler::PyStepInfo;
 mod target;
 use target::PyTarget;
 
-mod relaxer;
-
 mod packer;
 use packer::{PyPackResult, PyPacker};
 
@@ -78,10 +76,6 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPacker>()?;
     m.add_class::<PyPackResult>()?;
     m.add_class::<PyStepInfo>()?;
-
-    m.add_class::<relaxer::PyTorsionMcRelaxer>()?;
-    #[cfg(feature = "ff")]
-    m.add_class::<relaxer::PyLBFGSRelaxer>()?;
 
     m.add_class::<PyScriptJob>()?;
     m.add_function(wrap_pyfunction!(load_script, m)?)?;

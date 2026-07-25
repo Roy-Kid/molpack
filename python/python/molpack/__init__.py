@@ -1,6 +1,5 @@
 """molpack — Packmol-grade molecular packing with Python bindings."""
 
-from . import relaxer
 from ._protocols import Handler, Restraint
 from .molpack import (
     AbovePlaneRestraint,
@@ -18,7 +17,6 @@ from .molpack import (
     InsideBoxRestraint,
     InsideSphereRestraint,
     InvalidPBCBoxError,
-    LBFGSRelaxer,
     MaxIterationsError,
     Molpack,
     NoTargetsError,
@@ -30,7 +28,6 @@ from .molpack import (
     TabulatedPlane,
     TabulatedPoint,
     Target,
-    TorsionMcRelaxer,
     init_thread_pool,
     load_script,
     num_threads,
@@ -60,9 +57,6 @@ __all__ = [
     "Molpack",
     "PackResult",
     "StepInfo",
-    # Relaxation-assisted packing (in-loop, per-molecule relaxers)
-    "TorsionMcRelaxer",
-    "LBFGSRelaxer",
     # Script loader (`.inp` input)
     "ScriptJob",
     "load_script",
@@ -74,7 +68,6 @@ __all__ = [
     "Handler",
     "Restraint",
     # Post-pack whole-system relaxation (LAMMPS via molpy)
-    "relaxer",
     # Errors
     "PackError",
     "ConstraintsFailedError",

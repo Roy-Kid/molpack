@@ -20,14 +20,14 @@
 //!   restraint scopes, handlers, relaxers, PBC, running the canonical
 //!   examples.
 //! - [`concepts`] — every abstraction defined in one place: `AtomRestraint`,
-//!   `Region`, `Relaxer`, `Handler`, `Objective`, `Target`, `Molpack`,
+//!   `Region`, `Handler`, `Objective`, `Target`, `Molpack`,
 //!   `PackContext`; the scope equivalence law; the two-scale contract;
 //!   the direction-3 extension pattern.
 //! - [`architecture`] — module map, dependency graph, core-type
 //!   relationships, full `pack()` lifecycle diagram, hot-path
 //!   `evaluate()` walkthrough, invariants, design decisions.
 //! - [`extending`] — tutorials for writing your own `AtomRestraint` /
-//!   `Region` / `Handler` / `Relaxer`; testing + benchmarking
+//!   `Region` / `Handler`; testing + benchmarking
 //!   discipline; common pitfalls; contributing flow.
 //!
 //! Reference material (not rustdoc):
@@ -67,7 +67,7 @@
 //! | AtomRestraint trait + 14 concrete structs | [`AtomRestraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…AtomRestraint` |
 //! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
 //! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`PhaseInfo`], [`PhaseReport`] |
-//! | Relaxer trait + built-ins | [`Relaxer`], [`RelaxerRunner`], [`TorsionMcRelaxer`], `LBFGSRelaxer` (`ff` feature) |
+//! | Optimizer (`ff`) | [`OptimizeSelect`] + `Molpack::with_optimizer` + molrs [`Optimizer`] / [`TorsionMcOptimizer`] |
 //! | Errors | [`PackError`] |
 //! | Validation | [`validate_from_targets`], [`ValidationReport`], [`ViolationMetrics`] |
 //! | Examples harness | [`ExampleCase`], [`build_targets`], [`example_dir_from_manifest`], [`render_inp_script`] |
@@ -83,8 +83,7 @@
 //! - `cli` — build the `molpack` binary and its integration tests (pulls in
 //!   `clap` and implies `io`).
 //! - `ff` — pull in molrs's `ff` module (MMFF94/MMFF94s typifiers + L-BFGS) and enable the
-//!   `LBFGSRelaxer`, which relaxes a flexible molecule's internal geometry
-//!   during packing under a caller-supplied force field.
+//!   in-loop [`Optimizer`] bindings via `Molpack::with_optimizer`.
 //!
 //! Precision is fixed at `f64` via `molrs::types::F`.
 
@@ -106,7 +105,8 @@ pub mod objective;
 pub mod packer;
 mod random;
 pub mod region;
-pub mod relaxer;
+#[cfg(feature = "ff")]
+pub mod optimizer;
 pub mod restraint;
 pub mod script;
 pub mod target;
@@ -128,13 +128,13 @@ pub use region::{
     Aabb, And, InsideBoxRegion, InsideSphereRegion, Not, Or, OutsideSphereRegion, Region,
     RegionExt, RegionRestraint,
 };
-pub use relaxer::{Relaxer, RelaxerRunner, TorsionMcRelaxer};
-// Force-field geometry relaxer + the molrs `Potential` trait it relaxes against
-// (named in `LBFGSRelaxer::new`). Gated on the `ff` feature.
+// In-loop optimizers require molrs `ff` (Optimizer trait + Potential).
 #[cfg(feature = "ff")]
 pub use molrs::ff::potential::Potential;
 #[cfg(feature = "ff")]
-pub use relaxer::LBFGSRelaxer;
+pub use molrs::optimize::{LBFGS, OptReport, Optimizer};
+#[cfg(feature = "ff")]
+pub use optimizer::{OptimizeMode, OptimizeSelect, TorsionMcOptimizer};
 pub use restraint::{
     AboveGaussianRestraint, AbovePlaneRestraint, AtomRestraint, BelowGaussianRestraint,
     BelowPlaneRestraint, InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint,
@@ -234,16 +234,10 @@ pub mod prelude {
         Region,
         RegionExt,
         RegionRestraint,
-        // Relaxer
-        Relaxer,
-        RelaxerRunner,
         StepInfo,
         Target,
-        TorsionMcRelaxer,
         XYZHandler,
     };
-    // Force-field relaxer (gated; cannot live in the `use` group above because a
-    // single item in a brace group cannot carry its own `cfg`).
     #[cfg(feature = "ff")]
-    pub use crate::LBFGSRelaxer;
+    pub use crate::{OptimizeMode, OptimizeSelect, TorsionMcOptimizer, LBFGS, Optimizer};
 }

@@ -21,7 +21,8 @@ use crate::handler::{
 use crate::initial::{SwapState, init_xcart_from_x, initial};
 use crate::movebad::{MoveBadConfig, movebad};
 use crate::numerics::objective_small_floor;
-use crate::relaxer::RelaxerRunner;
+#[cfg(feature = "ff")]
+use crate::optimizer::{OptimizerBinding, ResolvedBinding, resolve_bindings, run_optimizer_bindings};
 use crate::restraint::AtomRestraint;
 use crate::target::{CenteringMode, Target};
 
@@ -126,6 +127,9 @@ pub struct Molpack {
     /// seeds inside the solute, inflating the initial overlap ~2× and stalling
     /// GENCAN. Has no effect when there are no fixed molecules.
     avoid_overlap: bool,
+    /// In-loop optimizers (`ff` feature): selection + molrs `Optimizer`.
+    #[cfg(feature = "ff")]
+    optimizers: Vec<OptimizerBinding>,
 }
 
 impl Default for Molpack {
@@ -162,7 +166,26 @@ impl Molpack {
             log_level: MolpackLogLevel::Quiet,
             log_frequency: 1,
             avoid_overlap: true,
+            #[cfg(feature = "ff")]
+            optimizers: Vec::new(),
         }
+    }
+
+    /// Bind an in-loop [`molrs::optimize::Optimizer`] with a component selection.
+    ///
+    /// Requires the `ff` feature. Repeatable — each binding runs each all-type
+    /// iteration. See [`crate::OptimizeSelect`].
+    #[cfg(feature = "ff")]
+    pub fn with_optimizer(
+        mut self,
+        select: crate::OptimizeSelect,
+        optimizer: impl molrs::optimize::Optimizer + 'static,
+    ) -> Self {
+        self.optimizers.push(OptimizerBinding {
+            select,
+            optimizer: Box::new(optimizer),
+        });
+        self
     }
 
     /// Append a progress handler. Multiple handlers compose in call order.
@@ -635,27 +658,12 @@ impl Molpack {
             h.on_initialized(&sys);
         }
 
-        // Build relaxer runners from target relaxers (RelaxerRunner carries mutable MC state).
-        // Each entry: (type_index, Vec<Box<dyn RelaxerRunner>>).
-        let mut relaxer_runners: Vec<(usize, Vec<Box<dyn RelaxerRunner>>)> = free_targets
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| !t.relaxers.is_empty())
-            .map(|(i, t)| {
-                let base = sys.idfirst[i];
-                let na = sys.natoms[i];
-                let ref_slice = &sys.coor[base..base + na];
-                // Pass the molecule template (full topology) so a force-field
-                // relaxer can compile its potential; `None` for coord-only targets.
-                let frame = t.template.as_ref();
-                let runners = t
-                    .relaxers
-                    .iter()
-                    .map(|r| r.spawn(frame, ref_slice))
-                    .collect();
-                (i, runners)
-            })
-            .collect();
+        #[cfg(feature = "ff")]
+        let mut optimizer_bindings: Vec<ResolvedBinding> = {
+            let type_names: Vec<Option<String>> =
+                free_targets.iter().map(|t| t.name.clone()).collect();
+            resolve_bindings(std::mem::take(&mut self.optimizers), &type_names)
+        };
 
         // max_loops controls the outer loop count, matching Packmol's `nloop` parameter.
         let gencan_params = GencanParams {
@@ -697,7 +705,8 @@ impl Molpack {
                 &mut sys,
                 &mut x,
                 &mut swap,
-                &mut relaxer_runners,
+                #[cfg(feature = "ff")]
+                &mut optimizer_bindings,
                 &mut handlers,
                 &mut gencan_workspace,
                 &mut rng,
@@ -918,7 +927,7 @@ pub fn run_iteration(
     flast: &mut F,
     fimp_prev: &mut F,
     radscale: &mut F,
-    relaxer_runners: &mut Vec<(usize, Vec<Box<dyn RelaxerRunner>>)>,
+    #[cfg(feature = "ff")] optimizer_bindings: &mut [ResolvedBinding],
     handlers: &mut [Box<dyn Handler>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
@@ -933,37 +942,13 @@ pub fn run_iteration(
         *flast = evaluate_unscaled(sys, xwork).0;
     }
 
-    // Relaxer MC block: run per-target relaxers between movebad and pgencan.
-    // Each relaxer modifies the reference coords (coor) for its type.
-    for (itype, runners) in relaxer_runners.iter_mut() {
-        if !is_all && *itype != phase {
-            continue;
-        }
-
-        let base = sys.idfirst[*itype];
-        let na = sys.natoms[*itype];
-
-        for runner in runners.iter_mut() {
-            let saved: Vec<[F; 3]> = sys.coor[base..base + na].to_vec();
-            let f_before = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
-
-            let result = runner.on_iter(
-                &saved,
-                f_before,
-                &mut |trial: &[[F; 3]]| {
-                    sys.coor[base..base + na].copy_from_slice(trial);
-                    let f = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
-                    sys.coor[base..base + na].copy_from_slice(&saved);
-                    f
-                },
-                rng,
-            );
-
-            if let Some(new_coords) = result {
-                sys.coor[base..base + na].copy_from_slice(&new_coords);
-            }
-        }
+    // In-loop optimizers: all-type phase only (full x ⇒ clean COM/Euler).
+    #[cfg(feature = "ff")]
+    if is_all {
+        run_optimizer_bindings(sys, xwork, optimizer_bindings);
     }
+    #[cfg(not(feature = "ff"))]
+    let _ = phase; // silence if unused without optimizers
 
     // GENCAN on working x (compact for per-type, full for all-type)
     sys.reset_eval_counters();
@@ -993,11 +978,6 @@ pub fn run_iteration(
     *fimp_prev = fimp;
 
     if !handlers.is_empty() {
-        let relaxer_acceptance: Vec<(usize, F)> = relaxer_runners
-            .iter()
-            .flat_map(|(itype, runners)| runners.iter().map(move |r| (*itype, r.acceptance_rate())))
-            .collect();
-
         let step_info = StepInfo {
             loop_idx,
             max_loops,
@@ -1007,7 +987,7 @@ pub fn run_iteration(
             improvement_pct: fimp,
             radscale: *radscale,
             precision,
-            relaxer_acceptance,
+            relaxer_acceptance: Vec::new(),
         };
         for h in handlers.iter_mut() {
             h.on_step(&step_info, sys);
@@ -1074,7 +1054,7 @@ pub enum PhaseOutcome {
 /// clone of `x`.
 ///
 /// The function takes the outer-loop state (`sys`, `x`, `swap`,
-/// `relaxer_runners`, `handlers`, `gencan_workspace`, `rng`) by `&mut` so that
+/// optimizer bindings, `handlers`, `gencan_workspace`, `rng`) by `&mut` so that
 /// state persists across phases, exactly as the inlined body did.
 ///
 /// Returns `PhaseOutcome::Converged` **only** when the all-type phase
@@ -1096,7 +1076,7 @@ pub fn run_phase(
     sys: &mut PackContext,
     x: &mut Vec<F>,
     swap: &mut SwapState,
-    relaxer_runners: &mut Vec<(usize, Vec<Box<dyn RelaxerRunner>>)>,
+    #[cfg(feature = "ff")] optimizer_bindings: &mut [ResolvedBinding],
     handlers: &mut [Box<dyn Handler>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
@@ -1201,7 +1181,8 @@ pub fn run_phase(
             &mut flast,
             &mut fimp_prev,
             &mut radscale,
-            relaxer_runners,
+            #[cfg(feature = "ff")]
+            optimizer_bindings,
             handlers,
             gencan_workspace,
             rng,

@@ -104,41 +104,6 @@ impl PyTarget {
         }
     }
 
-    /// Attach an in-loop geometry relaxer (relaxation-assisted packing).
-    ///
-    /// Accepts either built-in relaxer:
-    ///
-    /// * :class:`TorsionMcRelaxer` — engine-free Monte-Carlo torsion sampling
-    ///   (always available);
-    /// * :class:`LBFGSRelaxer` — force-field L-BFGS minimization (`ff` feature).
-    ///
-    /// Requires ``count == 1`` — every copy shares the reference geometry the
-    /// relaxer rewrites, so a relaxed target packs one molecule.
-    fn with_relaxer(&self, relaxer: &Bound<'_, PyAny>) -> PyResult<Self> {
-        if self.inner.count != 1 {
-            return Err(PyValueError::new_err(format!(
-                "with_relaxer requires count == 1 (all copies share the reference \
-                 geometry the relaxer rewrites), got count = {}",
-                self.inner.count
-            )));
-        }
-        // Torsion-MC relaxer is core (no feature gate).
-        if let Ok(tm) = relaxer.extract::<crate::relaxer::PyTorsionMcRelaxer>() {
-            return Ok(PyTarget {
-                inner: self.inner.clone().with_relaxer(tm.inner),
-            });
-        }
-        #[cfg(feature = "ff")]
-        if let Ok(lb) = relaxer.extract::<crate::relaxer::PyLBFGSRelaxer>() {
-            return Ok(PyTarget {
-                inner: self.inner.clone().with_relaxer(lb.inner),
-            });
-        }
-        Err(PyValueError::new_err(
-            "with_relaxer expects a TorsionMcRelaxer or LBFGSRelaxer",
-        ))
-    }
-
     /// Attach a restraint to selected atoms of every copy.
     ///
     /// ``indices`` are **0-based** (Rust/Python native). Porting from a

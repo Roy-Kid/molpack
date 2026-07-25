@@ -7,6 +7,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- In-loop geometry: deleted `Relaxer` / `TorsionMcRelaxer` / `LBFGSRelaxer` /
+  `Target::with_relaxer`. Single entry `Molpack::with_optimizer(OptimizeSelect,
+  impl molrs::optimize::Optimizer)` (`ff` feature). Selection is
+  `OptimizeSelect::per_copy|joint(names)` with optional `.with_environment(rcut)`.
+  Callers build molrs optimizers (`LBFGS`, `SoftSpec::into_optimizer`) or
+  molpack `TorsionMcOptimizer`. No deprecated shims.
+- Post-pack relaxation: deleted the `molpack.relaxer` module and its
+  `LAMMPSRelaxer` façade over `molpy.engine.LAMMPSEngine`. molpack no longer
+  ships any relaxer, in-loop or post-pack; drive an MD engine directly from the
+  packed frame if a settle step is wanted.
+
 ### Fixed
 
 - Python tests construct `molrs.Frame.from_dict` with both `"blocks"` and

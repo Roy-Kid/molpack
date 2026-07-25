@@ -149,3 +149,9 @@ harness = false
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+[[test]]
+name = "optimizer"
+path = "tests/optimizer.rs"
+required-features = ["ff"]
+bench = false

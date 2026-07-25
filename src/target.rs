@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use crate::frame::frame_to_coords_and_elements;
-use crate::relaxer::Relaxer;
 use crate::restraint::{AtomRestraint, Restraint};
 use molrs::types::F;
 
@@ -106,8 +105,6 @@ pub struct Target {
     pub rotation_bound: [Option<(Angle, Angle)>; 3],
     /// If `Some`, this molecule is fixed (one copy, placed at the given location).
     pub fixed_at: Option<Placement>,
-    /// Per-target in-loop relaxers (e.g. torsion MC). Called in order each iteration.
-    pub relaxers: Vec<Box<dyn Relaxer>>,
     /// Source frame this target was built from, retained so the packer can
     /// replay its full topology (bonds/angles/…) and per-atom metadata onto
     /// the packed coordinates. `None` for targets built from bare coordinates
@@ -165,7 +162,6 @@ impl Target {
             centering: CenteringMode::Auto,
             rotation_bound: [None, None, None],
             fixed_at: None,
-            relaxers: Vec::new(),
             template: None,
         }
     }
@@ -208,21 +204,6 @@ impl Target {
     /// once, not the per-atom [`AtomRestraint`].
     pub fn with_collective_restraint(mut self, r: impl Restraint + 'static) -> Self {
         self.collective_restraints.push(Arc::new(r));
-        self
-    }
-
-    /// Attach an in-loop relaxer for this target.
-    ///
-    /// Multiple relaxers can be attached (called in order).
-    /// Relaxers require `count == 1` because all copies share reference coords.
-    ///
-    /// Mirrors [`with_restraint`](Self::with_restraint) — a per-target builder method.
-    pub fn with_relaxer(mut self, relaxer: impl Relaxer + 'static) -> Self {
-        assert!(
-            self.count <= 1,
-            "relaxers require count == 1 (all copies share ref coords)"
-        );
-        self.relaxers.push(Box::new(relaxer));
         self
     }
 

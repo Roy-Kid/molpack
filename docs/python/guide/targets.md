@@ -156,26 +156,6 @@ target = target.with_atom_restraint(
     convention. If you are porting from a Packmol `.inp` file (which
     uses 1-based indices), subtract 1 at the call site.
 
-## Relaxation-assisted packing
-
-Attach an in-loop relaxer to reshape a flexible molecule's reference
-geometry *during* packing — useful for long chains that must fold to
-fit. `with_relaxer` requires `count == 1` (every copy shares the
-reference geometry the relaxer rewrites):
-
-```python
-from molpack import Target, TorsionMcRelaxer
-
-chain = TorsionMcRelaxer(frame).with_steps(20).with_self_avoidance(1.5)
-target = Target(frame, count=1).with_relaxer(chain)
-```
-
-Two relaxers ship built in: `TorsionMcRelaxer` (engine-free Monte-Carlo
-torsion sampling, always available) and `LBFGSRelaxer` (force-field
-L-BFGS, `ff` feature). See
-[In-loop relaxers](../api-reference.md#in-loop-relaxers) for their
-options.
-
 ## Per-target solver budget
 
 Override the maximum perturbation budget for this target:

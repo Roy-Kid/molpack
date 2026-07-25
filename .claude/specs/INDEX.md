@@ -2,7 +2,7 @@
 
 Status legend: **DRAFT** (under review) → **IN PROGRESS** (being implemented) → **DONE**.
 
-Add via `/mpk-spec <feature description>`. Implement via `/mpk-impl <slug>`.
+Add via `/mol:spec <feature description>`. Implement via `/mol:impl <slug>`.
 
 - [gencan-anneal-budget](./gencan-anneal-budget.md) — pack_solvprotein 5.5× slowdown: real root cause was a missing `avoid_overlap` fixed-atom rejection in `initial.rs` (solvent seeded inside the fixed protein); fixed → now faster than packmol. Proposed anneal-budget workaround SUPERSEDED — RESOLVED
 
@@ -16,3 +16,7 @@ Soft restraints that bias selected sites toward a target spatial distribution ρ
 - [profile-distribution-restraints-04-spline](./profile-distribution-restraints-04-spline.md) — `spline.rs`: C¹ monotone cubic + numerical inversion for the tabulated profile [done]
 - [profile-distribution-restraints-05-compose](./profile-distribution-restraints-05-compose.md) — `ProfileRestraint`: compose coordinate × distribution and impl `Restraint` (chain rule) [done]
 - [profile-distribution-restraints-06-script](./profile-distribution-restraints-06-script.md) — `.inp` `profile` keyword + parser + lowering + end-to-end pack tests (criteria 1–4) [done]
+
+## Active
+
+- [pair-loop-context-split](./pair-loop-context-split.md) — move the pair kernel's read set into a `PairInputs` sub-struct so the accumulators stay borrowable, then share the five duplicated traversals. Architecture first; perf recorded per step on a dedicated node, not gated. **DRAFT**
