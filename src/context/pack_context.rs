@@ -211,8 +211,6 @@ pub struct PackContext {
     /// minimum image: the pair kernel calls
     /// [`SimBox::shortest_vector_impl`], which honours `pbc` per axis.
     pub simbox: SimBox,
-    /// Cached [`GeometryKey`] for the current cell.
-    geometry_cache: GeometryKey,
     /// Partition of [`simbox`](Self::simbox) into cells, in fractional space.
     ///
     /// Wraps on periodic axes and clamps on non-periodic ones, so an atom
@@ -295,6 +293,15 @@ pub struct PackContext {
     // ---- Debug: call counters (zeroed per pgencan call) ----
     ncf: usize,
     ncg: usize,
+
+    /// Cached [`GeometryKey`] for the current cell.
+    ///
+    /// Deliberately last. It is read once per objective evaluation, not per
+    /// pair, and it is ~130 bytes: placing it among the cell-geometry fields
+    /// pushed the pair kernel's hot reads onto different cache lines and cost
+    /// 11% on `compute_f` — as much as caching it saved elsewhere. Cold fields
+    /// belong at the end of a struct this wide.
+    geometry_cache: GeometryKey,
 }
 
 impl PackContext {
@@ -346,12 +353,6 @@ impl PackContext {
             ibmol: vec![0; ntotat],
             fixedatom: vec![false; ntotat],
             comptype: vec![true; ntype],
-            geometry_cache: GeometryKey {
-                celldim: [1; 3],
-                pbc: [false; 3],
-                h: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-                origin: [0.0; 3],
-            },
             simbox,
             grid,
             latomfirst: vec![NONE_IDX; ncell_total],
@@ -376,6 +377,12 @@ impl PackContext {
             frame: molrs::Frame::new(),
             ncf: 0,
             ncg: 0,
+            geometry_cache: GeometryKey {
+                celldim: [1; 3],
+                pbc: [false; 3],
+                h: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                origin: [0.0; 3],
+            },
         }
     }
 
