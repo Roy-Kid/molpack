@@ -695,6 +695,9 @@ impl Molpack {
             ),
             (None, None) => None,
         };
+        if let Some(bx) = cell.as_ref() {
+            reject_planes_across_periodic_axes(targets, bx)?;
+        }
         initial(
             &mut x,
             &mut sys,
@@ -900,6 +903,50 @@ impl CellDecl {
 /// Returns `Err(ConflictingPeriodicBoxes)` when two declarations disagree
 /// and `Err(InvalidPBCBox)` if the declared box has a non-positive extent
 /// on any axis.
+/// Reject a half-space restraint declared across a periodic lattice direction.
+///
+/// A plane splits space in two. Under periodicity along lattice vector `a`,
+/// translating a point by `a` must leave it on the same side, which holds only
+/// when the normal is orthogonal to `a`. Packmol evaluates such a constraint
+/// anyway, in the frame of whichever cell the origin sits in, so whether it is
+/// satisfied depends on where the user put the origin. There is no
+/// interpretation to salvage — the declaration is refused, naming the axis.
+fn reject_planes_across_periodic_axes(targets: &[Target], bx: &SimBox) -> Result<(), PackError> {
+    let pbc = bx.pbc();
+    if !pbc.iter().any(|&p| p) {
+        return Ok(());
+    }
+    let h = bx.h_view();
+    // Lattice vectors are the columns of H.
+    let lattice = |k: usize| [h[[0, k]], h[[1, k]], h[[2, k]]];
+
+    for target in targets {
+        let restraints = target
+            .molecule_restraints
+            .iter()
+            .chain(target.atom_restraints.iter().map(|(_, r)| r));
+        for r in restraints {
+            let Some(n) = r.plane_normal() else { continue };
+            let n_norm = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            if n_norm <= 0.0 {
+                continue;
+            }
+            for (k, &periodic) in pbc.iter().enumerate() {
+                if !periodic {
+                    continue;
+                }
+                let a = lattice(k);
+                let a_norm = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+                let cos = (n[0] * a[0] + n[1] * a[1] + n[2] * a[2]) / (n_norm * a_norm);
+                if cos.abs() > 1e-9 {
+                    return Err(PackError::PlaneAcrossPeriodicAxis { axis: k, normal: n });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Do two lattices describe the same cell?
 fn cells_agree(a: &SimBox, b: &SimBox) -> bool {
     let (ha, hb) = (a.h_view(), b.h_view());

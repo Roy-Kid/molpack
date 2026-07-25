@@ -10,7 +10,9 @@
 //! code with the packer's cell list. A check routed through the same partition
 //! would be wrong in exactly the cases the partition is wrong.
 
-use molpack::{F, InsideCellRegion, Molpack, RegionRestraint, Target};
+use molpack::{
+    AbovePlaneRestraint, BelowPlaneRestraint, F, InsideCellRegion, Molpack, RegionRestraint, Target,
+};
 
 /// Lattice vectors (columns of H) for a cell given by lengths and angles, in
 /// the same upper-triangular convention `SimBox` uses.
@@ -203,6 +205,62 @@ fn a_degenerate_cell_is_rejected() {
         .expect_err("degenerate cell must be rejected");
     assert!(
         format!("{err}").contains("invalid packing cell"),
+        "unexpected error: {err}"
+    );
+}
+
+// ── half-spaces under periodicity ──────────────────────────────────────────
+
+#[test]
+fn a_plane_across_a_periodic_axis_is_rejected() {
+    // z is periodic, so a plane with a z-component has no well-defined side:
+    // translating by c moves a point across it.
+    let cell =
+        InsideCellRegion::from_lengths_angles(HEX_LENGTHS, HEX_ANGLES, [true; 3]).expect("cell");
+    let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 8)
+        .with_restraint(RegionRestraint(cell))
+        .with_restraint(AbovePlaneRestraint::new([0.0, 0.0, 1.0], 5.0));
+    let err = Molpack::new()
+        .with_seed(1)
+        .pack_with_report(&[target], 2)
+        .expect_err("plane across a periodic axis must be rejected");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("periodic lattice direction 2"),
+        "the error must name the offending axis, got: {msg}"
+    );
+}
+
+#[test]
+fn a_plane_along_a_confined_axis_is_accepted() {
+    // Same plane, but with z non-periodic: now it is exactly the slab
+    // constraint an interface system needs.
+    let cell = InsideCellRegion::from_lengths_angles(HEX_LENGTHS, HEX_ANGLES, [true, true, false])
+        .expect("cell");
+    let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 8)
+        .with_restraint(RegionRestraint(cell))
+        .with_restraint(AbovePlaneRestraint::new([0.0, 0.0, 1.0], 5.0));
+    let result = Molpack::new().with_seed(1).pack_with_report(&[target], 10);
+    assert!(
+        result.is_ok(),
+        "expected the slab plane to be accepted: {result:?}"
+    );
+}
+
+#[test]
+fn a_plane_in_the_periodic_plane_is_rejected_naming_the_first_axis() {
+    // A normal lying in the periodic xy plane crosses lattice vector a.
+    let cell = InsideCellRegion::from_lengths_angles(HEX_LENGTHS, HEX_ANGLES, [true, true, false])
+        .expect("cell");
+    let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 8)
+        .with_restraint(RegionRestraint(cell))
+        .with_restraint(BelowPlaneRestraint::new([1.0, 0.0, 0.0], 5.0));
+    let err = Molpack::new()
+        .with_seed(1)
+        .pack_with_report(&[target], 2)
+        .expect_err("plane across a periodic axis must be rejected");
+    assert!(
+        format!("{err}").contains("periodic lattice direction 0"),
         "unexpected error: {err}"
     );
 }

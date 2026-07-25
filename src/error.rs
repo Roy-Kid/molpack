@@ -16,6 +16,9 @@ pub enum PackError {
     InvalidPBCBox { min: [F; 3], max: [F; 3] },
     /// A declared packing cell is unusable, or contradicts a periodic box.
     InvalidCell { detail: String },
+    /// A half-space restraint was declared across a periodic lattice direction,
+    /// where it has no well-defined meaning.
+    PlaneAcrossPeriodicAxis { axis: usize, normal: [F; 3] },
     /// Two or more restraints declared periodic boxes with different
     /// bounds or different per-axis periodicity flags. Only one periodic
     /// box is allowed per packing run.
@@ -37,6 +40,13 @@ impl fmt::Display for PackError {
             PackError::NoTargets => write!(f, "No targets provided"),
             PackError::EmptyMolecule(i) => write!(f, "Target {i} has no atoms"),
             PackError::InvalidCell { detail } => write!(f, "invalid packing cell: {detail}"),
+            PackError::PlaneAcrossPeriodicAxis { axis, normal } => write!(
+                f,
+                "plane restraint with normal {normal:?} crosses periodic lattice \
+                 direction {axis}: a half-space has no meaning along a periodic axis, \
+                 since translating by that lattice vector moves a point across the \
+                 plane. Make axis {axis} non-periodic, or drop the plane."
+            ),
             PackError::InvalidPBCBox { min, max } => write!(
                 f,
                 "Invalid PBC box: min={:?}, max={:?} (all max-min components must be > 0)",
