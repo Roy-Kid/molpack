@@ -2,11 +2,13 @@
 
 use std::sync::Arc;
 
-use crate::cell::{cell_ind, icell_to_cell, index_cell};
 use crate::constraints::{Constraints, EvalMode, EvalOutput};
 use crate::restraint::{AtomRestraint, Restraint};
 use molrs::Element;
+use molrs::spatial::neighbors::CellGrid;
+use molrs::spatial::region::simbox::SimBox;
 use molrs::types::F;
+use ndarray::array;
 
 use super::model::ModelData;
 use super::state::{RuntimeState, RuntimeStateMut};
@@ -74,39 +76,16 @@ pub struct AtomProps {
 pub const ATOM_PROPS_SIZE: usize = 40;
 const _ATOM_PROPS_IS_40_BYTES: [(); ATOM_PROPS_SIZE] = [(); std::mem::size_of::<AtomProps>()];
 
-/// Neighbor offsets used by `computef.f90` (13 forward neighbors).
-const NEIGHBOR_OFFSETS_F: [(isize, isize, isize); 13] = [
-    (1, 0, 0),
-    (0, 1, 0),
-    (0, 0, 1),
-    (1, -1, 0),
-    (1, 0, -1),
-    (0, 1, -1),
-    (0, 1, 1),
-    (1, 1, 0),
-    (1, 0, 1),
-    (1, -1, -1),
-    (1, -1, 1),
-    (1, 1, -1),
-    (1, 1, 1),
-];
-
-/// Neighbor offsets used by `computeg.f90` (13 forward neighbors, different order).
-const NEIGHBOR_OFFSETS_G: [(isize, isize, isize); 13] = [
-    (1, 0, 0),
-    (0, 1, 0),
-    (0, 0, 1),
-    (0, 1, 1),
-    (0, 1, -1),
-    (1, 1, 0),
-    (1, 0, 1),
-    (1, -1, 0),
-    (1, 0, -1),
-    (1, 1, 1),
-    (1, 1, -1),
-    (1, -1, 1),
-    (1, -1, -1),
-];
+/// Identity of the packing geometry — the cell partition plus the lattice it
+/// partitions. Compared by the evaluation cache to decide whether a previous
+/// cell assignment is still valid.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct GeometryKey {
+    pub celldim: [u32; 3],
+    pub pbc: [bool; 3],
+    pub h: [F; 9],
+    pub origin: [F; 3],
+}
 
 /// Full runtime context for one packing execution.
 /// All arrays are 0-based; Fortran 1-based arrays are shifted by -1.
@@ -224,15 +203,20 @@ pub struct PackContext {
     pub comptype: Vec<bool>,
 
     // ---- Cell geometry ----
-    pub ncells: [usize; 3],
-    pub cell_length: [F; 3],
-    pub pbc_length: [F; 3],
-    pub pbc_min: [F; 3],
-    /// Per-axis periodicity flags. `pbc_periodic[k] == true` means axis
-    /// `k` wraps in the pair-kernel minimum image and the cell list;
-    /// `false` means the cell list clamps and no wrap is applied. Set
-    /// from restraints that override `AtomRestraint::periodic_box()`.
-    pub pbc_periodic: [bool; 3],
+    /// The packing cell: lattice matrix, origin and per-axis periodicity.
+    ///
+    /// Replaces the axis-aligned `pbc_min` / `pbc_length` pair, so the cell may
+    /// be hexagonal, monoclinic or fully triclinic — the geometry Packmol
+    /// cannot express at all. It is also the single source of truth for the
+    /// minimum image: the pair kernel calls
+    /// [`SimBox::shortest_vector_impl`], which honours `pbc` per axis.
+    pub simbox: SimBox,
+    /// Partition of [`simbox`](Self::simbox) into cells, in fractional space.
+    ///
+    /// Wraps on periodic axes and clamps on non-periodic ones, so an atom
+    /// pushed outside the cell mid-optimisation lands in the nearest edge cell
+    /// instead of on the opposite face.
+    pub grid: CellGrid,
 
     // ---- Linked cell lists ----
     /// `latomfirst[icell]` = first atom index in cell, `NONE_IDX` if empty.
@@ -252,13 +236,25 @@ pub struct PackContext {
     pub fixed_cells: Vec<usize>,
     /// Cells touched during the previous objective/gradient evaluation.
     pub active_cells: Vec<usize>,
-    /// Precomputed 13 forward-neighbor cell indices per cell for `compute_f`.
-    pub neighbor_cells_f: Vec<[usize; 13]>,
-    /// Precomputed 13 forward-neighbor cell indices per cell for `compute_g`.
-    /// The parallel gradient path ([`crate::objective`]) walks this same
-    /// half-stencil — each pair once — accumulating into per-worker scratch
-    /// buffers, so no full 26-neighbor list is needed.
-    pub neighbor_cells_g: Vec<[usize; 13]>,
+    /// Forward-neighbour cells per cell, flattened (CSR): cell `i` owns
+    /// `neighbor_cells[neighbor_start[i]..neighbor_start[i + 1]]`. Read it
+    /// through [`neighbors`](Self::neighbors).
+    ///
+    /// Every unordered pair of adjacent cells appears exactly once across a
+    /// full sweep, so both the objective and the gradient walk this one
+    /// half-stencil and neither needs a full 26-neighbour list.
+    ///
+    /// Storage is variable-length because forwardness is decided by cell
+    /// **index** (`nc > i`), not by a fixed set of 13 offset directions. The
+    /// direction-based scheme Packmol uses double-counts as soon as a periodic
+    /// axis holds two cells — cell 0's `+1` neighbour is cell 1, and cell 1's
+    /// `+1` wraps back to cell 0 — which is common in a thin slab or a
+    /// flat triclinic cell. Per-cell counts then vary from 0 to 26 while the
+    /// total stays at 13 per cell.
+    pub neighbor_cells: Vec<u32>,
+    /// CSR offsets into [`neighbor_cells`](Self::neighbor_cells); length is
+    /// `n_cells + 1`.
+    pub neighbor_start: Vec<u32>,
 
     // ---- State flags ----
     /// If true, skip pair-distance computations (constraints only during init).
@@ -302,8 +298,10 @@ pub struct PackContext {
 impl PackContext {
     /// Allocate and zero-initialize all arrays.
     pub fn new(ntotat: usize, ntotmol: usize, ntype: usize) -> Self {
-        let ncells = [1, 1, 1];
-        let ncell_total = ncells[0] * ncells[1] * ncells[2];
+        let simbox =
+            SimBox::cube(1.0, array![0.0, 0.0, 0.0], [false; 3]).expect("unit placeholder cell");
+        let grid = CellGrid::with_dims([1; 3], [false; 3]);
+        let ncell_total = grid.n_cells();
         debug_assert!(
             ntotat < NONE_IDX as usize,
             "ntotat={ntotat} must fit in u32 (< NONE_IDX)"
@@ -346,11 +344,8 @@ impl PackContext {
             ibmol: vec![0; ntotat],
             fixedatom: vec![false; ntotat],
             comptype: vec![true; ntype],
-            ncells,
-            cell_length: [1.0; 3],
-            pbc_length: [1.0; 3],
-            pbc_min: [0.0; 3],
-            pbc_periodic: [false; 3],
+            simbox,
+            grid,
             latomfirst: vec![NONE_IDX; ncell_total],
             latomnext: vec![NONE_IDX; ntotat],
             latomfix: vec![NONE_IDX; ncell_total],
@@ -359,8 +354,8 @@ impl PackContext {
             empty_cell: vec![true; ncell_total],
             fixed_cells: Vec::new(),
             active_cells: Vec::new(),
-            neighbor_cells_f: vec![[0; 13]; ncell_total],
-            neighbor_cells_g: vec![[0; 13]; ncell_total],
+            neighbor_cells: Vec::new(),
+            neighbor_start: vec![0; ncell_total + 1],
             init1: false,
             move_flag: false,
             parallel_pair_eval: false,
@@ -403,7 +398,7 @@ impl PackContext {
 
     /// Resize cell list arrays after ncells is set.
     pub fn resize_cell_arrays(&mut self) {
-        let nc = self.ncells[0] * self.ncells[1] * self.ncells[2];
+        let nc = self.grid.n_cells();
         debug_assert!(
             nc < NONE_IDX as usize,
             "ncell_total={nc} must fit in u32 (< NONE_IDX)"
@@ -414,8 +409,6 @@ impl PackContext {
         self.empty_cell = vec![true; nc];
         self.fixed_cells.clear();
         self.active_cells.clear();
-        self.neighbor_cells_f = vec![[0; 13]; nc];
-        self.neighbor_cells_g = vec![[0; 13]; nc];
         self.rebuild_neighbor_cells();
     }
 
@@ -683,34 +676,83 @@ impl PackContext {
         self.ncg
     }
 
+    /// Recompute the forward-neighbour table from the cell partition.
+    ///
+    /// Delegates the stencil to [`CellGrid::stencil_forward`], so periodicity,
+    /// small-`celldim` aliasing and deduplication are decided in one place
+    /// rather than re-derived here.
     fn rebuild_neighbor_cells(&mut self) {
-        let (nx, ny, nz) = (self.ncells[0], self.ncells[1], self.ncells[2]);
-        let nc = nx * ny * nz;
+        let nc = self.grid.n_cells();
+        self.neighbor_start.clear();
+        self.neighbor_start.reserve(nc + 1);
+        self.neighbor_cells.clear();
+
+        let mut buf = [0usize; 27];
         for icell in 0..nc {
-            let cell = icell_to_cell(icell, &self.ncells);
-            let (ci, cj, ck) = (cell[0], cell[1], cell[2]);
+            self.neighbor_start.push(self.neighbor_cells.len() as u32);
+            let n = self.grid.stencil_forward(icell, &mut buf);
+            self.neighbor_cells
+                .extend(buf[..n].iter().map(|&c| c as u32));
+        }
+        self.neighbor_start.push(self.neighbor_cells.len() as u32);
+    }
 
-            let mut nbs_f = [0usize; 13];
-            for (idx, &(di, dj, dk)) in NEIGHBOR_OFFSETS_F.iter().enumerate() {
-                let ncell = [
-                    cell_ind(ci as isize + di, nx),
-                    cell_ind(cj as isize + dj, ny),
-                    cell_ind(ck as isize + dk, nz),
-                ];
-                nbs_f[idx] = index_cell(&ncell, &self.ncells);
-            }
-            self.neighbor_cells_f[icell] = nbs_f;
+    /// Forward neighbours of `icell` — see [`neighbor_cells`](Self::neighbor_cells).
+    #[inline(always)]
+    pub fn neighbors(&self, icell: usize) -> &[u32] {
+        let lo = self.neighbor_start[icell] as usize;
+        let hi = self.neighbor_start[icell + 1] as usize;
+        &self.neighbor_cells[lo..hi]
+    }
 
-            let mut nbs_g = [0usize; 13];
-            for (idx, &(di, dj, dk)) in NEIGHBOR_OFFSETS_G.iter().enumerate() {
-                let ncell = [
-                    cell_ind(ci as isize + di, nx),
-                    cell_ind(cj as isize + dj, ny),
-                    cell_ind(ck as isize + dk, nz),
-                ];
-                nbs_g[idx] = index_cell(&ncell, &self.ncells);
-            }
-            self.neighbor_cells_g[icell] = nbs_g;
+    /// Forward neighbours of `icell` copied into a caller-owned buffer.
+    ///
+    /// The serial pair loops mutate the context while walking the neighbour
+    /// list, so they cannot hold a borrow of it. Copying into a stack array
+    /// keeps that allocation-free — the same thing the fixed `[usize; 13]`
+    /// table gave for free when it was `Copy`.
+    #[inline(always)]
+    pub fn copy_neighbors(&self, icell: usize, out: &mut [u32; 27]) -> usize {
+        let nbs = self.neighbors(icell);
+        out[..nbs.len()].copy_from_slice(nbs);
+        nbs.len()
+    }
+
+    /// Number of cells along each lattice direction.
+    #[inline(always)]
+    pub fn ncells(&self) -> [usize; 3] {
+        self.grid.celldim().map(|d| d as usize)
+    }
+
+    /// Per-axis periodicity of the packing cell.
+    #[inline(always)]
+    pub fn pbc_periodic(&self) -> [bool; 3] {
+        self.grid.pbc()
+    }
+
+    /// Compact identity of the packing geometry, for the evaluation cache.
+    ///
+    /// Everything the cell list depends on: the partition and the lattice it
+    /// partitions. Comparing this is what lets a repeated evaluation at the
+    /// same coordinates reuse the previous cell assignment.
+    pub fn geometry_key(&self) -> GeometryKey {
+        let h = self.simbox.h_view();
+        let o = self.simbox.origin_view();
+        GeometryKey {
+            celldim: self.grid.celldim(),
+            pbc: self.grid.pbc(),
+            h: [
+                h[[0, 0]],
+                h[[0, 1]],
+                h[[0, 2]],
+                h[[1, 0]],
+                h[[1, 1]],
+                h[[1, 2]],
+                h[[2, 0]],
+                h[[2, 1]],
+                h[[2, 2]],
+            ],
+            origin: [o[0], o[1], o[2]],
         }
     }
 }

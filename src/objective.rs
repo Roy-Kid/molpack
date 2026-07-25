@@ -1,10 +1,10 @@
 //! Objective function and gradient computation.
 //! Exact port of `computef.f90`, `computeg.f90`, `fparc.f90`, `gparc.f90`.
 
-use crate::cell::{index_cell, setcell};
 use crate::constraints::{EvalMode, EvalOutput};
 use crate::context::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat, eulerrmat_derivatives};
+use molrs::spatial::region::simbox::SimBox;
 use molrs::types::F;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -20,41 +20,31 @@ enum ExpandMode {
 /// a per-axis division. `inv_length[k] = 1/length[k]` when PBC is active on
 /// axis k, else 0. `any_active` short-circuits the entire wrap in the common
 /// non-PBC workload.
-#[derive(Clone, Copy)]
+/// Minimum-image state pulled out once per objective evaluation.
+///
+/// Holds the packing cell itself rather than a set of axis lengths: the cell
+/// may be tilted, in which case the wrap is not a per-axis operation at all.
+/// `SimBox` keeps an orthorhombic fast path, so the common case still costs
+/// three `round`s.
 struct PbcConstants {
-    length: [F; 3],
-    inv_length: [F; 3],
-    any_active: bool,
+    bx: SimBox,
 }
 
 #[inline(always)]
 fn pbc_constants(sys: &PackContext) -> PbcConstants {
-    let length = sys.pbc_length;
-    let mut inv_length = [0.0 as F; 3];
-    let mut any_active = false;
-    for k in 0..3 {
-        if sys.pbc_periodic[k] && length[k] > 0.0 {
-            inv_length[k] = 1.0 / length[k];
-            any_active = true;
-        }
-    }
     PbcConstants {
-        length,
-        inv_length,
-        any_active,
+        bx: sys.simbox.clone(),
     }
 }
 
+/// Minimum image of a displacement.
+///
+/// The convention depends only on the displacement, so the kernel is asked for
+/// the image of `d` measured from the origin.
 #[inline(always)]
 fn pbc_wrap_delta(dx: F, dy: F, dz: F, pbc: &PbcConstants) -> (F, F, F) {
-    if !pbc.any_active {
-        return (dx, dy, dz);
-    }
-    (
-        dx - (dx * pbc.inv_length[0]).round() * pbc.length[0],
-        dy - (dy * pbc.inv_length[1]).round() * pbc.length[1],
-        dz - (dz * pbc.inv_length[2]).round() * pbc.length[2],
-    )
+    let d = pbc.bx.shortest_vector_impl([0.0, 0.0, 0.0], [dx, dy, dz]);
+    (d[0], d[1], d[2])
 }
 
 // Parallel pair evaluation is user-selected via
@@ -778,15 +768,7 @@ fn accumulate_collective_fg(sys: &mut PackContext) -> F {
 
 #[inline(always)]
 fn insert_atom_in_cell(icart: usize, pos: &[F; 3], sys: &mut PackContext) {
-    let cell = setcell(
-        pos,
-        &sys.pbc_min,
-        &sys.pbc_length,
-        &sys.cell_length,
-        &sys.ncells,
-        &sys.pbc_periodic,
-    );
-    let icell = index_cell(&cell, &sys.ncells);
+    let icell = sys.grid.cell_of(&sys.simbox, *pos);
     sys.latomnext[icart] = sys.latomfirst[icell];
     sys.latomfirst[icell] = icart as u32;
 
@@ -816,7 +798,9 @@ fn accumulate_pair_f(sys: &mut PackContext) -> F {
     let mut icell_id = sys.lcellfirst;
     while icell_id != NONE_IDX {
         let icell = icell_id as usize;
-        let neighbors = sys.neighbor_cells_f[icell];
+        let mut nbuf = [0u32; 27];
+        let n_nb = sys.copy_neighbors(icell, &mut nbuf);
+        let neighbors = &nbuf[..n_nb];
 
         let mut icart_id = sys.latomfirst[icell];
         while icart_id != NONE_IDX {
@@ -826,8 +810,8 @@ fn accumulate_pair_f(sys: &mut PackContext) -> F {
             if dfd > fdist_local {
                 fdist_local = dfd;
             }
-            for &ncell in &neighbors {
-                let (df, dfd) = fparc(icart, sys.latomfirst[ncell], sys, &pbc);
+            for &ncell in neighbors {
+                let (df, dfd) = fparc(icart, sys.latomfirst[ncell as usize], sys, &pbc);
                 f += df;
                 if dfd > fdist_local {
                     fdist_local = dfd;
@@ -854,7 +838,9 @@ fn accumulate_pair_f_parallel(sys: &PackContext) -> (F, F) {
         .map(|&icell| {
             let mut f: F = 0.0;
             let mut fdist_max: F = 0.0;
-            let neighbors = sys.neighbor_cells_f[icell];
+            let mut nbuf = [0u32; 27];
+            let n_nb = sys.copy_neighbors(icell, &mut nbuf);
+            let neighbors = &nbuf[..n_nb];
 
             let mut icart_id = sys.latomfirst[icell];
             while icart_id != NONE_IDX {
@@ -863,9 +849,9 @@ fn accumulate_pair_f_parallel(sys: &PackContext) -> (F, F) {
                 f += f_same;
                 fdist_max = fdist_max.max(fdist_same);
 
-                for &ncell in &neighbors {
+                for &ncell in neighbors {
                     let (f_neigh, fdist_neigh) =
-                        fparc_stats(icart, sys.latomfirst[ncell], sys, &pbc);
+                        fparc_stats(icart, sys.latomfirst[ncell as usize], sys, &pbc);
                     f += f_neigh;
                     fdist_max = fdist_max.max(fdist_neigh);
                 }
@@ -887,14 +873,16 @@ fn accumulate_pair_g(sys: &mut PackContext) {
     let mut icell_id = sys.lcellfirst;
     while icell_id != NONE_IDX {
         let icell = icell_id as usize;
-        let neighbors = sys.neighbor_cells_g[icell];
+        let mut nbuf = [0u32; 27];
+        let n_nb = sys.copy_neighbors(icell, &mut nbuf);
+        let neighbors = &nbuf[..n_nb];
 
         let mut icart_id = sys.latomfirst[icell];
         while icart_id != NONE_IDX {
             let icart = icart_id as usize;
             gparc(icart, sys.latomnext[icart], sys, &pbc);
-            for &ncell in &neighbors {
-                gparc(icart, sys.latomfirst[ncell], sys, &pbc);
+            for &ncell in neighbors {
+                gparc(icart, sys.latomfirst[ncell as usize], sys, &pbc);
             }
 
             icart_id = sys.latomnext[icart];
@@ -921,7 +909,9 @@ fn accumulate_pair_fg(sys: &mut PackContext) -> F {
     let mut icell_id = sys.lcellfirst;
     while icell_id != NONE_IDX {
         let icell = icell_id as usize;
-        let neighbors = sys.neighbor_cells_g[icell];
+        let mut nbuf = [0u32; 27];
+        let n_nb = sys.copy_neighbors(icell, &mut nbuf);
+        let neighbors = &nbuf[..n_nb];
 
         let mut icart_id = sys.latomfirst[icell];
         while icart_id != NONE_IDX {
@@ -931,8 +921,8 @@ fn accumulate_pair_fg(sys: &mut PackContext) -> F {
             if dfd > fdist_local {
                 fdist_local = dfd;
             }
-            for &ncell in &neighbors {
-                let (df, dfd) = fgparc(icart, sys.latomfirst[ncell], sys, &pbc);
+            for &ncell in neighbors {
+                let (df, dfd) = fgparc(icart, sys.latomfirst[ncell as usize], sys, &pbc);
                 f += df;
                 if dfd > fdist_local {
                     fdist_local = dfd;
@@ -980,7 +970,7 @@ impl PartialPtr {
 
 /// Parallel counterpart to [`accumulate_pair_fg`]. rayon work-steals over
 /// `active_cells` using the **same 13-neighbor half-stencil the serial path
-/// walks** ([`PackContext::neighbor_cells_g`]), so each unordered pair is
+/// walks** ([`PackContext::neighbor_cells`]), so each unordered pair is
 /// visited exactly once — none of the ~2× redundant distance work an
 /// atom-centric full-stencil pass incurs.
 ///
@@ -1029,7 +1019,7 @@ fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
             // The worker's private region index. Inside a rayon parallel
             // closure this is always `Some(0..nthreads)`.
             let t = rayon::current_thread_index().unwrap_or(0);
-            let neighbors = &sys_ro.neighbor_cells_g[icell];
+            let neighbors = sys_ro.neighbors(icell);
             let mut f_local: F = 0.0;
             let mut fdist_local: F = 0.0;
             let mut icart_id = sys_ro.latomfirst[icell];
@@ -1043,8 +1033,14 @@ fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
                 }
                 // The 13 forward neighbor cells.
                 for &ncell in neighbors {
-                    let (df, dfd) =
-                        fgparc_into(icart, sys_ro.latomfirst[ncell], sys_ro, pptr, t, &pbc);
+                    let (df, dfd) = fgparc_into(
+                        icart,
+                        sys_ro.latomfirst[ncell as usize],
+                        sys_ro,
+                        pptr,
+                        t,
+                        &pbc,
+                    );
                     f_local += df;
                     if dfd > fdist_local {
                         fdist_local = dfd;
@@ -1347,30 +1343,14 @@ where
 
 #[inline]
 fn matches_cached_geometry(x: &[F], sys: &PackContext) -> bool {
-    sys.work.matches_cached_geometry(
-        x,
-        &sys.comptype,
-        sys.init1,
-        sys.ncells,
-        sys.cell_length,
-        sys.pbc_min,
-        sys.pbc_length,
-        sys.pbc_periodic,
-    )
+    sys.work
+        .matches_cached_geometry(x, &sys.comptype, sys.init1, sys.geometry_key())
 }
 
 #[inline]
 fn update_cached_geometry(x: &[F], sys: &mut PackContext) {
-    sys.work.update_cached_geometry(
-        x,
-        &sys.comptype,
-        sys.init1,
-        sys.ncells,
-        sys.cell_length,
-        sys.pbc_min,
-        sys.pbc_length,
-        sys.pbc_periodic,
-    );
+    sys.work
+        .update_cached_geometry(x, &sys.comptype, sys.init1, sys.geometry_key());
 }
 
 // ── Phase A.5 — Objective trait ────────────────────────────────────────────

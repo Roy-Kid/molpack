@@ -62,23 +62,22 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
     sys.iratom_offsets = vec![0; ntotat + 1];
     sys.iratom_data.clear();
 
-    // Cell geometry over a padded box so `setcell` never wraps (non-PBC path).
+    // Cell geometry over a padded, non-periodic box.
     let pad: F = 3.0;
-    sys.pbc_min = [-pad, -pad, -pad];
-    sys.pbc_length = [box_side + 2.0 * pad; 3];
-    let cell_side: F = 2.0; // ≈ 1.01 * 2*radius_ini
+    let side = box_side + 2.0 * pad;
+    let origin = [-pad, -pad, -pad];
+    let mut origin_arr = molrs::types::F3::zeros(3);
     for k in 0..3 {
-        sys.ncells[k] = ((sys.pbc_length[k] / cell_side).floor() as usize).max(1);
-        sys.cell_length[k] = sys.pbc_length[k] / sys.ncells[k] as F;
+        origin_arr[k] = origin[k];
     }
+    sys.simbox = molrs::spatial::region::simbox::SimBox::cube(side, origin_arr, [false; 3])
+        .expect("bench cell");
+    let cell_side: F = 2.0; // ≈ 1.01 * 2*radius_ini
+    sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, cell_side);
     sys.resize_cell_arrays();
 
-    sys.sizemin = sys.pbc_min;
-    sys.sizemax = [
-        sys.pbc_min[0] + sys.pbc_length[0],
-        sys.pbc_min[1] + sys.pbc_length[1],
-        sys.pbc_min[2] + sys.pbc_length[2],
-    ];
+    sys.sizemin = origin;
+    sys.sizemax = [origin[0] + side, origin[1] + side, origin[2] + side];
 
     sys.sync_atom_props();
 

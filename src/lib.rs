@@ -91,7 +91,6 @@
 pub mod assemble;
 #[cfg(feature = "io")]
 pub mod cases;
-pub mod cell;
 pub mod constraints;
 pub mod context;
 pub mod error;
