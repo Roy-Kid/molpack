@@ -60,80 +60,6 @@ fn pbc_wrap_delta(dx: F, dy: F, dz: F, pbc: &PbcConstants) -> (F, F, F) {
 // movebad proportion) rather than something inferrable from a single
 // per-pack metric like `active_cells.len()`.
 
-/// The slices the pair kernel reads, borrowed apart from the rest of the context.
-///
-/// `PackContext` carries ~60 fields; the pair kernel touches six of them. Taking
-/// the whole struct by shared reference is what forced every traversal to be
-/// written out inline: the kernel wanted `&PackContext` while its caller wanted
-/// `&mut sys.fdist_atom` or `&mut sys.work.gxcar`, and a whole-struct shared
-/// borrow cannot coexist with a field-level mutable one. Five near-identical
-/// loops existed to work around that, not because they did different things.
-///
-/// Narrowing the read set makes the borrows disjoint, so the traversal can be
-/// written once ([`walk_chain`]) and each caller supplies only what it does with
-/// a contribution.
-#[derive(Clone, Copy)]
-struct PairView<'a> {
-    xcart: &'a [[F; 3]],
-    atom_props: &'a [crate::context::AtomProps],
-    short_radius: &'a [F],
-    short_radius_scale: &'a [F],
-    latomnext: &'a [u32],
-    any_short_radius: bool,
-    any_fixed_atoms: bool,
-}
-
-impl PairView<'_> {
-    /// Build the view from a shared borrow.
-    ///
-    /// Only the rayon kernels can use this: they never write back through
-    /// `sys`, so a whole-struct shared borrow is fine. The serial kernels
-    /// destructure instead, which is the whole point of the type — the write
-    /// targets have to stay borrowable alongside it.
-    #[cfg(feature = "rayon")]
-    #[inline(always)]
-    fn of(sys: &PackContext) -> PairView<'_> {
-        PairView {
-            xcart: &sys.xcart,
-            atom_props: &sys.atom_props,
-            short_radius: &sys.short_radius,
-            short_radius_scale: &sys.short_radius_scale,
-            latomnext: &sys.latomnext,
-            any_short_radius: sys.any_short_radius,
-            any_fixed_atoms: sys.any_fixed_atoms,
-        }
-    }
-}
-
-/// Walk one cell chain, handing every surviving pair to `sink`.
-///
-/// Packmol splits this across `fparc.f90` / `gparc.f90` / `fgparc.f90`; the
-/// three differ only in what they accumulate, which is what `sink` carries.
-///
-/// The single traversal all pair kernels share. `GRAD` / `VIOLATION` select what
-/// [`pair_term`] computes; `sink` is the only thing that differs between the
-/// objective, the gradient, the fused pass and their rayon variants.
-#[inline(always)]
-fn walk_chain<const GRAD: bool, const VIOLATION: bool>(
-    icart: usize,
-    first_jcart: u32,
-    view: PairView<'_>,
-    pbc: &PbcConstants,
-    mut sink: impl FnMut(usize, PairContribution),
-) {
-    let xi = view.xcart[icart];
-    let hot = AtomHotState::load(icart, view);
-    let mut jcart_id = first_jcart;
-    while jcart_id != NONE_IDX {
-        let jcart = jcart_id as usize;
-        let next = view.latomnext[jcart];
-        if let Some(c) = pair_term::<GRAD, VIOLATION>(&hot, xi, jcart, view, pbc) {
-            sink(jcart, c);
-        }
-        jcart_id = next;
-    }
-}
-
 /// Per-atom hot-path state pulled out once before the inner `jcart` loop
 /// inside `fparc` / `gparc` / `fgparc` (and the rayon variants `fparc_stats`
 /// and `fgparc_into`).
@@ -163,7 +89,7 @@ struct AtomHotState {
 
 impl AtomHotState {
     #[inline(always)]
-    fn load(icart: usize, sys: PairView<'_>) -> Self {
+    fn load(icart: usize, sys: &PackContext) -> Self {
         let props = sys.atom_props[icart];
         let has_short = sys.any_short_radius;
         let has_fixed = sys.any_fixed_atoms;
@@ -312,7 +238,7 @@ fn pair_term<const GRAD: bool, const VIOLATION: bool>(
     hot: &AtomHotState,
     xi: [F; 3],
     jcart: usize,
-    sys: PairView<'_>,
+    sys: &PackContext,
     pbc: &PbcConstants,
 ) -> Option<PairContribution> {
     let props_j = sys.atom_props[jcart];
@@ -380,59 +306,46 @@ fn pair_term<const GRAD: bool, const VIOLATION: bool>(
     })
 }
 
-/// Newton's third law on the pair: `+grad` on `i`, `-grad` on `j`.
+/// Atom-pair distance penalty function.
+/// Port of `fparc.f90`.
+///
+/// Returns `(penalty_sum, fdist_max)`. The caller aggregates `fdist_max`
+/// across pair traversal and updates `sys.fdist` once at the end, so the
+/// inner loop keeps a data dependency on a local register instead of an
+/// `&mut PackContext` field.
+///
+/// The per-atom reads go through `sys.atom_props` — an AoS mirror that
+/// packs the ten or so hot fields into one cache line per atom (see
+/// [`AtomProps`]).
 #[inline(always)]
-fn scatter_pair_gradient(g: &mut [[F; 3]], icart: usize, jcart: usize, grad: [F; 3]) {
-    let gi = &mut g[icart];
-    gi[0] += grad[0];
-    gi[1] += grad[1];
-    gi[2] += grad[2];
-    let gj = &mut g[jcart];
-    gj[0] -= grad[0];
-    gj[1] -= grad[1];
-    gj[2] -= grad[2];
-}
-
-/// Objective contribution of one cell chain: value plus the largest violation.
 fn fparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstants) -> (F, F) {
-    let move_flag = sys.move_flag;
-    let PackContext {
-        xcart,
-        atom_props,
-        short_radius,
-        short_radius_scale,
-        latomnext,
-        any_short_radius,
-        any_fixed_atoms,
-        fdist_atom,
-        ..
-    } = sys;
-    let view = PairView {
-        xcart,
-        atom_props,
-        short_radius,
-        short_radius_scale,
-        latomnext,
-        any_short_radius: *any_short_radius,
-        any_fixed_atoms: *any_fixed_atoms,
-    };
-
     let mut result = 0.0;
     let mut local_fdist: F = 0.0;
-    walk_chain::<false, true>(icart, first_jcart, view, pbc, |jcart, c| {
-        result += c.energy;
-        if c.violation > local_fdist {
-            local_fdist = c.violation;
-        }
-        if move_flag {
-            if c.violation > fdist_atom[icart] {
-                fdist_atom[icart] = c.violation;
+    let mut jcart_id = first_jcart;
+    let xi = sys.xcart[icart];
+    let hot = AtomHotState::load(icart, sys);
+    let move_flag = sys.move_flag;
+
+    while jcart_id != NONE_IDX {
+        let jcart = jcart_id as usize;
+        let next = sys.latomnext[jcart];
+        if let Some(c) = pair_term::<false, true>(&hot, xi, jcart, sys, pbc) {
+            result += c.energy;
+            if c.violation > local_fdist {
+                local_fdist = c.violation;
             }
-            if c.violation > fdist_atom[jcart] {
-                fdist_atom[jcart] = c.violation;
+            if move_flag {
+                if c.violation > sys.fdist_atom[icart] {
+                    sys.fdist_atom[icart] = c.violation;
+                }
+                if c.violation > sys.fdist_atom[jcart] {
+                    sys.fdist_atom[jcart] = c.violation;
+                }
             }
         }
-    });
+        jcart_id = next;
+    }
+
     (result, local_fdist)
 }
 
@@ -1199,8 +1112,6 @@ fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
 /// same-molecule skip rules out `icart == jcart` — and each `&mut` is scoped so
 /// the two never coexist, so the disjoint raw writes carry no aliasing hazard.
 #[cfg(feature = "rayon")]
-/// Rayon sibling of [`fgparc`]: gradients land in this worker's private region
-/// of the partials buffer instead of the shared one.
 #[inline(always)]
 fn fgparc_into(
     icart: usize,
@@ -1212,129 +1123,136 @@ fn fgparc_into(
 ) -> (F, F) {
     let mut result: F = 0.0;
     let mut local_fdist: F = 0.0;
-    walk_chain::<true, true>(icart, first_jcart, PairView::of(sys), pbc, |jcart, c| {
-        result += c.energy;
-        if c.overlap {
-            // SAFETY: `t` is this worker's unique region; `icart`/`jcart` are
-            // distinct in-bounds atoms; each `&mut` is dropped before the next.
-            {
-                let gi = unsafe { pptr.slot(t, icart) };
-                gi[0] += c.grad[0];
-                gi[1] += c.grad[1];
-                gi[2] += c.grad[2];
+    let mut jcart_id = first_jcart;
+    let xi = sys.xcart[icart];
+    let hot = AtomHotState::load(icart, sys);
+
+    while jcart_id != NONE_IDX {
+        let jcart = jcart_id as usize;
+        let next = sys.latomnext[jcart];
+        if let Some(c) = pair_term::<true, true>(&hot, xi, jcart, sys, pbc) {
+            result += c.energy;
+            if c.overlap {
+                // SAFETY: `t` is this worker's unique region; `icart`/`jcart`
+                // are distinct in-bounds atoms; each `&mut` is dropped before
+                // the next.
+                {
+                    let gi = unsafe { pptr.slot(t, icart) };
+                    gi[0] += c.grad[0];
+                    gi[1] += c.grad[1];
+                    gi[2] += c.grad[2];
+                }
+                {
+                    let gj = unsafe { pptr.slot(t, jcart) };
+                    gj[0] -= c.grad[0];
+                    gj[1] -= c.grad[1];
+                    gj[2] -= c.grad[2];
+                }
             }
-            {
-                let gj = unsafe { pptr.slot(t, jcart) };
-                gj[0] -= c.grad[0];
-                gj[1] -= c.grad[1];
-                gj[2] -= c.grad[2];
+            if c.violation > local_fdist {
+                local_fdist = c.violation;
             }
         }
-        if c.violation > local_fdist {
-            local_fdist = c.violation;
-        }
-    });
+        jcart_id = next;
+    }
+
     (result, local_fdist)
 }
 
 /// Atom-pair gradient accumulation into `sys.work.gxcar`.
 /// Port of `gparc.f90`.
-/// Gradient contribution of one cell chain.
 #[inline(always)]
 fn gparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstants) {
-    let PackContext {
-        xcart,
-        atom_props,
-        short_radius,
-        short_radius_scale,
-        latomnext,
-        any_short_radius,
-        any_fixed_atoms,
-        work,
-        ..
-    } = sys;
-    let view = PairView {
-        xcart,
-        atom_props,
-        short_radius,
-        short_radius_scale,
-        latomnext,
-        any_short_radius: *any_short_radius,
-        any_fixed_atoms: *any_fixed_atoms,
-    };
+    let mut jcart_id = first_jcart;
+    let xi = sys.xcart[icart];
+    let hot = AtomHotState::load(icart, sys);
 
-    walk_chain::<true, false>(icart, first_jcart, view, pbc, |jcart, c| {
-        if c.overlap {
-            scatter_pair_gradient(&mut work.gxcar, icart, jcart, c.grad);
+    while jcart_id != NONE_IDX {
+        let jcart = jcart_id as usize;
+        let next = sys.latomnext[jcart];
+        if let Some(c) = pair_term::<true, false>(&hot, xi, jcart, sys, pbc)
+            && c.overlap
+        {
+            let gi = &mut sys.work.gxcar[icart];
+            gi[0] += c.grad[0];
+            gi[1] += c.grad[1];
+            gi[2] += c.grad[2];
+            let gj = &mut sys.work.gxcar[jcart];
+            gj[0] -= c.grad[0];
+            gj[1] -= c.grad[1];
+            gj[2] -= c.grad[2];
         }
-    });
+        jcart_id = next;
+    }
 }
 
 /// Atom-pair function and gradient accumulation into `sys.work.gxcar`.
 ///
 /// Returns `(penalty_sum, fdist_max)`. Caller reduces `fdist_max` locally
 /// and writes `sys.fdist` once after the cell walk completes.
-/// Fused value + gradient contribution of one cell chain.
 #[inline(always)]
 fn fgparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstants) -> (F, F) {
-    let move_flag = sys.move_flag;
-    let PackContext {
-        xcart,
-        atom_props,
-        short_radius,
-        short_radius_scale,
-        latomnext,
-        any_short_radius,
-        any_fixed_atoms,
-        fdist_atom,
-        work,
-        ..
-    } = sys;
-    let view = PairView {
-        xcart,
-        atom_props,
-        short_radius,
-        short_radius_scale,
-        latomnext,
-        any_short_radius: *any_short_radius,
-        any_fixed_atoms: *any_fixed_atoms,
-    };
-
     let mut result = 0.0;
     let mut local_fdist: F = 0.0;
-    walk_chain::<true, true>(icart, first_jcart, view, pbc, |jcart, c| {
-        result += c.energy;
-        if c.overlap {
-            scatter_pair_gradient(&mut work.gxcar, icart, jcart, c.grad);
-        }
-        if c.violation > local_fdist {
-            local_fdist = c.violation;
-        }
-        if move_flag {
-            if c.violation > fdist_atom[icart] {
-                fdist_atom[icart] = c.violation;
+    let mut jcart_id = first_jcart;
+    let xi = sys.xcart[icart];
+    let hot = AtomHotState::load(icart, sys);
+    let move_flag = sys.move_flag;
+
+    while jcart_id != NONE_IDX {
+        let jcart = jcart_id as usize;
+        let next = sys.latomnext[jcart];
+        if let Some(c) = pair_term::<true, true>(&hot, xi, jcart, sys, pbc) {
+            result += c.energy;
+            if c.overlap {
+                let gi = &mut sys.work.gxcar[icart];
+                gi[0] += c.grad[0];
+                gi[1] += c.grad[1];
+                gi[2] += c.grad[2];
+                let gj = &mut sys.work.gxcar[jcart];
+                gj[0] -= c.grad[0];
+                gj[1] -= c.grad[1];
+                gj[2] -= c.grad[2];
             }
-            if c.violation > fdist_atom[jcart] {
-                fdist_atom[jcart] = c.violation;
+            if c.violation > local_fdist {
+                local_fdist = c.violation;
+            }
+            if move_flag {
+                if c.violation > sys.fdist_atom[icart] {
+                    sys.fdist_atom[icart] = c.violation;
+                }
+                if c.violation > sys.fdist_atom[jcart] {
+                    sys.fdist_atom[jcart] = c.violation;
+                }
             }
         }
-    });
+        jcart_id = next;
+    }
+
     (result, local_fdist)
 }
 
 #[cfg(feature = "rayon")]
-/// Read-only sibling of [`fparc`] for the rayon path: no per-atom bookkeeping,
-/// so it needs only a shared borrow.
 #[inline(always)]
 fn fparc_stats(icart: usize, first_jcart: u32, sys: &PackContext, pbc: &PbcConstants) -> (F, F) {
     let mut result: F = 0.0;
     let mut fdist_max: F = 0.0;
-    walk_chain::<false, true>(icart, first_jcart, PairView::of(sys), pbc, |_, c| {
-        result += c.energy;
-        if c.violation > fdist_max {
-            fdist_max = c.violation;
+    let mut jcart_id = first_jcart;
+    let xi = sys.xcart[icart];
+    let hot = AtomHotState::load(icart, sys);
+
+    while jcart_id != NONE_IDX {
+        let jcart = jcart_id as usize;
+        let next = sys.latomnext[jcart];
+        if let Some(c) = pair_term::<false, true>(&hot, xi, jcart, sys, pbc) {
+            result += c.energy;
+            if c.violation > fdist_max {
+                fdist_max = c.violation;
+            }
         }
-    });
+        jcart_id = next;
+    }
+
     (result, fdist_max)
 }
 
