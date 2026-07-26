@@ -13,7 +13,7 @@
 //!   9. Phase 2: constraint-only GENCAN per type (reduced x!)
 
 use molrs::spatial::neighbors::CellGrid;
-use molrs::spatial::region::simbox::SimBox;
+use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use ndarray::array;
 use std::time::Instant;

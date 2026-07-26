@@ -36,7 +36,7 @@ fn system(nmol: usize) -> (PackContext, Vec<F>) {
     // about.
     let side = 12.0 * (nmol as F).cbrt();
     sys.simbox =
-        molrs::spatial::region::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
+        molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
             .expect("cell");
     sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, 2.5);
     sys.resize_cell_arrays();

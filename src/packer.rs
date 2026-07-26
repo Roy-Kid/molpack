@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use molrs::Element;
-use molrs::spatial::region::simbox::SimBox;
+use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use ndarray::{Array1, array};
 use rand::SeedableRng;

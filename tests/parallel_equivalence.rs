@@ -52,7 +52,7 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
         origin_arr[k] = origin[k];
     }
     sys.simbox =
-        molrs::spatial::region::simbox::SimBox::cube(side, origin_arr, [false; 3]).expect("cell");
+        molrs::spatial::simbox::SimBox::cube(side, origin_arr, [false; 3]).expect("cell");
     let cell_side: F = 2.0;
     sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, cell_side);
     sys.resize_cell_arrays();

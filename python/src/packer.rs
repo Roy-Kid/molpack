@@ -434,7 +434,9 @@ impl PyPacker {
             packer = packer.with_log_frequency(every);
         }
         if let Some((min, max)) = self.periodic_box {
-            packer = packer.with_periodic_box(min, max);
+            // Python `with_periodic_box` is the Packmol `pbc` keyword: every axis
+            // is periodic (per-axis flags are a Rust-only extension).
+            packer = packer.with_periodic_box(min, max, [true; 3]);
         }
 
         for gr in &self.global_restraints {

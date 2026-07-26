@@ -6,7 +6,7 @@ use crate::constraints::{Constraints, EvalMode, EvalOutput};
 use crate::restraint::{AtomRestraint, Restraint};
 use molrs::Element;
 use molrs::spatial::neighbors::CellGrid;
-use molrs::spatial::region::simbox::SimBox;
+use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use ndarray::array;
 

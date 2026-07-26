@@ -342,8 +342,10 @@ fn recenter(coords: &mut [[F; 3]]) {
 }
 
 fn optimizer_pbc(sys: &PackContext) -> Option<[F; 3]> {
-    if sys.pbc_periodic.iter().any(|&p| p) {
-        Some(sys.pbc_length)
+    let pbc = sys.pbc_periodic();
+    if pbc.iter().any(|&p| p) {
+        let l = sys.simbox.lengths();
+        Some([l[0], l[1], l[2]])
     } else {
         None
     }

@@ -63,6 +63,12 @@ pub fn pack_error_to_pyerr(e: molpack::PackError) -> PyErr {
         molpack::PackError::NoTargets => NoTargetsError::new_err(msg),
         molpack::PackError::EmptyMolecule(_) => EmptyMoleculeError::new_err(msg),
         molpack::PackError::InvalidPBCBox { .. } => InvalidPBCBoxError::new_err(msg),
+        // Triclinic / cell validation errors surface as ValueError until
+        // dedicated Python exception types are added.
+        molpack::PackError::InvalidCell { .. } => pyo3::exceptions::PyValueError::new_err(msg),
+        molpack::PackError::PlaneAcrossPeriodicAxis { .. } => {
+            pyo3::exceptions::PyValueError::new_err(msg)
+        }
         molpack::PackError::ConflictingPeriodicBoxes { .. } => {
             ConflictingPeriodicBoxesError::new_err(msg)
         }

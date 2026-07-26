@@ -18,7 +18,7 @@ use molpack::{F, InsideBoxRestraint, PackContext};
 fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
     let side = cell_len * cell_n as F;
     sys.simbox =
-        molrs::spatial::region::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
+        molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
             .expect("cell");
     sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
     sys.resize_cell_arrays();

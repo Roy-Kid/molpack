@@ -4,7 +4,7 @@
 use crate::constraints::{EvalMode, EvalOutput};
 use crate::context::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat, eulerrmat_derivatives};
-use molrs::spatial::region::simbox::Mic;
+use molrs::spatial::simbox::Mic;
 use molrs::types::F;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;

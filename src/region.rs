@@ -30,7 +30,7 @@
 //! not on `AtomRestraint`. Plugin vs built-in `Region` are type-equal via
 //! user `impl Region`.
 
-use molrs::spatial::region::simbox::SimBox;
+use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use ndarray::array;
 
