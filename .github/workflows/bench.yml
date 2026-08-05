@@ -20,7 +20,7 @@ on:
 
 # Pin sibling molrs to the same version as Cargo.toml / python/pyproject.toml.
 env:
-  MOLRS_GIT_REF: v0.9.3
+  MOLRS_GIT_REF: v0.12.0
 
 jobs:
   bench:

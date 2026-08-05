@@ -1,7 +1,7 @@
 """Shared helpers for the molpack Python examples.
 
 Provides a minimal PDB loader for cases where ``molrs`` is unavailable.
-When ``molrs`` is installed, prefer ``molrs.read_pdb(path)`` directly —
+When ``molrs`` is installed, prefer ``molrs.io.read_pdb(path)`` directly —
 the returned ``Frame`` can be passed straight to
 ``molpack.Target(frame, count)``.
 """

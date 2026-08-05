@@ -1,6 +1,6 @@
 [package]
 name = "molpack-python"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.91"
 authors = ["MolCrafts"]
@@ -17,17 +17,17 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.29", features = ["extension-module"] }
 numpy = "0.29"
 ndarray = "0.17"
-molpack = { path = "..", package = "molcrafts-molpack", version = "0.1.2" }
+molpack = { path = "..", package = "molcrafts-molpack", version = "0.2.0" }
 # Same crate (and version) molpack links, so frame types unify across the wheel.
 # The merged `molcrafts-molrs` crate exposes core at its root with default
 # features off (matching molpack's dependency), so the wheel stays io/ff-free.
-molrs = { path = "../../molrs/molrs", package = "molcrafts-molrs", version = "0.9.3", default-features = false }
+molrs = { path = "../../molrs/molrs", package = "molcrafts-molrs", version = "0.12.0", default-features = false }
 # Stable FFI handle layer. molpack resolves molrs/molpy Python objects to
 # `molrs_ffi::{FrameRef, ForceFieldRef}` capsules (zero-copy) instead of dict
-# marshalling — see `src/interop.rs`. Pinned to the same 0.9.3 molrs-python
+# marshalling — see `src/interop.rs`. Pinned to the same 0.12.0 molrs-python
 # links, so the handle types and the `molrs::Frame` they lend share one layout
 # (path+version managed manually, per project convention).
-molrs-ffi = { path = "../../molrs/molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.9.3" }
+molrs-ffi = { path = "../../molrs/molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.12.0" }
 # Direct rayon dep so the binding can introspect/configure the global pool
 # (`num_threads`, `init_thread_pool`); shares the same process-global pool
 # molpack's parallel evaluator runs on. Gated behind the `rayon` feature.

@@ -334,7 +334,7 @@ Raises `ImportError` if `molcrafts-molpy` is not installed.
 ### `load_script(path, *, read_frame=None) -> ScriptJob`
 
 Parse and lower a Packmol-compatible `.inp` script. Template files are
-read on the Python side (defaulting to `molrs.read_pdb` / `read_xyz` by
+read on the Python side (defaulting to `molrs.io.read_pdb` / `read_xyz` by
 extension), so the wheel stays free of `molrs-io`. Pass `read_frame`
 — a callable `(path, filetype) -> molrs.Frame` — to plug in another
 loader (mdtraj, ASE, …).

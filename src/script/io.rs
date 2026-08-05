@@ -62,7 +62,7 @@ pub fn read_frame(path: &Path, filetype_hint: Option<&str>) -> Result<Frame, Scr
             let file = File::open(path).map_err(|e| io_err(path, format!("opening SDF: {e}")))?;
             let mut reader = SDFReader::new(std::io::BufReader::new(file));
             reader
-                .read_frame()
+                .read()
                 .map_err(|e| io_err(path, format!("reading SDF: {e}")))?
                 .ok_or_else(|| io_err(path, "SDF file contains no records"))
         }

@@ -63,8 +63,8 @@ fn topology_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
     let mut topo_parts: Vec<Vec<(String, Vec<Column>)>> =
         TOPOLOGY.iter().map(|_| Vec::new()).collect();
     let (mut xs, mut ys, mut zs) = (Vec::new(), Vec::new(), Vec::new());
-    let mut ids: Vec<I> = Vec::new();
-    let mut mol_ids: Vec<I> = Vec::new();
+    let mut ids: Vec<U> = Vec::new();
+    let mut mol_ids: Vec<U> = Vec::new();
 
     let mut atom_base: usize = 0;
     let mut mol_base: usize = 0;
@@ -82,9 +82,9 @@ fn topology_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
             zs.push(p[2]);
         }
         cursor += span;
-        ids.extend((atom_base + 1..=atom_base + span).map(|i| i as I));
+        ids.extend((atom_base + 1..=atom_base + span).map(|i| i as U));
         for copy in 0..count {
-            mol_ids.extend(std::iter::repeat_n((mol_base + copy + 1) as I, n));
+            mol_ids.extend(std::iter::repeat_n((mol_base + copy + 1) as U, n));
         }
 
         for (slot, (key, dtype)) in carried.iter().enumerate() {
@@ -120,8 +120,8 @@ fn topology_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
     }
 
     let mut atoms = Block::new();
-    insert_int(&mut atoms, "id", ids);
-    insert_int(&mut atoms, "mol_id", mol_ids);
+    insert_uint(&mut atoms, "id", ids);
+    insert_uint(&mut atoms, "mol_id", mol_ids);
     insert_float(&mut atoms, "x", xs);
     insert_float(&mut atoms, "y", ys);
     insert_float(&mut atoms, "z", zs);
@@ -146,7 +146,7 @@ fn topology_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
                 .expect("topology column insert");
         }
         let nrows = table.nrows().unwrap_or(0);
-        insert_int(&mut table, "id", (1..=nrows as I).collect());
+        insert_uint(&mut table, "id", (1..=nrows as U).collect());
         frame.insert(*block, table);
     }
 
@@ -157,22 +157,22 @@ fn topology_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
 fn coords_only_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
     let n = positions.len();
     let mut elements: Vec<String> = Vec::with_capacity(n);
-    let mut mol_ids: Vec<I> = Vec::with_capacity(n);
+    let mut mol_ids: Vec<U> = Vec::with_capacity(n);
     let mut mol = 0usize;
     for target in targets {
         for _ in 0..target.count {
             mol += 1;
             elements.extend(target.elements.iter().cloned());
-            mol_ids.extend(std::iter::repeat_n(mol as I, target.elements.len()));
+            mol_ids.extend(std::iter::repeat_n(mol as U, target.elements.len()));
         }
     }
 
     let mut atoms = Block::new();
-    insert_int(&mut atoms, "id", (1..=n as I).collect());
+    insert_uint(&mut atoms, "id", (1..=n as U).collect());
     insert_float(&mut atoms, "x", positions.iter().map(|p| p[0]).collect());
     insert_float(&mut atoms, "y", positions.iter().map(|p| p[1]).collect());
     insert_float(&mut atoms, "z", positions.iter().map(|p| p[2]).collect());
-    insert_int(&mut atoms, "mol_id", mol_ids);
+    insert_uint(&mut atoms, "mol_id", mol_ids);
     atoms
         .insert("element", Array1::from_vec(elements).into_dyn())
         .expect("element insert");
@@ -207,10 +207,10 @@ fn insert_float(block: &mut Block, key: &str, values: Vec<F>) {
         .expect("float column insert");
 }
 
-fn insert_int(block: &mut Block, key: &str, values: Vec<I>) {
+fn insert_uint(block: &mut Block, key: &str, values: Vec<U>) {
     block
         .insert(key, Array1::from_vec(values).into_dyn())
-        .expect("int column insert");
+        .expect("uint column insert");
 }
 
 /// Repeat `arr` `count` times along axis 0 (numpy `tile`).
@@ -298,11 +298,11 @@ fn offset_index_column(tiled: Column, atom_base: usize, n: usize, rows: usize) -
 mod tests {
     use super::*;
 
-    fn col_int(frame: &molrs::Frame, block: &str, key: &str) -> Vec<I> {
+    fn col_uint(frame: &molrs::Frame, block: &str, key: &str) -> Vec<U> {
         frame
             .get(block)
             .unwrap()
-            .get_int(key)
+            .get_uint(key)
             .unwrap()
             .iter()
             .copied()
@@ -341,10 +341,10 @@ mod tests {
         }
         let mut bonds = Block::new();
         bonds
-            .insert("atomi", Array1::from_vec(vec![0 as I]).into_dyn())
+            .insert("atomi", Array1::from_vec(vec![0 as U]).into_dyn())
             .unwrap();
         bonds
-            .insert("atomj", Array1::from_vec(vec![1 as I]).into_dyn())
+            .insert("atomj", Array1::from_vec(vec![1 as U]).into_dyn())
             .unwrap();
         let mut frame = molrs::Frame::new();
         frame.insert("atoms", atoms);
@@ -379,11 +379,11 @@ mod tests {
         let target = Target::new(diatomic(), 3);
         let frame = assemble_frame(&[target], &positions(6));
 
-        assert_eq!(col_int(&frame, "bonds", "atomi"), [0, 2, 4]);
-        assert_eq!(col_int(&frame, "bonds", "atomj"), [1, 3, 5]);
-        assert_eq!(col_int(&frame, "bonds", "id"), [1, 2, 3]);
-        assert_eq!(col_int(&frame, "atoms", "id"), [1, 2, 3, 4, 5, 6]);
-        assert_eq!(col_int(&frame, "atoms", "mol_id"), [1, 1, 2, 2, 3, 3]);
+        assert_eq!(col_uint(&frame, "bonds", "atomi"), [0, 2, 4]);
+        assert_eq!(col_uint(&frame, "bonds", "atomj"), [1, 3, 5]);
+        assert_eq!(col_uint(&frame, "bonds", "id"), [1, 2, 3]);
+        assert_eq!(col_uint(&frame, "atoms", "id"), [1, 2, 3, 4, 5, 6]);
+        assert_eq!(col_uint(&frame, "atoms", "mol_id"), [1, 1, 2, 2, 3, 3]);
         assert_eq!(
             col_str(&frame, "atoms", "type"),
             ["A", "B", "A", "B", "A", "B"]
@@ -415,9 +415,9 @@ mod tests {
             col_str(&frame, "atoms", "type"),
             ["A", "B", "A", "B", "", ""]
         );
-        assert_eq!(col_int(&frame, "atoms", "mol_id"), [1, 1, 2, 2, 3, 4]);
+        assert_eq!(col_uint(&frame, "atoms", "mol_id"), [1, 1, 2, 2, 3, 4]);
         // Bonds belong only to the two diatomics.
-        assert_eq!(col_int(&frame, "bonds", "atomi"), [0, 2]);
+        assert_eq!(col_uint(&frame, "bonds", "atomi"), [0, 2]);
     }
 
     #[test]
@@ -425,7 +425,7 @@ mod tests {
         let target = Target::from_coords(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], &[1.5, 1.5], 2);
         let frame = assemble_frame(&[target], &positions(4));
 
-        assert_eq!(col_int(&frame, "atoms", "id"), [1, 2, 3, 4]);
+        assert_eq!(col_uint(&frame, "atoms", "id"), [1, 2, 3, 4]);
         assert!(frame.get("bonds").is_none());
     }
 }

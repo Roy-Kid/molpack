@@ -15,7 +15,7 @@
 //! what molpack (built `ff`-only) sees across the extension boundary.
 
 use molrs::Frame;
-use molrs::spatial::region::simbox::SimBox;
+use molrs::spatial::simbox::SimBox;
 use molrs_ffi::{FfiError, FrameRef};
 use ndarray::Array1;
 use pyo3::exceptions::{PyTypeError, PyValueError};

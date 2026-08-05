@@ -130,7 +130,7 @@ if not result.converged:
 ```
 
 `PackResult.frame` is the same Frame returned by `pack()`. Pass it to a
-writer of your choice (e.g. `molrs.write_pdb`). molpack does **not**
+writer of your choice (e.g. `molrs.io.write_pdb`). molpack does **not**
 provide writers.
 
 ## Reproducibility

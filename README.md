@@ -89,7 +89,7 @@ let report = Molpack::new().pack_with_report(&[target], 200)?;
 import molrs
 from molpack import InsideBoxRestraint, Molpack, Target
 
-frame = molrs.read_pdb("water.pdb")
+frame = molrs.io.read_pdb("water.pdb")
 
 water = (
     Target(frame, count=100)

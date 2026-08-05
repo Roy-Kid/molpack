@@ -1,7 +1,7 @@
 //! Helpers for converting between `molrs_core::Frame` and packing inputs.
 
 use molrs::store::block::Block;
-use molrs::types::{F, I};
+use molrs::types::{F, U};
 use ndarray::Array1;
 use std::str::FromStr;
 
@@ -94,14 +94,14 @@ pub fn init_frame_constants(sys: &mut PackContext) {
         .collect();
 
     let mol_ids = compute_mol_ids(sys);
-    let mol_id_int: Vec<I> = mol_ids.iter().map(|&id| id as I).collect();
+    let mol_id_u: Vec<U> = mol_ids.iter().map(|&id| id as U).collect();
 
     let mut atoms = Block::new();
     atoms
         .insert("element", Array1::from_vec(elem_strs).into_dyn())
         .expect("element insert");
     atoms
-        .insert("mol_id", Array1::from_vec(mol_id_int).into_dyn())
+        .insert("mol_id", Array1::from_vec(mol_id_u).into_dyn())
         .expect("mol_id insert");
 
     sys.frame.insert("atoms", atoms);
@@ -158,7 +158,7 @@ pub fn context_to_frame(sys: &PackContext) -> molrs::Frame {
         .collect();
 
     let mol_ids = compute_mol_ids(sys);
-    let mol_id_int: Vec<I> = mol_ids.iter().map(|&id| id as I).collect();
+    let mol_id_u: Vec<U> = mol_ids.iter().map(|&id| id as U).collect();
 
     let mut atoms = Block::new();
     atoms
@@ -174,7 +174,7 @@ pub fn context_to_frame(sys: &PackContext) -> molrs::Frame {
         .insert("element", Array1::from_vec(elem_strs).into_dyn())
         .expect("element insert");
     atoms
-        .insert("mol_id", Array1::from_vec(mol_id_int).into_dyn())
+        .insert("mol_id", Array1::from_vec(mol_id_u).into_dyn())
         .expect("mol_id insert");
 
     let mut frame = molrs::Frame::new();

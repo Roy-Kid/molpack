@@ -19,9 +19,9 @@ DATA = HERE.parent.parent / "examples" / "pack_interface"
 
 
 def main() -> None:
-    water_frame = molrs.read_pdb(str(DATA / "water.pdb"))
-    chlor_frame = molrs.read_pdb(str(DATA / "chloroform.pdb"))
-    t3_frame = molrs.read_pdb(str(DATA / "t3.pdb"))
+    water_frame = molrs.io.read_pdb(str(DATA / "water.pdb"))
+    chlor_frame = molrs.io.read_pdb(str(DATA / "chloroform.pdb"))
+    t3_frame = molrs.io.read_pdb(str(DATA / "t3.pdb"))
 
     water = (
         molpack.Target(water_frame, count=100)

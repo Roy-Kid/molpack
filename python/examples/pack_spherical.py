@@ -21,8 +21,8 @@ ORIGIN = [0.0, 0.0, 0.0]
 
 
 def main() -> None:
-    water_frame = molrs.read_pdb(str(DATA / "water.pdb"))
-    lipid_frame = molrs.read_pdb(str(DATA / "palmitoil.pdb"))
+    water_frame = molrs.io.read_pdb(str(DATA / "water.pdb"))
+    lipid_frame = molrs.io.read_pdb(str(DATA / "palmitoil.pdb"))
 
     # 1. Inner water sphere (r = 13).
     water_inner = (

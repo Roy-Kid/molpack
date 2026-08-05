@@ -66,9 +66,9 @@ def _read_frame(path: Path) -> Any:
     suffix = path.suffix.lower()
     molrs = _require_molrs()
     if suffix == ".pdb":
-        return molrs.read_pdb(str(path))
+        return molrs.io.read_pdb(str(path))
     if suffix == ".xyz":
-        return molrs.read_xyz(str(path))
+        return molrs.io.read_xyz(str(path))
     raise typer.BadParameter(f"unsupported input extension '{suffix}' for {path}")
 
 
@@ -89,9 +89,9 @@ def _write_result(path: Path, result: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     suffix = path.suffix.lower()
     if suffix == ".pdb":
-        molrs.write_pdb(str(path), frame)
+        molrs.io.write_pdb(str(path), frame)
     elif suffix == ".xyz":
-        molrs.write_xyz(str(path), frame)
+        molrs.io.write_xyz(str(path), frame)
     else:
         raise typer.BadParameter(f"unsupported output extension '{suffix}' for {path}")
 
