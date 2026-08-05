@@ -4,13 +4,13 @@ A minimal end-to-end pack: 100 water molecules inside a 40 Å cube.
 
 ## 1. Load a molecule
 
-Use `molrs.read_pdb` to load a template PDB file — the returned
+Use `molrs.io.read_pdb` to load a template PDB file — the returned
 `Frame` can be passed directly to `Target`:
 
 ```python
 import molrs
 
-frame = molrs.read_pdb("water.pdb")
+frame = molrs.io.read_pdb("water.pdb")
 ```
 
 No PDB file? Build a `molrs.Frame` from arrays with `Frame.from_dict`:
@@ -27,7 +27,8 @@ frame = molrs.Frame.from_dict({
             "z": np.zeros(3),
             "element": ["O", "H", "H"],
         }
-    }
+    },
+    "meta": {},
 })
 ```
 
@@ -96,7 +97,7 @@ output. Hand the returned frame to a writer:
 ```python
 import molrs
 
-molrs.write_xyz("packed.xyz", frame)
+molrs.io.write_xyz("packed.xyz", frame)
 ```
 
 Or use `pack_with_report()` and write `result.frame` if you also need
@@ -108,7 +109,7 @@ the diagnostic fields.
 import molrs
 from molpack import InsideBoxRestraint, Molpack, Target
 
-frame = molrs.read_pdb("water.pdb")
+frame = molrs.io.read_pdb("water.pdb")
 
 water = (
     Target(frame, count=100)

@@ -5,7 +5,7 @@
 [project]
 site_name = "molpack"
 site_description = "Packmol-grade molecular packing in pure Rust, with Python bindings."
-site_url = "https://molpack.molcrafts.org/"
+site_url = "https://docs.molcrafts.org/molpack/"
 repo_url = "https://github.com/MolCrafts/molpack"
 repo_name = "MolCrafts/molpack"
 copyright = "Copyright &copy; 2026 MolCrafts"

@@ -20,7 +20,7 @@ pip install molcrafts-molpack
 ```
 
 `pack_water_cube.py` builds its frame in memory with `molrs.Frame.from_dict`
-(no PDB file); the others load PDB files via `molrs.read_pdb`.
+(no PDB file); the others load PDB files via `molrs.io.read_pdb`.
 
 ## Running
 
@@ -41,8 +41,8 @@ The `pack_mixture.py` example reproduces Packmol's classic `mixture.inp`:
 import molrs
 from molpack import InsideBoxRestraint, Molpack, Target
 
-water_frame = molrs.read_pdb("water.pdb")
-urea_frame  = molrs.read_pdb("urea.pdb")
+water_frame = molrs.io.read_pdb("water.pdb")
+urea_frame  = molrs.io.read_pdb("urea.pdb")
 
 box = InsideBoxRestraint([0, 0, 0], [40, 40, 40])
 
@@ -69,7 +69,8 @@ frame = molrs.Frame.from_dict({
             "z": np.zeros(3),
             "element": ["O", "H", "H"],
         }
-    }
+    },
+    "meta": {},
 })
 
 water = Target(frame, count=100).with_name("water").with_restraint(

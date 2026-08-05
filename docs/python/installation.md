@@ -29,7 +29,7 @@ pip install molcrafts-molpack
 import molrs
 from molpack import InsideBoxRestraint, Molpack, Target
 
-frame = molrs.read_pdb("water.pdb")
+frame = molrs.io.read_pdb("water.pdb")
 water = (
     Target(frame, count=100)
     .with_name("water")
@@ -61,7 +61,8 @@ import molrs
 from molpack import Target
 
 frame = molrs.Frame.from_dict({
-    "blocks": {"atoms": {"x": [0.0], "y": [0.0], "z": [0.0], "element": ["O"]}}
+    "blocks": {"atoms": {"x": [0.0], "y": [0.0], "z": [0.0], "element": ["O"]}},
+    "meta": {},
 })
 target = Target(frame, count=1).with_name("mol")
 print(target)  # Target(natoms=1, count=1, name=Some("mol"))

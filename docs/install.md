@@ -37,7 +37,7 @@ Optional features (crate defaults to none enabled):
 
 ```toml
 # Cargo.toml — common combinations
-molcrafts-molpack = { version = "0.1", features = ["io", "rayon"] }
+molcrafts-molpack = { version = "0.2", features = ["io", "rayon"] }
 ```
 
 ## Python binding

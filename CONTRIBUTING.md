@@ -22,10 +22,11 @@ workspace/
 The root `Cargo.toml` uses a path dependency on `../molrs/molrs`. With the
 sibling layout above everything resolves automatically.
 
-**Version pins:** path molrs / PyPI `molcrafts-molrs` / `molcrafts-molpy` are
-fixed at **0.9.3** (see `Cargo.toml`, `python/pyproject.toml` `[tool.tox]`, and
-`MOLRS_GIT_REF` in `.github/workflows/ci.yml`). Keep the sibling molrs clone
-on that version line (`git checkout v0.9.3` or the matching release branch).
+**Version pins:** path molrs / PyPI `molcrafts-molrs` / `molcrafts-molpy` track
+the **0.12.*** minor line (see `Cargo.toml`, `python/pyproject.toml` `[tool.tox]`,
+and `MOLRS_GIT_REF` in `.github/workflows/ci.yml`). Patch may differ; only
+major.minor must match. Keep the sibling molrs clone on that minor line
+(`git checkout v0.12.x` or the matching release branch).
 
 **First-time setup:**
 

@@ -20,7 +20,7 @@ type plus PDB/XYZ I/O.
     ```python
     import molrs
 
-    frame = molrs.read_pdb("water.pdb")
+    frame = molrs.io.read_pdb("water.pdb")
     ```
 
 === "In-memory (no file)"
@@ -37,7 +37,8 @@ type plus PDB/XYZ I/O.
                 "z": np.zeros(3),
                 "element": ["O", "H", "H"],
             }
-        }
+        },
+        "meta": {},
     })
     ```
 
@@ -90,8 +91,8 @@ For a frame-only return, use `Molpack().pack([water], max_loops=200)`.
 ```python
 import molrs
 
-molrs.write_pdb(packed, "water_box.pdb")
-# or: molrs.write_xyz(packed, "water_box.xyz")
+molrs.io.write_pdb("water_box.pdb", packed)
+# or: molrs.io.write_xyz("water_box.xyz", packed)
 ```
 
 ## Where next

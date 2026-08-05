@@ -27,7 +27,9 @@ You **maintain** molpack's documentation. You do **NOT** invent API behavior —
 | Python docs | `docs/python/` (the site's "Python" nav section) | Python users |
 | CONTRIBUTING | `CONTRIBUTING.md` | Contributors |
 | README | `README.md` (CLI keyword table, format table, quick-start) | Discovery |
-| Changelog | `CHANGELOG.md` | Users tracking releases |
+
+Release history lives in git tags / GitHub Releases — no hand-written
+`CHANGELOG.md`.
 
 **Sync triggers.** When one of these changes, the listed doc must change too:
 
@@ -38,7 +40,6 @@ You **maintain** molpack's documentation. You do **NOT** invent API behavior —
 | New file format | README format table; `docs/getting_started.md` |
 | Public type added / renamed | rustdoc on the type; Python docs if mirrored |
 | Feature flag added | `Cargo.toml` comment; README install section; CONTRIBUTING test commands |
-| User-visible bug fix | `CHANGELOG.md` |
 
 **Rustdoc style.** Every public item gets a one-line summary plus, for non-trivial items, an example. Examples must compile (`cargo test --doc`). Cross-link via `` [`Item`] `` syntax, never bare names. Use `# Examples`, `# Errors`, `# Panics` sections per Rust API guidelines.
 

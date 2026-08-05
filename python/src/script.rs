@@ -7,7 +7,7 @@
 //!
 //! The loader does **not** touch molecule files in Rust. Each
 //! ``structure``'s template is read on the Python side, defaulting to
-//! :mod:`molrs` (``molrs.read_pdb`` / ``read_xyz``) but pluggable via the
+//! :mod:`molrs` (``molrs.io.read_pdb`` / ``read_xyz``) but pluggable via the
 //! ``read_frame`` argument. This keeps the PyO3 wheel free of
 //! ``molrs-io`` and lets users plug in their own loader (mdtraj, ASE, …) as
 //! long as it returns a ``molrs.Frame`` / ``molpy.Frame``.
@@ -179,9 +179,9 @@ fn default_molrs_loader(py: Python<'_>) -> PyResult<Py<PyAny>> {
 def _loader(path, filetype):
     fmt = (filetype or '').lower() or path.rsplit('.', 1)[-1].lower()
     if fmt == 'pdb':
-        return molrs.read_pdb(path)
+        return molrs.io.read_pdb(path)
     if fmt == 'xyz':
-        return molrs.read_xyz(path)
+        return molrs.io.read_xyz(path)
     raise ValueError(
         f"default loader handles .pdb / .xyz only - pass read_frame=... for {fmt!r}"
     )

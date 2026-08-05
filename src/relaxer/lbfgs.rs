@@ -26,11 +26,31 @@ use std::sync::Arc;
 use molrs::Frame;
 use molrs::ff::ForceField;
 use molrs::ff::potential::{Potential, intramolecular_pairs};
-use molrs::optimize::{LBFGS, LbfgsConfig};
+use molrs::optimize::LBFGS;
 use molrs::types::F;
 use rand::Rng;
 
 use super::{Relaxer, RelaxerRunner, recenter};
+
+/// L-BFGS knobs for the relaxer (defaults match molrs `LBFGS::with_defaults`).
+#[derive(Clone, Copy, Debug)]
+struct LbfgsConfig {
+    fmax: F,
+    max_steps: usize,
+    max_step: F,
+    memory: usize,
+}
+
+impl Default for LbfgsConfig {
+    fn default() -> Self {
+        Self {
+            fmax: 0.05,
+            max_steps: 500,
+            max_step: 0.2,
+            memory: 8,
+        }
+    }
+}
 
 // ── LBFGSRelaxer ────────────────────────────────────────────────────────
 
@@ -192,10 +212,17 @@ impl RelaxerRunner for LBFGSRelaxerRunner {
         // Flatten to molrs's `[x0,y0,z0, x1,y1,z1, …]` 3N layout and relax the
         // internal geometry under the force field.
         let mut flat: Vec<F> = coords.iter().flat_map(|p| *p).collect();
-        // `run` only errors on a non-3N buffer, which cannot happen here, but
+        // `minimize` only errors on a non-3N buffer, which cannot happen here, but
         // surface it rather than silently no-op'ing in case molrs grows new
         // error conditions (e.g. a non-finite energy).
-        let report = match LBFGS::new(&**potential, self.cfg).run(&mut flat) {
+        let report = match LBFGS::minimize(
+            &**potential,
+            &mut flat,
+            self.cfg.fmax,
+            self.cfg.max_steps,
+            self.cfg.max_step,
+            self.cfg.memory,
+        ) {
             Ok(report) => report,
             Err(e) => {
                 log::debug!(

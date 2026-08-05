@@ -16,7 +16,7 @@ Read CLAUDE.md for molpack conventions.
 3. **Diagnose** in place — read the suspect code path. Do not modify code yet.
 4. **Smallest fix.** Edit only what is necessary to flip the test GREEN. Resist the urge to refactor adjacent code, rename variables, or "clean up" while you're there — open a separate `/mpk-refactor` if cleanup is warranted.
 5. **Run impacted tier.** If the fix touches a hot-path file, run the relevant criterion bench. If it touches `restraint.rs`, `objective.rs`, `packer.rs`, `gencan/`, `initial.rs`, `relaxer.rs`, or `movebad.rs`, run `examples_batch`.
-6. **Changelog.** Update `CHANGELOG.md` if the bug was user-visible.
+6. **History.** No `CHANGELOG.md` — release notes come from git tags / GitHub Releases.
 
 ## Output
 
