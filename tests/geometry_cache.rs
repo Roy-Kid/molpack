@@ -17,9 +17,8 @@ use molpack::{F, InsideBoxRestraint, PackContext};
 
 fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
     let side = cell_len * cell_n as F;
-    sys.simbox =
-        molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
-            .expect("cell");
+    sys.simbox = molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
+        .expect("cell");
     sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
     sys.resize_cell_arrays();
 }
@@ -32,7 +31,9 @@ fn mixed_system() -> (PackContext, Vec<F>) {
     sys.natoms = vec![1];
     sys.idfirst = vec![0];
     sys.comptype = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0]];
+    // `coor` holds one reference conformer **per copy**, sharing `xcart`'s
+    // index space — three single-atom copies, so three entries.
+    sys.coor = vec![[0.0, 0.0, 0.0]; 3];
 
     sys.radius = vec![1.0; 3];
     sys.radius_ini = vec![1.0; 3];

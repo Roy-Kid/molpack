@@ -35,9 +35,8 @@ fn system(nmol: usize) -> (PackContext, Vec<F>) {
     // the pair loop degrades to O(N^2), which would swamp what this bench is
     // about.
     let side = 12.0 * (nmol as F).cbrt();
-    sys.simbox =
-        molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
-            .expect("cell");
+    sys.simbox = molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
+        .expect("cell");
     sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, 2.5);
     sys.resize_cell_arrays();
     sys.collective = vec![(

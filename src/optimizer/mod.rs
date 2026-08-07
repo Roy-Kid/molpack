@@ -13,11 +13,9 @@ use molrs::store::frame::Frame;
 use molrs::types::F;
 use ndarray::Array1;
 
-use crate::context::PackContext;
 use crate::constraints::EvalMode;
-use crate::Objective;
+use crate::context::PackContext;
 use crate::euler::eulerrmat;
-
 
 pub mod torsion_mc;
 pub use torsion_mc::TorsionMcOptimizer;
@@ -79,7 +77,12 @@ pub struct OptimizerBinding {
 }
 
 /// Resolved type indices for a binding (matched by target name at pack start).
-pub(crate) struct ResolvedBinding {
+///
+/// Public because it appears in the signatures of the public
+/// [`run_iteration`](crate::packer::run_iteration) /
+/// [`run_phase`](crate::packer::run_phase) entry points that the benches drive.
+/// Built by [`resolve_bindings`] at pack start — not constructed by callers.
+pub struct ResolvedBinding {
     pub select: OptimizeSelect,
     pub type_indices: Vec<usize>,
     pub optimizer: Box<dyn Optimizer>,
@@ -253,17 +256,18 @@ fn optimize_group(
         Err(_) => return,
     };
     let n_movable = world_movable.len();
-    let mut world_new: Vec<[F; 3]> = (0..n_movable)
-        .map(|i| {
-            [
-                new_flat[3 * i],
-                new_flat[3 * i + 1],
-                new_flat[3 * i + 2],
-            ]
-        })
+    let world_new: Vec<[F; 3]> = (0..n_movable)
+        .map(|i| [new_flat[3 * i], new_flat[3 * i + 1], new_flat[3 * i + 2]])
         .collect();
 
     // Map world delta → reference coor per copy (Rᵀ + recenter), then non-harm gate.
+    //
+    // Both evaluations must run on a fresh Cartesian expansion. The cache is
+    // keyed on `x`, which this function never touches — it rewrites `coor` —
+    // so without invalidation the second call returns the first call's value
+    // and the gate below can never fire. `f_before` needs it too: an earlier
+    // copy in this same sweep may already have rewritten its own conformer.
+    sys.invalidate_geometry_cache();
     let f_before = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
     let mut saved: Vec<(usize, usize, Vec<[F; 3]>)> = Vec::with_capacity(spans.len());
     for s in spans {
@@ -292,11 +296,13 @@ fn optimize_group(
         saved.push((s.copy_start, s.na, coor_old));
         sys.coor[s.copy_start..s.copy_start + s.na].copy_from_slice(&coor_new);
     }
+    sys.invalidate_geometry_cache();
     let f_after = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
     if f_after > f_before {
         for (cs, na, coor_old) in &saved {
             sys.coor[*cs..*cs + *na].copy_from_slice(coor_old);
         }
+        sys.invalidate_geometry_cache();
     }
     let _ = world_new; // silence if unused after refactor
 }

@@ -1,8 +1,8 @@
 //! Regression microbench for `packer::run_iteration` — one outer-loop step.
 //!
-//! `run_iteration` is the packer's per-iteration sequence (movebad → relaxer
-//! MC → pgencan → unscaled statistics → handler notify → convergence check →
-//! radii schedule). This bench drives one such step so a regression in the
+//! `run_iteration` is the packer's per-iteration sequence (movebad → in-loop
+//! optimizers → pgencan → unscaled statistics → handler notify → convergence
+//! check → radii schedule). This bench drives one such step so a regression in the
 //! iteration scaffold's boundary cost (indirection, inlining, the GENCAN
 //! step) shows up.
 //!
@@ -22,7 +22,6 @@ use molpack::handler::{Handler, PhaseInfo};
 use molpack::initial::SwapState;
 use molpack::movebad::MoveBadConfig;
 use molpack::packer::{IterOutcome, run_iteration};
-use molpack::relaxer::RelaxerRunner;
 use molpack::{F, PackContext};
 
 type Snapshot = (
@@ -30,7 +29,6 @@ type Snapshot = (
     Vec<F>,
     SwapState,
     GencanWorkspace,
-    Vec<(usize, Vec<Box<dyn RelaxerRunner>>)>,
     Vec<Box<dyn Handler>>,
     SmallRng,
 );
@@ -45,10 +43,9 @@ fn build_snapshot() -> Snapshot {
     let x: Vec<F> = Vec::new();
     let swap = SwapState::init(&x, &sys);
     let ws = GencanWorkspace::new();
-    let runners: Vec<(usize, Vec<Box<dyn RelaxerRunner>>)> = Vec::new();
     let handlers: Vec<Box<dyn Handler>> = Vec::new();
     let rng = SmallRng::seed_from_u64(1_234_567);
-    (sys, x, swap, ws, runners, handlers, rng)
+    (sys, x, swap, ws, handlers, rng)
 }
 
 fn phase_info() -> PhaseInfo {
@@ -80,7 +77,7 @@ fn bench_run_iteration(c: &mut Criterion) {
     group.bench_function("step", |b| {
         b.iter_batched(
             build_snapshot,
-            |(mut sys, mut x, mut swap, mut ws, mut runners, mut handlers, mut rng)| {
+            |(mut sys, mut x, mut swap, mut ws, mut handlers, mut rng)| {
                 let mut flast = 0.0_f64;
                 let mut fimp_prev = F::INFINITY;
                 let mut radscale = 1.0_f64;
@@ -100,7 +97,10 @@ fn bench_run_iteration(c: &mut Criterion) {
                     &mut flast,
                     &mut fimp_prev,
                     &mut radscale,
-                    &mut runners,
+                    // Optimizer bindings are `pub(crate)`; an empty slice
+                    // coerces without naming the type.
+                    #[cfg(feature = "ff")]
+                    &mut [],
                     &mut handlers,
                     &mut ws,
                     &mut rng,

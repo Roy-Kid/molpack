@@ -101,11 +101,11 @@ pub mod initial;
 pub mod movebad;
 mod numerics;
 pub mod objective;
+#[cfg(feature = "ff")]
+pub mod optimizer;
 pub mod packer;
 mod random;
 pub mod region;
-#[cfg(feature = "ff")]
-pub mod optimizer;
 pub mod restraint;
 pub mod script;
 pub mod target;
@@ -239,5 +239,5 @@ pub mod prelude {
         XYZHandler,
     };
     #[cfg(feature = "ff")]
-    pub use crate::{OptimizeMode, OptimizeSelect, TorsionMcOptimizer, LBFGS, Optimizer};
+    pub use crate::{LBFGS, OptimizeMode, OptimizeSelect, Optimizer, TorsionMcOptimizer};
 }

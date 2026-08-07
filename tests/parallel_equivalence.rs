@@ -29,7 +29,8 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
     sys.comptype = vec![true; ntype];
     sys.constrain_rot = vec![[false; 3]; ntype];
     sys.rot_bound = vec![[[0.0; 2]; 3]; ntype];
-    sys.coor = vec![[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
+    // One reference conformer per copy — `coor` shares `xcart`'s index space.
+    sys.coor = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]].repeat(n_mols);
     sys.radius.fill(1.0);
     sys.radius_ini.fill(1.0);
     sys.fscale.fill(1.0);
@@ -51,8 +52,7 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
     for k in 0..3 {
         origin_arr[k] = origin[k];
     }
-    sys.simbox =
-        molrs::spatial::simbox::SimBox::cube(side, origin_arr, [false; 3]).expect("cell");
+    sys.simbox = molrs::spatial::simbox::SimBox::cube(side, origin_arr, [false; 3]).expect("cell");
     let cell_side: F = 2.0;
     sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, cell_side);
     sys.resize_cell_arrays();

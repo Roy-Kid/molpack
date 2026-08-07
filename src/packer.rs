@@ -22,7 +22,9 @@ use crate::initial::{SwapState, init_xcart_from_x, initial};
 use crate::movebad::{MoveBadConfig, movebad};
 use crate::numerics::objective_small_floor;
 #[cfg(feature = "ff")]
-use crate::optimizer::{OptimizerBinding, ResolvedBinding, resolve_bindings, run_optimizer_bindings};
+use crate::optimizer::{
+    OptimizerBinding, ResolvedBinding, resolve_bindings, run_optimizer_bindings,
+};
 use crate::restraint::AtomRestraint;
 use crate::target::{CenteringMode, Target};
 
@@ -551,8 +553,14 @@ impl Molpack {
             sys.nmols[itype] = target.count;
             sys.natoms[itype] = target.natoms();
             sys.idfirst[itype] = cum_atoms;
-            coor.extend_from_slice(reference_coords(target));
-            cum_atoms += target.natoms();
+            // One reference conformer **per copy**: in-loop optimizers relax
+            // each copy independently, so copies must not share a block.
+            // Layout matches `xcart` exactly (type-major, copy-major,
+            // atom-minor), so a single index addresses both buffers.
+            for _ in 0..target.count {
+                coor.extend_from_slice(reference_coords(target));
+            }
+            cum_atoms += target.natoms() * target.count;
 
             maxmove_per_type[itype] = target.perturb_budget.unwrap_or(target.count);
             for k in 0..3 {

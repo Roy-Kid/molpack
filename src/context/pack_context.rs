@@ -100,7 +100,13 @@ pub struct PackContext {
     pub elements: Vec<Option<Element>>,
 
     // ---- Reference (centered) coordinates ----
-    /// Reference coordinates `coor[idatom]` = `[x, y, z]`. Size: total atoms across all types.
+    /// Reference conformer per **copy**: `coor[icart]` = `[x, y, z]`.
+    ///
+    /// Shares `xcart`'s index space exactly (type-major, copy-major,
+    /// atom-minor, free types then fixed types), so `icart` addresses both.
+    /// Copies of one type start identical; in-loop optimizers
+    /// ([`crate::optimizer`]) relax each copy independently, after which they
+    /// diverge. Size: `ntotat`.
     pub coor: Vec<[F; 3]>,
 
     // ---- Radii ----
@@ -157,7 +163,9 @@ pub struct PackContext {
     pub nmols: Vec<usize>,
     /// Number of atoms per type: `natoms[itype]`. 0-based type index.
     pub natoms: Vec<usize>,
-    /// First datum atom index (0-based) for each type: `idfirst[itype]`.
+    /// First atom index (0-based) of each type's first copy: `idfirst[itype]`.
+    /// Base into both [`Self::coor`] and [`Self::xcart`]; copy `imol` of type
+    /// `itype` starts at `idfirst[itype] + imol * natoms[itype]`.
     pub idfirst: Vec<usize>,
     /// Total number of types (free).
     pub ntype: usize,
@@ -508,6 +516,18 @@ impl PackContext {
         if i < self.atom_props.len() {
             self.atom_props[i].fscale = value;
         }
+    }
+
+    /// Drop the cached Cartesian expansion so the next evaluation rebuilds it.
+    ///
+    /// The cache is keyed on `x` (COM / Euler), `comptype` and the cell
+    /// geometry — **not** on [`coor`](Self::coor). Anything that mutates the
+    /// reference conformers while leaving `x` alone (an in-loop optimizer, say)
+    /// must call this, or the next `evaluate` at the same `x` returns the
+    /// pre-mutation objective and any comparison against it is meaningless.
+    #[inline]
+    pub fn invalidate_geometry_cache(&mut self) {
+        self.work.cached_geometry = None;
     }
 
     /// Toggle atom `i`'s fixed-structure flag and keep the `atom_props`

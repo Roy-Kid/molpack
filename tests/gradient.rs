@@ -38,7 +38,8 @@ fn single_atom_system(nmol: usize) -> PackContext {
     sys.natoms = vec![1];
     sys.idfirst = vec![0];
     sys.comptype = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0]];
+    // One reference conformer per copy (`coor` shares `xcart`'s index space).
+    sys.coor = vec![[0.0, 0.0, 0.0]; nmol];
     sys.radius = vec![1.0; ntotat];
     sys.radius_ini = vec![1.0; ntotat];
     sys.fscale = vec![1.0; ntotat];
@@ -51,9 +52,8 @@ fn single_atom_system(nmol: usize) -> PackContext {
 
 fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
     let side = cell_len * cell_n as F;
-    sys.simbox =
-        molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
-            .expect("cell");
+    sys.simbox = molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
+        .expect("cell");
     sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
     sys.resize_cell_arrays();
 }
@@ -521,7 +521,7 @@ fn gradient_with_rotations() {
     sys.natoms = vec![2];
     sys.idfirst = vec![0];
     sys.comptype = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
+    sys.coor = [[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]].repeat(2);
 
     sys.radius = vec![1.0; 4];
     sys.radius_ini = vec![1.0; 4];
@@ -578,7 +578,7 @@ fn gradient_combined_constraint_and_pairs() {
     sys.natoms = vec![1];
     sys.idfirst = vec![0];
     sys.comptype = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0]];
+    sys.coor = vec![[0.0, 0.0, 0.0]; 3];
 
     sys.radius = vec![1.0; 3];
     sys.radius_ini = vec![1.0; 3];
@@ -633,7 +633,7 @@ fn fused_function_and_gradient_matches_separate_evaluation() {
     sys.natoms = vec![2];
     sys.idfirst = vec![0];
     sys.comptype = vec![true];
-    sys.coor = vec![[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]];
+    sys.coor = [[0.0, 0.0, 0.0], [1.0, 0.2, -0.1]].repeat(2);
 
     sys.radius = vec![1.0; 4];
     sys.radius_ini = vec![1.0; 4];

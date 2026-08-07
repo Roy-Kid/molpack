@@ -15,6 +15,7 @@ use molrs::perceive::rotatable::{
 };
 use molrs::store::frame::Frame;
 use molrs::system::atomistic::Atomistic;
+use molrs::system::bond::BondType;
 use molrs::types::F;
 use rand::Rng;
 use rand::SeedableRng;
@@ -41,8 +42,28 @@ pub struct TorsionMcOptimizer {
 }
 
 impl TorsionMcOptimizer {
+    /// Build from a molecule's topology, perceiving its rotatable bonds.
+    ///
+    /// # Unclassed bonds
+    ///
+    /// Rotatable-bond perception only accepts bonds whose class is
+    /// [`BondType::Single`]. Formats that carry connectivity without orders —
+    /// PDB `CONECT`, GROMACS `.top`, XYZ `Connct`, and hand-built coarse-grain
+    /// frames — read back [`BondType::Unknown`], because molrs reports what
+    /// the file said rather than guessing. Perceiving such a molecule directly
+    /// yields **zero** rotatable bonds and turns this optimizer into a silent
+    /// no-op.
+    ///
+    /// So the fallback lives here, at the consumer, where the policy is
+    /// defensible: for a packing conformer search an unclassed bond is treated
+    /// as a rotatable single bond. The caller's graph is not modified — the
+    /// class is filled in on a local copy used for perception only.
+    ///
+    /// [`BondType::Single`]: molrs::system::bond::BondType::Single
+    /// [`BondType::Unknown`]: molrs::system::bond::BondType::Unknown
     pub fn new(graph: &Atomistic) -> Self {
-        let bonds = detect_rotatable_bonds_with_downstream(graph);
+        let perceived = unclassed_bonds_as_single(graph);
+        let bonds = detect_rotatable_bonds_with_downstream(&perceived);
         let excluded_pairs = compute_excluded_pairs(graph);
         Self {
             bonds,
@@ -53,6 +74,16 @@ impl TorsionMcOptimizer {
             excluded_pairs,
             seed: 1,
         }
+    }
+
+    /// Number of rotatable bonds perceived for this molecule, after the
+    /// unclassed-bond fallback described on [`new`](Self::new).
+    ///
+    /// Zero means every proposal this optimizer makes is the identity — worth
+    /// asserting on when wiring one up, since a no-op optimizer is otherwise
+    /// indistinguishable from one that simply never improves anything.
+    pub fn rotatable_bond_count(&self) -> usize {
+        self.bonds.len()
     }
 
     pub fn with_temperature(mut self, t: F) -> Self {
@@ -89,7 +120,7 @@ impl Optimizer for TorsionMcOptimizer {
         }
         let flat = extract_coords(frame)?;
         let n = flat.len() / 3;
-        let mut coords: Vec<[F; 3]> = (0..n)
+        let coords: Vec<[F; 3]> = (0..n)
             .map(|i| [flat[3 * i], flat[3 * i + 1], flat[3 * i + 2]])
             .collect();
 
@@ -104,7 +135,12 @@ impl Optimizer for TorsionMcOptimizer {
 
         let use_sa = self.self_avoidance_radius > 0.0;
         let mut best = coords.clone();
-        let mut best_e = energy(&best, use_sa, self.self_avoidance_radius, &self.excluded_pairs);
+        let mut best_e = energy(
+            &best,
+            use_sa,
+            self.self_avoidance_radius,
+            &self.excluded_pairs,
+        );
         let mut trial = best.clone();
         let mut accepts = 0usize;
 
@@ -115,7 +151,10 @@ impl Optimizer for TorsionMcOptimizer {
             let bond_idx = (rng.next_u32() as usize) % self.bonds.len();
             let bond = &self.bonds[bond_idx];
             // Skip moves that would rotate only fixed atoms.
-            if !bond.downstream.iter().any(|&i| free.get(i).copied().unwrap_or(false))
+            if !bond
+                .downstream
+                .iter()
+                .any(|&i| free.get(i).copied().unwrap_or(false))
                 && !free.get(bond.j).copied().unwrap_or(false)
             {
                 continue;
@@ -157,23 +196,14 @@ impl Optimizer for TorsionMcOptimizer {
     }
 }
 
-fn energy(
-    coords: &[[F; 3]],
-    use_sa: bool,
-    radius: F,
-    excluded: &HashSet<(usize, usize)>,
-) -> F {
+fn energy(coords: &[[F; 3]], use_sa: bool, radius: F, excluded: &HashSet<(usize, usize)>) -> F {
     if !use_sa {
         return 0.0;
     }
     self_avoidance_penalty(coords, radius, excluded)
 }
 
-fn self_avoidance_penalty(
-    coords: &[[F; 3]],
-    radius: F,
-    excluded: &HashSet<(usize, usize)>,
-) -> F {
+fn self_avoidance_penalty(coords: &[[F; 3]], radius: F, excluded: &HashSet<(usize, usize)>) -> F {
     let cutoff = 2.0 * radius;
     let cutoff_sq = cutoff * cutoff;
     let n = coords.len();
@@ -260,6 +290,26 @@ fn metropolis_accept(f_trial: F, f_current: F, temperature: F, rng: &mut dyn Rng
     }
     let delta = (f_trial - f_current) / temperature;
     uniform01_core(rng) < (-delta).exp()
+}
+
+/// Copy of `graph` with every [`BondType::Unknown`] bond re-classed as
+/// `Single`, so rotatable-bond perception sees the connectivity the caller
+/// meant. See [`TorsionMcOptimizer::new`] for why this is the consumer's call
+/// and not the reader's.
+///
+/// [`BondType::Unknown`]: molrs::system::bond::BondType::Unknown
+fn unclassed_bonds_as_single(graph: &Atomistic) -> Atomistic {
+    let mut out = graph.clone();
+    let unclassed: Vec<_> = out
+        .bonds()
+        .filter(|(id, _)| out.bond_type(*id) == BondType::Unknown)
+        .map(|(id, _)| id)
+        .collect();
+    for id in unclassed {
+        // Only fails on a stale handle, which `bonds()` cannot produce.
+        let _ = out.set_bond_type(id, BondType::Single);
+    }
+    out
 }
 
 fn compute_excluded_pairs(graph: &Atomistic) -> HashSet<(usize, usize)> {

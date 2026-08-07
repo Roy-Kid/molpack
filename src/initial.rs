@@ -98,6 +98,12 @@ impl SwapState {
 // ── dmax ───────────────────────────────────────────────────────────────────
 
 /// Compute maximum internal distance per molecule type.
+///
+/// Reads copy 0's conformer (`idfirst[itype]` is its base in the per-copy
+/// `coor`). Called once during initial placement, where every copy of a type
+/// is still identical, so copy 0 is representative. `dmax` only sizes the
+/// initial placement grid — it is not consulted after in-loop optimizers let
+/// the copies' conformations diverge.
 pub fn compute_dmax(sys: &mut PackContext) {
     sys.dmax = vec![0.0 as F; sys.ntype];
     for itype in 0..sys.ntype {
@@ -752,9 +758,10 @@ pub fn init_xcart_from_x(x: &[F], sys: &mut PackContext) {
             let teta = x[ilugan + 2];
             let (v1, v2, v3) = eulerrmat(beta, gama, teta);
 
-            let idatom_base = sys.idfirst[itype];
-            for iatom in 0..sys.natoms[itype] {
-                let pos = compcart(&xcm, &sys.coor[idatom_base + iatom], &v1, &v2, &v3);
+            for _ in 0..sys.natoms[itype] {
+                // `coor` shares `xcart`'s index space — this copy's own
+                // reference conformer sits at the same offset.
+                let pos = compcart(&xcm, &sys.coor[icart], &v1, &v2, &v3);
                 sys.xcart[icart] = pos;
                 // Packmol's initial.f90 sets fixedatom=false on every free
                 // atom here, but in Rust that bit is already false from

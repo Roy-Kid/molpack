@@ -464,13 +464,14 @@ fn expand_molecules(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
         let body = |&(itype, icart0, ilubar, ilugan): &(usize, usize, usize, usize)| -> (F, F) {
             let (v1, v2, v3) = eulerrmat(x[ilugan], x[ilugan + 1], x[ilugan + 2]);
             let xcm = [x[ilubar], x[ilubar + 1], x[ilubar + 2]];
-            let idbase = sys_ro.idfirst[itype];
             let na = sys_ro.natoms[itype];
             let mut f_local: F = 0.0;
             let mut frest_local: F = 0.0;
             for iatom in 0..na {
                 let icart = icart0 + iatom;
-                let pos = compcart(&xcm, &sys_ro.coor[idbase + iatom], &v1, &v2, &v3);
+                // `coor` shares `xcart`'s index space, so this copy's own
+                // reference conformer sits at the same offset.
+                let pos = compcart(&xcm, &sys_ro.coor[icart], &v1, &v2, &v3);
                 // SAFETY: `icart` is owned by this molecule alone.
                 unsafe {
                     *slots.xcart_at(icart) = pos;
@@ -1302,13 +1303,12 @@ fn project_cartesian_gradient(x: &[F], sys: &mut PackContext, g: &mut [F]) {
             let (dv1beta, dv1gama, dv1teta, dv2beta, dv2gama, dv2teta, dv3beta, dv3gama, dv3teta) =
                 eulerrmat_derivatives(beta, gama, teta);
 
-            let idbase = sys_ro.idfirst[itype];
             let na = sys_ro.natoms[itype];
             let mut gcom = [0.0 as F; 3];
             let mut gang = [0.0 as F; 3];
             for iatom in 0..na {
                 let gx = sys_ro.work.gxcar[icart0 + iatom];
-                let cr = sys_ro.coor[idbase + iatom];
+                let cr = sys_ro.coor[icart0 + iatom];
                 for k in 0..3 {
                     gcom[k] += gx[k];
                 }

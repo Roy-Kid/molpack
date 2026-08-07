@@ -14,7 +14,9 @@ pub fn uniform01(rng: &mut impl Rng) -> F {
     rng.random::<f64>() as F
 }
 
-/// Same as [`uniform01`], but for trait-object RNGs used by hook runners.
+/// Same as [`uniform01`], but for trait-object RNGs. Its only consumer is the
+/// in-loop torsion optimizer, so it carries that module's feature gate.
+#[cfg(feature = "ff")]
 #[inline]
 pub fn uniform01_core(rng: &mut dyn Rng) -> F {
     let unit = (rng.next_u64() as f64) / ((u64::MAX as f64) + 1.0);
