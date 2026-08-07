@@ -120,6 +120,103 @@ impl PyTarget {
         })
     }
 
+    /// Set the packing radius for **every atom** of this target.
+    ///
+    /// Packmol's structure-level ``radius``. The packer separates two atoms by
+    /// the sum of their radii; without this every atom uses the global
+    /// ``tolerance / 2``. Van der Waals radii from the source file are not used
+    /// as packing radii.
+    ///
+    /// Raises ``ValueError`` if ``radius`` is not positive.
+    fn with_radius(&self, radius: F) -> PyResult<Self> {
+        check_positive(radius, "packing radius")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_radius(radius),
+        })
+    }
+
+    /// Set the packing radius for selected atoms of every copy.
+    ///
+    /// Packmol's ``radius`` inside an ``atoms ... end atoms`` block.
+    /// ``indices`` are **0-based** (Rust/Python native); a Packmol ``.inp``
+    /// uses 1-based indices, so subtract 1 when porting.
+    ///
+    /// Raises ``ValueError`` if ``radius`` is not positive or an index is out
+    /// of range.
+    fn with_atom_radius(&self, indices: Vec<usize>, radius: F) -> PyResult<Self> {
+        validate_atom_indices(&indices, self.inner.natoms())?;
+        check_positive(radius, "packing radius")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_atom_radius(&indices, radius),
+        })
+    }
+
+    /// Weight this target's atoms in the overlap penalty (Packmol ``fscale``).
+    ///
+    /// The pair term is multiplied by ``fscale_i * fscale_j``, so a value below
+    /// 1 makes a species *softer* without changing the distance it is asked to
+    /// keep. Default ``1.0``.
+    ///
+    /// Raises ``ValueError`` if ``fscale`` is not positive.
+    fn with_fscale(&self, fscale: F) -> PyResult<Self> {
+        check_positive(fscale, "fscale")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_fscale(fscale),
+        })
+    }
+
+    /// Weight selected atoms in the overlap penalty. ``indices`` are **0-based**.
+    fn with_atom_fscale(&self, indices: Vec<usize>, fscale: F) -> PyResult<Self> {
+        validate_atom_indices(&indices, self.inner.natoms())?;
+        check_positive(fscale, "fscale")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_atom_fscale(&indices, fscale),
+        })
+    }
+
+    /// Give this target's atoms a second, shorter penalty radius
+    /// (Packmol ``short_radius``). Must be smaller than the packing radius.
+    fn with_short_radius(&self, short_radius: F) -> PyResult<Self> {
+        check_positive(short_radius, "short radius")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_short_radius(short_radius),
+        })
+    }
+
+    /// Per-atom counterpart of :meth:`with_short_radius`; ``indices`` are
+    /// **0-based**.
+    fn with_atom_short_radius(&self, indices: Vec<usize>, short_radius: F) -> PyResult<Self> {
+        validate_atom_indices(&indices, self.inner.natoms())?;
+        check_positive(short_radius, "short radius")?;
+        Ok(PyTarget {
+            inner: self
+                .inner
+                .clone()
+                .with_atom_short_radius(&indices, short_radius),
+        })
+    }
+
+    /// Weight the short-radius penalty (Packmol ``short_radius_scale``).
+    fn with_short_radius_scale(&self, scale: F) -> PyResult<Self> {
+        check_positive(scale, "short radius scale")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_short_radius_scale(scale),
+        })
+    }
+
+    /// Per-atom counterpart of :meth:`with_short_radius_scale`; ``indices`` are
+    /// **0-based**.
+    fn with_atom_short_radius_scale(&self, indices: Vec<usize>, scale: F) -> PyResult<Self> {
+        validate_atom_indices(&indices, self.inner.natoms())?;
+        check_positive(scale, "short radius scale")?;
+        Ok(PyTarget {
+            inner: self
+                .inner
+                .clone()
+                .with_atom_short_radius_scale(&indices, scale),
+        })
+    }
+
     fn with_perturb_budget(&self, budget: usize) -> Self {
         PyTarget {
             inner: self.inner.clone().with_perturb_budget(budget),
@@ -210,6 +307,16 @@ fn validate_atom_indices(indices: &[usize], natoms: usize) -> PyResult<()> {
                 "atom indices are 0-based and must be in 0..{natoms}, got {index}",
             )));
         }
+    }
+    Ok(())
+}
+
+/// Reject a non-positive per-atom property value with a Python `ValueError`.
+fn check_positive(value: F, what: &str) -> PyResult<()> {
+    if value <= 0.0 || value.is_nan() {
+        return Err(PyValueError::new_err(format!(
+            "{what} must be positive, got {value}"
+        )));
     }
     Ok(())
 }

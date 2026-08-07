@@ -58,6 +58,15 @@ pub struct StructurePlan {
     /// **1-based** as written in the script; [`StructurePlan::apply`]
     /// converts to 0-based when stamping them on a [`Target`].
     pub atom_groups: Vec<AtomGroup>,
+    /// Structure-level `radius`, applied to every atom before any
+    /// atom-specific override.
+    pub radius: Option<f64>,
+    /// Structure-level `fscale`.
+    pub fscale: Option<f64>,
+    /// Structure-level `short_radius`.
+    pub short_radius: Option<f64>,
+    /// Structure-level `short_radius_scale`.
+    pub short_radius_scale: Option<f64>,
     /// Whether the `center` keyword was present.
     pub center: bool,
     /// Fixed placement: `(position [x,y,z], euler [ex,ey,ez])`.
@@ -112,6 +121,10 @@ impl StructurePlan {
             number: s.number,
             mol_restraints: s.mol_restraints.clone(),
             atom_groups: s.atom_groups.clone(),
+            radius: s.radius,
+            fscale: s.fscale,
+            short_radius: s.short_radius,
+            short_radius_scale: s.short_radius_scale,
             center: s.center,
             fixed: s.fixed,
         }
@@ -122,6 +135,22 @@ impl StructurePlan {
     pub fn apply(&self, mut target: Target) -> Target {
         for r in &self.mol_restraints {
             target = apply_mol_restraint(target, r);
+        }
+
+        // Radii before restraints of the same scope, and structure level
+        // before atom level — Packmol runs the two passes in that order
+        // (`app/packmol.f90` lines 294 and 390) so the narrower selection wins.
+        if let Some(r) = self.radius {
+            target = target.with_radius(r);
+        }
+        if let Some(v) = self.fscale {
+            target = target.with_fscale(v);
+        }
+        if let Some(v) = self.short_radius {
+            target = target.with_short_radius(v);
+        }
+        if let Some(v) = self.short_radius_scale {
+            target = target.with_short_radius_scale(v);
         }
 
         for group in &self.atom_groups {
@@ -218,6 +247,18 @@ fn apply_atom_group(mut target: Target, group: &AtomGroup) -> Target {
         .map(|&i| i.saturating_sub(1))
         .collect();
     let indices = zero_indexed.as_slice();
+    if let Some(r) = group.radius {
+        target = target.with_atom_radius(indices, r);
+    }
+    if let Some(v) = group.fscale {
+        target = target.with_atom_fscale(indices, v);
+    }
+    if let Some(v) = group.short_radius {
+        target = target.with_atom_short_radius(indices, v);
+    }
+    if let Some(v) = group.short_radius_scale {
+        target = target.with_atom_short_radius_scale(indices, v);
+    }
     for r in &group.restraints {
         target = target.with_atom_restraint(indices, restraint_from_spec(r));
     }

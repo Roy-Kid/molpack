@@ -72,6 +72,11 @@ pub fn pack_error_to_pyerr(e: molpack::PackError) -> PyErr {
         molpack::PackError::ConflictingPeriodicBoxes { .. } => {
             ConflictingPeriodicBoxesError::new_err(msg)
         }
+        // A short radius that is not shorter than the packing radius is a bad
+        // input value, not a packing failure.
+        molpack::PackError::ShortRadiusNotShorter { .. } => {
+            pyo3::exceptions::PyValueError::new_err(msg)
+        }
     }
 }
 

@@ -76,8 +76,29 @@ pub struct Target {
     /// Flat list of atom positions — the centered reference coordinates.
     /// Shape: natoms × 3, stored as Vec<[F; 3]>.
     pub ref_coords: Vec<[F; 3]>,
-    /// Van der Waals radii per atom.
+    /// Van der Waals radii per atom, as read from the source structure.
+    ///
+    /// These are *reference* radii — they are **not** what the packer separates
+    /// atoms by. Packing radii come from [`resolved_radii`](Self::resolved_radii);
+    /// see [`with_radius`](Self::with_radius) for why.
     pub radii: Vec<F>,
+    /// Per-atom packing-radius overrides, one entry per atom. `None` means
+    /// "use the packer's default" (`tolerance / 2`).
+    ///
+    /// This is a **per-type template**: every copy of this target is packed
+    /// with the same values, matching Packmol, which broadcasts the first
+    /// copy's per-atom values to the rest (`app/packmol.f90` lines 503-515).
+    /// The same holds for the three fields below.
+    pub atom_radii: Vec<Option<F>>,
+    /// Per-atom overlap-penalty weights. `None` means the Packmol default of
+    /// `1.0`. The pair term is scaled by `fscale_i * fscale_j`.
+    pub atom_fscale: Vec<Option<F>>,
+    /// Per-atom short-radius overrides for Packmol's optional second,
+    /// shorter-range penalty. `None` means the packer's global short radius.
+    pub atom_short_radii: Vec<Option<F>>,
+    /// Per-atom weights for that second penalty. `None` means the packer's
+    /// global short-radius scale.
+    pub atom_short_radius_scale: Vec<Option<F>>,
     /// Element symbols per atom (e.g. `"C"`, `"O"`). Defaults to `"X"` if unknown.
     pub elements: Vec<String>,
     /// Number of copies to pack.
@@ -152,6 +173,10 @@ impl Target {
             input_coords,
             ref_coords,
             radii: radii.to_vec(),
+            atom_radii: vec![None; radii.len()],
+            atom_fscale: vec![None; radii.len()],
+            atom_short_radii: vec![None; radii.len()],
+            atom_short_radius_scale: vec![None; radii.len()],
             elements,
             count,
             name: None,
@@ -169,6 +194,179 @@ impl Target {
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self
+    }
+
+    /// Set the packing radius for **every atom** of this target.
+    ///
+    /// Packmol's structure-level `radius` keyword. The packer separates two
+    /// atoms by the sum of their radii, so this is how a species is made
+    /// bulkier or slimmer than the global `tolerance / 2` default.
+    ///
+    /// Van der Waals radii read from the source structure are deliberately not
+    /// used for this: Packmol packs on a single tolerance so the minimum
+    /// separation is a property of the run, not of whichever force field
+    /// labelled the input. Opting in per species is what this method is for.
+    ///
+    /// Order matters — a later call overwrites earlier per-atom values, which
+    /// is how the two Packmol passes compose:
+    /// ```
+    /// # use molpack::Target;
+    /// let t = Target::from_coords(&[[0.0; 3], [1.0, 0.0, 0.0]], &[1.5; 2], 1)
+    ///     .with_radius(3.0)             // every atom
+    ///     .with_atom_radius(&[1], 6.0); // then one of them
+    /// assert_eq!(t.resolved_radii(2.0), vec![3.0, 6.0]);
+    /// ```
+    ///
+    /// # Panics
+    /// If `radius` is not positive.
+    pub fn with_radius(mut self, radius: F) -> Self {
+        set_all(&mut self.atom_radii, radius, "packing radius");
+        self
+    }
+
+    /// Set the packing radius for selected atoms of this target.
+    ///
+    /// Packmol's `radius` inside an `atoms ... end atoms` block. Indices are
+    /// **0-based**, matching [`with_atom_restraint`](Self::with_atom_restraint);
+    /// a Packmol `.inp` uses 1-based indices, so subtract one when porting.
+    ///
+    /// Applies to the same atom of every copy — per-atom values are a per-type
+    /// template, not a per-copy one.
+    ///
+    /// # Panics
+    /// If `radius` is not positive, or an index is out of range.
+    pub fn with_atom_radius(mut self, indices: &[usize], radius: F) -> Self {
+        set_at(&mut self.atom_radii, indices, radius, "packing radius");
+        self
+    }
+
+    /// Weight this target's atoms in the overlap penalty.
+    ///
+    /// Packmol's structure-level `fscale`. The pair term is multiplied by
+    /// `fscale_i * fscale_j`, so a value below 1 makes a species *softer* —
+    /// penalised less for the same overlap — without changing the distance it
+    /// is asked to keep. Default `1.0`.
+    ///
+    /// # Panics
+    /// If `fscale` is not positive.
+    pub fn with_fscale(mut self, fscale: F) -> Self {
+        set_all(&mut self.atom_fscale, fscale, "fscale");
+        self
+    }
+
+    /// Weight selected atoms in the overlap penalty. Packmol's `fscale` inside
+    /// an `atoms ... end atoms` block; indices are **0-based**.
+    ///
+    /// # Panics
+    /// If `fscale` is not positive, or an index is out of range.
+    pub fn with_atom_fscale(mut self, indices: &[usize], fscale: F) -> Self {
+        set_at(&mut self.atom_fscale, indices, fscale, "fscale");
+        self
+    }
+
+    /// Give this target's atoms a second, shorter penalty radius.
+    ///
+    /// Packmol's structure-level `short_radius`. The main radius still governs
+    /// the ordinary overlap term; inside this smaller radius an additional,
+    /// steeper penalty applies, which lets a pair approach past the main
+    /// radius while still being stopped hard. Setting it opts the atoms into
+    /// the short-radius term.
+    ///
+    /// Must be **smaller** than the atom's packing radius — `pack()` rejects
+    /// the run otherwise, as Packmol does.
+    ///
+    /// # Panics
+    /// If `short_radius` is not positive.
+    pub fn with_short_radius(mut self, short_radius: F) -> Self {
+        set_all(&mut self.atom_short_radii, short_radius, "short radius");
+        self
+    }
+
+    /// Per-atom counterpart of [`with_short_radius`](Self::with_short_radius);
+    /// indices are **0-based**.
+    ///
+    /// # Panics
+    /// If `short_radius` is not positive, or an index is out of range.
+    pub fn with_atom_short_radius(mut self, indices: &[usize], short_radius: F) -> Self {
+        set_at(
+            &mut self.atom_short_radii,
+            indices,
+            short_radius,
+            "short radius",
+        );
+        self
+    }
+
+    /// Weight the short-radius penalty for this target's atoms.
+    ///
+    /// Packmol's structure-level `short_radius_scale`. Like
+    /// [`with_short_radius`](Self::with_short_radius), setting it opts the
+    /// atoms into the short-radius term even on its own.
+    ///
+    /// # Panics
+    /// If `scale` is not positive.
+    pub fn with_short_radius_scale(mut self, scale: F) -> Self {
+        set_all(
+            &mut self.atom_short_radius_scale,
+            scale,
+            "short radius scale",
+        );
+        self
+    }
+
+    /// Per-atom counterpart of
+    /// [`with_short_radius_scale`](Self::with_short_radius_scale); indices are
+    /// **0-based**.
+    ///
+    /// # Panics
+    /// If `scale` is not positive, or an index is out of range.
+    pub fn with_atom_short_radius_scale(mut self, indices: &[usize], scale: F) -> Self {
+        set_at(
+            &mut self.atom_short_radius_scale,
+            indices,
+            scale,
+            "short radius scale",
+        );
+        self
+    }
+
+    /// The packing radius of each atom, resolving unset entries to `default`
+    /// (the packer passes `tolerance / 2`).
+    ///
+    /// One entry per atom — the template every copy of this target is packed
+    /// with.
+    pub fn resolved_radii(&self, default: F) -> Vec<F> {
+        resolve(&self.atom_radii, default)
+    }
+
+    /// The overlap-penalty weight of each atom; unset entries resolve to `1.0`.
+    pub fn resolved_fscale(&self) -> Vec<F> {
+        resolve(&self.atom_fscale, 1.0)
+    }
+
+    /// The short-radius of each atom, resolving unset entries to `default`
+    /// (the packer's global short radius).
+    pub fn resolved_short_radii(&self, default: F) -> Vec<F> {
+        resolve(&self.atom_short_radii, default)
+    }
+
+    /// The short-radius penalty weight of each atom, resolving unset entries
+    /// to `default` (the packer's global short-radius scale).
+    pub fn resolved_short_radius_scale(&self, default: F) -> Vec<F> {
+        resolve(&self.atom_short_radius_scale, default)
+    }
+
+    /// Which atoms this target opts into the short-radius penalty.
+    ///
+    /// True wherever either short-radius field was set — Packmol raises the
+    /// same flag from both keywords (`app/packmol.f90` lines 473 and 495).
+    /// The packer ORs this with its global short-tolerance switch.
+    pub fn uses_short_radius(&self) -> Vec<bool> {
+        self.atom_short_radii
+            .iter()
+            .zip(&self.atom_short_radius_scale)
+            .map(|(r, s)| r.is_some() || s.is_some())
+            .collect()
     }
 
     /// Attach a restraint applied to every atom of every molecule copy.
@@ -275,6 +473,41 @@ impl Target {
     pub fn natoms(&self) -> usize {
         self.ref_coords.len()
     }
+}
+
+// ── per-atom override helpers ───────────────────────────────────────────────
+//
+// The four per-atom properties (radius, fscale, short radius, short-radius
+// scale) share one shape: a structure-level set that covers every atom and an
+// atom-level set that overrides a selection, with `None` deferring to a
+// default the packer supplies. These keep that logic in one place.
+
+fn check_positive(value: F, what: &str) {
+    assert!(
+        value > 0.0 && !value.is_nan(),
+        "{what} must be positive, got {value}"
+    );
+}
+
+fn set_all(slot: &mut [Option<F>], value: F, what: &str) {
+    check_positive(value, what);
+    slot.fill(Some(value));
+}
+
+fn set_at(slot: &mut [Option<F>], indices: &[usize], value: F, what: &str) {
+    check_positive(value, what);
+    let n = slot.len();
+    for &i in indices {
+        assert!(
+            i < n,
+            "atom index {i} is out of range for a {n}-atom structure"
+        );
+        slot[i] = Some(value);
+    }
+}
+
+fn resolve(slot: &[Option<F>], default: F) -> Vec<F> {
+    slot.iter().map(|v| v.unwrap_or(default)).collect()
 }
 
 fn centered_coords(coords: &[[F; 3]]) -> Vec<[F; 3]> {

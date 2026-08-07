@@ -9,6 +9,15 @@ pub enum PackError {
     MaxIterations,
     /// No molecules were provided.
     NoTargets,
+    /// A short radius is not shorter than the atom's packing radius, so the
+    /// second penalty could never be the tighter one. Packmol rejects the same
+    /// input (`app/packmol.f90` lines 519-528).
+    ShortRadiusNotShorter {
+        target: usize,
+        atom: usize,
+        short_radius: F,
+        radius: F,
+    },
     /// A molecule has no atoms.
     EmptyMolecule(usize),
     /// A restraint declared a periodic box whose `max - min` is
@@ -38,6 +47,16 @@ impl fmt::Display for PackError {
                 write!(f, "Maximum iterations reached without convergence")
             }
             PackError::NoTargets => write!(f, "No targets provided"),
+            PackError::ShortRadiusNotShorter {
+                target,
+                atom,
+                short_radius,
+                radius,
+            } => write!(
+                f,
+                "target {target} atom {atom}: short radius {short_radius} must be \
+                 smaller than the packing radius {radius}"
+            ),
             PackError::EmptyMolecule(i) => write!(f, "Target {i} has no atoms"),
             PackError::InvalidCell { detail } => write!(f, "invalid packing cell: {detail}"),
             PackError::PlaneAcrossPeriodicAxis { axis, normal } => write!(

@@ -82,6 +82,15 @@ pub struct Structure {
     pub mol_restraints: Vec<RestraintSpec>,
     /// Atom-subset restraints (`atoms … end atoms` blocks).
     pub atom_groups: Vec<AtomGroup>,
+    /// Structure-level `radius`: the packing radius for every atom of every
+    /// copy. `None` leaves the packer's `tolerance / 2` default in place.
+    pub radius: Option<f64>,
+    /// Structure-level `fscale`: the overlap-penalty weight. `None` = `1.0`.
+    pub fscale: Option<f64>,
+    /// Structure-level `short_radius` for the second, shorter-range penalty.
+    pub short_radius: Option<f64>,
+    /// Structure-level `short_radius_scale`, weighting that second penalty.
+    pub short_radius_scale: Option<f64>,
     /// Whether the `center` keyword was present.
     pub center: bool,
     /// Fixed placement: `(position [x,y,z], euler [ex,ey,ez])`.
@@ -94,6 +103,15 @@ pub struct AtomGroup {
     /// Atom indices as written in the script (1-based).
     pub atom_indices: Vec<usize>,
     pub restraints: Vec<RestraintSpec>,
+    /// Atom-specific `radius`, overriding the structure-level one for the
+    /// atoms this group names.
+    pub radius: Option<f64>,
+    /// Atom-specific `fscale`.
+    pub fscale: Option<f64>,
+    /// Atom-specific `short_radius`.
+    pub short_radius: Option<f64>,
+    /// Atom-specific `short_radius_scale`.
+    pub short_radius_scale: Option<f64>,
 }
 
 /// AtomRestraint as it appears in the script, before being mapped to a
@@ -266,6 +284,10 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                         number: 0,
                         mol_restraints: Vec::new(),
                         atom_groups: Vec::new(),
+                        radius: None,
+                        fscale: None,
+                        short_radius: None,
+                        short_radius_scale: None,
                         center: false,
                         fixed: None,
                     })
@@ -318,6 +340,23 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                     s.mol_restraints.push(r);
                     State::InStructure(s)
                 }
+                "radius" => {
+                    s.radius = Some(parse_positive(&tokens, "radius", lineno)?);
+                    State::InStructure(s)
+                }
+                "fscale" => {
+                    s.fscale = Some(parse_positive(&tokens, "fscale", lineno)?);
+                    State::InStructure(s)
+                }
+                "short_radius" => {
+                    s.short_radius = Some(parse_positive(&tokens, "short_radius", lineno)?);
+                    State::InStructure(s)
+                }
+                "short_radius_scale" => {
+                    s.short_radius_scale =
+                        Some(parse_positive(&tokens, "short_radius_scale", lineno)?);
+                    State::InStructure(s)
+                }
                 "atoms" => {
                     let indices = tokens[1..]
                         .iter()
@@ -334,6 +373,10 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                         group: AtomGroup {
                             atom_indices: indices,
                             restraints: Vec::new(),
+                            radius: None,
+                            fscale: None,
+                            short_radius: None,
+                            short_radius_scale: None,
                         },
                     }
                 }
@@ -382,6 +425,35 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                 "below" => {
                     let r = parse_plane_below(&tokens, lineno)?;
                     group.restraints.push(r);
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
+                }
+                "radius" => {
+                    group.radius = Some(parse_positive(&tokens, "radius", lineno)?);
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
+                }
+                "fscale" => {
+                    group.fscale = Some(parse_positive(&tokens, "fscale", lineno)?);
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
+                }
+                "short_radius" => {
+                    group.short_radius = Some(parse_positive(&tokens, "short_radius", lineno)?);
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
+                }
+                "short_radius_scale" => {
+                    group.short_radius_scale =
+                        Some(parse_positive(&tokens, "short_radius_scale", lineno)?);
                     State::InAtoms {
                         structure: s,
                         group,
@@ -563,6 +635,23 @@ fn parse_plane_above(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, Sc
     let normal = parse_vec3(tokens, 2, "over plane normal", lineno)?;
     let distance = parse_f64(tokens, 5, "over plane distance", lineno)?;
     Ok(RestraintSpec::AbovePlane { normal, distance })
+}
+
+/// A `<keyword> <positive value>` line. The four per-atom properties
+/// (`radius`, `fscale`, `short_radius`, `short_radius_scale`) all take this
+/// shape, and all are valid both at structure level and inside an
+/// `atoms … end atoms` block — Packmol reads the same keywords in both places
+/// (`app/packmol.f90` lines 317 and 413) and lets the enclosing block decide
+/// which layer applies.
+fn parse_positive(tokens: &[&str], what: &str, lineno: usize) -> Result<f64, ScriptError> {
+    let value = parse_f64(tokens, 1, what, lineno)?;
+    if value <= 0.0 || value.is_nan() {
+        return Err(parse_err(
+            lineno,
+            format!("{what} must be positive, got `{value}`"),
+        ));
+    }
+    Ok(value)
 }
 
 fn parse_plane_below(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptError> {

@@ -76,8 +76,9 @@ const SIDEMAX: F = 1000.0;
 /// Packmol default movefrac.
 const MOVEFRAC: F = 0.05;
 /// Default minimum atom-atom distance tolerance (Packmol's `dism` default = 2.0 Å).
-/// Atom radii are set to `tolerance / 2` for all atoms, matching Packmol's
-/// `radius(i) = dism/2.d0` (packmol.f90 line 283).
+/// `tolerance / 2` is the *default* atom radius, matching Packmol's
+/// `radius(i) = dism/2.d0` (packmol.f90 line 283); a target can override it per
+/// species or per atom — see [`Target::with_radius`].
 const DEFAULT_TOLERANCE: F = 2.0;
 /// Default RNG seed (Packmol's `seed` default = 1234567, getinp.f90 line 33).
 const DEFAULT_SEED: u64 = 1_234_567;
@@ -92,7 +93,8 @@ pub struct Molpack {
     precision: F,
     discale: F,
     /// Minimum atom-atom distance (Packmol's `tolerance`/`dism`). Default 2.0 Å.
-    /// Atom radii = `tolerance / 2`.
+    /// Sets the default atom radius to `tolerance / 2`; per-species and
+    /// per-atom overrides live on [`Target`].
     tolerance: F,
     /// GENCAN inner iterations (`maxit` keyword).
     inner_iterations: usize,
@@ -134,6 +136,11 @@ pub struct Molpack {
     /// seeds inside the solute, inflating the initial overlap ~2× and stalling
     /// GENCAN. Has no effect when there are no fixed molecules.
     avoid_overlap: bool,
+    /// Packmol's optional second, shorter-range penalty: `(radius, scale)`,
+    /// enabled by `use_short_tol` and tuned by `short_tol_dist` /
+    /// `short_tol_scale`. `None` leaves it off for every atom that does not
+    /// opt in through its [`Target`].
+    short_tolerance: Option<(F, F)>,
     /// In-loop optimizers (`ff` feature): selection + molrs `Optimizer`.
     #[cfg(feature = "ff")]
     optimizers: Vec<OptimizerBinding>,
@@ -174,6 +181,7 @@ impl Molpack {
             log_level: MolpackLogLevel::Quiet,
             log_frequency: 1,
             avoid_overlap: true,
+            short_tolerance: None,
             #[cfg(feature = "ff")]
             optimizers: Vec::new(),
         }
@@ -193,6 +201,40 @@ impl Molpack {
             select,
             optimizer: Box::new(optimizer),
         });
+        self
+    }
+
+    /// Turn on Packmol's second, shorter-range overlap penalty for every atom.
+    ///
+    /// Mirrors `use_short_tol` together with `short_tol_dist` and
+    /// `short_tol_scale`: `distance` is the short *tolerance* (atoms get half
+    /// of it as their short radius, exactly as the main tolerance gives them
+    /// `tolerance / 2`), and `scale` weights the extra term. Packmol's default
+    /// scale is `3.0`.
+    ///
+    /// Individual targets can override both per species and per atom; see
+    /// [`Target::with_short_radius`]. A target that opts in on its own does not
+    /// need this call — this is the global switch, not a prerequisite.
+    ///
+    /// # Panics
+    /// If `distance` is not positive, `scale` is not positive, or `distance`
+    /// is not smaller than the packing tolerance (Packmol rejects the same,
+    /// `getinp.f90` lines 779-782).
+    pub fn with_short_tolerance(mut self, distance: F, scale: F) -> Self {
+        assert!(
+            distance > 0.0 && !distance.is_nan(),
+            "short tolerance distance must be positive, got {distance}"
+        );
+        assert!(
+            scale > 0.0 && !scale.is_nan(),
+            "short tolerance scale must be positive, got {scale}"
+        );
+        assert!(
+            distance < self.tolerance,
+            "short tolerance distance {distance} must be smaller than the tolerance {}",
+            self.tolerance
+        );
+        self.short_tolerance = Some((distance / 2.0, scale));
         self
     }
 
@@ -583,18 +625,35 @@ impl Molpack {
         sys.coor = coor;
 
         // Assign radii, element symbols, and per-atom (itype, imol) tags.
-        // Packmol uses `radius = tolerance/2` for ALL atoms (packmol.f90 line 283:
-        //   `radius(i) = dism/2.d0`), not VdW radii from the PDB file.
+        //
+        // Radii follow Packmol's layering (packmol.f90 lines 281-515): every
+        // atom starts at `tolerance / 2` (line 283), a structure-level
+        // `radius` covers the whole species, and an atom-specific `radius`
+        // overrides selected atoms. `Target::resolved_radii` collapses those
+        // layers into one per-type template, which is then broadcast to every
+        // copy — Packmol does the same broadcast explicitly at lines 503-515.
+        // VdW radii from the source file are deliberately not used.
+        //
         // `ibtype` / `ibmol` are derivable from position in the sequential
         // atom layout, so we set them here once instead of having
         // `insert_atom_in_cell` rewrite the same constants on every eval.
-        let atom_radius = self.tolerance / 2.0;
+        let default_radius = self.tolerance / 2.0;
+        let (global_short_radius, global_short_scale) =
+            self.short_tolerance.unwrap_or((default_radius / 2.0, 3.0));
+        let short_on_globally = self.short_tolerance.is_some();
         let mut icart = 0usize;
         for (itype, target) in free_targets.iter().enumerate() {
+            let props = AtomPropsTemplate::of(
+                target,
+                default_radius,
+                global_short_radius,
+                global_short_scale,
+                short_on_globally,
+            );
+            props.validate(itype)?;
             for imol in 0..target.count {
                 for iatom in 0..target.natoms() {
-                    sys.radius[icart] = atom_radius;
-                    sys.radius_ini[icart] = atom_radius;
+                    props.stamp(&mut sys, icart, iatom);
                     sys.ibtype[icart] = itype;
                     sys.ibmol[icart] = imol;
                     sys.elements[icart] = Element::by_symbol(&target.elements[iatom]);
@@ -604,9 +663,16 @@ impl Molpack {
         }
         for (fi, target) in fixed_targets.iter().enumerate() {
             let itype = ntype + fi;
+            let props = AtomPropsTemplate::of(
+                target,
+                default_radius,
+                global_short_radius,
+                global_short_scale,
+                short_on_globally,
+            );
+            props.validate(itype)?;
             for iatom in 0..target.natoms() {
-                sys.radius[icart] = atom_radius;
-                sys.radius_ini[icart] = atom_radius;
+                props.stamp(&mut sys, icart, iatom);
                 sys.ibtype[icart] = itype;
                 sys.ibmol[icart] = 0;
                 sys.elements[icart] = Element::by_symbol(&target.elements[iatom]);
@@ -1032,6 +1098,65 @@ fn derive_periodic_box(targets: &[Target]) -> Result<Option<PeriodicSpec>, PackE
         }
     }
     Ok(found)
+}
+
+/// One target's resolved per-atom properties — the per-type template Packmol
+/// broadcasts to every copy (`app/packmol.f90` lines 503-515).
+struct AtomPropsTemplate {
+    radii: Vec<F>,
+    fscale: Vec<F>,
+    short_radii: Vec<F>,
+    short_scale: Vec<F>,
+    use_short: Vec<bool>,
+}
+
+impl AtomPropsTemplate {
+    fn of(
+        target: &Target,
+        default_radius: F,
+        global_short_radius: F,
+        global_short_scale: F,
+        short_on_globally: bool,
+    ) -> Self {
+        let opted_in = target.uses_short_radius();
+        Self {
+            radii: target.resolved_radii(default_radius),
+            fscale: target.resolved_fscale(),
+            short_radii: target.resolved_short_radii(global_short_radius),
+            short_scale: target.resolved_short_radius_scale(global_short_scale),
+            // A target opts in per atom; the packer's global switch turns it on
+            // for everything else.
+            use_short: opted_in
+                .into_iter()
+                .map(|opted| opted || short_on_globally)
+                .collect(),
+        }
+    }
+
+    /// The short penalty is meaningless unless it is the tighter of the two.
+    fn validate(&self, itype: usize) -> Result<(), PackError> {
+        for (iatom, &use_short) in self.use_short.iter().enumerate() {
+            if use_short && self.short_radii[iatom] >= self.radii[iatom] {
+                return Err(PackError::ShortRadiusNotShorter {
+                    target: itype,
+                    atom: iatom,
+                    short_radius: self.short_radii[iatom],
+                    radius: self.radii[iatom],
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Write atom `iatom` of the template onto context slot `icart`.
+    fn stamp(&self, sys: &mut PackContext, icart: usize, iatom: usize) {
+        sys.radius[icart] = self.radii[iatom];
+        sys.radius_ini[icart] = self.radii[iatom];
+        sys.fscale[icart] = self.fscale[iatom];
+        sys.short_radius[icart] = self.short_radii[iatom];
+        sys.short_radius_scale[icart] = self.short_scale[iatom];
+        sys.use_short_radius[icart] = self.use_short[iatom];
+    }
 }
 
 fn reference_coords(target: &Target) -> &[[F; 3]] {
