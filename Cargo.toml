@@ -115,6 +115,21 @@ name = "mt_scaling"
 path = "examples/mt_scaling/main.rs"
 required-features = ["rayon"]
 
+# Polymer adsorption onto a substrate: a heterogeneous system whose chains relax
+# their conformation in-loop via `TorsionMcOptimizer`. Synthesizes its own
+# coarse-grain geometry, so it needs `ff` (the optimizer) but not `io`.
+[[example]]
+name = "pack_adsorption"
+path = "examples/pack_adsorption/main.rs"
+required-features = ["ff"]
+
+# Polymer translocation initial state: chains threaded through a membrane pore —
+# a configuration MD cannot reach from an unthreaded start. Needs `ff`, not `io`.
+[[example]]
+name = "pack_translocation"
+path = "examples/pack_translocation/main.rs"
+required-features = ["ff"]
+
 # Criterion regression benchmarks under `benches/`. Each is a SMALL, fast
 # regression alarm (one tens-to-few-hundred-atom workload, `sample_size(10)`,
 # ~500 ms measurement) — a guard against a perf regression, not a throughput
