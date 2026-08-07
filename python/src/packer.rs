@@ -113,6 +113,7 @@ impl PyPackResult {
 /// result = packer.pack(targets, max_loops=200)
 /// ```
 #[pyclass(name = "Molpack")]
+#[derive(Default)]
 pub struct PyPacker {
     pub(crate) precision: Option<F>,
     pub(crate) tolerance: Option<F>,
@@ -136,31 +137,6 @@ pub struct PyPacker {
     /// Built-in XYZ trajectory recorder: `(path, every)`. Installs molpack's
     /// native [`molpack::XYZHandler`] at pack time.
     pub(crate) xyz_output: Option<(String, usize)>,
-}
-
-impl Default for PyPacker {
-    fn default() -> Self {
-        PyPacker {
-            precision: None,
-            tolerance: None,
-            inner_iterations: None,
-            init_passes: None,
-            init_box_half_size: None,
-            perturb_fraction: None,
-            random_perturb: None,
-            perturb: None,
-            avoid_overlap: None,
-            seed: None,
-            parallel_eval: None,
-            progress: false,
-            log_level: None,
-            log_frequency: None,
-            periodic_box: None,
-            py_handlers: Vec::new(),
-            global_restraints: Vec::new(),
-            xyz_output: None,
-        }
-    }
 }
 
 #[pymethods]

@@ -22,9 +22,6 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyCapsule, PyModule};
 
-#[cfg(feature = "ff")]
-use molrs_ffi::ForceFieldRef;
-
 use molpack::F;
 
 /// Map a molrs-ffi handle error into a Python exception.
@@ -56,18 +53,6 @@ pub fn frame_from_py(obj: &Bound<'_, PyAny>) -> PyResult<FrameRef> {
 /// compilation) — equivalent to `frame_from_py(obj)?.clone_frame()`.
 pub fn owned_frame_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Frame> {
     frame_from_py(obj)?.clone_frame().map_err(ffi_err)
-}
-
-/// Resolve a `molrs.ForceField` / `molpy.ForceField` to a shared
-/// [`ForceFieldRef`] (zero-copy). Consumed by `LBFGSRelaxer(ff)`.
-#[cfg(feature = "ff")]
-pub fn forcefield_from_py(obj: &Bound<'_, PyAny>) -> PyResult<ForceFieldRef> {
-    let capsule = capsule_from(obj, "_ffi_forcefield_capsule")?;
-    let ptr = capsule.pointer_checked(Some(c"molrs.ForceFieldRef"))?;
-    let pp = ptr.as_ptr() as *const *const ForceFieldRef;
-    // SAFETY: see `frame_from_py`; the payload is `*mut *mut ForceFieldRef`.
-    let ffref = unsafe { (**pp).clone() };
-    Ok(ffref)
 }
 
 /// Build a Python `molrs.Frame` from a Rust [`Frame`] — the **return path**.

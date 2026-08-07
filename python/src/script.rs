@@ -126,12 +126,12 @@ pub fn load_script(
         .map(|sp| build_target(py, sp, plan.filetype.as_deref(), &loader))
         .collect::<PyResult<_>>()?;
 
-    let mut packer = PyPacker::default();
-    packer.tolerance = Some(script_ast.tolerance);
-    packer.seed = script_ast.seed;
-    if let Some(pbc) = script_ast.pbc {
-        packer.periodic_box = Some((pbc.min, pbc.max));
-    }
+    let packer = PyPacker {
+        tolerance: Some(script_ast.tolerance),
+        seed: script_ast.seed,
+        periodic_box: script_ast.pbc.map(|pbc| (pbc.min, pbc.max)),
+        ..PyPacker::default()
+    };
 
     Ok(PyScriptJob {
         packer: Py::new(py, packer)?,
