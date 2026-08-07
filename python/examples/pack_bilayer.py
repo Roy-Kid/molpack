@@ -19,8 +19,8 @@ DATA = HERE.parent.parent / "examples" / "pack_bilayer"
 
 
 def main() -> None:
-    water_frame = molrs.read_pdb(str(DATA / "water.pdb"))
-    lipid_frame = molrs.read_pdb(str(DATA / "palmitoil.pdb"))
+    water_frame = molrs.io.read_pdb(str(DATA / "water.pdb"))
+    lipid_frame = molrs.io.read_pdb(str(DATA / "palmitoil.pdb"))
 
     water_low = (
         molpack.Target(water_frame, count=50)

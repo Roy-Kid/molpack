@@ -12,7 +12,7 @@ permissions:
 
 # Keep in lockstep with ci.yml / Cargo.toml molrs pin.
 env:
-  MOLRS_GIT_REF: v0.9.3
+  MOLRS_GIT_REF: v0.12.0
 
 # Build matrix produces one wheel per OS per supported Python (3.12, 3.13),
 # matching `requires-python = ">=3.12"` in pyproject.toml. Linux + macOS only;

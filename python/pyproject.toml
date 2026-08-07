@@ -4,17 +4,17 @@ build-backend = "maturin"
 
 [project]
 name = "molcrafts-molpack"
-version = "0.1.2"
+version = "0.2.0"
 description = "Python bindings for molpack molecular packing (Packmol port)"
 requires-python = ">=3.12"
 readme = "README.md"
 license = "BSD-3-Clause"
-# Exact pins — keep in lockstep with Cargo.toml, [tool.tox], and CI MOLRS_GIT_REF.
+# Minor-line pins — same major.minor as molrs/molpy; patch may drift.
 dependencies = [
   "numpy>=2.0",
   "typer>=0.12",
-  "molcrafts-molrs==0.9.3",
-  "molcrafts-molpy==0.9.3",
+  "molcrafts-molrs>=0.12.0,<0.13",
+  "molcrafts-molpy>=0.12.0,<0.13",
 ]
 
 # Installable "extra" carrying the docs-build deps. Unlike the [dependency-groups]
@@ -24,8 +24,8 @@ dependencies = [
 # That is the build command a Cloudflare Pages Git-integration build should use.
 [project.optional-dependencies]
 doc = [
-  "zensical>=0.0.51",
-  "molcrafts-zensical-theme>=0.2.3",
+  "zensical>=0.0.53",
+  "molcrafts-zensical-theme>=0.2.5",
 ]
 
 # PEP 735 dependency groups — the single source of truth for dev-time
@@ -38,7 +38,7 @@ typecheck = [
   "ty",
   "typer>=0.12",
   "numpy>=2.0",
-  "molcrafts-molrs==0.9.3",
+  "molcrafts-molrs>=0.12.0,<0.13",
   # `ty check` walks tests/ which imports pytest.
   "pytest",
 ]
@@ -46,8 +46,8 @@ test = [
   "pytest",
   "typer>=0.12",
   "numpy>=2.0",
-  "molcrafts-molrs==0.9.3",
-  "molcrafts-molpy==0.9.3",
+  "molcrafts-molrs>=0.12.0,<0.13",
+  "molcrafts-molpy>=0.12.0,<0.13",
 ]
 dev = [
   {include-group = "typecheck"},
@@ -58,15 +58,12 @@ dev = [
   # `uv run --group dev tox -e py` from python/.
   "tox>=4.23",
 ]
-# Documentation build. Zensical is the static-site generator; it reads the
-# single site config at ../zensical.toml (the Python binding docs live under
-# ../docs/python/ as the "Python" nav section). That config sets
-# `theme.name = "molcrafts"` — the shared MolCrafts brand extension, now on
-# PyPI, so the docs build is reproducible from this group alone.
+# Documentation build: `zensical build` reads zensical.toml (docs → site).
+# Theme: `theme.name = "molcrafts"` (molcrafts-zensical-theme on PyPI).
 doc = [
-  "zensical>=0.0.51",
+  "zensical>=0.0.53",
   # The molcrafts docs theme (zensical.toml sets `theme.name = "molcrafts"`).
-  "molcrafts-zensical-theme>=0.2.3",
+  "molcrafts-zensical-theme>=0.2.5",
 ]
 
 [project.scripts]
@@ -127,7 +124,7 @@ extra-paths = ["examples"]
 
 # Isolated binding tests — prek pre-push + CI call: `tox -c python -e py`
 # Non-editable only: sibling molrs path install + maturin wheel + pytest.
-# Requires ../../molrs at workspace version 0.9.3 (CI: MolCrafts/molrs@v0.9.3).
+# Requires ../../molrs at workspace version 0.12.0 (CI: MolCrafts/molrs@v0.12.0).
 [tool.tox]
 requires = ["tox>=4.23"]
 env_list = ["py"]
@@ -141,7 +138,7 @@ deps = [
   "pytest",
   "numpy>=2.0",
   "typer>=0.12",
-  "molcrafts-molpy==0.9.3",
+  "molcrafts-molpy>=0.12.0,<0.13",
 ]
 pass_env = [
   "HOME",
@@ -156,11 +153,12 @@ pass_env = [
 ]
 allowlist_externals = ["maturin"]
 # toxinidir is python/ when config lives here; sibling molrs is ../.. /molrs.
+# Minor-line only: 0.12.* (patch may differ).
 commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import tomllib; from pathlib import Path; p=Path('{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text())['workspace']['package']['version']; assert v=='0.9.3', f'sibling molrs {{v}} != 0.9.3'",
+    "import tomllib; from pathlib import Path; p=Path('{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text())['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,12), f'sibling molrs {{v}} not on 0.12.*'",
   ],
   [
     "{envpython}",
@@ -172,7 +170,7 @@ commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert v=='0.9.3', v",
+    "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,12), v",
   ],
   ["maturin", "build", "--release", "-o", "{env_tmp_dir}/wheels"],
   [

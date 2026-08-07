@@ -13,7 +13,7 @@ reference output.
 import molrs
 from molpack import InsideBoxRestraint, Molpack, Target
 
-frame = molrs.read_pdb("water.pdb")
+frame = molrs.io.read_pdb("water.pdb")
 
 water = (
     Target(frame, count=100)
@@ -28,17 +28,39 @@ print(f"packed {frame['atoms'].nrows} atoms")
 
 ## Next steps
 
-<div class="molpack-next-cards" markdown>
-
-- **[Installation](installation.md)** — pip install and verification
-- **[Quickstart](getting-started.md)** — first pack end-to-end
-- **[Targets](guide/targets.md)** — templates, counts, fixed placement
-- **[Restraints](guide/restraints.md)** — geometric and collective restraints
-- **[Packer](guide/packer.md)** — builder options, diagnostics, handlers
-- **[Periodic boundaries](guide/periodic-boundaries.md)** — PBC rules
-- **[Examples](examples.md)** — Packmol-equivalent workloads
-- **[API reference](api-reference.md)** — class-by-class summary
-
+<div class="molcrafts-manual-list">
+  <a href="installation/">
+    <strong>Installation</strong>
+    <em>pip install and verification.</em>
+  </a>
+  <a href="getting-started/">
+    <strong>Quickstart</strong>
+    <em>First pack end-to-end.</em>
+  </a>
+  <a href="guide/targets/">
+    <strong>Targets</strong>
+    <em>Templates, counts, fixed placement.</em>
+  </a>
+  <a href="guide/restraints/">
+    <strong>Restraints</strong>
+    <em>Geometric and collective restraints.</em>
+  </a>
+  <a href="guide/packer/">
+    <strong>Packer</strong>
+    <em>Builder options, diagnostics, handlers.</em>
+  </a>
+  <a href="guide/periodic-boundaries/">
+    <strong>Periodic boundaries</strong>
+    <em>PBC rules and validation.</em>
+  </a>
+  <a href="examples/">
+    <strong>Examples</strong>
+    <em>Packmol-equivalent workloads.</em>
+  </a>
+  <a href="api-reference/">
+    <strong>API reference</strong>
+    <em>Class-by-class summary.</em>
+  </a>
 </div>
 
 ## See also

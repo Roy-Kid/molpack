@@ -18,9 +18,9 @@ target = Target(frame, count)
 
   | Source | Element column |
   |--------|---------------|
-  | `molrs.read_pdb(path)` | `"symbol"` |
-  | `molrs.read_xyz(path)` | `"element"` |
-  | `molrs.Frame.from_dict({"blocks": {"atoms": {...}}})` | `"element"` |
+  | `molrs.io.read_pdb(path)` | `"symbol"` |
+  | `molrs.io.read_xyz(path)` | `"element"` |
+  | `molrs.Frame.from_dict({"blocks": {"atoms": {...}}, "meta": {}})` | `"element"` |
   | `molpy.Frame` | `"element"` |
 
 - `count` — number of copies to produce.
@@ -45,7 +45,8 @@ frame = molrs.Frame.from_dict({
             "z": np.zeros(3),
             "element": ["O", "H", "H"],
         }
-    }
+    },
+    "meta": {},
 })
 water = Target(frame, count=100).with_name("water")
 ```

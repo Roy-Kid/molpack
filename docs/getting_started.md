@@ -20,7 +20,7 @@ type plus PDB/XYZ I/O.
     ```python
     import molrs
 
-    frame = molrs.read_pdb("water.pdb")
+    frame = molrs.io.read_pdb("water.pdb")
     ```
 
 === "In-memory (no file)"
@@ -37,7 +37,8 @@ type plus PDB/XYZ I/O.
                 "z": np.zeros(3),
                 "element": ["O", "H", "H"],
             }
-        }
+        },
+        "meta": {},
     })
     ```
 
@@ -90,18 +91,31 @@ For a frame-only return, use `Molpack().pack([water], max_loops=200)`.
 ```python
 import molrs
 
-molrs.write_pdb(packed, "water_box.pdb")
-# or: molrs.write_xyz(packed, "water_box.xyz")
+molrs.io.write_pdb("water_box.pdb", packed)
+# or: molrs.io.write_xyz("water_box.xyz", packed)
 ```
 
 ## Where next
 
-<div class="molpack-next-cards" markdown>
-
-- **[Concepts](concepts/)** — targets, restraints, phases of the packer
-- **[CLI](cli/)** — same job as a Packmol-style `.inp`
-- **[Python guide](python/)** — fixed solutes, PBC, collective restraints
-- **[Rust API](rust/)** — embed the engine in a native crate
-- **[Packmol parity](packmol_parity/)** — what matches Packmol, and what does not
-
+<div class="molcrafts-manual-grid molcrafts-manual-grid--cols-3">
+  <a href="concepts/">
+    <strong>Concepts</strong>
+    <em>Targets, restraints, and packer phases.</em>
+  </a>
+  <a href="cli/">
+    <strong>CLI</strong>
+    <em>Same job as a Packmol-style `.inp`.</em>
+  </a>
+  <a href="python/">
+    <strong>Python</strong>
+    <em>Fixed solutes, PBC, collective restraints.</em>
+  </a>
+  <a href="rust/">
+    <strong>Rust</strong>
+    <em>Embed the engine in a native crate.</em>
+  </a>
+  <a href="packmol_parity/">
+    <strong>Packmol parity</strong>
+    <em>What matches Packmol, and what does not.</em>
+  </a>
 </div>

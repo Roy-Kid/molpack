@@ -1,6 +1,6 @@
 ---
 name: mpk-docs
-description: Audit or update docs — rustdoc, docs/ (incl. docs/python/), README, CONTRIBUTING, CHANGELOG. Writes docs when asked.
+description: Audit or update docs — rustdoc, docs/ (incl. docs/python/), README, CONTRIBUTING. Writes docs when asked.
 argument-hint: "<git ref, path, or 'update: <topic>'>"
 user-invocable: true
 ---

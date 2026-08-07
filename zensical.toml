@@ -1,20 +1,16 @@
+# molpack docs — single English site served at the root.
+#
+#   zensical build     # docs → site
+
 [project]
 site_name = "molpack"
 site_description = "Packmol-grade molecular packing in pure Rust, with Python bindings."
-# Site is built by Cloudflare Pages (pip install "molcrafts-molpack[doc]" + zensical).
-# Keep site_url in sync with the Cloudflare custom domain when one is set.
-site_url = "https://molcrafts.github.io/molpack/"
+site_url = "https://docs.molcrafts.org/molpack/"
 repo_url = "https://github.com/MolCrafts/molpack"
 repo_name = "MolCrafts/molpack"
 copyright = "Copyright &copy; 2026 MolCrafts"
 docs_dir = "docs"
 site_dir = "site"
-
-# Markdown extensions are intentionally not listed: Zensical's built-in default
-# set (admonition, attr_list, def_list, footnotes, md_in_html, toc permalink,
-# pymdownx.{arithmatex,details,emoji,highlight,inlinehilite,superfences,tabbed,
-# tasklist}, and more) already covers everything these docs use — the CLI/Rust/
-# Python tabbed blocks, admonitions, and code annotations.
 
 nav = [
   { "Home" = "index.md" },
@@ -58,32 +54,15 @@ nav = [
 
 extra_css = ["assets/stylesheets/extra.css"]
 
-# Shared MolCrafts theme (github.com/MolCrafts/molcrafts-zensical-theme). Provides
-# the brand palette, light/dark schemes, navigation features, and the home-page
-# hero/manual-home component system used by docs/index.md. The package must be
-# installed to build (see the `doc` dependency group in python/pyproject.toml).
+# https://zensical.org/docs/setup/language/#site-language
 [project.theme]
 name = "molcrafts"
 language = "en"
 
-# Language selector. English is the default and lives at the site root; a
-# Chinese (zh) tree lives under docs/zh/. Zensical renders the header dropdown
-# from `extra.alternate` (theme partial partials/alternate.html). The `url`
-# filter passes absolute paths through unchanged, so each `link` carries the
-# site's base path (`/molpack/`, matching site_url) to stay correct from every
-# page and depth. The zh pages are placeholders for now — no docs are
-# translated yet.
-[project.extra]
-alternate = [
-  { name = "English", link = "/molpack/", lang = "en" },
-  { name = "简体中文", link = "/molpack/zh/", lang = "zh" },
-]
-
-# Selects the molpack accent (rust orange) for links, hovers, and hero eyebrows.
 [project.extra.molcrafts]
 product = "molpack"
-accent = "#c2410c"                       # primary (主) — molpack signature colour
-accent_soft = "rgba(194, 65, 12, 0.14)"  # secondary (副) — soft fill behind it
+accent = "#c2410c"
+accent_soft = "rgba(194, 65, 12, 0.14)"
 
 [[project.extra.social]]
 icon = "fontawesome/brands/github"

@@ -20,12 +20,12 @@ DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "examples"
 
 @pytest.fixture(scope="module")
 def water_frame():
-    return molrs.read_pdb(str(DATA_ROOT / "pack_mixture" / "water.pdb"))
+    return molrs.io.read_pdb(str(DATA_ROOT / "pack_mixture" / "water.pdb"))
 
 
 @pytest.fixture(scope="module")
 def urea_frame():
-    return molrs.read_pdb(str(DATA_ROOT / "pack_mixture" / "urea.pdb"))
+    return molrs.io.read_pdb(str(DATA_ROOT / "pack_mixture" / "urea.pdb"))
 
 
 def _packer() -> molpack.Molpack:

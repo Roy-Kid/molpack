@@ -20,10 +20,10 @@ DATA = HERE.parent.parent / "examples" / "pack_solvprotein"
 
 
 def main() -> None:
-    protein_frame = molrs.read_pdb(str(DATA / "protein.pdb"))
-    water_frame = molrs.read_pdb(str(DATA / "water.pdb"))
-    sodium_frame = molrs.read_pdb(str(DATA / "sodium.pdb"))
-    chloride_frame = molrs.read_pdb(str(DATA / "chloride.pdb"))
+    protein_frame = molrs.io.read_pdb(str(DATA / "protein.pdb"))
+    water_frame = molrs.io.read_pdb(str(DATA / "water.pdb"))
+    sodium_frame = molrs.io.read_pdb(str(DATA / "sodium.pdb"))
+    chloride_frame = molrs.io.read_pdb(str(DATA / "chloride.pdb"))
 
     sphere = molpack.InsideSphereRestraint([0.0, 0.0, 0.0], 50.0)
 

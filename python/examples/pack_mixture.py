@@ -18,8 +18,8 @@ DATA = HERE.parent.parent / "examples" / "pack_mixture"
 
 
 def main() -> None:
-    water_frame = molrs.read_pdb(str(DATA / "water.pdb"))
-    urea_frame = molrs.read_pdb(str(DATA / "urea.pdb"))
+    water_frame = molrs.io.read_pdb(str(DATA / "water.pdb"))
+    urea_frame = molrs.io.read_pdb(str(DATA / "urea.pdb"))
 
     box = molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
 
