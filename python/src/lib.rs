@@ -56,6 +56,12 @@ use script::{PyScriptJob, load_script};
 
 #[pymodule]
 fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // ABI handshake first: this extension exchanges molrs_ffi handle capsules
+    // with the installed molcrafts-molrs wheel, so both must embed the same
+    // molrs minor line (minor-line = ABI version). A mismatch must be a clear
+    // ImportError here, not a capsule ValueError (or worse) mid-run.
+    interop::check_abi(m.py())?;
+
     m.add_class::<PyAngle>()?;
     m.add_class::<PyAxis>()?;
     m.add_class::<PyCenteringMode>()?;

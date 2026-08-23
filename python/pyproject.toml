@@ -13,8 +13,8 @@ license = "BSD-3-Clause"
 dependencies = [
   "numpy>=2.0",
   "typer>=0.12",
-  "molcrafts-molrs>=0.12.0,<0.13",
-  "molcrafts-molpy>=0.12.0,<0.13",
+  "molcrafts-molrs>=0.14.0,<0.15",
+  "molcrafts-molpy>=0.14.0,<0.15",
 ]
 
 # Installable "extra" carrying the docs-build deps. Unlike the [dependency-groups]
@@ -38,7 +38,7 @@ typecheck = [
   "ty",
   "typer>=0.12",
   "numpy>=2.0",
-  "molcrafts-molrs>=0.12.0,<0.13",
+  "molcrafts-molrs>=0.14.0,<0.15",
   # `ty check` walks tests/ which imports pytest.
   "pytest",
 ]
@@ -46,8 +46,8 @@ test = [
   "pytest",
   "typer>=0.12",
   "numpy>=2.0",
-  "molcrafts-molrs>=0.12.0,<0.13",
-  "molcrafts-molpy>=0.12.0,<0.13",
+  "molcrafts-molrs>=0.14.0,<0.15",
+  "molcrafts-molpy>=0.14.0,<0.15",
 ]
 dev = [
   {include-group = "typecheck"},
@@ -124,7 +124,7 @@ extra-paths = ["examples"]
 
 # Isolated binding tests — prek pre-push + CI call: `tox -c python -e py`
 # Non-editable only: sibling molrs path install + maturin wheel + pytest.
-# Requires ../../molrs at workspace version 0.12.0 (CI: MolCrafts/molrs@v0.12.0).
+# Requires ../../molrs on the 0.14.* minor line (CI: MOLRS_GIT_REF in ci.yml).
 [tool.tox]
 requires = ["tox>=4.23"]
 env_list = ["py"]
@@ -138,7 +138,7 @@ deps = [
   "pytest",
   "numpy>=2.0",
   "typer>=0.12",
-  "molcrafts-molpy>=0.12.0,<0.13",
+  "molcrafts-molpy>=0.14.0,<0.15",
 ]
 pass_env = [
   "HOME",
@@ -147,18 +147,24 @@ pass_env = [
   "CARGO_TARGET_DIR",
   "RUSTUP_HOME",
   "RUSTFLAGS",
+  # sccache (CI compile cache) — harmless when unset locally.
+  "RUSTC_WRAPPER",
+  "SCCACHE_GHA_ENABLED",
+  "SCCACHE_PATH",
+  "ACTIONS_RESULTS_URL",
+  "ACTIONS_RUNTIME_TOKEN",
   "MACOSX_DEPLOYMENT_TARGET",
   "SSH_AUTH_SOCK",
   "TERM",
 ]
 allowlist_externals = ["maturin"]
 # toxinidir is python/ when config lives here; sibling molrs is ../.. /molrs.
-# Minor-line only: 0.12.* (patch may differ).
+# Minor-line only: 0.14.* (patch may differ).
 commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import tomllib; from pathlib import Path; p=Path('{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text())['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,12), f'sibling molrs {{v}} not on 0.12.*'",
+    "import tomllib; from pathlib import Path; p=Path('{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text())['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,14), f'sibling molrs {{v}} not on 0.14.*'",
   ],
   [
     "{envpython}",
@@ -170,7 +176,7 @@ commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,12), v",
+    "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,14), v",
   ],
   ["maturin", "build", "--release", "-o", "{env_tmp_dir}/wheels"],
   [

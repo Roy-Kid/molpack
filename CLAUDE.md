@@ -110,3 +110,17 @@ workspace/
 The root `Cargo.toml` uses a single path dep on `../molrs/molrs` (the unified
 `molcrafts-molrs` crate); `core` is always-on, while `io` and `ff` are pulled in
 through the matching molpack features above.
+
+**Build cache:** the committed `.cargo/config.toml` routes every build
+(root workspace and `python/`) into `../molrs/target`, shared with the
+sibling molrs checkout — molrs compiles once per (rustc, features, profile)
+across both repos. `rust-toolchain.toml` matches molrs's so the cache
+fingerprints one rustc. CI caches that dir and runs sccache.
+
+**molrs ABI line:** molpack exchanges `molrs_ffi` handle capsules with the
+installed `molcrafts-molrs` wheel; both must embed the same molrs
+**major.minor** (minor-line = ABI version — see molrs `docs/interop.md`).
+Gates: `molpack/version.py` (wheel metadata, at `import molpack`),
+`interop::check_abi` (`molrs._ffi_abi_token()`, at extension init), and the
+versioned capsule names (`molrs.FrameRef/<line>`) from `molrs_ffi::abi` —
+never hard-code a capsule name.

@@ -10,7 +10,9 @@ on:
 # Pin sibling molrs to the same version as Cargo.toml / python/pyproject.toml [tool.tox].
 # Bump together when raising molcrafts-molrs / molcrafts-molpy.
 env:
-  MOLRS_GIT_REF: v0.12.0
+  MOLRS_GIT_REF: v0.14.0
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
 
 # Lint: same as prek commit-stage hooks in .pre-commit-config.yaml.
 # Tests: same commands as prek pre-push hooks (no scripts/).
@@ -31,9 +33,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      # The committed .cargo/config.toml routes builds into ../molrs/target,
+      # shared with the sibling molrs checkout.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: molpack
+          workspaces: "molpack -> ../molrs/target"
       - uses: astral-sh/setup-uv@v6
       - name: Rust fmt + clippy (pre-commit parity)
         working-directory: molpack
@@ -65,9 +70,12 @@ jobs:
         with:
           path: molpack
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      # The committed .cargo/config.toml routes builds into ../molrs/target,
+      # shared with the sibling molrs checkout.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: molpack
+          workspaces: "molpack -> ../molrs/target"
       - name: Cache test data
         uses: actions/cache@v5
         with:
@@ -102,9 +110,12 @@ jobs:
         with:
           path: molpack
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      # The committed .cargo/config.toml routes builds into ../molrs/target,
+      # shared with the sibling molrs checkout.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: molpack
+          workspaces: "molpack -> ../molrs/target"
       - name: Run examples_batch (--ignored)
         run: cargo test --release --features io --test examples_batch -- --ignored
         working-directory: molpack
@@ -122,9 +133,12 @@ jobs:
         with:
           path: molpack
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      # The committed .cargo/config.toml routes builds into ../molrs/target,
+      # shared with the sibling molrs checkout.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: molpack
+          workspaces: "molpack -> ../molrs/target"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"

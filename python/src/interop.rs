@@ -13,6 +13,15 @@
 //! is feature-independent. So a handle minted by molrs-python (built with the
 //! `full` feature set) and the `molrs::Frame` it lends are layout-identical to
 //! what molpack (built `ff`-only) sees across the extension boundary.
+//!
+//! The version contract is **minor-line = ABI version** (`molrs_ffi::abi`):
+//! layout is frozen within a molrs minor line (enforced by molrs-ffi's layout
+//! snapshot gate), so both wheels must embed the same `major.minor` — patch
+//! may drift. Two gates enforce it here: [`check_abi`] compares
+//! `molrs._ffi_abi_token()` against the embedded line at import (clear
+//! `ImportError`), and the capsule names carry the line
+//! (`molrs.FrameRef/<major.minor>`), so even a stale consumer fails the name
+//! check instead of dereferencing a drifted layout.
 
 use molrs::Frame;
 use molrs::spatial::simbox::SimBox;
@@ -37,9 +46,21 @@ fn ffi_err(e: FfiError) -> PyErr {
 /// real molrs/molpy `Frame` (a plain `dict` is no longer accepted).
 pub fn frame_from_py(obj: &Bound<'_, PyAny>) -> PyResult<FrameRef> {
     let capsule = capsule_from(obj, "_ffi_frameref_capsule")?;
-    let ptr = capsule.pointer_checked(Some(c"molrs.FrameRef"))?;
+    // The expected name carries the ABI line of the molrs this wheel embeds
+    // (`molrs.FrameRef/<major.minor>`), so a producer on another minor line
+    // fails here cleanly instead of being dereferenced.
+    let expected = molrs_ffi::abi::frameref_capsule_name();
+    let ptr = capsule.pointer_checked(Some(expected)).map_err(|err| {
+        PyValueError::new_err(format!(
+            "{err} — molpack embeds molrs ABI line {line} (capsule name \
+             {expected:?}); the producing molrs/molpy wheel is on a different \
+             minor line. Align molcrafts-molrs and molcrafts-molpack on one \
+             minor line. / molpack 与 molrs 的 minor 版本线不一致，请对齐后重装。",
+            line = molrs_ffi::abi::abi_line(),
+        ))
+    })?;
     let pp = ptr.as_ptr() as *const *const FrameRef;
-    // SAFETY: a "molrs.FrameRef" capsule's void* is `*mut *mut FrameRef` (the
+    // SAFETY: the versioned capsule's void* is `*mut *mut FrameRef` (the
     // exporter boxes a `*mut FrameRef`); deref twice to reach the cloned handle
     // and `.clone()` it (Rc bumps). The capsule is only touched under the GIL.
     let fref = unsafe { (**pp).clone() };
@@ -84,20 +105,72 @@ pub fn frame_to_py<'py>(
         .call_method1("_from_ffi_frameref_capsule", (capsule,))
 }
 
-/// Box a `FrameRef` into a `"molrs.FrameRef"` PyCapsule — the exporter side of
-/// the return path, mirroring molrs-python's `Frame._ffi_frameref_capsule`.
+/// Box a `FrameRef` into a versioned `molrs.FrameRef/<major.minor>` PyCapsule
+/// — the exporter side of the return path, mirroring molrs-python's
+/// `Frame._ffi_frameref_capsule`.
 fn export_frame_capsule<'py>(py: Python<'py>, fref: FrameRef) -> PyResult<Bound<'py, PyCapsule>> {
+    // Same constructor and pointer shape as molrs-python's
+    // ``Frame._ffi_frameref_capsule``: PyO3 boxes the ``FrameRefPtr`` payload,
+    // so the capsule void* is ``*mut *mut FrameRef``. The shared abi module is
+    // the single source of the (``&'static CStr``) name — never hard-code it.
     let raw = FrameRefPtr(Box::into_raw(Box::new(fref)));
-    PyCapsule::new_with_value_and_destructor(
-        py,
-        raw,
-        c"molrs.FrameRef",
-        |ptr: FrameRefPtr, _ctx| {
-            // SAFETY: `ptr.0` came from `Box::into_raw` above and is reclaimed
-            // exactly once when the capsule dies.
-            drop(unsafe { Box::from_raw(ptr.0) });
-        },
-    )
+    let name = molrs_ffi::abi::frameref_capsule_name();
+    PyCapsule::new_with_value_and_destructor(py, raw, name, |ptr: FrameRefPtr, _ctx| {
+        // SAFETY: `ptr.0` came from `Box::into_raw` above and is reclaimed
+        // exactly once when the capsule dies.
+        drop(unsafe { Box::from_raw(ptr.0) });
+    })
+}
+
+/// Import-time ABI handshake against the installed `molcrafts-molrs` wheel.
+///
+/// Calls `molrs._ffi_abi_token()` and compares its ABI line against the line
+/// molpack embeds. Runs once from the `#[pymodule]` init so a minor-line
+/// mismatch is a clear `ImportError` naming both versions, not a later
+/// capsule-name `ValueError` deep inside a pack run.
+pub fn check_abi(py: Python<'_>) -> PyResult<()> {
+    let embedded = molrs_ffi::abi::abi_line();
+    let molrs = PyModule::import(py, "molrs")?;
+    let token = match molrs.getattr("_ffi_abi_token") {
+        Ok(f) => f.call0()?,
+        Err(_) => {
+            // Pre-0.14 wheels have no handshake — they are on an older line
+            // by definition (the token and the versioned capsule names were
+            // introduced together).
+            return Err(pyo3::exceptions::PyImportError::new_err(format!(
+                "molpack embeds molrs ABI line {embedded}, but the installed \
+                 molcrafts-molrs predates the ABI handshake (≤0.13). Install \
+                 a matching wheel: pip install 'molcrafts-molrs>={embedded}.0,\
+                 <{next}' / 已安装的 molcrafts-molrs 过旧，请安装 {embedded}.* 版本。",
+                next = next_minor(embedded),
+            )));
+        }
+    };
+    let (line, version): (String, String) = token
+        .cast::<pyo3::types::PyTuple>()
+        .map_err(|_| {
+            pyo3::exceptions::PyImportError::new_err("molrs._ffi_abi_token() returned a non-tuple")
+        })
+        .and_then(|t| Ok((t.get_item(0)?.extract()?, t.get_item(1)?.extract()?)))?;
+    if line != embedded {
+        return Err(pyo3::exceptions::PyImportError::new_err(format!(
+            "Minor-line mismatch: molpack embeds molrs ABI line {embedded}, \
+             but the installed molcrafts-molrs is {version} (line {line}). \
+             Handles cannot cross minor lines — install a matching wheel: \
+             pip install 'molcrafts-molrs>={embedded}.0,<{next}' / molpack \
+             与已安装的 molcrafts-molrs({version})minor 版本线不一致，请对齐。",
+            next = next_minor(embedded),
+        )));
+    }
+    Ok(())
+}
+
+/// `"0.14"` → `"0.15"` — the exclusive upper bound of a minor line, for pip
+/// range hints in handshake errors.
+fn next_minor(line: &str) -> String {
+    let (major, minor) = line.split_once('.').unwrap_or((line, "0"));
+    let bumped = minor.parse::<u64>().map(|m| m + 1).unwrap_or(0);
+    format!("{major}.{bumped}")
 }
 
 /// `Send` wrapper around a `*mut FrameRef` for the capsule payload (mirrors

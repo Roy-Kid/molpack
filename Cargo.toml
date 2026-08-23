@@ -28,7 +28,7 @@ bench = false
 # Library-required. The merged `molcrafts-molrs` crate exposes its former member
 # crates as feature-gated modules: `core` is always on (re-exported at the crate
 # root), while `io` and `ff` are opt-in via the molpack features below.
-molrs = { path = "../molrs/molrs", version = "0.12.0", package = "molcrafts-molrs", default-features = false }
+molrs = { path = "../molrs/molrs", version = "0.14", package = "molcrafts-molrs", default-features = false }
 rand = "0.10"
 ndarray = "0.17"
 log = "0.4"

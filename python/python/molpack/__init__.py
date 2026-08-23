@@ -33,6 +33,7 @@ from .molpack import (
     num_threads,
     rayon_enabled,
 )
+from .version import MOLRS_MINOR, check_molrs_version, version
 
 __all__ = [
     # Typed values
@@ -76,4 +77,7 @@ __all__ = [
     "EmptyMoleculeError",
     "InvalidPBCBoxError",
     "ConflictingPeriodicBoxesError",
+    "MOLRS_MINOR",
+    "check_molrs_version",
+    "version",
 ]

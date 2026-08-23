@@ -23,10 +23,12 @@ The root `Cargo.toml` uses a path dependency on `../molrs/molrs`. With the
 sibling layout above everything resolves automatically.
 
 **Version pins:** path molrs / PyPI `molcrafts-molrs` / `molcrafts-molpy` track
-the **0.12.*** minor line (see `Cargo.toml`, `python/pyproject.toml` `[tool.tox]`,
+the **0.14.*** minor line (see `Cargo.toml`, `python/pyproject.toml` `[tool.tox]`,
 and `MOLRS_GIT_REF` in `.github/workflows/ci.yml`). Patch may differ; only
 major.minor must match. Keep the sibling molrs clone on that minor line
-(`git checkout v0.12.x` or the matching release branch).
+(`git checkout v0.14.x` or the matching release branch). The Python wheel
+checks this on ``import molpack`` — a molrs/molpy minor mismatch is an
+``ImportError``, not a later FFI segfault.
 
 **First-time setup:**
 
