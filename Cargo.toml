@@ -28,7 +28,14 @@ bench = false
 # Library-required. The merged `molcrafts-molrs` crate exposes its former member
 # crates as feature-gated modules: `core` is always on (re-exported at the crate
 # root), while `io` and `ff` are opt-in via the molpack features below.
-molrs = { path = "../molrs/molrs", version = "0.14", package = "molcrafts-molrs", default-features = false }
+#
+# On molrs's default feature union (`full + stream + filesystem + rayon`). That
+# union is the shared-dylib precondition: Rust has no stable ABI, so molpack's
+# graph must resolve molrs identically to molrs's own binders or each side gets
+# its own statically embedded copy. The molpack features below stay as the
+# record of what the library actually needs — they are additive and idempotent
+# with the union.
+molrs = { path = "../molrs/molrs", version = "0.14", package = "molcrafts-molrs" }
 rand = "0.10"
 ndarray = "0.17"
 log = "0.4"
@@ -61,6 +68,28 @@ ff = ["molrs/ff"]
 env_logger = "0.11"
 # Criterion harness for the benchmark suite under `benches/`.
 criterion = "0.8"
+# The shared molrs dylib host. PATH-ONLY, and deliberately so: cargo strips
+# path-only dev-dependencies when packaging, and `molcrafts-molrs-ffi` is NOT on
+# crates.io (molrs's publish.yml ships only `molcrafts-molrs`), so a `version`
+# key — or a normal dependency — would break `cargo publish` for molpack, the one
+# crate in this chain that publishes. It builds libmolrs_ffi in molpack's own
+# test/bench graph, on the same feature union, so the shared object stays
+# fingerprint-consistent from this side.
+#
+# A dev-dependency alone is NOT enough to pull a binary into that circle: rustc
+# only loads an `--extern` crate that source actually references, so an
+# unreferenced molrs-ffi leaves the test binaries statically embedding molrs
+# (measured: `otool -L` showed no libmolrs_ffi entry). `tests/abi_line.rs` is
+# the reference that closes it — it calls `molrs_ffi::abi::abi_line()` for
+# real, and the compiled `abi_line-*` binary does carry a libmolrs_ffi entry.
+# Keep that call site: deleting it re-inerts this dependency silently.
+#
+# REMAINING LIMIT: the `cli` binary (`cargo build --features cli`) is still out
+# of the circle and embeds molrs statically — closing it needs
+# `molcrafts-molrs-ffi` on the crates.io release train, at which point this
+# entry becomes a normal dependency. The wheel is unaffected either way:
+# python/Cargo.toml depends on molrs-ffi directly and does link it.
+molrs-ffi = { path = "../molrs/molrs-ffi", package = "molcrafts-molrs-ffi" }
 
 [[bin]]
 name = "molpack"
@@ -166,9 +195,19 @@ name = "pack_end_to_end"
 path = "benches/pack_end_to_end.rs"
 harness = false
 
+# These four keys are byte-identical to molrs's five workspace roots — profile
+# is part of the build fingerprint, and a mismatch would put two libmolrs_ffi
+# builds behind the one hashless install_name that @rpath resolves at runtime.
+#
+# No LTO here — it is incompatible with the shared dylib graph: once a Rust
+# dylib (libmolrs_ffi) is in a cdylib's dependency graph, rustc refuses with
+# "only 'staticlib', 'bin', and 'cdylib' outputs are supported with LTO"
+# (probe C2 in ../molrs/.claude/specs/ffi-shared-dylib.md). CI/publish restore
+# it on their static path via env CARGO_PROFILE_RELEASE_LTO=thin.
 [profile.release]
-lto = "thin"
 codegen-units = 1
+opt-level = 3
+strip = "symbols"
 
 [[test]]
 name = "optimizer"

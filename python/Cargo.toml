@@ -19,9 +19,10 @@ numpy = "0.29"
 ndarray = "0.17"
 molpack = { path = "..", package = "molcrafts-molpack", version = "0.2.0" }
 # Same crate (and version) molpack links, so frame types unify across the wheel.
-# The merged `molcrafts-molrs` crate exposes core at its root with default
-# features off (matching molpack's dependency), so the wheel stays io/ff-free.
-molrs = { path = "../../molrs/molrs", package = "molcrafts-molrs", version = "0.14", default-features = false }
+# On molrs's default feature union (matching molpack's dependency and molrs's own
+# binders) — the shared-dylib precondition: a single differing feature would give
+# this extension its own molrs image instead of the process-wide shared one.
+molrs = { path = "../../molrs/molrs", package = "molcrafts-molrs", version = "0.14" }
 # Stable FFI handle layer. molpack resolves molrs/molpy Python objects to
 # `molrs_ffi::{FrameRef, ForceFieldRef}` capsules (zero-copy) instead of dict
 # marshalling — see `src/interop.rs`. Minor-line pinned (minor-line = ABI
@@ -35,6 +36,22 @@ rayon = { version = "1.12", optional = true }
 
 # Standalone package — not a member of any outer workspace.
 [workspace]
+
+# Standalone workspace root: does NOT inherit ../Cargo.toml's [profile.release].
+# Keep in sync with it (and with molrs's roots) so released wheels get the same
+# optimization — profile is part of the build fingerprint, and a mismatch would
+# put two libmolrs_ffi builds behind the one hashless install_name that @rpath
+# resolves at runtime.
+#
+# No LTO here — it is incompatible with the shared dylib graph: once a Rust
+# dylib (libmolrs_ffi) is in a cdylib's dependency graph, rustc refuses with
+# "only 'staticlib', 'bin', and 'cdylib' outputs are supported with LTO"
+# (probe C2 in ../../molrs/.claude/specs/ffi-shared-dylib.md). CI/publish
+# restore it on their static path via env CARGO_PROFILE_RELEASE_LTO=thin.
+[profile.release]
+codegen-units = 1
+opt-level = 3
+strip = "symbols"
 
 [features]
 # The force-field relaxer (`ff`) is a mandatory part of the wheel — the Python
