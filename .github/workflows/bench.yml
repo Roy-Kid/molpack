@@ -20,14 +20,10 @@ on:
 
 # Pin sibling molrs to the same version as Cargo.toml / python/pyproject.toml.
 #
-# RUSTFLAGS/LTO: CI/publish pin today's static, LTO'd form; the local default is
-# dynamic via .cargo/config.toml (env RUSTFLAGS replaces those rustflags
-# entirely). Bench MUST stay static — a shared dylib has no cross-crate
-# inlining, so a dynamic run would break comparability with recorded history.
+# Bench MUST stay static — a shared dylib has no cross-crate inlining, so a
+# dynamic run would break comparability with recorded history.
 env:
   MOLRS_GIT_REF: v0.12.0
-  RUSTFLAGS: "-C prefer-dynamic=no"
-  CARGO_PROFILE_RELEASE_LTO: "thin"
 
 jobs:
   bench:

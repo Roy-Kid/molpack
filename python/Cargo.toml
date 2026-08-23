@@ -38,18 +38,18 @@ rayon = { version = "1.12", optional = true }
 [workspace]
 
 # Standalone workspace root: does NOT inherit ../Cargo.toml's [profile.release].
-# Keep in sync with it (and with molrs's roots) so released wheels get the same
-# optimization — profile is part of the build fingerprint, and a mismatch would
-# put two libmolrs_ffi builds behind the one hashless install_name that @rpath
-# resolves at runtime.
+# These four keys are byte-identical across the seven native roots listed in
+# ../../molrs/scripts/sync-dylib-locks.sh's ROOTS array, so released wheels get
+# the same optimization — profile is part of cargo's unit fingerprint, and a
+# mismatch would put two libmolrs_ffi builds behind the one hashless install_name
+# that @rpath resolves at runtime.
 #
-# No LTO here — it is incompatible with the shared dylib graph: once a Rust
-# dylib (libmolrs_ffi) is in a cdylib's dependency graph, rustc refuses with
-# "only 'staticlib', 'bin', and 'cdylib' outputs are supported with LTO"
-# (probe C2 in ../../molrs/.claude/specs/ffi-shared-dylib.md). CI/publish
-# restore it on their static path via env CARGO_PROFILE_RELEASE_LTO=thin.
+# LTO is on because static is the default link form; the opt-in dynamic form has
+# to turn it off, since a Rust dylib in a cdylib's graph makes rustc reject LTO.
+# The how lives in ../../molrs/docs/interop.md, nowhere else.
 [profile.release]
 codegen-units = 1
+lto = "thin"
 opt-level = 3
 strip = "symbols"
 

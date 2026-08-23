@@ -11,14 +11,8 @@ permissions:
   id-token: write
 
 # Keep in lockstep with ci.yml / Cargo.toml molrs pin.
-#
-# RUSTFLAGS/LTO: CI/publish pin today's static, LTO'd form; the local default is
-# dynamic via .cargo/config.toml (env RUSTFLAGS replaces those rustflags
-# entirely).
 env:
   MOLRS_GIT_REF: v0.12.0
-  RUSTFLAGS: "-C prefer-dynamic=no"
-  CARGO_PROFILE_RELEASE_LTO: "thin"
 
 # Build matrix produces one wheel per OS per supported Python (3.12, 3.13),
 # matching `requires-python = ">=3.12"` in pyproject.toml. Linux + macOS only;
