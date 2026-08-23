@@ -9,6 +9,15 @@ on:
 
 # Pin sibling molrs to the same version as Cargo.toml / python/pyproject.toml [tool.tox].
 # Bump together when raising molcrafts-molrs / molcrafts-molpy.
+#
+# Landing-order precondition: MOLRS_GIT_REF must NEVER point at a molrs ref
+# predating `link-mode-static-default-01-invert`. That spec deleted the static
+# link-form pin this repo used to carry, so an older molrs — one whose committed
+# config still injects the dynamic link flags — would turn every "static" job
+# below into a dynamic build. Nothing would error: the wheels would simply carry
+# an absolute path into a build tree that does not exist on any user's machine.
+# So 01 must be on molrs master before the pinned tag is cut, and this pin only
+# ever moves forward from there.
 env:
   MOLRS_GIT_REF: v0.14.0
   SCCACHE_GHA_ENABLED: "true"
@@ -119,6 +128,48 @@ jobs:
       - name: Run examples_batch (--ignored)
         run: cargo test --release --features io --test examples_batch -- --ignored
         working-directory: molpack
+
+  # Cross-repo link-form gate: the molrs and molpack extensions, in ONE venv,
+  # must resolve ONE libmolrs_ffi. Expensive (two release wheel builds), so
+  # master / release / dispatch only — same cost control as `regression:` above,
+  # and molrs already runs this gate on every PR of its own. What this job adds
+  # is the other direction: a molpack change that forks the shared molrs unit.
+  #
+  # The gate itself is molrs's script, invoked from the sibling checkout. molpack
+  # owns no copy of it — that is what keeps the "no scripts/" policy intact and
+  # keeps the dynamic opt-in written down in exactly one place.
+  link-dynamic:
+    name: link (dynamic)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: MolCrafts/molrs
+          ref: ${{ env.MOLRS_GIT_REF }}
+          path: molrs
+      - uses: actions/checkout@v6
+        with:
+          path: molpack
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      # The committed .cargo/config.toml routes builds into ../molrs/target,
+      # shared with the sibling molrs checkout — which is also where the one
+      # shared dylib this gate hashes lives.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "molpack -> ../molrs/target"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install maturin
+        run: uv tool install maturin
+      # MOLPACK_ROOT needs no value: the script defaults to <molrs>/../molpack,
+      # which the two checkouts above satisfy.
+      - name: Shared libmolrs_ffi (sibling molrs gate)
+        working-directory: molrs
+        run: bash scripts/verify-shared-dylib.sh
 
   python:
     name: python tests
