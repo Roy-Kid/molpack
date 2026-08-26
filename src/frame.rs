@@ -1,7 +1,7 @@
 //! Helpers for converting between `molrs_core::Frame` and packing inputs.
 
 use molrs::store::block::Block;
-use molrs::types::{F, U};
+use molrs::types::{F, Idx};
 use ndarray::Array1;
 use std::str::FromStr;
 
@@ -94,7 +94,7 @@ pub fn init_frame_constants(sys: &mut PackContext) {
         .collect();
 
     let mol_ids = compute_mol_ids(sys);
-    let mol_id_u: Vec<U> = mol_ids.iter().map(|&id| id as U).collect();
+    let mol_id_u: Vec<Idx> = mol_ids.iter().map(|&id| id as Idx).collect();
 
     let mut atoms = Block::new();
     atoms
@@ -158,7 +158,7 @@ pub fn context_to_frame(sys: &PackContext) -> molrs::Frame {
         .collect();
 
     let mol_ids = compute_mol_ids(sys);
-    let mol_id_u: Vec<U> = mol_ids.iter().map(|&id| id as U).collect();
+    let mol_id_u: Vec<Idx> = mol_ids.iter().map(|&id| id as Idx).collect();
 
     let mut atoms = Block::new();
     atoms

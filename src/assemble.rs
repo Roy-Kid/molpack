@@ -12,7 +12,7 @@
 //! the language boundary, never re-derive it.
 
 use molrs::store::block::{Block, Column, DType};
-use molrs::types::{F, I, U};
+use molrs::types::{F, I, Idx};
 use ndarray::{Array1, ArrayD, Axis, concatenate};
 
 use crate::target::Target;
@@ -63,8 +63,8 @@ fn topology_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
     let mut topo_parts: Vec<Vec<(String, Vec<Column>)>> =
         TOPOLOGY.iter().map(|_| Vec::new()).collect();
     let (mut xs, mut ys, mut zs) = (Vec::new(), Vec::new(), Vec::new());
-    let mut ids: Vec<U> = Vec::new();
-    let mut mol_ids: Vec<U> = Vec::new();
+    let mut ids: Vec<Idx> = Vec::new();
+    let mut mol_ids: Vec<Idx> = Vec::new();
 
     let mut atom_base: usize = 0;
     let mut mol_base: usize = 0;
@@ -82,9 +82,9 @@ fn topology_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
             zs.push(p[2]);
         }
         cursor += span;
-        ids.extend((atom_base + 1..=atom_base + span).map(|i| i as U));
+        ids.extend((atom_base + 1..=atom_base + span).map(|i| i as Idx));
         for copy in 0..count {
-            mol_ids.extend(std::iter::repeat_n((mol_base + copy + 1) as U, n));
+            mol_ids.extend(std::iter::repeat_n((mol_base + copy + 1) as Idx, n));
         }
 
         for (slot, (key, dtype)) in carried.iter().enumerate() {
@@ -146,7 +146,7 @@ fn topology_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
                 .expect("topology column insert");
         }
         let nrows = table.nrows().unwrap_or(0);
-        insert_uint(&mut table, "id", (1..=nrows as U).collect());
+        insert_uint(&mut table, "id", (1..=nrows as Idx).collect());
         frame.insert(*block, table);
     }
 
@@ -157,18 +157,18 @@ fn topology_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
 fn coords_only_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
     let n = positions.len();
     let mut elements: Vec<String> = Vec::with_capacity(n);
-    let mut mol_ids: Vec<U> = Vec::with_capacity(n);
+    let mut mol_ids: Vec<Idx> = Vec::with_capacity(n);
     let mut mol = 0usize;
     for target in targets {
         for _ in 0..target.count {
             mol += 1;
             elements.extend(target.elements.iter().cloned());
-            mol_ids.extend(std::iter::repeat_n(mol as U, target.elements.len()));
+            mol_ids.extend(std::iter::repeat_n(mol as Idx, target.elements.len()));
         }
     }
 
     let mut atoms = Block::new();
-    insert_uint(&mut atoms, "id", (1..=n as U).collect());
+    insert_uint(&mut atoms, "id", (1..=n as Idx).collect());
     insert_float(&mut atoms, "x", positions.iter().map(|p| p[0]).collect());
     insert_float(&mut atoms, "y", positions.iter().map(|p| p[1]).collect());
     insert_float(&mut atoms, "z", positions.iter().map(|p| p[2]).collect());
@@ -207,7 +207,7 @@ fn insert_float(block: &mut Block, key: &str, values: Vec<F>) {
         .expect("float column insert");
 }
 
-fn insert_uint(block: &mut Block, key: &str, values: Vec<U>) {
+fn insert_uint(block: &mut Block, key: &str, values: Vec<Idx>) {
     block
         .insert(key, Array1::from_vec(values).into_dyn())
         .expect("uint column insert");
@@ -227,6 +227,7 @@ fn tile_column(col: &Column, count: usize) -> Column {
         DType::UInt => Column::from_uint(tile_arr(col.as_uint().unwrap(), count)),
         DType::U8 => Column::from_u8(tile_arr(col.as_u8().unwrap(), count)),
         DType::String => Column::from_string(tile_arr(col.as_string().unwrap(), count)),
+        other => panic!("pack cannot tile column dtype {other}"),
     }
 }
 
@@ -239,6 +240,7 @@ fn default_column(dtype: DType, len: usize) -> Column {
         DType::UInt => Column::from_uint(ArrayD::zeros(vec![len])),
         DType::U8 => Column::from_u8(ArrayD::zeros(vec![len])),
         DType::String => Column::from_string(ArrayD::from_elem(vec![len], String::new())),
+        other => panic!("pack cannot default column dtype {other}"),
     }
 }
 
@@ -253,6 +255,7 @@ fn concat_columns(parts: Vec<Column>) -> Column {
         DType::String => {
             Column::from_string(concat_arr(parts.iter().map(|c| c.as_string().unwrap())))
         }
+        other => panic!("pack cannot concat column dtype {other}"),
     }
 }
 
@@ -279,7 +282,7 @@ fn offset_index_column(tiled: Column, atom_base: usize, n: usize, rows: usize) -
         DType::UInt => {
             let mut arr = tiled.as_uint().expect("uint column").clone();
             for (i, v) in arr.iter_mut().enumerate() {
-                *v += offset_at(i) as U;
+                *v += offset_at(i) as Idx;
             }
             Column::from_uint(arr)
         }
@@ -298,7 +301,7 @@ fn offset_index_column(tiled: Column, atom_base: usize, n: usize, rows: usize) -
 mod tests {
     use super::*;
 
-    fn col_uint(frame: &molrs::Frame, block: &str, key: &str) -> Vec<U> {
+    fn col_uint(frame: &molrs::Frame, block: &str, key: &str) -> Vec<Idx> {
         frame
             .get(block)
             .unwrap()
@@ -341,10 +344,10 @@ mod tests {
         }
         let mut bonds = Block::new();
         bonds
-            .insert("atomi", Array1::from_vec(vec![0 as U]).into_dyn())
+            .insert("atomi", Array1::from_vec(vec![0 as Idx]).into_dyn())
             .unwrap();
         bonds
-            .insert("atomj", Array1::from_vec(vec![1 as U]).into_dyn())
+            .insert("atomj", Array1::from_vec(vec![1 as Idx]).into_dyn())
             .unwrap();
         let mut frame = molrs::Frame::new();
         frame.insert("atoms", atoms);
