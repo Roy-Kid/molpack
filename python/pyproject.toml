@@ -115,6 +115,10 @@ known-first-party = ["molpack"]
 quote-style = "double"
 indent-style = "space"
 
+[tool.uv.sources]
+molcrafts-molrs = { path = "../../molrs/molrs-python" }
+molcrafts-molpy = { path = "../../molpy" }
+
 [tool.ty]
 [tool.ty.environment]
 python-version = "3.12"
@@ -138,7 +142,6 @@ deps = [
   "pytest",
   "numpy>=2.0",
   "typer>=0.12",
-  "molcrafts-molpy>=0.14.0,<0.15",
 ]
 pass_env = [
   "HOME",
@@ -182,6 +185,23 @@ commands_pre = [
     "{envpython}",
     "-c",
     "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,14), v",
+  ],
+  [
+    "{envpython}",
+    "-c",
+    "import ast; from pathlib import Path; src=Path('{toxinidir}')/'..'/'..'/'molpy'/'src'/'molpy'/'version.py'.read_text(); v=next(n.value.value for n in ast.parse(src).body if isinstance(n, ast.Assign) and getattr(n.targets[0],'id',None)=='version'); assert tuple(map(int, v.split('.')[:2]))==(0,14), f'sibling molpy {{v}} not on 0.14.*'",
+  ],
+  [
+    "{envpython}",
+    "-m",
+    "pip",
+    "install",
+    "{toxinidir}/../../molpy",
+  ],
+  [
+    "{envpython}",
+    "-c",
+    "import importlib.metadata as m; v=m.version('molcrafts-molpy'); assert tuple(map(int, v.split('.')[:2]))==(0,14), v",
   ],
   ["maturin", "build", "--release", "-o", "{env_tmp_dir}/wheels"],
   [

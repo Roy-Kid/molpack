@@ -4,6 +4,7 @@ on:
   push:
     branches: [master, main]
   pull_request:
+    branches: [master, main]
   workflow_call:
   workflow_dispatch:
 
@@ -180,6 +181,11 @@ jobs:
           repository: MolCrafts/molrs
           ref: ${{ env.MOLRS_GIT_REF }}
           path: molrs
+      - uses: actions/checkout@v6
+        with:
+          repository: MolCrafts/molpy
+          ref: dev
+          path: molpy
       - uses: actions/checkout@v6
         with:
           path: molpack
