@@ -1,6 +1,7 @@
 # Managed by prek (drop-in pre-commit replacement): `prek install`
 # Lint on commit; test gates on pre-push (same commands as .github/workflows/ci.yml).
 default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit, pre-push]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
