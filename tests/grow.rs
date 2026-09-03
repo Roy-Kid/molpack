@@ -816,7 +816,7 @@ fn prior_ris_calibrated_c_inf() {
     );
 }
 
-// ── Section: Task 5 — GrowthSolver: constructive growth end-to-end ─────────
+// ── Section: Task 5 — GrowStage: constructive growth end-to-end ───────────
 //
 // Exercises `src/grow/driver.rs` (spec Design §4, Task 5): the `GrowConfig`
 // builder surface, the `GrowError::{NoBox, TriclinicCell, FixedTarget}`
@@ -2650,3 +2650,110 @@ fn lattice_grow_then_seeded_push_off_dense() {
 // migration record). The determinism gates above
 // (`grow_deterministic_same_seed`, `grow_push_off_deterministic`) now run
 // on the entry directly.
+
+// ── Section: the seam markers the two growth stages declare ───────────────
+//
+// Owner-side half of acceptance ac-008 (`stage-pipeline-04-stage`): what
+// `GrowStage` and `LatticeStage` declare on the stage seam belongs to their
+// owner — `tests/stage.rs` verifies the seam's own behaviour with fakes and
+// boots no real algorithm. Both stages build their placements from nothing
+// and return with every free molecule placed, so both read
+// `Placed::None -> Placed::All`.
+
+/// The continuum growth stage requires nothing placed and guarantees
+/// everything placed.
+#[test]
+fn grow_stage_requires_none_guarantees_all() {
+    use molpack::grow::driver::GrowStage;
+    use molpack::{Placed, Stage};
+
+    let targets = [Target::new(chain_frame(6, 1.53, true), 2)];
+    let stage = GrowStage::from_targets(&targets, &GrowConfig::new(TorsionPrior::Uniform), 7)
+        .expect("a bead-chain target with a template builds a growth stage");
+
+    assert_eq!(
+        stage.requires().placed,
+        Placed::None,
+        "growth constructs its own placements, so it requires nothing placed"
+    );
+    assert_eq!(
+        stage.guarantees().placed,
+        Placed::All,
+        "growth returns with every free molecule placed"
+    );
+}
+
+/// The diamond-lattice growth stage declares the same two markers.
+#[test]
+fn lattice_stage_requires_none_guarantees_all() {
+    use molpack::grow::lattice::LatticeStage;
+    use molpack::{LatticeConfig, Placed, Stage};
+
+    let targets = [Target::new(chain_frame(6, 1.53, true), 2)];
+    let stage = LatticeStage::from_targets(&targets, &LatticeConfig::new(TorsionPrior::Uniform), 7)
+        .expect("a bead-chain target with a template builds a lattice stage");
+
+    assert_eq!(
+        stage.requires().placed,
+        Placed::None,
+        "lattice growth decorates its own placements onto the lattice"
+    );
+    assert_eq!(
+        stage.guarantees().placed,
+        Placed::All,
+        "lattice growth returns with every free molecule placed"
+    );
+}
+
+// ── Section: the stage identity carried on StepInfo ───────────────────────
+
+/// One recorded `StageInfo`, copied out of a `StepInfo` inside `on_step`.
+type StageEvents = Arc<Mutex<Vec<(usize, usize, &'static str)>>>;
+
+/// Records the stage identity of every `on_step` event.
+struct StageRecorder {
+    events: StageEvents,
+}
+
+impl Handler for StageRecorder {
+    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
+        self.events.lock().expect("stage recorder mutex").push((
+            info.stage.index,
+            info.stage.total,
+            info.stage.name,
+        ));
+    }
+}
+
+/// Every `StepInfo` names the stage that emitted it. A single-stage run is
+/// stage 0 of 1, and its name is the stage's own `name()` — `"growth"` for
+/// the continuum growth driver.
+#[test]
+fn step_info_names_the_stage_that_emitted_it() {
+    let events: StageEvents = Arc::new(Mutex::new(Vec::new()));
+    let target = Target::new(chain_frame(12, 1.53, true), 8);
+    CbmcGrow::new(TorsionPrior::Uniform)
+        .with_seed(7)
+        .with_tolerance(2.0)
+        .with_periodic_box([0.0; 3], [26.0; 3], [true; 3])
+        .with_handler(Box::new(StageRecorder {
+            events: Arc::clone(&events),
+        }))
+        .run(&[target], 50)
+        .expect("the Task 5 small-melt baseline must still succeed");
+
+    let events = events.lock().expect("stage recorder mutex");
+    assert!(
+        !events.is_empty(),
+        "growth emitted no on_step events, so the stage identity on StepInfo \
+         is unobservable"
+    );
+    for &(index, total, name) in events.iter() {
+        assert_eq!(index, 0, "a single-stage run reports index 0");
+        assert_eq!(total, 1, "a single-stage run reports total 1");
+        assert_eq!(
+            name, "growth",
+            "StepInfo.stage.name must be the emitting stage's own name()"
+        );
+    }
+}

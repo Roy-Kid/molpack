@@ -2,7 +2,7 @@
 //!
 //! Free functions pulled out of the packer main loop (phases A.4.1-A.4.3)
 //! and moved beside the optimizer they drive (engine-entry-split): the
-//! solver ([`super::solver::GencanSolver`]) owns the phase loop, these own
+//! stage ([`super::solver::GencanStage`]) owns the phase loop, these own
 //! one phase and one iteration.
 
 use molrs::types::F;
@@ -11,11 +11,12 @@ use rand::rngs::SmallRng;
 use crate::constraints::EvalMode;
 use crate::context::PackContext;
 // The unscaled verdict is a shared primitive owned by the context layer, not
-// by this solver: growth evaluates the same way, and the pipeline layer must
+// by this stage: growth evaluates the same way, and the pipeline layer must
 // not import `gencan/`.
 use crate::context::pack_state::evaluate_unscaled;
+use crate::gencan::solver::GencanStage;
 use crate::gencan::{GencanParams, GencanWorkspace, pgencan};
-use crate::handler::{Handler, PhaseInfo, PhaseReport, StepInfo};
+use crate::handler::{Handler, PhaseInfo, PhaseReport, StageInfo, StepInfo};
 use crate::initial::SwapState;
 use crate::movebad::{MoveBadConfig, movebad};
 use crate::numerics::objective_small_floor;
@@ -69,7 +70,7 @@ pub fn run_iteration(
     flast: &mut F,
     fimp_prev: &mut F,
     radscale: &mut F,
-    #[cfg(feature = "ff")] optimizer_bindings: &mut [ResolvedBinding],
+    #[cfg(feature = "ff")] optimizer_bindings: &mut [ResolvedBinding<'_>],
     handlers: &mut [Box<dyn Handler>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
@@ -121,6 +122,13 @@ pub fn run_iteration(
 
     if !handlers.is_empty() {
         let step_info = StepInfo {
+            // One stage per run until the pipeline lands; the name is the
+            // stage's own, taken from the stage type so the two cannot drift.
+            stage: StageInfo {
+                index: 0,
+                total: 1,
+                name: GencanStage::NAME,
+            },
             loop_idx,
             max_loops,
             phase: phase_info,
@@ -218,7 +226,7 @@ pub fn run_phase(
     sys: &mut PackContext,
     x: &mut [F],
     swap: &mut SwapState,
-    #[cfg(feature = "ff")] optimizer_bindings: &mut [ResolvedBinding],
+    #[cfg(feature = "ff")] optimizer_bindings: &mut [ResolvedBinding<'_>],
     handlers: &mut [Box<dyn Handler>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,

@@ -7,11 +7,11 @@ use crate::entry::result::Placements;
 use crate::entry::setup::CellDecl;
 use crate::entry::{EngineSetup, PackEngine, PackResult, PackSettings};
 use crate::error::PackError;
-use crate::gencan::solver::{GencanSettings, GencanSolver};
+use crate::gencan::solver::{GencanSettings, GencanStage};
 use crate::handler::Handler;
 #[cfg(feature = "ff")]
 use crate::optimizer::OptimizerBinding;
-use crate::solver::Solver;
+use crate::stage::Stage;
 
 /// Rigid-body packing via the GENCAN bound-constrained optimizer
 /// (Birgin & Martínez) — the Packmol algorithm as its own entry.
@@ -208,7 +208,7 @@ impl PackEngine for GenCanPack {
         Ok(())
     }
 
-    fn solver(&mut self, setup: &EngineSetup<'_>) -> Result<Box<dyn Solver>, PackError> {
+    fn solver(&mut self, setup: &EngineSetup<'_>) -> Result<Box<dyn Stage>, PackError> {
         let s = &self.settings;
         let gencan = GencanSettings {
             inner_iterations: self.inner_iterations,
@@ -224,18 +224,20 @@ impl PackEngine for GenCanPack {
             // `initial()`, disable movebad — rigid-body descent only.
             push_off: self.seed_placements.is_some(),
         };
-        let solver = GencanSolver::new(
+        let stage = GencanStage::new(
             gencan,
             setup.maxmove_per_type.to_vec(),
             setup.cell.clone(),
             setup.ntype,
             setup.ntype_with_fixed,
         );
-        // The bindings are handed to the solver once; `run(self)` consumes
-        // the entry, so there is no second `solver()` call to run bare.
+        // The bindings are handed to the stage once; `run(self)` consumes
+        // the entry, so there is no second `solver()` call to run bare. The
+        // stage keeps them for every run it is given — this take is the
+        // entry's one-shot handover, not a per-run one.
         #[cfg(feature = "ff")]
-        let solver = solver.with_optimizers(std::mem::take(&mut self.optimizers));
-        Ok(Box::new(solver))
+        let stage = stage.with_optimizers(std::mem::take(&mut self.optimizers));
+        Ok(Box::new(stage))
     }
 }
 

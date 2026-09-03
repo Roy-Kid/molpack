@@ -2,12 +2,12 @@
 
 use crate::entry::{EngineSetup, PackEngine, PackSettings};
 use crate::error::PackError;
-use crate::grow::GrowthSolver;
+use crate::grow::GrowStage;
 use crate::grow::config::GrowConfig;
 use crate::grow::prior::{AnglePrior, TorsionPrior};
 use crate::grow::validate_grow_cell;
 use crate::handler::Handler;
-use crate::solver::Solver;
+use crate::stage::Stage;
 use crate::target::Target;
 use molrs::types::F;
 
@@ -152,9 +152,9 @@ impl PackEngine for CbmcGrow {
         Ok(())
     }
 
-    fn solver(&mut self, setup: &EngineSetup<'_>) -> Result<Box<dyn Solver>, PackError> {
-        let solver = GrowthSolver::from_targets(setup.targets, &self.config, self.settings.seed())
+    fn solver(&mut self, setup: &EngineSetup<'_>) -> Result<Box<dyn Stage>, PackError> {
+        let stage = GrowStage::from_targets(setup.targets, &self.config, self.settings.seed())
             .map_err(|(target, source)| PackError::Grow { target, source })?;
-        Ok(Box::new(solver))
+        Ok(Box::new(stage))
     }
 }

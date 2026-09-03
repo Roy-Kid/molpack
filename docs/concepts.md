@@ -179,6 +179,8 @@ pub trait Handler: Send {
     fn on_phase_start  (&mut self, info: &PhaseInfo)      {}
     fn on_phase_end    (&mut self, info, report: &PhaseReport) {}
     fn on_inner_iter   (&mut self, iter, f, sys)          {}
+    fn on_stage_start  (&mut self, info: &StageInfo)      {}
+    fn on_stage_end    (&mut self, info: &StageInfo, outcome: &StageOutcome, sys) {}
     fn on_finish       (&mut self, sys: &PackContext)     {}
     fn should_stop     (&self) -> bool                    { false }
 }
@@ -191,6 +193,28 @@ Built-ins: [`NullHandler`](crate::NullHandler),
 [`ProgressHandler`](crate::ProgressHandler),
 [`EarlyStopHandler`](crate::EarlyStopHandler),
 [`XYZHandler`](crate::XYZHandler).
+
+### Which stage a callback came from
+
+A **stage** is one packing algorithm behind the crate's packing seam — the
+[`Stage`](crate::Stage) trait, whose implementors are `GencanStage`,
+`GrowStage` and `LatticeStage`; [`extending`](crate::extending) walks through
+writing one. Every `StepInfo` names the stage that emitted it in `info.stage`,
+a [`StageInfo`](crate::handler::StageInfo) with three fields: `index` (0-based
+position of the stage in the run), `total` (how many stages the run has), and
+`name` (the stage's own [`Stage::name`](crate::Stage::name), e.g. `"gencan"`).
+A run driven by one engine entry has one stage, so it reports `index = 0` and
+`total = 1`.
+
+`on_stage_start` and `on_stage_end` bracket a whole stage the way
+`on_phase_start` / `on_phase_end` bracket one GENCAN phase. Both are provided
+no-ops, and a single-stage run calls neither; they are the seam a caller that
+chains stages itself brackets each stage with. `on_stage_end`'s
+[`StageOutcome`](crate::StageOutcome) deliberately carries no verdict, only
+`converged` and `softened` (how many times the stage had to relax a
+constructive guarantee). The violation maxima are read off `sys`, the
+post-stage `PackContext` — the same place `on_finish` reads them — so the
+shared objective stays the only ruler.
 
 ## Objective
 

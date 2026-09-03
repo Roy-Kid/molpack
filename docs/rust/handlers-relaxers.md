@@ -50,7 +50,47 @@ impl Handler for WatchFdist {
 }
 ```
 
-See [Extending](../extending.md) for a full custom-handler walkthrough.
+Every `StepInfo` also says which packing algorithm emitted it. A **stage** is
+one algorithm behind molpack's packing seam (the `Stage` trait), and
+`info.stage` is a `StageInfo` carrying `index` (0-based position of the stage
+in the run), `total` (how many stages the run has), and `name` (the stage's own
+name, `"gencan"` for the rigid-body path). One engine entry drives one stage,
+so a plain `GenCanPack` or `CbmcGrow` run reports `index = 0`, `total = 1`.
+
+Two further callbacks bracket a whole stage, the way `on_phase_start` /
+`on_phase_end` bracket one GENCAN phase:
+
+```rust
+use molpack::handler::StageInfo;
+use molpack::{Handler, PackContext, StageOutcome, StepInfo};
+
+struct WatchStages;
+
+impl Handler for WatchStages {
+    fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {}
+
+    fn on_stage_start(&mut self, info: &StageInfo) {
+        eprintln!("stage {}/{} ({}) starting", info.index + 1, info.total, info.name);
+    }
+
+    fn on_stage_end(&mut self, info: &StageInfo, outcome: &StageOutcome, sys: &PackContext) {
+        eprintln!(
+            "stage {} converged={} softened={} fdist={} frest={}",
+            info.name, outcome.converged, outcome.softened, sys.fdist, sys.frest,
+        );
+    }
+}
+```
+
+Both have default no-op bodies, and a run driven by a single engine entry calls
+neither; they are the seam a caller that chains stages itself brackets each
+stage with. Note where the numbers come from:
+`StageOutcome` reports only what the stage alone knows (`converged`,
+`softened`), while the violation maxima `fdist` and `frest` are read off the
+post-stage `PackContext`, so every algorithm is judged by the same objective.
+
+See [Extending](../extending.md) for a full custom-handler walkthrough and for
+writing a stage of your own.
 
 ## Relaxers
 

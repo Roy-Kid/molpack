@@ -13,7 +13,7 @@
 //! restraints, same cell), is judged by the same objective, and is selected
 //! by the [`CbmcGrow`](crate::CbmcGrow) entry. It never
 //! calls the GENCAN internals, and the GENCAN path never calls it — the
-//! [`Solver`](crate::solver::Solver) seam is the only shared contract.
+//! [`Stage`](crate::stage::Stage) seam is the only shared contract.
 //!
 //! The module is purely geometric: no force-field dependency, no `ff`
 //! feature. Conformer statistics come from user-supplied geometric priors
@@ -55,7 +55,7 @@ pub(crate) mod moves;
 pub mod prior;
 
 pub use config::{GrowConfig, GrowError};
-pub use driver::GrowthSolver;
+pub use driver::GrowStage;
 pub use prior::{AnglePrior, TorsionPrior};
 
 use molrs::store::frame::Frame;

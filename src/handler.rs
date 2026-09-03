@@ -8,8 +8,25 @@ use std::time::Instant;
 use crate::context::PackContext;
 use crate::frame::compute_mol_ids;
 use crate::numerics::objective_small_floor;
+use crate::stage::StageOutcome;
 
 // ── Info structs ─────────────────────────────────────────────────────────────
+
+/// Identifies the stage a callback comes from.
+///
+/// The field shape follows [`PhaseInfo`] on purpose — a stage is to a run
+/// what a phase is to the GENCAN loop, so the two identities read the same
+/// way — and, like `PhaseInfo`, this is a plain `Copy` record a caller may
+/// build by literal (a handler test drives the two stage hooks with one).
+#[derive(Debug, Clone, Copy)]
+pub struct StageInfo {
+    /// 0-based index of this stage in the run.
+    pub index: usize,
+    /// How many stages the run has. A single-stage run reports `1`.
+    pub total: usize,
+    /// The stage's own [`Stage::name`](crate::Stage::name).
+    pub name: &'static str,
+}
 
 /// Information about the current packing phase.
 #[derive(Debug, Clone, Copy)]
@@ -69,8 +86,17 @@ impl LogLevel {
 /// it only ever commits a placement that already clears the hard core and the
 /// restraints; the measured end-of-run numbers live in
 /// [`PackResult`](crate::PackResult).
+///
+/// `#[non_exhaustive]`: the crate builds this in exactly three places (the
+/// GENCAN iteration, the two growth drivers), and every stage that lands
+/// later adds a field. An external construction site would turn each of
+/// those additions into a breaking change for a struct nobody outside this
+/// crate emits — readers are unaffected.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct StepInfo {
+    /// The stage that emitted this step.
+    pub stage: StageInfo,
     /// GENCAN: 0-based loop iteration within the current phase. Growth: the
     /// 1-based index of the current round.
     pub loop_idx: usize,
@@ -146,6 +172,28 @@ pub trait Handler: Send {
     ///
     /// [`on_phase_start`]: Handler::on_phase_start
     fn on_phase_end(&mut self, _info: &PhaseInfo, _report: &PhaseReport) {}
+
+    // ── stage-pipeline-04-stage additions — default no-op, backward compatible ──
+
+    /// Called before a stage starts, with the stage's identity.
+    ///
+    /// Default: no-op. The **call** belongs to the pipeline that chains
+    /// stages; a single-stage run reports `index == 0` and `total == 1`.
+    fn on_stage_start(&mut self, _info: &StageInfo) {}
+
+    /// Called after a stage returns, with its identity, its outcome, and the
+    /// state it just finished writing.
+    ///
+    /// Default: no-op. The **call** belongs to the pipeline that chains
+    /// stages; a single-stage run reports `index == 0` and `total == 1`.
+    ///
+    /// [`StageOutcome`] deliberately carries no verdict. A handler that wants
+    /// the run's violation maxima reads them off `sys` — `sys.fdist` and
+    /// `sys.frest`, the shared objective's numbers on the post-run state,
+    /// exactly as [`on_finish`] does. Same shape, same authority.
+    ///
+    /// [`on_finish`]: Handler::on_finish
+    fn on_stage_end(&mut self, _info: &StageInfo, _outcome: &StageOutcome, _sys: &PackContext) {}
 }
 
 // ── NullHandler ───────────────────────────────────────────────────────────────

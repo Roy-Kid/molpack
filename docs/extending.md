@@ -1,8 +1,9 @@
 # Extending the Crate
 
 Tutorials for writing your own `AtomRestraint` / `Region` / `Handler` types,
-plus the in-loop optimizer seam. Every extension trait in this crate follows
-the same shape (direction-3 rule — see [`concepts`](crate::concepts)):
+plus the in-loop optimizer seam and the `Stage` seam every packing algorithm
+implements. Every extension trait in this crate follows the same shape
+(direction-3 rule — see [`concepts`](crate::concepts)):
 
 > `pub trait X` + N concrete `pub struct` types implementing it.
 > User types `impl X` identically. No built-in/plugin type-level
@@ -327,6 +328,13 @@ Handler notes:
 - **`should_stop` is polled every iteration.** Return `true` to break
   the outer loop early. Useful for time budgets or custom convergence
   criteria.
+- **Every step names its stage.** `info.stage` is a `StageInfo` — `index`,
+  `total`, `name` — identifying the packing algorithm that emitted the step
+  (stages are the subject of the `Stage` section below). A run driven by one
+  engine entry has one stage, so it reports `index = 0` and `total = 1`. The
+  `on_stage_start` / `on_stage_end` hooks bracket a whole stage the way
+  `on_phase_start` / `on_phase_end` bracket one GENCAN phase; both are
+  no-op defaults, and a single-stage run calls neither.
 
 ## Custom in-loop optimizer (feature `ff`)
 
@@ -506,6 +514,235 @@ Optimizer notes:
 - **Copies diverge.** Under `per_copy`, each copy's reference conformer is
   relaxed independently, so copies of one target stop sharing a shape.
 
+## Custom `Stage` — a whole packing algorithm
+
+Everything above plugs into an algorithm that already exists: a restraint
+changes *what* the packer tries to satisfy, a handler watches it work, an
+in-loop optimizer reshapes molecules while it runs. Replacing the algorithm
+itself — how molecules get from nothing to a non-overlapping arrangement — is
+what the `Stage` seam is for.
+
+A **stage** is one packing algorithm behind four methods. molpack ships three:
+`GencanStage` (rigid-body descent on the shared objective), `GrowStage`
+(configurational-bias chain growth) and `LatticeStage` (a self-avoiding walk on
+a diamond lattice). They are peers — no stage reaches into another stage's
+driver — and each is judged afterwards by the same objective, so none of them
+can grade its own work.
+
+```text
+pub trait Stage: Send {
+    fn name(&self) -> &'static str;
+    fn requires(&self) -> Requires;
+    fn guarantees(&self) -> Guarantees;
+    fn run(&mut self, state: &mut PackState, targets: &[Target],
+           budget: &Budget, handlers: &mut [Box<dyn Handler>]) -> StageOutcome;
+}
+```
+
+Of the four arguments to `run`, `state` is the run's geometry — the subject of
+the next section — while `targets` are the molecule types the caller passed to
+the engine's `run`, `budget` is the caller's iteration allowance, and
+`handlers` are the observers to notify while you work.
+
+### The state a stage is handed
+
+`run` takes a `&mut PackState`, which carries three things:
+
+- a [`PackContext`](crate::PackContext) — the run's mutable geometry: per-atom
+  radii, the restraint pool, the cell list, and `xcart`, the **lab-frame**
+  coordinates, meaning where each atom actually sits in the packing cell;
+- a [`RigidView`](crate::RigidView) — the **rigid placement vector**: for every
+  free molecule a centre of mass and three Euler angles (the three-parameter
+  description of that molecule's orientation). It is `6 · nmol` numbers, the
+  centre-of-mass block first, then the Euler block;
+- a [`Placed`](crate::Placed) marker — `Placed::None` (nothing placed yet) or
+  `Placed::All` (every free molecule has a placement).
+
+Take the first two apart with `state.rigid_split_mut()`, which hands back
+`(&mut PackContext, &mut RigidView)` as two disjoint borrows.
+
+Two coordinate frames meet inside the context. `ctx.coor` holds each copy's
+**reference conformer** — its atoms measured from that copy's own centre of
+mass with no orientation applied, so it describes the molecule's shape and
+nothing else. `ctx.xcart` holds the lab-frame positions. The two are related by
+`xcart = com + R(euler) · coor`, where `R(euler)` is the rotation matrix built
+from the three Euler angles.
+
+That relation decides where a stage must leave its answer. A stage writes
+placements into the `RigidView`; once `run` returns, the lifecycle rebuilds
+`xcart` from them with `RigidView::write_xcart`. A stage that instead works
+directly in lab-frame coordinates — both growth stages do, because a chain is
+grown atom by atom — must capture them back into placements with
+`RigidView::capture_from_xcart` before returning. Anything left only in `xcart`
+is overwritten.
+
+### What `requires` and `guarantees` declare
+
+Both are one-field records over the `Placed` marker above:
+`Requires::new(Placed::All)` says "hand me a state whose molecules are already
+placed"; `Guarantees::new(Placed::All)` says "when I return, every free
+molecule has a placement". They are declarations, not checks — the lifecycle
+advances the state's marker to whatever the stage *guaranteed*, never by
+inspecting what it actually did. Declaring them truthfully is what lets a
+caller decide which stages may legally follow which.
+
+Both types are `#[non_exhaustive]`, so build them with `::new` rather than a
+struct literal; that is what lets a second precondition be added later without
+breaking your code.
+
+### Re-entrancy: never consume your own configuration
+
+A stage may be run **more than once** on an evolving state. The rule that falls
+out of that is short: the second `run` must have every capability the first
+had. The only thing a call may consume is scratch it created itself.
+
+The contract is not decorative. The rigid-body stage used to move its bound
+in-loop optimizers out of `self` on the first call; from the second call on it
+kept running, just *degraded* — with no error and no name for what it had lost.
+Borrow your configuration, do not take it.
+
+### `StageOutcome` carries no verdict
+
+`run` returns `StageOutcome::new(converged, softened)`, and those two numbers
+are all a stage reports: whether it met its own convergence criterion, and how
+many times it had to relax a constructive guarantee (growth's hard-core
+softening rungs; always `0` on the rigid-body path, which relaxes nothing). The
+run's verdict — the largest inter-molecular overlap `fdist` and the largest
+restraint violation `frest` — is read off the context *after* `run` returns, by
+the shared objective. That is the one-ruler rule: no algorithm reports its own
+score.
+
+### A minimal stage
+
+```rust
+use molpack::{
+    Budget, F, Guarantees, Handler, PackState, Placed, Requires, Stage, StageOutcome, Target,
+};
+
+/// Nudges every molecule by a fixed offset. Not useful — just the smallest
+/// thing that is still a stage.
+struct ShakeStage {
+    /// Displacement added to each centre of mass, in ångström.
+    step: [F; 3],
+}
+
+impl Stage for ShakeStage {
+    fn name(&self) -> &'static str {
+        "shake"
+    }
+
+    /// It moves placements that already exist; it never creates them.
+    fn requires(&self) -> Requires {
+        Requires::new(Placed::All)
+    }
+
+    /// It leaves every molecule placed, because it only moved them.
+    fn guarantees(&self) -> Guarantees {
+        Guarantees::new(Placed::All)
+    }
+
+    fn run(
+        &mut self,
+        state: &mut PackState,
+        _targets: &[Target],
+        _budget: &Budget,
+        _handlers: &mut [Box<dyn Handler>],
+    ) -> StageOutcome {
+        // `self.step` is read, never taken — re-entrancy contract.
+        let (_ctx, x) = state.rigid_split_mut();
+        for i in 0..x.nmol() {
+            let com = x.com(i);
+            x.set_com(
+                i,
+                [
+                    com[0] + self.step[0],
+                    com[1] + self.step[1],
+                    com[2] + self.step[2],
+                ],
+            );
+        }
+        // Placements only: the lifecycle expands them into `xcart`.
+        StageOutcome::new(true, 0)
+    }
+}
+```
+
+### Wiring it into a run
+
+A stage does not run itself. The lifecycle around it — validation, restraint
+broadcast, context construction, handler bracketing, the lab-frame rebuild,
+frame assembly — belongs to the [`PackEngine`](crate::PackEngine) trait, and an
+**entry** is a type implementing it. Its `solver` method is the one thing an
+entry must supply: the stage it drives.
+
+```rust
+# struct ShakeStage { step: [molpack::F; 3] }
+# impl molpack::Stage for ShakeStage {
+#     fn name(&self) -> &'static str { "shake" }
+#     fn requires(&self) -> molpack::Requires { molpack::Requires::new(molpack::Placed::All) }
+#     fn guarantees(&self) -> molpack::Guarantees { molpack::Guarantees::new(molpack::Placed::All) }
+#     fn run(&mut self, _state: &mut molpack::PackState, _targets: &[molpack::Target],
+#            _budget: &molpack::Budget, _handlers: &mut [Box<dyn molpack::Handler>])
+#            -> molpack::StageOutcome { molpack::StageOutcome::new(true, 0) }
+# }
+use molpack::entry::EngineSetup;
+use molpack::{F, Handler, PackEngine, PackError, PackSettings, Stage};
+
+pub struct ShakePack {
+    settings: PackSettings,
+    handlers: Vec<Box<dyn Handler>>,
+    step: [F; 3],
+}
+
+impl ShakePack {
+    pub fn new(step: [F; 3]) -> Self {
+        Self { settings: PackSettings::default(), handlers: Vec::new(), step }
+    }
+}
+
+impl PackEngine for ShakePack {
+    fn settings(&self) -> &PackSettings {
+        &self.settings
+    }
+    fn settings_mut(&mut self) -> &mut PackSettings {
+        &mut self.settings
+    }
+    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>> {
+        &mut self.handlers
+    }
+
+    /// The entry's single contribution: which algorithm this run drives.
+    fn solver(&mut self, _setup: &EngineSetup<'_>) -> Result<Box<dyn Stage>, PackError> {
+        Ok(Box::new(ShakeStage { step: self.step }))
+    }
+}
+```
+
+`ShakePack` now has every shared builder (`with_seed`, `with_tolerance`,
+`with_handler`, `with_global_restraint`, …) and the terminal
+`run(&targets, max_loops)`, exactly like `GenCanPack`, because all of them are
+provided methods on `PackEngine`. Two knobs are worth knowing before you write
+a real stage: `EngineSetup` (the resolved targets, cell and context shape) is
+what `solver` reads to build the stage, and `PackEngine::prepare` is the hook
+for an entry that already knows where molecules go and wants to write the
+placement vector before the stage takes over.
+
+Stage notes:
+
+- **Pick your own name.** `name()` is what every `StepInfo` a handler sees
+  carries in `info.stage.name`; keep it short and lowercase — the three
+  built-ins report `"gencan"`, `"growth"` and `"lattice"`.
+- **`targets` is the one source of chemistry.** They are the same objects the
+  caller passed to `run`, so a stage never needs a second copy of the molecule
+  data.
+- **`budget` is an allowance, not a schedule.** Its two fields, `max_loops` and
+  `precision`, say how much work the caller is willing to pay for and how small
+  the violation maxima must get; how you spend it is your algorithm's business,
+  so your stage should document how it reads `max_loops`.
+- **Stages are geometry only.** The seam takes no force field and performs no
+  chemistry perception; priors, radii and restraints all arrive as user data on
+  the targets.
+
 ## Testing discipline
 
 | Kind | Location | Convention |
@@ -546,8 +783,9 @@ Rules:
 - **An in-loop optimizer only runs in the all-type phase.** If you expected it
   during per-type pre-compaction, you will see no effect there.
 - **`radscale` is phase-dependent.** Don't hard-code atomic radii —
-  always go through `sys.radius[i]`. `evaluate_unscaled` temporarily
-  swaps `radius` with `radius_ini` for user-facing numbers.
+  always go through `sys.radius[i]`. The crate-internal `evaluate_unscaled`
+  (`src/context/pack_state.rs`) temporarily swaps `radius` with `radius_ini`
+  so the numbers it reports are unscaled.
 - **PBC boxes must be valid.** Zero-length axis returns
   `PackError::InvalidPBCBox`.
 

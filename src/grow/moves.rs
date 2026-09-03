@@ -2,7 +2,7 @@
 //! placement, and the W-guarded tail regrowth — plus the per-chain state
 //! ([`Chain`], [`Species`]) and the hashed RNG streams they draw from.
 //!
-//! The [`driver`](super::driver) owns the round loop and the `Solver`
+//! The [`driver`](super::driver) owns the round loop and the `Stage`
 //! contract; this module owns everything a single chain does within a round.
 //! The split follows the file-size budget, not a semantic boundary shift:
 //! the round-snapshot semantics documented on the parent module bind both.

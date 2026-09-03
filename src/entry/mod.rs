@@ -3,22 +3,27 @@
 //! One entry type per packing algorithm (`GenCanPack`, `CbmcGrow`, …), all
 //! implementing [`PackEngine`]: the trait owns the lifecycle — validation,
 //! space resolution, context construction, handler bracketing, assembly —
-//! and each entry contributes exactly one thing, its [`Solver`].
+//! and each entry contributes exactly one thing, its [`Stage`].
 //!
 //! `run` consumes the entry by value: an engine is one shot by construction,
 //! which is what makes the handler set impossible to lose silently (the old
 //! `pack(&mut self)` drained its handlers on first use and ran headless on
 //! the second).
 //!
-//! The lifecycle also owns the run's rigid placement vector: one
-//! [`RigidView`], sized from the free copy count, is created next to the
-//! [`PackContext`](crate::context::PackContext), offered to
-//! [`PackEngine::prepare`], handed to the [`Solver`] as the state it
-//! optimizes, and — in the run's last stage, after the solver returns —
-//! expanded back into lab-frame coordinates with
-//! [`RigidView::write_xcart`]. No entry re-derives those coordinates from the
-//! placements itself, and the same view is what the result carries away for a
-//! later seeded run.
+//! The lifecycle also owns the run's state: the [`PackContext`] and the
+//! rigid placement vector ([`RigidView`](crate::RigidView), sized from the
+//! free copy count) are wrapped into one [`PackState`], offered field-wise
+//! to [`PackEngine::prepare`], handed to the [`Stage`] as the state it
+//! optimizes, and — in the run's last stage, after the stage returns — taken
+//! apart again so the placements can be expanded back into lab-frame
+//! coordinates with
+//! [`RigidView::write_xcart`](crate::RigidView::write_xcart). No entry
+//! re-derives those coordinates from the placements itself, and the same
+//! view is what the result carries away for a later seeded run.
+//!
+//! The lifecycle also advances the state's placement marker, by the
+//! guarantee the stage declares rather than by inspection — the same rule
+//! the multi-stage pipeline follows.
 
 pub(crate) mod result;
 pub(crate) mod setup;
@@ -30,11 +35,11 @@ use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use ndarray::Array1;
 
-use crate::context::RigidView;
 use crate::context::build::{ContextKnobs, build_context};
+use crate::context::{PackContext, PackState};
 use crate::error::PackError;
 use crate::handler::{Handler, LammpsLogHandler, LogLevel};
-use crate::solver::{Budget, Solver};
+use crate::stage::{Budget, Stage};
 use crate::target::Target;
 use setup::{CellDecl, PeriodicSpec, broadcast_global_restraints, resolve_pack_space};
 
@@ -92,7 +97,7 @@ impl PackSettings {
 }
 
 /// Everything the lifecycle resolved before handing control to the entry's
-/// [`Solver`]: the targets (post-broadcast), the space, and the context
+/// [`Stage`]: the targets (post-broadcast), the space, and the context
 /// shape. Borrowed — valid only inside [`PackEngine::solver`] /
 /// [`PackEngine::prepare`].
 pub struct EngineSetup<'a> {
@@ -108,13 +113,13 @@ pub struct EngineSetup<'a> {
 
 /// One packing algorithm behind one lifecycle.
 ///
-/// Entries supply their [`Solver`] (and optionally validation and context
+/// Entries supply their [`Stage`] (and optionally validation and context
 /// preparation); the provided [`run`](Self::run) owns everything shared:
 /// space resolution, restraint broadcast, context construction, the run's
-/// [`RigidView`] and the lab-frame rebuild that closes it out, handler
-/// bracketing (`on_start` / `on_finish`, log-handler injection), and frame
-/// assembly. `fdist` / `frest` come from the shared objective — the seam's
-/// one-ruler guarantee.
+/// [`RigidView`](crate::RigidView) and the lab-frame rebuild that closes it
+/// out, handler bracketing (`on_start` / `on_finish`, log-handler
+/// injection), and frame assembly. `fdist` / `frest` come from the shared
+/// objective — the seam's one-ruler guarantee.
 pub trait PackEngine: Sized {
     /// Read the shared settings.
     fn settings(&self) -> &PackSettings;
@@ -127,28 +132,29 @@ pub trait PackEngine: Sized {
     fn validate(&self, _targets: &[Target]) -> Result<(), PackError> {
         Ok(())
     }
-    /// Entry-specific context preparation, run once the solver is built and
+    /// Entry-specific context preparation, run once the stage is built and
     /// before it takes over.
     ///
-    /// `x` is the backing buffer of the run's [`RigidView`] — the flat
-    /// `6 * ntotmol_free` placement vector, COM block then Euler block — so an
-    /// entry that already knows where the molecules go writes it here. Growth
-    /// installs the box and cell grid; a seeded GENCAN run installs the seed's
+    /// `x` is the backing buffer of the run's
+    /// [`RigidView`](crate::RigidView) — the flat `6 * ntotmol_free`
+    /// placement vector, COM block then Euler block — so an entry that
+    /// already knows where the molecules go writes it here. Growth installs
+    /// the box and cell grid; a seeded GENCAN run installs the seed's
     /// conformers into `sys.coor` and its placements into `x` (see
-    /// [`RigidView::install_seed`]). An unseeded GENCAN run touches neither:
-    /// `sys.coor` already holds the templates' reference conformers from
-    /// context construction, and `x` stays zeroed until its own `initial()`
-    /// pass fills it.
+    /// [`RigidView::install_seed`](crate::RigidView::install_seed)). An
+    /// unseeded GENCAN run touches neither: `sys.coor` already holds the
+    /// templates' reference conformers from context construction, and `x`
+    /// stays zeroed until its own `initial()` pass fills it.
     fn prepare(
         &self,
-        _sys: &mut crate::context::PackContext,
+        _sys: &mut PackContext,
         _x: &mut [F],
         _setup: &EngineSetup<'_>,
     ) -> Result<(), PackError> {
         Ok(())
     }
-    /// The algorithm: build this entry's [`Solver`] for the resolved setup.
-    fn solver(&mut self, setup: &EngineSetup<'_>) -> Result<Box<dyn Solver>, PackError>;
+    /// The algorithm: build this entry's [`Stage`] for the resolved setup.
+    fn solver(&mut self, setup: &EngineSetup<'_>) -> Result<Box<dyn Stage>, PackError>;
 
     // ── Shared builders (bound once, forwarded to `PackSettings`) ────────
 
@@ -260,8 +266,7 @@ pub trait PackEngine: Sized {
             parallel_eval: settings.parallel_eval,
         };
         let built = build_context(&knobs, targets)?;
-        let mut sys = built.sys;
-        let mut view = RigidView::fresh(built.ntotmol_free);
+        let mut state = PackState::new(built.sys, built.ntotmol_free);
 
         let setup = EngineSetup {
             targets,
@@ -275,8 +280,11 @@ pub trait PackEngine: Sized {
         };
 
         // Stages ③④: the algorithm, bracketed by the handlers.
-        let mut solver = self.solver(&setup)?;
-        self.prepare(&mut sys, view.as_mut_slice(), &setup)?;
+        let mut stage = self.solver(&setup)?;
+        {
+            let (sys, view) = state.rigid_split_mut();
+            self.prepare(sys, view.as_mut_slice(), &setup)?;
+        }
 
         let log = self.settings().log;
         let (tolerance, precision, seed) = {
@@ -299,15 +307,23 @@ pub trait PackEngine: Sized {
         for h in handlers.iter_mut() {
             h.on_start(built.ntotat, built.ntotmol_free);
         }
-        sys.ntotmol = built.ntotmol_free;
+        state.ctx_mut().ntotmol = built.ntotmol_free;
 
         let budget = Budget::new(max_loops, precision);
-        let outcome = solver.solve(&mut sys, targets, &mut view, &budget, &mut handlers);
+        let outcome = stage.run(&mut state, targets, &budget, &mut handlers);
+        // The marker moves by what the stage declared, not by inspecting the
+        // result — the pipeline advances it the same way.
+        state.set_placed(stage.guarantees().placed);
+
         // Stage ⑤: xcart rebuild, finish bracket, assembly.
-        for itype in 0..built.ntype_with_fixed {
-            sys.comptype[itype] = true;
+        {
+            let ctx = state.ctx_mut();
+            for itype in 0..built.ntype_with_fixed {
+                ctx.comptype[itype] = true;
+            }
+            ctx.ntotmol = built.ntotmol_free;
         }
-        sys.ntotmol = built.ntotmol_free;
+        let (mut sys, view) = state.into_parts();
         view.write_xcart(&mut sys);
         for h in handlers.iter_mut() {
             h.on_finish(&sys);

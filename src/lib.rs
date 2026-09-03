@@ -66,11 +66,11 @@
 //! | Engine entries | [`PackEngine`], [`GenCanPack`], [`CbmcGrow`], [`LogLevel`], [`PackResult`] |
 //! | Target  | [`Target`], [`CenteringMode`] |
 //! | Rigid placement vector | [`RigidView`] |
-//! | Solver seam (Rust-only) | [`solver::Solver`], [`solver::Budget`], [`solver::SolveOutcome`] |
+//! | Stage seam (Rust-only) | [`Stage`], [`Requires`], [`Guarantees`], [`StageOutcome`], [`Budget`], [`PackState`], [`Placed`] |
 //! | Template bond graph + geometry reader | [`Topology`], [`TopologyError`], [`frame_positions`] |
 //! | AtomRestraint trait + 14 concrete structs | [`AtomRestraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…AtomRestraint` |
 //! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideCellRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
-//! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`PhaseInfo`], [`PhaseReport`] |
+//! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`handler::StageInfo`], [`PhaseInfo`], [`PhaseReport`] |
 //! | In-loop optimizer (feature `ff`) | `OptimizeSelect`, `GenCanPack::with_optimizer`, `TorsionMcOptimizer`, and molrs's `Optimizer` trait |
 //! | Errors | [`PackError`] |
 //! | Validation | [`validate_from_targets`], [`ValidationReport`], [`ViolationMetrics`] |
@@ -122,14 +122,14 @@ mod random;
 pub mod region;
 pub mod restraint;
 pub mod script;
-pub mod solver;
+pub mod stage;
 pub mod target;
 pub mod topology;
 pub mod validation;
 
 #[cfg(feature = "io")]
 pub use cases::{ExampleCase, build_targets, example_dir_from_manifest, render_inp_script};
-pub use context::{PackContext, RigidView};
+pub use context::{PackContext, PackState, Placed, RigidView};
 pub use entry::PackResult;
 pub use entry::{PackEngine, PackSettings};
 pub use error::PackError;
@@ -160,6 +160,7 @@ pub use restraint::{
     InsideEllipsoidRestraint, InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint,
     OutsideCylinderRestraint, OutsideEllipsoidRestraint, OutsideSphereRestraint,
 };
+pub use stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 pub use target::{Angle, Axis, CenteringMode, Placement, Target};
 pub use topology::{Topology, TopologyError, frame_positions};
 pub use validation::{ValidationReport, ViolationMetrics, validate_from_targets};

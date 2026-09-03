@@ -25,7 +25,8 @@
 //! earned when a single chain reaches another `soften_after` dead ends, and the
 //! driver takes at most one rung per round even when two chains earn one in the
 //! same round, because the rung is the driver's global step, not a per-chain
-//! one. [`SolveOutcome::softened`] counts each such shrink *and* each forced
+//! one. [`StageOutcome::softened`](crate::StageOutcome::softened) counts
+//! each such shrink *and* each forced
 //! placement, and a structure is only `converged` when that counter is zero, so
 //! the constructive no-overlap guarantee is asserted, never hoped for.
 //!
@@ -40,7 +41,7 @@
 use molrs::types::F;
 
 use crate::context::pack_state::evaluate_unscaled;
-use crate::context::{PackContext, RigidView};
+use crate::context::{PackState, Placed};
 use crate::grow::config::{GrowConfig, GrowError};
 use crate::grow::field::OverlapField;
 use crate::grow::internal::InternalTree;
@@ -48,21 +49,29 @@ use crate::grow::moves::{
     Chain, Proposal, RestraintTable, SALT_SHUFFLE, Species, commit, force_place, propose, relax,
     retract, stream, uniform,
 };
-use crate::handler::{Handler, PhaseInfo, StepInfo};
-use crate::solver::{Budget, SolveOutcome, Solver};
+use crate::handler::{Handler, PhaseInfo, StageInfo, StepInfo};
+use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 use crate::target::Target;
 
-/// The chain-growth solver. Built from the Grow targets before `solve`;
-/// the targets handed to `solve` must be the same objects.
+/// The chain-growth stage. Built from the Grow targets before the first
+/// [`run`](Stage::run); the targets handed to `run` must be the same objects.
+///
+/// The per-species trees are the stage's own configuration and stay on it
+/// across runs, as the seam's re-entrancy contract requires.
 ///
 /// **Rust-only:** not mirrored in the Python wheel — Python reaches growth
-/// through the `CbmcGrow` entry, which constructs this solver itself.
-pub struct GrowthSolver {
+/// through the `CbmcGrow` entry, which constructs this stage itself.
+pub struct GrowStage {
     seed: u64,
     species: Vec<Species>,
 }
 
-impl GrowthSolver {
+impl GrowStage {
+    /// The name this stage reports, in one place: [`Stage::name`] returns it
+    /// and `StepInfo.stage.name` is filled from it, so the two cannot drift
+    /// apart.
+    pub(crate) const NAME: &'static str = "growth";
+
     /// Build the per-species trees from the targets' templates. The `i`-th
     /// error names the offending target.
     pub fn from_targets(
@@ -92,19 +101,29 @@ impl GrowthSolver {
     }
 }
 
-impl Solver for GrowthSolver {
+impl Stage for GrowStage {
     fn name(&self) -> &'static str {
-        "growth"
+        Self::NAME
     }
 
-    fn solve(
+    /// Nothing: growth constructs every placement itself, atom by atom.
+    fn requires(&self) -> Requires {
+        Requires::new(Placed::None)
+    }
+
+    /// Every free molecule placed.
+    fn guarantees(&self) -> Guarantees {
+        Guarantees::new(Placed::All)
+    }
+
+    fn run(
         &mut self,
-        sys: &mut PackContext,
+        state: &mut PackState,
         _targets: &[Target],
-        x: &mut RigidView,
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
-    ) -> SolveOutcome {
+    ) -> StageOutcome {
+        let (sys, x) = state.rigid_split_mut();
         // ── Field over the final box ───────────────────────────────────────
         let origin: [F; 3] = {
             let v = sys.simbox.origin_view();
@@ -363,6 +382,13 @@ impl Solver for GrowthSolver {
                 }
             }
             let info = StepInfo {
+                // One stage per run until the pipeline lands; the name comes
+                // from the stage type so the two cannot drift.
+                stage: StageInfo {
+                    index: 0,
+                    total: 1,
+                    name: Self::NAME,
+                },
                 loop_idx: round as usize,
                 max_loops: budget.max_loops,
                 phase: PhaseInfo {
@@ -423,6 +449,6 @@ impl Solver for GrowthSolver {
         // inline and gives the caller's values back afterwards.
         let (_, fdist, frest) = evaluate_unscaled(sys, x.as_slice());
         let converged = !aborted && softened == 0 && fdist == 0.0 && frest < budget.precision;
-        SolveOutcome::new(converged, fdist, frest, softened)
+        StageOutcome::new(converged, softened)
     }
 }

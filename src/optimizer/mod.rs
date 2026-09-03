@@ -76,26 +76,41 @@ pub struct OptimizerBinding {
     pub optimizer: Box<dyn Optimizer>,
 }
 
-/// Resolved type indices for a binding (matched by target name at pack start).
+/// One [`OptimizerBinding`] **borrowed** for the duration of a single run,
+/// with its target names resolved to type indices.
 ///
 /// Public because it appears in the signatures of the public
 /// [`run_iteration`](crate::gencan::phases::run_iteration) /
 /// [`run_phase`](crate::gencan::phases::run_phase) entry points that the benches drive.
-/// Built by [`resolve_bindings`] at pack start — not constructed by callers.
-pub struct ResolvedBinding {
-    pub select: OptimizeSelect,
+/// Built by [`resolve_bindings`] at the start of every run — not constructed
+/// by callers.
+///
+/// It borrows rather than owns because of the stage seam's re-entrancy
+/// contract ([`Stage::run`](crate::Stage::run)): the bindings are the
+/// stage's own configuration and must still be there on the next run, so a
+/// run may resolve them but never take them. Cloning is not the alternative
+/// — [`Optimizer`] is a trait object with no `Clone` bound.
+pub struct ResolvedBinding<'a> {
+    pub select: &'a OptimizeSelect,
     pub type_indices: Vec<usize>,
-    pub optimizer: Box<dyn Optimizer>,
+    pub optimizer: &'a mut dyn Optimizer,
 }
 
-pub(crate) fn resolve_bindings(
-    bindings: Vec<OptimizerBinding>,
+/// Resolve `bindings` against this run's `type_names`, borrowing each one.
+///
+/// Type indices are recomputed per run rather than cached: it is a name
+/// comparison over a handful of targets, and a stage handed a different
+/// target set gets the right answer for free.
+pub(crate) fn resolve_bindings<'a>(
+    bindings: &'a mut [OptimizerBinding],
     type_names: &[Option<String>],
-) -> Vec<ResolvedBinding> {
+) -> Vec<ResolvedBinding<'a>> {
     let mut out = Vec::with_capacity(bindings.len());
-    for b in bindings {
+    for binding in bindings.iter_mut() {
+        // Split the borrow: `select` is read while `optimizer` is driven.
+        let OptimizerBinding { select, optimizer } = binding;
         let mut idxs = Vec::new();
-        for name in &b.select.names {
+        for name in &select.names {
             let mut found = false;
             for (i, tn) in type_names.iter().enumerate() {
                 if tn.as_deref() == Some(name.as_str()) {
@@ -111,9 +126,9 @@ pub(crate) fn resolve_bindings(
             continue;
         }
         out.push(ResolvedBinding {
-            select: b.select,
+            select,
             type_indices: idxs,
-            optimizer: b.optimizer,
+            optimizer: &mut **optimizer,
         });
     }
     out
@@ -123,7 +138,7 @@ pub(crate) fn resolve_bindings(
 pub(crate) fn run_optimizer_bindings(
     sys: &mut PackContext,
     xwork: &[F],
-    bindings: &mut [ResolvedBinding],
+    bindings: &mut [ResolvedBinding<'_>],
 ) {
     if bindings.is_empty() {
         return;
@@ -153,7 +168,7 @@ pub(crate) fn run_optimizer_bindings(
                             pbc,
                             &spans,
                             &world,
-                            &binding.select,
+                            binding.select,
                             &mut *binding.optimizer,
                         );
                     }
@@ -189,7 +204,7 @@ pub(crate) fn run_optimizer_bindings(
                     pbc,
                     &spans,
                     &world,
-                    &binding.select,
+                    binding.select,
                     &mut *binding.optimizer,
                 );
             }

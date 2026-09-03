@@ -185,3 +185,33 @@ fn gencan_clamps_to_lower_bound() {
         x[0]
     );
 }
+
+// ── the seam markers the GENCAN stage declares ─────────────────────────────
+
+/// Owner-side half of acceptance ac-008: what `GencanStage` declares on the
+/// stage seam belongs here, not in `tests/stage.rs` (which knows only fakes).
+///
+/// `Placed::None` because the stage seeds its own placements with `initial()`
+/// — it needs nothing placed on entry; `Placed::All` because it returns with
+/// every free molecule placed. The two markers are what a pipeline checks
+/// before chaining anything after this stage.
+#[test]
+fn gencan_stage_requires_none_guarantees_all() {
+    use molpack::gencan::solver::{GencanSettings, GencanStage};
+    use molpack::{Placed, Stage};
+
+    // The declarations are construction-time constants: an empty system is
+    // enough to read them, and using one keeps this test off the algorithm.
+    let stage = GencanStage::new(GencanSettings::default(), Vec::new(), None, 0, 0);
+
+    assert_eq!(
+        stage.requires().placed,
+        Placed::None,
+        "GENCAN places the molecules itself, so it requires nothing placed"
+    );
+    assert_eq!(
+        stage.guarantees().placed,
+        Placed::All,
+        "GENCAN returns with every free molecule placed"
+    );
+}

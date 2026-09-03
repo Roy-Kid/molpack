@@ -1,9 +1,9 @@
-//! GENCAN on the [`Solver`] seam.
+//! GENCAN on the [`Stage`] seam.
 //!
 //! Until engine-entry-split, the rigid-body path was a 12-argument inherent
 //! method on the `Molpack` builder (`run_gencan_stages`) — the peer claim in
-//! [`solver`](crate::solver) existed only in prose. [`GencanSolver`] makes it
-//! true in code: the same lifecycle the growth solver implements, judged by
+//! [`stage`](crate::stage) existed only in prose. [`GencanStage`] makes it
+//! true in code: the same lifecycle the growth stages implement, judged by
 //! the same shared-objective ruler, selected by the same seam.
 
 use molrs::spatial::simbox::SimBox;
@@ -11,7 +11,7 @@ use molrs::types::F;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-use crate::context::{PackContext, RigidView};
+use crate::context::{PackState, Placed};
 use crate::gencan::phases::{PhaseOutcome, run_phase};
 use crate::gencan::{GencanParams, GencanWorkspace};
 use crate::handler::Handler;
@@ -19,7 +19,7 @@ use crate::initial::{SwapState, initial};
 use crate::movebad::MoveBadConfig;
 #[cfg(feature = "ff")]
 use crate::optimizer::{OptimizerBinding, ResolvedBinding, resolve_bindings};
-use crate::solver::{Budget, SolveOutcome, Solver};
+use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 use crate::target::Target;
 
 /// GENCAN-only knobs (engine-entry-split: these live on `GenCanPack`, never
@@ -68,14 +68,18 @@ impl Default for GencanSettings {
     }
 }
 
-/// The rigid-body GENCAN packing algorithm as a [`Solver`].
+/// The rigid-body GENCAN packing algorithm as a [`Stage`].
 ///
 /// Construction captures everything the former `run_gencan_stages` read
 /// beyond the seam signature: the GENCAN knobs, the per-type move quota,
 /// the resolved cell, the phase-shape counts, and the push-off flag (skip
 /// `initial()` and movebad — the entry seeded the state from a previous run,
 /// see [`GenCanPack::seeded_from`](crate::GenCanPack::seeded_from)).
-pub struct GencanSolver {
+///
+/// The optimizer bindings stay on the stage for its whole life and are
+/// resolved afresh on every [`run`](Stage::run) — the seam's re-entrancy
+/// contract: a stage does not consume its own configuration.
+pub struct GencanStage {
     settings: GencanSettings,
     maxmove_per_type: Vec<usize>,
     cell: Option<SimBox>,
@@ -87,7 +91,12 @@ pub struct GencanSolver {
     rng: SmallRng,
 }
 
-impl GencanSolver {
+impl GencanStage {
+    /// The name this stage reports, in one place: [`Stage::name`] returns
+    /// it and `StepInfo.stage.name` is filled from it, so the two cannot
+    /// drift apart.
+    pub(crate) const NAME: &'static str = "gencan";
+
     pub fn new(
         settings: GencanSettings,
         maxmove_per_type: Vec<usize>,
@@ -120,19 +129,30 @@ impl GencanSolver {
     }
 }
 
-impl Solver for GencanSolver {
+impl Stage for GencanStage {
     fn name(&self) -> &'static str {
-        "gencan"
+        Self::NAME
     }
 
-    fn solve(
+    /// Nothing: GENCAN seeds its own placements with `initial()`, and a
+    /// push-off run reads placements the entry installed before the seam.
+    fn requires(&self) -> Requires {
+        Requires::new(Placed::None)
+    }
+
+    /// Every free molecule placed.
+    fn guarantees(&self) -> Guarantees {
+        Guarantees::new(Placed::All)
+    }
+
+    fn run(
         &mut self,
-        sys: &mut PackContext,
+        state: &mut PackState,
         targets: &[Target],
-        x: &mut RigidView,
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
-    ) -> SolveOutcome {
+    ) -> StageOutcome {
+        let (sys, x) = state.rigid_split_mut();
         let init_passes = self.settings.init_passes.unwrap_or(20 * self.ntype);
         let movebad_cfg = MoveBadConfig {
             movefrac: self.settings.perturb_fraction,
@@ -167,13 +187,15 @@ impl Solver for GencanSolver {
         }
 
         #[cfg(feature = "ff")]
-        let mut optimizer_bindings: Vec<ResolvedBinding> = {
+        let mut optimizer_bindings: Vec<ResolvedBinding<'_>> = {
             let type_names: Vec<Option<String>> = targets
                 .iter()
                 .filter(|t| t.fixed_at.is_none())
                 .map(|t| t.name.clone())
                 .collect();
-            resolve_bindings(std::mem::take(&mut self.optimizers), &type_names)
+            // Borrowed, never taken: the bindings are this stage's own
+            // configuration and the next run must find them intact.
+            resolve_bindings(&mut self.optimizers, &type_names)
         };
         #[cfg(not(feature = "ff"))]
         let _ = targets;
@@ -241,7 +263,7 @@ impl Solver for GencanSolver {
             );
         }
 
-        SolveOutcome::new(converged, sys.fdist, sys.frest, 0)
+        StageOutcome::new(converged, 0)
     }
 }
 
@@ -254,7 +276,7 @@ mod tests {
     use crate::context::build::{ContextKnobs, build_context};
 
     /// RED-1 (engine-entry-split): the rigid-body path must run behind the
-    /// `Solver` seam — same context plumbing as any other solver, verdict
+    /// `Stage` seam — same context plumbing as any other stage, verdict
     /// from the shared objective, no `Molpack` internals.
     #[test]
     fn gencan_solves_a_small_pack_on_the_seam() {
@@ -270,8 +292,7 @@ mod tests {
             &targets,
         )
         .expect("context builds");
-        let mut sys = built.sys;
-        let mut x = RigidView::fresh(built.ntotmol_free);
+        let mut state = PackState::new(built.sys, built.ntotmol_free);
 
         let cell = SimBox::ortho(
             Array1::from_vec(vec![20.0, 20.0, 20.0]),
@@ -284,7 +305,7 @@ mod tests {
             seed: 7,
             ..Default::default()
         };
-        let mut solver: Box<dyn Solver> = Box::new(GencanSolver::new(
+        let mut stage: Box<dyn Stage> = Box::new(GencanStage::new(
             settings,
             built.maxmove_per_type.clone(),
             Some(cell),
@@ -293,21 +314,143 @@ mod tests {
         ));
 
         let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
-        let outcome = solver.solve(
-            &mut sys,
-            &targets,
-            &mut x,
-            &Budget::new(50, 0.01),
-            &mut handlers,
-        );
+        let outcome = stage.run(&mut state, &targets, &Budget::new(50, 0.01), &mut handlers);
 
-        assert_eq!(solver.name(), "gencan");
+        assert_eq!(stage.name(), "gencan");
         assert!(outcome.converged, "6 dimers in a 20 Å box must converge");
         assert_eq!(outcome.softened, 0, "GENCAN never softens");
         assert!(
-            sys.fdist <= 0.01,
+            state.ctx().fdist <= 0.01,
             "verdict comes from the shared objective: fdist = {}",
-            sys.fdist
+            state.ctx().fdist
+        );
+    }
+
+    /// ac-005 (stage-pipeline-04-stage): a stage may be run more than once on
+    /// an evolving state, and the second run must have the same capabilities
+    /// as the first — it may consume the scratch it builds per run, never its
+    /// own configuration.
+    ///
+    /// **RED for the right reason.** Before this spec, `solve` resolved its
+    /// bindings with `resolve_bindings(std::mem::take(&mut self.optimizers),
+    /// ..)` (`src/gencan/solver.rs:176`), which *moves* the bindings off the
+    /// stage. From the second run on, `self.optimizers` is empty, the `ff`
+    /// optimizer block is silently a no-op, and the counter below stops
+    /// advancing — a degraded result with no name (law § 10). The fix is to
+    /// borrow the bindings rather than take them, after which the second run
+    /// calls the optimizer exactly as the first did.
+    ///
+    /// **Why it lives in the crate.** `build_context` is `pub(crate)`, so an
+    /// integration test in `tests/` cannot build a context and run the same
+    /// stage twice on it; `tests/optimizer.rs` only reaches the entry, which
+    /// runs a stage once. Named with `optimizer` so the acceptance filter
+    /// `cargo test -p molcrafts-molpack --lib --tests --features ff --
+    /// optimizer` selects it.
+    ///
+    /// **Why the fixture is unsatisfiable.** The in-loop optimizer block runs
+    /// only inside the all-type phase's iteration loop
+    /// (`src/gencan/phases.rs:88-91`), and a phase that is already a solution
+    /// short-circuits past that loop. Twelve unit-radius dimers restrained
+    /// into a 4 Å cube cannot be solved, so the loop is entered on both runs.
+    /// The `after_first > 0` assertion guards exactly that: if the fixture
+    /// ever stops reaching the optimizer, this test says so instead of
+    /// certifying nothing.
+    #[cfg(feature = "ff")]
+    #[test]
+    fn optimizer_bindings_survive_a_second_run() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use crate::PackState;
+        use crate::optimizer::OptimizeSelect;
+        use crate::restraint::InsideBoxRestraint;
+
+        /// An optimizer that only counts its calls and leaves the frame
+        /// alone: the conformer is unchanged, so the non-harm gate is a
+        /// no-op and the counter is the single thing this test observes.
+        struct CountingOptimizer {
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl molrs::optimize::Optimizer for CountingOptimizer {
+            fn run(
+                &mut self,
+                _frame: &mut molrs::store::frame::Frame,
+            ) -> Result<molrs::optimize::OptReport, String> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                Ok(molrs::optimize::OptReport {
+                    converged: true,
+                    n_steps: 0,
+                    final_energy: 0.0,
+                    final_fmax: 0.0,
+                })
+            }
+        }
+
+        let coords = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
+        let targets = vec![
+            Target::from_coords(&coords, &[1.0, 1.0], 12)
+                .with_name("dimer")
+                .with_restraint(InsideBoxRestraint::new([0.0; 3], [4.0; 3], [false; 3])),
+        ];
+
+        let built = build_context(
+            &ContextKnobs {
+                tolerance: 2.0,
+                short_tolerance: None,
+                parallel_eval: false,
+            },
+            &targets,
+        )
+        .expect("context builds");
+
+        let cell = SimBox::ortho(
+            Array1::from_vec(vec![20.0, 20.0, 20.0]),
+            Array1::from_vec(vec![0.0, 0.0, 0.0]),
+            [true; 3],
+        )
+        .expect("orthorhombic box");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let settings = GencanSettings {
+            seed: 7,
+            ..Default::default()
+        };
+        let mut stage = GencanStage::new(
+            settings,
+            built.maxmove_per_type.clone(),
+            Some(cell),
+            built.ntype,
+            built.ntype_with_fixed,
+        )
+        .with_optimizers(vec![OptimizerBinding {
+            select: OptimizeSelect::per_copy(["dimer"]),
+            optimizer: Box::new(CountingOptimizer {
+                calls: Arc::clone(&calls),
+            }),
+        }]);
+
+        let mut state = PackState::new(built.sys, built.ntotmol_free);
+        let budget = Budget::new(2, 0.01);
+        let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
+
+        stage.run(&mut state, &targets, &budget, &mut handlers);
+        let after_first = calls.load(Ordering::Relaxed);
+        assert!(
+            after_first > 0,
+            "fixture guard: the first run never reached the in-loop optimizer, \
+             so this test cannot say anything about the second one"
+        );
+
+        stage.run(&mut state, &targets, &budget, &mut handlers);
+        let after_second = calls.load(Ordering::Relaxed);
+
+        assert!(
+            after_second > after_first,
+            "the optimizer counter did not advance during the second run \
+             (after run 1: {after_first}, after run 2: {after_second}) — a \
+             stage that consumes its own optimizer bindings on run 1 \
+             degrades silently on every later run"
         );
     }
 }

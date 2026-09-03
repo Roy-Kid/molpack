@@ -26,6 +26,8 @@ src/
 ├── objective.rs        compute_f / compute_g / compute_fg + Objective impl
 ├── context/            PackContext = single owner of mutable packing state
 │   ├── pack_context.rs
+│   ├── pack_state.rs   PackState — context + Placed + RigidView; evaluate_unscaled
+│   ├── rigid_view.rs   RigidView — the 6·ntotmol COM + Euler placement vector
 │   ├── build.rs        build_context — context + CSR restraint pool from Targets
 │   ├── model.rs        immutable topology + inputs
 │   ├── state.rs        mutable per-iteration state
@@ -33,21 +35,22 @@ src/
 ├── constraints/        EvalMode / EvalOutput facade
 ├── gencan/             rigid-body path: entry + bound-constrained optimizer
 │   ├── entry.rs        GenCanPack — the rigid-body engine entry
-│   ├── solver.rs       GencanSolver — GENCAN on the Solver seam
-│   ├── phases.rs       run_phase / run_iteration / evaluate_unscaled
+│   ├── solver.rs       GencanStage — GENCAN on the Stage seam
+│   ├── phases.rs       run_phase / run_iteration
 │   ├── mod.rs          pgencan / gencan / tn_linesearch
 │   ├── cg.rs           conjugate-gradient inner solve
 │   └── spg.rs          spectral projected gradient fallback
-├── solver.rs           Solver seam — the interface every packing algorithm implements
+├── stage.rs            Stage seam — the interface every packing algorithm implements
 ├── grow/               chain-growth path, peer of the GENCAN path
 │   ├── entry.rs        CbmcGrow — the chain-growth engine entry (honest verdicts)
-│   ├── lattice/        LatticeGrow — diamond-lattice SAW for melt density
-│   │                   (saw.rs walk, decorate.rs template rebuild, config.rs leaf)
+│   ├── lattice/        LatticeStage — diamond-lattice SAW for melt density
+│   │                   (entry.rs LatticeGrow entry, saw.rs walk,
+│   │                   decorate.rs template rebuild, config.rs leaf)
 │   ├── config.rs       GrowConfig / GrowError (leaf — no target/entry imports)
 │   ├── prior.rs        TorsionPrior / AnglePrior + C∞ calibration
 │   ├── internal.rs     template bond graph → internal-coordinate tree
 │   ├── field.rs        OverlapField — cell-listed hard-core / soft-shell probe
-│   ├── driver.rs       GrowthSolver round loop (seeding, retraction, softening)
+│   ├── driver.rs       GrowStage round loop (seeding, retraction, softening)
 │   └── moves.rs        propose / commit / retract / relax primitives
 ├── optimizer/          in-loop conformation optimizers (ff feature)
 ├── initial.rs          initial random placement + restmol pre-fit
@@ -86,12 +89,26 @@ src/
 is the narrow waist through which all per-atom work flows.
 
 The chain-growth path enters at the same level as `gencan`: the entry's
-`run()` builds one `Solver` from the `solver` seam, and `grow/` (the
-`GrowthSolver`) consumes the same `PackContext` and is judged by the
-same objective — it never calls the GENCAN internals. There is no
-mixed-algorithm pack inside one call: staging is explicit in user code —
-run `CbmcGrow`, then hand its output to `GenCanPack` as a fixed obstacle
-via `Target::fixed_from(&result)`.
+`run()` builds one `Stage` from the `stage` seam, and `grow/` (the
+`GrowStage`) consumes the same `PackState` and is judged by the same
+objective — it never calls the GENCAN internals.
+
+A **stage** is one interchangeable packing algorithm behind four methods:
+`name`, `requires`, `guarantees`, and `run`. The middle two declare the
+shape of the state the stage needs on the way in and promises on the way
+out, as a `Placed` marker — `Placed::None` (nothing placed yet) or
+`Placed::All` (every free molecule has a placement). `run` receives a
+`PackState`: the run's `PackContext`, plus that marker, plus the rigid
+placement vector `RigidView` (three centre-of-mass and three Euler values
+per free molecule). What `run` returns, a `StageOutcome`, is only what
+the stage alone knows — whether it met its own convergence criterion, and
+how many times it had to relax a constructive guarantee. The run's
+`fdist` / `frest` verdict is read off the state afterwards, so no
+algorithm grades its own paper.
+
+There is no mixed-algorithm pack inside one call: staging is explicit in
+user code — run `CbmcGrow`, then hand its output to `GenCanPack` as a
+fixed obstacle via `Target::fixed_from(&result)`.
 
 ## Data flow
 

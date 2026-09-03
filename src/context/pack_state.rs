@@ -53,13 +53,7 @@ use crate::numerics::DEFAULT_SCALE2;
 /// molecule been placed yet?", which is what a chain of stages checks before
 /// running the next one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// No production caller inside this spec — the callers are the stage seam
-// (`stage-pipeline-04-stage`, which also makes these types `pub`) and the
-// pipeline that follow in this chain. Until then the crate-private items are
-// reached only from the tests mounted at the bottom of this file. All three
-// `allow(dead_code)` in this file come off in 04.
-#[allow(dead_code)]
-pub(crate) enum Placed {
+pub enum Placed {
     /// Nothing has been placed yet — a freshly wrapped context.
     None,
     /// Every free molecule the context lays out has a placement.
@@ -67,9 +61,7 @@ pub(crate) enum Placed {
 }
 
 /// A [`PackContext`] plus the two pieces of run state a stage chain needs.
-// Dead until `stage-pipeline-04-stage` wires the seam — see `Placed` above.
-#[allow(dead_code)]
-pub(crate) struct PackState {
+pub struct PackState {
     /// The wrapped context — the authority for geometry, radii and restraints.
     ctx: PackContext,
     /// The shape marker; see [`Placed`].
@@ -89,12 +81,10 @@ impl fmt::Debug for PackState {
     }
 }
 
-// Dead until `stage-pipeline-04-stage` wires the seam — see `Placed` above.
-#[allow(dead_code)]
 impl PackState {
     /// Wrap `ctx` into a fresh run state for `nmol` free molecules: a zeroed
     /// [`RigidView`] in the slot and [`Placed::None`] as the marker.
-    pub(crate) fn new(ctx: PackContext, nmol: usize) -> Self {
+    pub fn new(ctx: PackContext, nmol: usize) -> Self {
         Self {
             ctx,
             placed: Placed::None,
@@ -103,39 +93,39 @@ impl PackState {
     }
 
     /// The wrapped context.
-    pub(crate) fn ctx(&self) -> &PackContext {
+    pub fn ctx(&self) -> &PackContext {
         &self.ctx
     }
 
     /// The wrapped context, mutably.
-    pub(crate) fn ctx_mut(&mut self) -> &mut PackContext {
+    pub fn ctx_mut(&mut self) -> &mut PackContext {
         &mut self.ctx
     }
 
     /// The current placement shape marker.
-    pub(crate) fn placed(&self) -> Placed {
+    pub fn placed(&self) -> Placed {
         self.placed
     }
 
     /// Advance the placement shape marker.
-    pub(crate) fn set_placed(&mut self, placed: Placed) {
+    pub fn set_placed(&mut self, placed: Placed) {
         self.placed = placed;
     }
 
     /// The rigid placement vector.
-    pub(crate) fn rigid(&self) -> &RigidView {
+    pub fn rigid(&self) -> &RigidView {
         &self.rigid
     }
 
     /// Context and view as two disjoint mutable borrows, for the many
     /// operations that write placements while reading or updating the
-    /// context (`write_xcart`, `capture_from_xcart`, a solver's inner loop).
-    pub(crate) fn rigid_split_mut(&mut self) -> (&mut PackContext, &mut RigidView) {
+    /// context (`write_xcart`, `capture_from_xcart`, a stage's inner loop).
+    pub fn rigid_split_mut(&mut self) -> (&mut PackContext, &mut RigidView) {
         (&mut self.ctx, &mut self.rigid)
     }
 
     /// Give the two owned parts back, consuming the state.
-    pub(crate) fn into_parts(self) -> (PackContext, RigidView) {
+    pub fn into_parts(self) -> (PackContext, RigidView) {
         (self.ctx, self.rigid)
     }
 
@@ -145,16 +135,17 @@ impl PackState {
     /// implementation: the cache and its invalidation semantics belong to the
     /// context. It sits here because the caller is a stage boundary, which
     /// holds the state and not the bare context.
-    pub(crate) fn invalidate_geometry_cache(&mut self) {
+    pub fn invalidate_geometry_cache(&mut self) {
         self.ctx.invalidate_geometry_cache();
     }
 
     /// Evaluate the shared objective once at unscaled radii.
     ///
-    /// A thin forward to the free [`evaluate_unscaled`] — one body, two
+    /// A thin forward to the free `evaluate_unscaled` below (crate-private,
+    /// so this is code font and not a link) — one body, two
     /// spellings, so a caller holding a `&mut PackContext` and a caller
     /// holding a `&mut PackState` cannot disagree about the verdict.
-    pub(crate) fn evaluate_unscaled(&mut self, x: &[F]) -> (F, F, F) {
+    pub fn evaluate_unscaled(&mut self, x: &[F]) -> (F, F, F) {
         evaluate_unscaled(&mut self.ctx, x)
     }
 }
@@ -164,7 +155,7 @@ impl PackState {
 ///
 /// Returns `(f_total, fdist, frest)` from that evaluation — the triple the
 /// GENCAN main loop feeds to `flast` / `fimp` / handler `StepInfo`, and the
-/// one both growth drivers turn into their `SolveOutcome`. On return
+/// one both growth drivers turn into their `StageOutcome`. On return
 /// `ctx.fdist` / `ctx.frest` / `ctx.fdist_atom` / `ctx.frest_atom` still
 /// describe this unscaled evaluation — that radius-dependent inner state is
 /// what a caller asks for — while `ctx.radius`, `ctx.scale` and `ctx.scale2`
