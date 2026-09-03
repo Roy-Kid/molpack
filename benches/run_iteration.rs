@@ -17,11 +17,11 @@
 use std::time::Duration;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use molpack::gencan::phases::{IterOutcome, run_iteration};
 use molpack::gencan::{GencanParams, GencanWorkspace};
 use molpack::handler::{Handler, PhaseInfo};
 use molpack::initial::SwapState;
 use molpack::movebad::MoveBadConfig;
-use molpack::packer::{IterOutcome, run_iteration};
 use molpack::{F, PackContext};
 
 type Snapshot = (

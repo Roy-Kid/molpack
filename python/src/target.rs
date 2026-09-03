@@ -70,6 +70,14 @@ impl PyTarget {
         }
     }
 
+    /// Override the per-copy total mass (amu) used by
+    /// ``with_density`` when element symbols cannot provide one.
+    fn with_mass(&self, amu: crate::helpers::NpF) -> Self {
+        PyTarget {
+            inner: self.inner.clone().with_mass(amu),
+        }
+    }
+
     /// Attach a restraint to this target — the single unified extension point.
     ///
     /// Accepts:
@@ -220,6 +228,16 @@ impl PyTarget {
     fn with_perturb_budget(&self, budget: usize) -> Self {
         PyTarget {
             inner: self.inner.clone().with_perturb_budget(budget),
+        }
+    }
+
+    /// One fixed obstacle target holding a previous pack's entire output,
+    /// coordinates kept verbatim — the named chaining primitive: grow first,
+    /// then pack the next stage around the frozen matrix.
+    #[staticmethod]
+    fn fixed_from(result: &crate::result::PyPackResult) -> Self {
+        Self {
+            inner: molpack::Target::fixed_from(&result.inner),
         }
     }
 

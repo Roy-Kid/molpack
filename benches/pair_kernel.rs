@@ -49,7 +49,7 @@ fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F
     sys.radius_ini.fill(1.0);
     sys.fscale.fill(1.0);
 
-    // Per-atom molecule/type tags (same layout as `Molpack::pack` writes).
+    // Per-atom molecule/type tags (same layout as a pack run writes).
     for imol in 0..n_mols {
         for iatom in 0..atoms_per_mol {
             let icart = imol * atoms_per_mol + iatom;

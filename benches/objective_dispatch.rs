@@ -1,6 +1,6 @@
 //! Regression microbench for `Objective::evaluate` dispatch cost.
 //!
-//! `Molpack::pack` drives a `&mut dyn Objective` through GENCAN; every
+//! A pack run drives a `&mut dyn Objective` through GENCAN; every
 //! `sys.evaluate(...)` call site pays one vtable indirection. This bench
 //! isolates that dispatch cost: the same trivial evaluation through the
 //! inherent `PackContext::evaluate` impl (`via_inherent`) versus through a

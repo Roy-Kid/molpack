@@ -4,6 +4,9 @@
 
 use molrs::types::F;
 pub mod cg;
+pub mod entry;
+pub mod phases;
+pub mod solver;
 pub mod spg;
 
 use crate::constraints::EvalMode;

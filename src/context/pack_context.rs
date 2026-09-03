@@ -271,7 +271,7 @@ pub struct PackContext {
     pub move_flag: bool,
     /// Run the pair-kernel reductions (`accumulate_pair_f`,
     /// `accumulate_pair_fg`) on rayon. Off by default — parallelism is
-    /// an explicit opt-in via [`Molpack::with_parallel_eval`](crate::Molpack::with_parallel_eval) because the
+    /// an explicit opt-in via [`PackEngine::with_parallel_eval`](crate::PackEngine::with_parallel_eval) because the
     /// crossover is workload-shaped and can't be inferred reliably from
     /// `active_cells.len()`. The flag is stored regardless of the
     /// `rayon` feature so the `Molpack` API stays the same; when the

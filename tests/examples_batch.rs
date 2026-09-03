@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use molpack::{
-    ExampleCase, Molpack, XYZHandler, build_targets, example_dir_from_manifest,
+    ExampleCase, GenCanPack, PackEngine, XYZHandler, build_targets, example_dir_from_manifest,
     validate_from_targets,
 };
 
@@ -22,12 +22,12 @@ fn run_case(case: ExampleCase) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&out_root)?;
     let out_path = out_root.join(case.output_xyz());
 
-    let mut packer = Molpack::new()
+    let pack_result = GenCanPack::new()
         .with_tolerance(2.0)
         .with_precision(1e-2)
-        .with_handler(XYZHandler::new(&out_path, 10))
-        .with_seed(case.seed());
-    let pack_result = packer.pack_with_report(&targets, case.max_loops())?;
+        .with_handler(Box::new(XYZHandler::new(&out_path, 10)))
+        .with_seed(case.seed())
+        .run(&targets, case.max_loops())?;
     let coords = &pack_result.positions();
     let report = validate_from_targets(&targets, coords, 2.0, 1e-2);
 

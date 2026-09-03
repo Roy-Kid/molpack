@@ -11,7 +11,7 @@ reference output.
 
 ```python
 import molrs
-from molpack import InsideBoxRestraint, Molpack, Target
+from molpack import GenCanPack, InsideBoxRestraint, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
@@ -21,9 +21,9 @@ water = (
     .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
-packer = Molpack().with_tolerance(2.0).with_seed(42)
-frame = packer.pack([water], max_loops=200)
-print(f"packed {frame['atoms'].nrows} atoms")
+packer = GenCanPack().with_tolerance(2.0).with_seed(42)
+result = packer.run([water], max_loops=200)
+print(f"packed {result.frame['atoms'].nrows} atoms")
 ```
 
 ## Next steps
@@ -48,6 +48,10 @@ print(f"packed {frame['atoms'].nrows} atoms")
   <a href="guide/packer/">
     <strong>Packer</strong>
     <em>Builder options, diagnostics, handlers.</em>
+  </a>
+  <a href="guide/growth/">
+    <strong>Chain growth</strong>
+    <em>Dense polymer melts via the CbmcGrow entry.</em>
   </a>
   <a href="guide/periodic-boundaries/">
     <strong>Periodic boundaries</strong>

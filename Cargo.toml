@@ -113,6 +113,11 @@ bench = false
 # Example programs all read PDB files via molrs-io directly, so they need
 # the `io` feature on. Run with `cargo run --example <name> --features io`.
 [[example]]
+name = "pack_peo"
+path = "examples/pack_peo/main.rs"
+required-features = ["io"]
+
+[[example]]
 name = "pack_mixture"
 path = "examples/pack_mixture/main.rs"
 required-features = ["io"]

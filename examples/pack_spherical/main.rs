@@ -46,8 +46,8 @@
 use std::path::PathBuf;
 
 use molpack::{
-    InsideBoxRestraint, InsideSphereRestraint, Molpack, OutsideSphereRestraint, ProgressHandler,
-    Target,
+    GenCanPack, InsideBoxRestraint, InsideSphereRestraint, OutsideSphereRestraint, PackEngine,
+    ProgressHandler, Target,
 };
 use molrs::io::data::pdb::read_pdb_frame;
 
@@ -95,15 +95,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Target order matches Packmol: water_inner → lipid_inner → lipid_outer → water_outer
     let targets = vec![water_inner, lipid_inner, lipid_outer, water_outer];
-    let mut packer = Molpack::new();
+    let mut packer = GenCanPack::new();
     if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.with_handler(ProgressHandler::new());
+        packer = packer.with_handler(Box::new(ProgressHandler::new()));
     }
 
     // Match spherical-comment.inp defaults:
     // - nloop defaults to 200 * ntype (ntype = 4 => 800)
     // - seed defaults to 1234567
-    packer.pack(&targets, 800)?;
+    packer.run(&targets, 800)?;
 
     Ok(())
 }

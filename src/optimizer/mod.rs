@@ -2,7 +2,7 @@
 //!
 //! Callers construct a molrs optimizer (e.g. `LBFGS`, `SoftSpec::into_optimizer`,
 //! or molpack's [`TorsionMcOptimizer`]) and bind it with
-//! [`Molpack::with_optimizer`](crate::Molpack::with_optimizer) plus an
+//! [`GenCanPack::with_optimizer`](crate::GenCanPack::with_optimizer) plus an
 //! [`OptimizeSelect`] that names which components to assemble each call.
 
 #![cfg(feature = "ff")]
@@ -70,7 +70,7 @@ impl OptimizeSelect {
     }
 }
 
-/// One bound optimizer + selection, stored on [`crate::Molpack`].
+/// One bound optimizer + selection, stored on [`crate::GenCanPack`].
 pub struct OptimizerBinding {
     pub select: OptimizeSelect,
     pub optimizer: Box<dyn Optimizer>,
@@ -79,8 +79,8 @@ pub struct OptimizerBinding {
 /// Resolved type indices for a binding (matched by target name at pack start).
 ///
 /// Public because it appears in the signatures of the public
-/// [`run_iteration`](crate::packer::run_iteration) /
-/// [`run_phase`](crate::packer::run_phase) entry points that the benches drive.
+/// [`run_iteration`](crate::gencan::phases::run_iteration) /
+/// [`run_phase`](crate::gencan::phases::run_phase) entry points that the benches drive.
 /// Built by [`resolve_bindings`] at pack start — not constructed by callers.
 pub struct ResolvedBinding {
     pub select: OptimizeSelect,

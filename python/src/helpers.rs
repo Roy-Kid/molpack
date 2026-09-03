@@ -77,6 +77,13 @@ pub fn pack_error_to_pyerr(e: molpack::PackError) -> PyErr {
         molpack::PackError::ShortRadiusNotShorter { .. } => {
             pyo3::exceptions::PyValueError::new_err(msg)
         }
+        // Growth and density declarations are input contracts: a target that
+        // cannot be grown, a density fighting an explicit box, or a mass the
+        // elements cannot resolve are all bad input values.
+        molpack::PackError::Grow { .. }
+        | molpack::PackError::DensityConflictsWithBox
+        | molpack::PackError::SeedMismatch { .. }
+        | molpack::PackError::UnknownMass { .. } => pyo3::exceptions::PyValueError::new_err(msg),
     }
 }
 

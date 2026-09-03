@@ -8,10 +8,10 @@ between optimizer iterations.
 Enable LAMMPS-style progress output through the builder:
 
 ```rust
-use molpack::{Molpack, MolpackLogLevel};
+use molpack::{GenCanPack, LogLevel, PackEngine};
 
-let mut packer = Molpack::new()
-    .with_log_level(MolpackLogLevel::Progress)
+let engine = GenCanPack::new()
+    .with_log_level(LogLevel::Progress)
     .with_log_frequency(10);
 ```
 
@@ -21,16 +21,17 @@ opt in.
 ## Built-in handlers
 
 ```rust
-use molpack::{EarlyStopHandler, Molpack, XYZHandler};
+use molpack::{EarlyStopHandler, GenCanPack, PackEngine, XYZHandler};
 
-let mut packer = Molpack::new()
-    .with_handler(XYZHandler::new("traj.xyz", 10))
-    .with_handler(EarlyStopHandler::new(1e-4));
+let engine = GenCanPack::new()
+    .with_handler(Box::new(XYZHandler::new("traj.xyz", 10)))
+    .with_handler(Box::new(EarlyStopHandler::new(1e-4)));
 ```
 
+`with_handler` is a `PackEngine` builder, so it works the same on `CbmcGrow`.
 Use handlers for progress logs, trajectory snapshots, custom observation, and
 early stop. Handler callbacks receive an immutable `PackContext` view; they do
-not mutate packer state.
+not mutate engine state.
 
 ## Custom handlers
 

@@ -4,7 +4,7 @@
 //! float-summation reordering regression inside the rayon reduce +
 //! parallel merge.
 //!
-//! Parallelism is user-opt-in via `Molpack::parallel_pair_eval(bool)`
+//! Parallelism is user-opt-in via `with_parallel_eval(bool)`
 //! → `PackContext::parallel_pair_eval`. These tests flip the flag
 //! explicitly so the parallel code path is actually exercised instead
 //! of relying on a size heuristic.
@@ -158,14 +158,14 @@ fn compute_fg_small_system_parallel_matches_serial() {
     }
 }
 
-// ── pack-level parity: full Molpack::pack run, serial vs parallel ──────────
+// ── pack-level parity: full GenCanPack run, serial vs parallel ──────────
 
 /// The kernel-level tests above lock in `compute_fg` parity, but the
 /// *full* pack driver layers gencan, relaxer, movebad, RNG sampling, and
 /// handler IO on top. A subtle drift inside any of those that depends
 /// on the parallel branch (e.g. an evaluation-order dependency in the
 /// movebad heuristic) would not surface in `compute_fg` alone. This
-/// test exercises a complete `Molpack::pack` run twice — same seed,
+/// test exercises a complete `GenCanPack` run twice — same seed,
 /// same targets — once serial and once with `parallel_pair_eval(true)`,
 /// and asserts that the final atom coordinates agree to within
 /// `1e-10`. Bit-exactness across rayon merge order is not guaranteed,
@@ -175,7 +175,7 @@ fn compute_fg_small_system_parallel_matches_serial() {
 /// fast enough to live in the default tier (< 200 ms).
 #[test]
 fn pack_seed_parity_serial_vs_parallel() {
-    use molpack::{InsideBoxRestraint, Molpack, Target};
+    use molpack::{GenCanPack, InsideBoxRestraint, PackEngine, Target};
 
     fn build_target() -> Target {
         let positions = vec![[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
@@ -190,16 +190,16 @@ fn pack_seed_parity_serial_vs_parallel() {
     const SEED: u64 = 0xA11CE;
     const MAX_LOOPS: usize = 5;
 
-    let serial = Molpack::new()
+    let serial = GenCanPack::new()
         .with_seed(SEED)
         .with_parallel_eval(false)
-        .pack_with_report(&[build_target()], MAX_LOOPS)
+        .run(&[build_target()], MAX_LOOPS)
         .expect("serial pack failed");
 
-    let parallel = Molpack::new()
+    let parallel = GenCanPack::new()
         .with_seed(SEED)
         .with_parallel_eval(true)
-        .pack_with_report(&[build_target()], MAX_LOOPS)
+        .run(&[build_target()], MAX_LOOPS)
         .expect("parallel pack failed");
 
     assert_eq!(

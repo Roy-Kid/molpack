@@ -83,7 +83,7 @@ molecule templates, copy counts, geometric restraints, then one packing run.
   <a href="rust/">
     <span>05</span>
     <strong>Rust API</strong>
-    <em>Native Target and Molpack builders inside your crate.</em>
+    <em>Native Target and PackEngine builders inside your crate.</em>
   </a>
   <a href="rust/handlers-relaxers/">
     <span>06</span>
@@ -140,7 +140,7 @@ the writer or analysis code you already use. See the [Python API](python/).
 water = Target(frame, 100).with_restraint(
     InsideBoxRestraint([0, 0, 0], [40, 40, 40])
 )
-packed = Molpack().with_seed(42).pack([water])
+packed = GenCanPack().with_seed(42).run([water], max_loops=200).frame
 ```
 
 </article>
@@ -155,9 +155,9 @@ Use the native builder API for applications, services, and tests. See the
 [Rust API](rust/).
 
 ```rust
-let frame = Molpack::new()
+let result = GenCanPack::new()
     .with_seed(42)
-    .pack(&[water], 200)?;
+    .run(&[water], 200)?;
 ```
 
 </article>

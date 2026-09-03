@@ -19,11 +19,19 @@ class Handler(Protocol):
     All methods are optional. Missing ones are silently skipped by the
     native extension. Returning ``True`` from :meth:`on_step` requests
     early termination.
+
+    ``ctx`` mirrors the Rust trait's ``sys`` argument: a
+    :class:`StepContext` borrow guard valid only inside the callback
+    (touching it later raises ``RuntimeError``). Its ``positions``
+    property copies the live coordinates into an owned ``(ntotat, 3)``
+    float64 NumPy array on access — handlers that never touch it pay
+    nothing. Atoms the growth solver has not placed yet sit at their
+    sentinel positions.
     """
 
     def on_start(self, ntotat: int, ntotmol: int) -> None: ...
 
-    def on_step(self, info: StepInfo) -> bool | None: ...
+    def on_step(self, info: StepInfo, ctx) -> bool | None: ...
 
     def on_finish(self) -> None: ...
 

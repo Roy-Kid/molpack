@@ -1,7 +1,7 @@
 //! Tests for Target builder: construction, natoms/count, fixed_at,
 //! centering modes, restraint attachment, and hook validation.
 
-use molpack::{F, InsideBoxRestraint, InsideSphereRestraint, Molpack, Target};
+use molpack::{F, GenCanPack, InsideBoxRestraint, InsideSphereRestraint, PackEngine, Target};
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -160,9 +160,9 @@ fn fixed_target_auto_centering_disabled() {
     let fixed = Target::from_coords(&[[10.0, 0.0, 0.0], [12.0, 0.0, 0.0]], &[1.0, 1.0], 1)
         .fixed_at([0.0, 0.0, 0.0]);
 
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_seed(1)
-        .pack_with_report(&[free, fixed], 5)
+        .run(&[free, fixed], 5)
         .expect("pack should succeed");
 
     // Fixed atoms follow free atoms in output.
@@ -179,9 +179,9 @@ fn fixed_target_centered() {
         .with_centering(molpack::CenteringMode::Center)
         .fixed_at([0.0, 0.0, 0.0]);
 
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_seed(1)
-        .pack_with_report(&[free, fixed], 5)
+        .run(&[free, fixed], 5)
         .expect("pack should succeed");
 
     // COM of [10,12] = 11. After centering, ref_coords = [-1, +1].

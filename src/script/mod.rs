@@ -1,5 +1,5 @@
 //! Script loader: parse molpack's `.inp` input format and turn it into
-//! a configured [`Molpack`](crate::Molpack) plus a list of
+//! a configured [`GenCanPack`](crate::GenCanPack) plus a list of
 //! [`Target`](crate::Target)s.
 //!
 //! Two front-end shapes are supported:

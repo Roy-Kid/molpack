@@ -105,11 +105,11 @@ lipid = (
 ## Global restraints
 
 To apply one restraint to every target in a pack, attach it on the
-packer:
+engine entry:
 
 ```python
 packer = (
-    Molpack()
+    GenCanPack()
     .with_global_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
 )
 ```

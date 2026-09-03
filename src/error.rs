@@ -35,6 +35,24 @@ pub enum PackError {
         first: ([F; 3], [F; 3], [bool; 3]),
         second: ([F; 3], [F; 3], [bool; 3]),
     },
+    /// A target was handed to a growth entry (`CbmcGrow`) but cannot be
+    /// grown. Growth consumes the template's bond graph; molpack neither
+    /// guesses missing chemistry nor silently falls back to rigid-body
+    /// packing.
+    Grow {
+        target: usize,
+        source: crate::grow::GrowError,
+    },
+    /// `with_density` combined with an explicit box or cell — the two are
+    /// competing definitions of the same volume.
+    DensityConflictsWithBox,
+    /// A seeded run's free targets do not match the seed's placement shape
+    /// (`GenCanPack::seeded_from` — total free atoms expected vs carried).
+    SeedMismatch { expected: usize, got: usize },
+    /// `with_density` needs every target's mass, and this target's elements
+    /// cannot provide one (nor did `Target::with_mass`). Named error, not a
+    /// guess.
+    UnknownMass { target: usize },
 }
 
 impl fmt::Display for PackError {
@@ -75,6 +93,25 @@ impl fmt::Display for PackError {
                 f,
                 "Conflicting periodic boxes declared by restraints: {first:?} vs {second:?}. \
                  At most one periodic InsideBoxRestraint is allowed per packing run."
+            ),
+            PackError::Grow { target, source } => {
+                write!(f, "target {target} cannot be grown: {source}")
+            }
+            PackError::DensityConflictsWithBox => write!(
+                f,
+                "with_density and an explicit box/cell are mutually exclusive: \
+                 declare one definition of the volume, not two"
+            ),
+            PackError::UnknownMass { target } => write!(
+                f,
+                "with_density needs target {target}'s mass, but its elements do not \
+                 resolve one — set Target::with_mass(amu) for element-less species"
+            ),
+            PackError::SeedMismatch { expected, got } => write!(
+                f,
+                "seeded run: the free targets declare {expected} atoms but the seed \
+                 carries {got} — a seeded GenCanPack must receive the same free \
+                 targets the seed result was packed from"
             ),
         }
     }

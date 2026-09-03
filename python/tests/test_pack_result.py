@@ -18,17 +18,14 @@ def _make_frame(
     positions: np.ndarray,
     elements: list[str],
 ) -> molrs.Frame:
-    return molrs.Frame.from_dict(
+    return molrs.Frame(
         {
-            "blocks": {
-                "atoms": {
-                    "x": positions[:, 0].copy(),
-                    "y": positions[:, 1].copy(),
-                    "z": positions[:, 2].copy(),
-                    "element": elements,
-                }
-            },
-            "meta": {},
+            "atoms": {
+                "x": positions[:, 0].copy(),
+                "y": positions[:, 1].copy(),
+                "z": positions[:, 2].copy(),
+                "element": elements,
+            }
         }
     )
 
@@ -39,8 +36,8 @@ def _make_tiny_pack() -> molpack.PackResult:
     target = molpack.Target(frame, 3).with_restraint(
         molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
     )
-    packer = molpack.Molpack().with_tolerance(2.0).with_progress(False).with_seed(42)
-    return packer.pack_with_report([target], max_loops=50)
+    packer = molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
+    return packer.run([target], max_loops=50)
 
 
 class TestPackResultProperties:
@@ -91,21 +88,18 @@ class TestFrameTopology:
 
     @staticmethod
     def _diatomic_with_bond() -> molrs.Frame:
-        return molrs.Frame.from_dict(
+        return molrs.Frame(
             {
-                "blocks": {
-                    "atoms": {
-                        "type": np.array(["A", "B"]),
-                        "charge": np.array([0.1, -0.1]),
-                        "mass": np.array([12.0, 1.0]),
-                        "element": np.array(["C", "H"]),
-                        "x": np.array([0.0, 1.0]),
-                        "y": np.array([0.0, 0.0]),
-                        "z": np.array([0.0, 0.0]),
-                    },
-                    "bonds": {"atomi": np.array([0]), "atomj": np.array([1])},
+                "atoms": {
+                    "type": np.array(["A", "B"]),
+                    "charge": np.array([0.1, -0.1]),
+                    "mass": np.array([12.0, 1.0]),
+                    "element": np.array(["C", "H"]),
+                    "x": np.array([0.0, 1.0]),
+                    "y": np.array([0.0, 0.0]),
+                    "z": np.array([0.0, 0.0]),
                 },
-                "meta": {},
+                "bonds": {"atomi": np.array([0]), "atomj": np.array([1])},
             }
         )
 
@@ -113,10 +107,12 @@ class TestFrameTopology:
         target = molpack.Target(self._diatomic_with_bond(), copies).with_restraint(
             molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
         )
-        packer = molpack.Molpack().with_tolerance(2.0).with_progress(False).with_seed(7)
+        packer = (
+            molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(7)
+        )
         if box:
             packer = packer.with_periodic_box([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
-        return packer.pack_with_report([target], max_loops=50)
+        return packer.run([target], max_loops=50)
 
     def test_frame_carries_replicated_topology(self):
         result = self._pack(3)
@@ -154,27 +150,34 @@ class TestFrameTopology:
     def test_no_box_when_not_declared(self):
         assert self._pack(3).frame.box is None
 
+    def test_frame_getter_returns_same_object(self):
+        result = self._pack(3)
+        assert result.frame is result.frame
 
-class TestMolpackErrorPaths:
+    def test_assigned_box_persists_on_frame(self):
+        result = self._pack(3)
+        result.frame.box = molrs.Box.cube(20.0)
+        assert result.frame.box is not None
+        assert np.allclose(np.asarray(result.frame.box.lengths), [20.0, 20.0, 20.0])
+
+
+class TestEngineErrorPaths:
     def test_empty_targets_list_raises(self):
-        packer = molpack.Molpack().with_progress(False).with_seed(1)
+        packer = molpack.GenCanPack().with_progress(False).with_seed(1)
         with pytest.raises(molpack.NoTargetsError):
-            packer.pack_with_report([], max_loops=10)
+            packer.run([], max_loops=10)
 
     def test_invalid_pbc_raises_typed_error(self):
         # Zero-length axis on a periodic box is rejected at pack().
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
-        frame = molrs.Frame.from_dict(
+        frame = molrs.Frame(
             {
-                "blocks": {
-                    "atoms": {
-                        "x": positions[:, 0],
-                        "y": positions[:, 1],
-                        "z": positions[:, 2],
-                        "element": ["X"],
-                    }
-                },
-                "meta": {},
+                "atoms": {
+                    "x": positions[:, 0],
+                    "y": positions[:, 1],
+                    "z": positions[:, 2],
+                    "element": ["X"],
+                }
             }
         )
         target = molpack.Target(frame, 1).with_restraint(
@@ -182,9 +185,9 @@ class TestMolpackErrorPaths:
                 [0.0, 0.0, 0.0], [0.0, 10.0, 10.0], periodic=(True, True, True)
             )
         )
-        packer = molpack.Molpack().with_progress(False).with_seed(1)
+        packer = molpack.GenCanPack().with_progress(False).with_seed(1)
         with pytest.raises(molpack.InvalidPBCBoxError):
-            packer.pack_with_report([target], max_loops=10)
+            packer.run([target], max_loops=10)
 
     def test_pack_error_is_runtime_error_subclass(self):
         assert issubclass(molpack.NoTargetsError, molpack.PackError)
@@ -194,17 +197,14 @@ class TestMolpackErrorPaths:
 class TestMultipleRestraints:
     def test_stacked_restraints(self):
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
-        frame = molrs.Frame.from_dict(
+        frame = molrs.Frame(
             {
-                "blocks": {
-                    "atoms": {
-                        "x": positions[:, 0],
-                        "y": positions[:, 1],
-                        "z": positions[:, 2],
-                        "element": ["X"],
-                    }
-                },
-                "meta": {},
+                "atoms": {
+                    "x": positions[:, 0],
+                    "y": positions[:, 1],
+                    "z": positions[:, 2],
+                    "element": ["X"],
+                }
             }
         )
         target = (
@@ -215,8 +215,8 @@ class TestMultipleRestraints:
             .with_restraint(molpack.OutsideSphereRestraint([10.0, 10.0, 10.0], 2.0))
         )
         packer = (
-            molpack.Molpack().with_tolerance(2.0).with_progress(False).with_seed(42)
+            molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
         )
-        result = packer.pack_with_report([target], max_loops=100)
+        result = packer.run([target], max_loops=100)
 
         assert result.positions.shape == (3, 3)

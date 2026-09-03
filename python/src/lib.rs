@@ -5,9 +5,11 @@
 //! | Python class     | Rust wrapper         | Purpose                            |
 //! |------------------|----------------------|------------------------------------|
 //! | `Target`         | [`PyTarget`]         | Molecule specification for packing |
-//! | `Molpack`        | [`PyPacker`]         | Molecular packer (Packmol port)    |
-//! | `PackResult`     | [`PyPackResult`]     | Diagnostics from `pack_with_report` |
+//! | `GenCanPack`     | [`PyGenCanPack`]     | Rigid-body GENCAN packing entry    |
+//! | `CbmcGrow`       | [`PyCbmcGrow`]       | Chain-growth entry                 |
+//! | `PackResult`     | [`PyPackResult`]     | Frame + diagnostics from `run()`   |
 //! | `StepInfo`       | [`PyStepInfo`]       | Read-only snapshot for handlers    |
+//! | `StepContext`    | [`PyStepContext`]    | Callback-scoped live-context guard |
 //! | `InsideBox`      | [`PyInsideBox`]      | Box restraint                      |
 //! | `InsideSphere`   | [`PyInsideSphere`]   | Sphere restraint (inside)          |
 //! | `OutsideSphere`  | [`PyOutsideSphere`]  | Sphere restraint (outside)         |
@@ -18,9 +20,8 @@
 //! callable `f(x, scale, scale2)` and `fg(x, scale, scale2)` methods to
 //! `Target.with_restraint` — no dedicated class needed.
 //!
-//! Custom Python progress handlers are registered via
-//! `Molpack.add_handler(obj)`; see the [`handler`] module for the
-//! method contract.
+//! Custom Python progress handlers are registered via the entries'
+//! `with_handler(obj)`; see the [`handler`] module for the method contract.
 
 use pyo3::prelude::*;
 
@@ -40,13 +41,17 @@ use constraint::{
 };
 
 mod handler;
-use handler::PyStepInfo;
+use handler::{PyStepContext, PyStepInfo};
+
+mod grow;
 
 mod target;
 use target::PyTarget;
 
-mod packer;
-use packer::{PyPackResult, PyPacker};
+mod entry;
+use entry::{PyCbmcGrow, PyGenCanPack, PyLatticeGrow};
+mod result;
+use result::PyPackResult;
 
 mod parallel;
 use parallel::{init_thread_pool, num_threads, rayon_enabled};
@@ -78,10 +83,16 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTabulatedPlane>()?;
     m.add_class::<PyTabulatedPoint>()?;
 
+    m.add_class::<grow::PyTorsionPrior>()?;
+    m.add_class::<grow::PyAnglePrior>()?;
+
     m.add_class::<PyTarget>()?;
-    m.add_class::<PyPacker>()?;
+    m.add_class::<PyGenCanPack>()?;
+    m.add_class::<PyCbmcGrow>()?;
+    m.add_class::<PyLatticeGrow>()?;
     m.add_class::<PyPackResult>()?;
     m.add_class::<PyStepInfo>()?;
+    m.add_class::<PyStepContext>()?;
 
     m.add_class::<PyScriptJob>()?;
     m.add_function(wrap_pyfunction!(load_script, m)?)?;

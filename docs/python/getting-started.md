@@ -13,22 +13,19 @@ import molrs
 frame = molrs.io.read_pdb("water.pdb")
 ```
 
-No PDB file? Build a `molrs.Frame` from arrays with `Frame.from_dict`:
+No PDB file? Build a `molrs.Frame` from arrays:
 
 ```python
 import molrs
 import numpy as np
 
-frame = molrs.Frame.from_dict({
-    "blocks": {
-        "atoms": {
-            "x": np.array([0.00,  0.96, -0.24]),
-            "y": np.array([0.00,  0.00,  0.93]),
-            "z": np.zeros(3),
-            "element": ["O", "H", "H"],
-        }
-    },
-    "meta": {},
+frame = molrs.Frame({
+    "atoms": {
+        "x": np.array([0.00,  0.96, -0.24]),
+        "y": np.array([0.00,  0.00,  0.93]),
+        "z": np.zeros(3),
+        "element": ["O", "H", "H"],
+    }
 })
 ```
 
@@ -76,18 +73,21 @@ repeated `.with_restraint()` calls — see
 ## 4. Pack
 
 ```python
-from molpack import Molpack
+from molpack import GenCanPack
 
-packer = Molpack().with_tolerance(2.0).with_seed(42)
-frame = packer.pack([water], max_loops=200)
+packer = GenCanPack().with_tolerance(2.0).with_seed(42)
+result = packer.run([water], max_loops=200)
+frame = result.frame
 
 print(frame["atoms"].nrows)
 ```
 
-`pack()` returns a ready-to-use `molrs.Frame`. If you need structured
-diagnostics, call `pack_with_report()` instead; it returns a
-`PackResult` with `.converged`, `.fdist`, `.frest`, `.positions`, and
-`.frame`.
+`GenCanPack` is the rigid-body entry — you choose the packing algorithm
+by choosing the entry, and `CbmcGrow` is the chain-growth one. Both have
+the same builders and the same terminal verb, `run()`, which returns a
+`PackResult` with `.frame`, `.converged`, `.fdist`, `.frest`,
+`.positions`, and `.softened`. An entry runs once: build a new one for
+each pack.
 
 ## 5. Save
 
@@ -100,14 +100,14 @@ import molrs
 molrs.io.write_xyz("packed.xyz", frame)
 ```
 
-Or use `pack_with_report()` and write `result.frame` if you also need
-the diagnostic fields.
+`result.frame` is the same object — keep the `PackResult` around when
+you also need the diagnostic fields.
 
 ## Full script
 
 ```python
 import molrs
-from molpack import InsideBoxRestraint, Molpack, Target
+from molpack import GenCanPack, InsideBoxRestraint, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
@@ -117,11 +117,11 @@ water = (
     .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
-frame = (
-    Molpack().with_tolerance(2.0).with_seed(42).pack([water], max_loops=200)
+result = (
+    GenCanPack().with_tolerance(2.0).with_seed(42).run([water], max_loops=200)
 )
 
-print(f"packed {frame['atoms'].nrows} atoms")
+print(f"packed {result.frame['atoms'].nrows} atoms")
 ```
 
 ## Next steps

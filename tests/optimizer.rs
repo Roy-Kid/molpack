@@ -3,7 +3,7 @@
 #![cfg(feature = "ff")]
 
 use molpack::{
-    F, InsideBoxRestraint, Molpack, OptimizeSelect, Target, TorsionMcOptimizer,
+    F, GenCanPack, InsideBoxRestraint, OptimizeSelect, PackEngine, Target, TorsionMcOptimizer,
     validate_from_targets,
 };
 use molrs::store::block::Block;
@@ -127,11 +127,11 @@ fn torsion_mc_optimizer_packs() {
         .with_self_avoidance(1.0);
 
     let targets = [chains, filler];
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_tolerance(2.0)
         .with_seed(3)
         .with_optimizer(OptimizeSelect::per_copy(["chain"]), opt)
-        .pack_with_report(&targets, 30)
+        .run(&targets, 30)
         .expect("pack");
 
     let report = validate_from_targets(&targets, &result.positions(), 2.0, 1e-2);
@@ -181,7 +181,7 @@ fn soft_spec_per_copy_with_environment() {
         .with_repulsion(8.0)
         .into_optimizer(0.05, 40, 0.2, 8);
 
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_tolerance(2.0)
         .with_seed(5)
         .with_periodic_box([0.0; 3], [18.0; 3], [true; 3])
@@ -189,7 +189,7 @@ fn soft_spec_per_copy_with_environment() {
             OptimizeSelect::per_copy(["water"]).with_environment(5.0),
             soft_opt,
         )
-        .pack_with_report(&[target, filler], 40)
+        .run(&[target, filler], 40)
         .expect("pack");
 
     assert_eq!(result.natoms(), 16 + 90);
@@ -220,11 +220,11 @@ fn per_copy_handles_multiple_copies() {
         .with_steps(5)
         .with_self_avoidance(1.0);
 
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_tolerance(2.0)
         .with_seed(7)
         .with_optimizer(OptimizeSelect::per_copy(["chain"]), opt)
-        .pack_with_report(&[chains, filler], 20)
+        .run(&[chains, filler], 20)
         .expect("pack");
 
     assert_eq!(result.natoms(), copies * n + 40);
@@ -252,11 +252,11 @@ fn per_copy_yields_distinct_conformations() {
         .with_self_avoidance(1.0)
         .with_temperature(1.0);
 
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_tolerance(2.0)
         .with_seed(11)
         .with_optimizer(OptimizeSelect::per_copy(["chain"]), opt)
-        .pack_with_report(&[chains, filler], 30)
+        .run(&[chains, filler], 30)
         .expect("pack");
 
     let pos = result.positions();
@@ -372,11 +372,11 @@ fn non_harm_gate_rejects_a_harmful_conformer() {
         .with_name("filler")
         .with_restraint(cell);
 
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_tolerance(2.0)
         .with_seed(17)
         .with_optimizer(OptimizeSelect::per_copy(["chain"]), Exploder)
-        .pack_with_report(&[chains, filler], 20)
+        .run(&[chains, filler], 20)
         .expect("pack");
 
     // Bond lengths survive: a 5× inflation would show up immediately.

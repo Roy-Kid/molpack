@@ -3,7 +3,10 @@
 Five canonical Packmol-equivalent workloads ship in `examples/`. Each
 exercises a different combination of restraints, fixed placements, and
 target counts, and all five are covered by the regression suite
-(`tests/examples_batch.rs`).
+(`tests/examples_batch.rs`). A sixth program, `examples/pack_peo`, is a
+measurement harness rather than a Packmol workload: it evaluates the
+chain-growth solver against the rigid-body path on a PEO melt
+(`cargo run --release --example pack_peo --features io -- grow 200 25 1.0 42`).
 
 | Workload | Rust example | Python example | Molecules | Restraints | Demonstrates |
 |---|---|---|---|---|---|

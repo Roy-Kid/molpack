@@ -2,7 +2,7 @@
 
 Restraints are soft penalties that guide atoms into allowed regions. They can
 be attached to a target, to a subset of atoms on each target copy, or globally
-on the packer.
+on the engine entry.
 
 ## Whole-target restraints
 
@@ -41,15 +41,14 @@ subtract 1 from each atom index.
 
 ## Global restraints
 
-Attach a restraint to every target through the packer:
+Attach a restraint to every target through the engine entry:
 
 ```rust
-use molpack::{InsideSphereRestraint, Molpack, Target};
+use molpack::{GenCanPack, InsideSphereRestraint, PackEngine, Target};
 
-let mut packer = Molpack::new()
-    .with_global_restraint(InsideSphereRestraint::new([20.0, 20.0, 20.0], 30.0));
-
-let frame = packer.pack(&[a, b], 200)?;
+let result = GenCanPack::new()
+    .with_global_restraint(InsideSphereRestraint::new([20.0, 20.0, 20.0], 30.0))
+    .run(&[a, b], 200)?;
 ```
 
 This is equivalent to cloning the same restraint onto every target before
@@ -59,12 +58,12 @@ packing.
 
 There are two ways to declare periodic boundary conditions.
 
-For fully periodic boxes, set PBC on the packer:
+For fully periodic boxes, set PBC on the engine entry:
 
 ```rust
-use molpack::Molpack;
+use molpack::{GenCanPack, PackEngine};
 
-let packer = Molpack::new().with_periodic_box([0.0; 3], [30.0; 3]);
+let engine = GenCanPack::new().with_periodic_box([0.0; 3], [30.0; 3], [true; 3]);
 ```
 
 For per-axis control, set periodic flags on `InsideBoxRestraint`:

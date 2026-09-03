@@ -54,7 +54,7 @@ out.
 
 ```python
 import molpack
-print(molpack.Molpack)
+print(molpack.GenCanPack)
 ```
 
 !!! note "Pre-built wheels"

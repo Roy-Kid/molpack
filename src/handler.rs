@@ -42,7 +42,7 @@ pub struct PhaseReport {
 
 /// Screen-log detail level for LAMMPS-style packer output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub enum MolpackLogLevel {
+pub enum LogLevel {
     /// Print nothing.
     #[default]
     Quiet,
@@ -54,7 +54,7 @@ pub enum MolpackLogLevel {
     Verbose,
 }
 
-impl MolpackLogLevel {
+impl LogLevel {
     #[inline]
     pub const fn is_enabled(self) -> bool {
         !matches!(self, Self::Quiet)
@@ -62,11 +62,21 @@ impl MolpackLogLevel {
 }
 
 /// Per-iteration progress snapshot.
+///
+/// Both solvers fill this in, and three fields carry a different meaning on
+/// each path — see `loop_idx`, `max_loops` and `radscale` below. Growth also
+/// reports `fdist` and `frest` as a constructive `0.0` on every round, because
+/// it only ever commits a placement that already clears the hard core and the
+/// restraints; the measured end-of-run numbers live in
+/// [`PackResult`](crate::PackResult).
 #[derive(Debug, Clone)]
 pub struct StepInfo {
-    /// 0-based loop iteration within the current phase.
+    /// GENCAN: 0-based loop iteration within the current phase. Growth: the
+    /// 1-based index of the current round.
     pub loop_idx: usize,
-    /// Maximum loops for this phase.
+    /// GENCAN: maximum loops for this phase. Growth: the caller's `max_loops`
+    /// verbatim — *not* the driver's round cap, which is `max_loops × (the
+    /// longest chain's steps + 1)`; see [`grow::driver`](crate::grow::driver).
     pub max_loops: usize,
     /// Current phase info.
     pub phase: PhaseInfo,
@@ -76,7 +86,11 @@ pub struct StepInfo {
     pub frest: F,
     /// Improvement from last iteration, as percentage (positive = improving).
     pub improvement_pct: F,
-    /// Current radius scaling factor (starts at discale, decays to 1.0).
+    /// GENCAN: current radius scaling factor (starts at discale, decays to
+    /// 1.0). Growth: the hard-core scale — the factor multiplying the pair
+    /// contact distance a placement must clear — which starts at 1.0 and steps
+    /// down in rungs to the floor set by
+    /// [`GrowConfig::with_min_hard_scale`](crate::grow::GrowConfig::with_min_hard_scale).
     pub radscale: F,
     /// Convergence precision target.
     pub precision: F,
@@ -86,9 +100,9 @@ pub struct StepInfo {
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
-/// Callback interface called by [`crate::packer::Molpack`] during packing.
+/// Callback interface called by the [`PackEngine`](crate::PackEngine) lifecycle during packing.
 pub trait Handler: Send {
-    /// Called immediately at the start of [`pack`][crate::packer::Molpack::pack],
+    /// Called immediately at the start of [`run`][crate::PackEngine::run],
     /// before any computation. Use this for immediate user feedback.
     fn on_start(&mut self, _ntotat: usize, _ntotmol: usize) {}
 
@@ -230,7 +244,7 @@ impl Handler for XYZHandler {
 
 /// Prints human-readable progress lines to `stderr`.
 ///
-/// Added as a default handler by [`crate::packer::Molpack::new`].
+/// Installed by the engine lifecycle according to [`LogSpec`](crate::entry::LogSpec).
 pub struct ProgressHandler {
     start: Option<Instant>,
 }
@@ -303,11 +317,11 @@ impl Handler for ProgressHandler {
 /// LAMMPS-style screen log for packing runs.
 ///
 /// Most users should enable this through
-/// [`Molpack::with_lammps_output`][crate::packer::Molpack::with_lammps_output]
-/// or [`Molpack::with_log_level`][crate::packer::Molpack::with_log_level]
+/// [`PackEngine::with_log_level`][crate::PackEngine::with_log_level]
+/// or [`with_log_frequency`][crate::PackEngine::with_log_frequency]
 /// instead of attaching the handler manually.
 pub struct LammpsLogHandler {
-    level: MolpackLogLevel,
+    level: LogLevel,
     every: usize,
     tolerance: F,
     precision: F,
@@ -322,7 +336,7 @@ pub struct LammpsLogHandler {
 impl LammpsLogHandler {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        level: MolpackLogLevel,
+        level: LogLevel,
         every: usize,
         tolerance: F,
         precision: F,
@@ -407,8 +421,8 @@ impl Handler for LammpsLogHandler {
             None => "all-type optimization".to_string(),
         };
         eprintln!("Phase {}/{}: {desc}", info.phase + 1, info.total_phases);
-        if self.level >= MolpackLogLevel::Progress {
-            if self.level >= MolpackLogLevel::Verbose {
+        if self.level >= LogLevel::Progress {
+            if self.level >= LogLevel::Verbose {
                 eprintln!(
                     "{:>8} {:>14} {:>14} {:>10} {:>10} {:>10}",
                     "Step", "Overlap", "Restraint", "Improve%", "RadScale", "Time"
@@ -423,10 +437,10 @@ impl Handler for LammpsLogHandler {
     }
 
     fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
-        if self.level < MolpackLogLevel::Progress || !info.loop_idx.is_multiple_of(self.every) {
+        if self.level < LogLevel::Progress || !info.loop_idx.is_multiple_of(self.every) {
             return;
         }
-        if self.level >= MolpackLogLevel::Verbose {
+        if self.level >= LogLevel::Verbose {
             eprintln!(
                 "{:>8} {:>14.6e} {:>14.6e} {:>10.3} {:>10.4} {:>10.3}",
                 info.loop_idx + 1,
@@ -487,7 +501,7 @@ impl Handler for LammpsLogHandler {
 /// relative improvement drops below `threshold` for `patience` consecutive
 /// steps, sets the stop flag.
 ///
-/// Added as a default handler by [`crate::packer::Molpack::new`].
+/// Installed by the engine lifecycle according to [`LogSpec`](crate::entry::LogSpec).
 pub struct EarlyStopHandler {
     /// Relative improvement threshold.
     pub threshold: F,

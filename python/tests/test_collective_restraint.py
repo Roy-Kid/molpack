@@ -19,23 +19,20 @@ BOX_HI = [12.0, 12.0, 40.0]
 
 
 def _ion_frame() -> molrs.Frame:
-    return molrs.Frame.from_dict(
+    return molrs.Frame(
         {
-            "blocks": {
-                "atoms": {
-                    "x": np.array([0.0]),
-                    "y": np.array([0.0]),
-                    "z": np.array([0.0]),
-                    "element": ["NA"],
-                }
-            },
-            "meta": {},
+            "atoms": {
+                "x": np.array([0.0]),
+                "y": np.array([0.0]),
+                "z": np.array([0.0]),
+                "element": ["NA"],
+            }
         }
     )
 
 
-def _packer() -> molpack.Molpack:
-    return molpack.Molpack().with_progress(False)
+def _packer() -> molpack.GenCanPack:
+    return molpack.GenCanPack().with_progress(False)
 
 
 class MeanTether:
@@ -146,12 +143,7 @@ class TestPackingBehavior:
                 molpack.GaussianPlane([0.0, 0.0, 1.0], 0.0, 1000.0, mu, sigma)
             )
         )
-        result = (
-            _packer()
-            .with_seed(1)
-            .with_tolerance(2.0)
-            .pack_with_report([target], max_loops=60)
-        )
+        result = _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=60)
         z = np.asarray(result.positions)[:, 2]
         assert abs(z.mean() - mu) < 1.0, f"mean {z.mean():.2f} != {mu}"
         assert abs(z.std() - sigma) < 1.0, f"std {z.std():.2f} != {sigma}"
@@ -168,12 +160,7 @@ class TestPackingBehavior:
             )
             .with_restraint(molpack.GaussianPoint(center, 1000.0, mu, sigma))
         )
-        result = (
-            _packer()
-            .with_seed(1)
-            .with_tolerance(2.0)
-            .pack_with_report([target], max_loops=80)
-        )
+        result = _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=80)
         pos = np.asarray(result.positions)
         r = np.linalg.norm(pos - np.asarray(center), axis=1)
         assert abs(r.mean() - mu) < 1.5, f"shell radius mean {r.mean():.2f} != {mu}"
@@ -192,12 +179,7 @@ class TestPackingBehavior:
             .with_restraint(molpack.InsideBoxRestraint(BOX_LO, BOX_HI))
             .with_restraint(molpack.ExponentialPlane([0.0, 0.0, 1.0], 0.0, 1000.0, lam))
         )
-        result = (
-            _packer()
-            .with_seed(1)
-            .with_tolerance(2.0)
-            .pack_with_report([target], max_loops=60)
-        )
+        result = _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=60)
         z = np.asarray(result.positions)[:, 2]
         # Exponential mean is lambda; densest at the wall → median < mean.
         assert abs(z.mean() - lam) < 3.0, f"mean depth {z.mean():.2f} != ~{lam}"
@@ -221,12 +203,7 @@ class TestPackingBehavior:
                 )
             )
         )
-        result = (
-            _packer()
-            .with_seed(3)
-            .with_tolerance(2.0)
-            .pack_with_report([target], max_loops=60)
-        )
+        result = _packer().with_seed(3).with_tolerance(2.0).run([target], max_loops=60)
         zz = np.asarray(result.positions)[:, 2]
         # Target quantiles from the supplied grid; packed sorted z should match.
         cdf = np.concatenate([[0.0], np.cumsum(0.5 * (cp[1:] + cp[:-1]) * np.diff(z))])
@@ -248,12 +225,7 @@ class TestPackingBehavior:
             .with_restraint(molpack.InsideBoxRestraint(BOX_LO, BOX_HI))
             .with_restraint(MeanTether([0.0, 0.0, 1.0], target, 5000.0))
         )
-        result = (
-            _packer()
-            .with_seed(1)
-            .with_tolerance(2.0)
-            .pack_with_report([tgt], max_loops=60)
-        )
+        result = _packer().with_seed(1).with_tolerance(2.0).run([tgt], max_loops=60)
         z = np.asarray(result.positions)[:, 2]
         assert z.mean() < 17.0, f"mean {z.mean():.2f} not pulled toward {target}"
 
@@ -279,9 +251,7 @@ class TestCallContract:
             .with_restraint(molpack.InsideBoxRestraint(BOX_LO, BOX_HI))
             .with_restraint(Recorder())
         )
-        _packer().with_seed(1).with_tolerance(2.0).pack_with_report(
-            [target], max_loops=20
-        )
+        _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=20)
 
         assert "coords" in seen, "collective fg was never called"
         coords = seen["coords"]
@@ -305,9 +275,7 @@ class TestErrorPropagation:
             .with_restraint(Explodes())
         )
         with pytest.raises(ValueError, match="boom from collective"):
-            _packer().with_seed(1).with_tolerance(2.0).pack_with_report(
-                [target], max_loops=20
-            )
+            _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=20)
 
     def test_wrong_gradient_count_is_reraised(self):
         class WrongLen:
@@ -323,6 +291,4 @@ class TestErrorPropagation:
             .with_restraint(WrongLen())
         )
         with pytest.raises(TypeError, match="gradients for"):
-            _packer().with_seed(1).with_tolerance(2.0).pack_with_report(
-                [target], max_loops=20
-            )
+            _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=20)

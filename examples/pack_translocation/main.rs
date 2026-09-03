@@ -54,8 +54,8 @@
 mod geometry;
 
 use molpack::{
-    AbovePlaneRestraint, BelowPlaneRestraint, CenteringMode, F, InsideBoxRestraint,
-    InsideCylinderRestraint, Molpack, OptimizeSelect, Target, TorsionMcOptimizer,
+    AbovePlaneRestraint, BelowPlaneRestraint, CenteringMode, F, GenCanPack, InsideBoxRestraint,
+    InsideCylinderRestraint, OptimizeSelect, PackEngine, Target, TorsionMcOptimizer,
 };
 
 // ── system ─────────────────────────────────────────────────────────────────
@@ -177,14 +177,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     targets.push(solvent);
     let mut names: Vec<String> = (0..PORES.len()).map(|i| format!("threaded{i}")).collect();
     names.push("free".to_string());
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_tolerance(TOLERANCE)
         .with_seed(20_260_807)
         .with_optimizer(
             OptimizeSelect::per_copy(names).with_environment(8.0),
             torsion,
         )
-        .pack_with_report(&targets, max_loops)?;
+        .run(&targets, max_loops)?;
 
     report(&result, &seg)?;
     Ok(())

@@ -17,17 +17,14 @@ import molpack
 
 
 def _single_atom_frame() -> molrs.Frame:
-    return molrs.Frame.from_dict(
+    return molrs.Frame(
         {
-            "blocks": {
-                "atoms": {
-                    "x": np.array([0.0]),
-                    "y": np.array([0.0]),
-                    "z": np.array([0.0]),
-                    "element": ["O"],
-                }
-            },
-            "meta": {},
+            "atoms": {
+                "x": np.array([0.0]),
+                "y": np.array([0.0]),
+                "z": np.array([0.0]),
+                "element": ["O"],
+            }
         }
     )
 
@@ -36,8 +33,8 @@ BOX_LO = [0.0, 0.0, 0.0]
 BOX_HI = [40.0, 40.0, 40.0]
 
 
-def _packer() -> molpack.Molpack:
-    return molpack.Molpack().with_progress(False)
+def _packer() -> molpack.GenCanPack:
+    return molpack.GenCanPack().with_progress(False)
 
 
 class InsideSpherePy:
@@ -130,12 +127,7 @@ class TestPackingBehavior:
             )
         )
 
-        result = (
-            _packer()
-            .with_seed(1)
-            .with_tolerance(2.0)
-            .pack_with_report([target], max_loops=80)
-        )
+        result = _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=80)
 
         positions = np.asarray(result.positions)
         distances = np.linalg.norm(positions - sphere_center, axis=1)
@@ -168,9 +160,7 @@ class TestCallContract:
             .with_restraint(molpack.InsideBoxRestraint(BOX_LO, BOX_HI))
             .with_restraint(Recorder())
         )
-        _packer().with_seed(1).with_tolerance(2.0).pack_with_report(
-            [target], max_loops=20
-        )
+        _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=20)
 
         assert seen, "fg was never called"
         coords, scale, scale2 = seen[0]
@@ -196,9 +186,7 @@ class TestErrorPropagation:
             .with_restraint(Explodes())
         )
         with pytest.raises(ValueError, match="boom from restraint"):
-            _packer().with_seed(1).with_tolerance(2.0).pack_with_report(
-                [target], max_loops=20
-            )
+            _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=20)
 
     def test_fg_wrong_return_shape_is_reraised(self):
         class WrongShape:
@@ -214,6 +202,4 @@ class TestErrorPropagation:
             .with_restraint(WrongShape())
         )
         with pytest.raises(TypeError, match="fg.* must return"):
-            _packer().with_seed(1).with_tolerance(2.0).pack_with_report(
-                [target], max_loops=20
-            )
+            _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=20)

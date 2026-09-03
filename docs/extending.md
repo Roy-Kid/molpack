@@ -145,7 +145,7 @@ binding does the `+=` for you. The contracts are otherwise identical: `fg`
 returns the energy, the gradient is the chain rule `(dU/dξ)·∇ξ`, a linear-energy
 penalty rides `scale` (a quadratic one `scale2`). A missing `f` or `fg` is
 rejected at attach time with a `TypeError`, and an exception raised inside `fg`
-propagates back out of `pack`. The `PlaneTether` above, duck-typed in Python:
+propagates back out of `run`. The `PlaneTether` above, duck-typed in Python:
 
 ```python
 import numpy as np

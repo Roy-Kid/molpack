@@ -37,17 +37,14 @@ class TestConstraintStackingOnTarget:
         import molrs
         import numpy as np
 
-        return molrs.Frame.from_dict(
+        return molrs.Frame(
             {
-                "blocks": {
-                    "atoms": {
-                        "x": np.array([0.0]),
-                        "y": np.array([0.0]),
-                        "z": np.array([0.0]),
-                        "element": ["O"],
-                    }
-                },
-                "meta": {},
+                "atoms": {
+                    "x": np.array([0.0]),
+                    "y": np.array([0.0]),
+                    "z": np.array([0.0]),
+                    "element": ["O"],
+                }
             }
         )
 

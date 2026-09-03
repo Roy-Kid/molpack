@@ -1,6 +1,6 @@
 """Pack 100 water molecules into a 30x30x30 cubic box.
 
-Minimal example — builds the template with ``molrs.Frame.from_dict`` (no PDB
+Minimal example — builds the template with ``molrs.Frame`` (no PDB
 file), so it needs ``molcrafts-molrs`` but no structure files on disk.
 """
 
@@ -14,17 +14,14 @@ import molpack
 
 def main() -> None:
     # Water geometry: O at origin, two Hs 0.96 Å away.
-    frame = molrs.Frame.from_dict(
+    frame = molrs.Frame(
         {
-            "blocks": {
-                "atoms": {
-                    "x": np.array([0.0, 0.9572, -0.2400], dtype=np.float64),
-                    "y": np.array([0.0, 0.0, 0.9266], dtype=np.float64),
-                    "z": np.zeros(3, dtype=np.float64),
-                    "element": ["O", "H", "H"],
-                }
-            },
-            "meta": {},
+            "atoms": {
+                "x": np.array([0.0, 0.9572, -0.2400], dtype=np.float64),
+                "y": np.array([0.0, 0.0, 0.9266], dtype=np.float64),
+                "z": np.zeros(3, dtype=np.float64),
+                "element": ["O", "H", "H"],
+            }
         }
     )
 
@@ -34,8 +31,8 @@ def main() -> None:
         .with_restraint(molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
     )
 
-    packer = molpack.Molpack()
-    result = packer.pack_with_report([water])
+    packer = molpack.GenCanPack()
+    result = packer.run([water], max_loops=200)
 
     print(f"converged = {result.converged}")
     print(f"natoms    = {result.natoms}")

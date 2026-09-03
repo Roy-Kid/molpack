@@ -131,6 +131,10 @@ pub struct Target {
     /// the packed coordinates. `None` for targets built from bare coordinates
     /// ([`Target::from_coords`]), whose result frame is coordinates-only.
     pub template: Option<molrs::Frame>,
+    /// Per-copy total mass override in amu, for the entries'
+    /// `with_density` when element symbols cannot provide it (coarse-grained beads, `from_coords`
+    /// targets whose elements are `"X"`).
+    pub mass: Option<F>,
 }
 
 impl Target {
@@ -188,7 +192,17 @@ impl Target {
             rotation_bound: [None, None, None],
             fixed_at: None,
             template: None,
+            mass: None,
         }
+    }
+
+    /// Override the per-copy total mass (amu) used by
+    /// [`PackEngine::with_density`](crate::PackEngine::with_density). Needed when
+    /// element symbols cannot resolve a mass (CG beads, bare-coordinate
+    /// targets).
+    pub fn with_mass(mut self, amu: F) -> Self {
+        self.mass = Some(amu);
+        self
     }
 
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
@@ -421,6 +435,18 @@ impl Target {
     pub fn with_centering(mut self, mode: CenteringMode) -> Self {
         self.centering = mode;
         self
+    }
+
+    /// One fixed obstacle target holding a previous pack's entire output,
+    /// coordinates kept verbatim (`CenteringMode::Off` + identity placement).
+    ///
+    /// The named chaining primitive of engine-entry-split: grow first, then
+    /// pack the next stage around the grown matrix held fixed —
+    /// `GenCanPack::new().run(&[Target::fixed_from(&grown), solvent], …)`.
+    pub fn fixed_from(result: &crate::entry::PackResult) -> Self {
+        Self::new(result.frame.clone(), 1)
+            .with_centering(CenteringMode::Off)
+            .fixed_at([0.0; 3])
     }
 
     /// Rotation bound on a single Euler axis, analogous to Packmol's

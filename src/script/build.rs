@@ -14,10 +14,10 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    AbovePlaneRestraint, Angle, AtomRestraint, BelowPlaneRestraint, CenteringMode,
+    AbovePlaneRestraint, Angle, AtomRestraint, BelowPlaneRestraint, CenteringMode, GenCanPack,
     InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint, InsideEllipsoidRestraint,
-    InsideSphereRestraint, Molpack, OutsideBoxRestraint, OutsideCubeRestraint,
-    OutsideCylinderRestraint, OutsideEllipsoidRestraint, OutsideSphereRestraint, Target,
+    InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint, OutsideCylinderRestraint,
+    OutsideEllipsoidRestraint, OutsideSphereRestraint, PackEngine, Target,
 };
 
 use super::error::ScriptError;
@@ -32,7 +32,7 @@ use super::parser::{AtomGroup, RestraintSpec, Script, Structure};
 /// stamp on the script's restraints / centering / fixed placement.
 pub struct ScriptPlan {
     /// Packer pre-configured with `tolerance`, `seed`, and (optional) `pbc`.
-    pub packer: Molpack,
+    pub entry: GenCanPack,
     /// One entry per `structure … end structure` block, in source order.
     pub structures: Vec<StructurePlan>,
     /// Resolved output file path.
@@ -85,17 +85,17 @@ impl Script {
             return Err(ScriptError::NoStructures);
         }
 
-        let mut packer = Molpack::new()
+        let mut entry = GenCanPack::new()
             .with_tolerance(self.tolerance)
             .with_avoid_overlap(self.avoid_overlap);
         if let Some(seed) = self.seed {
-            packer = packer.with_seed(seed);
+            entry = entry.with_seed(seed);
         }
         if let Some(pbc) = self.pbc {
-            packer = packer.with_periodic_box(pbc.min, pbc.max, [true; 3]);
+            entry = entry.with_periodic_box(pbc.min, pbc.max, [true; 3]);
         }
         if let Some(cell) = self.cell {
-            packer = packer.with_cell(cell.lengths, cell.angles_deg, cell.pbc);
+            entry = entry.with_cell(cell.lengths, cell.angles_deg, cell.pbc);
         }
 
         let structures: Vec<StructurePlan> = self
@@ -105,7 +105,7 @@ impl Script {
             .collect();
 
         Ok(ScriptPlan {
-            packer,
+            entry,
             structures,
             output: resolve(base_dir, &self.output),
             nloop: self.nloop,
@@ -277,7 +277,7 @@ fn apply_atom_group(mut target: Target, group: &AtomGroup) -> Target {
 /// a custom handler, or none.
 #[cfg(feature = "io")]
 pub struct BuildResult {
-    pub packer: Molpack,
+    pub entry: GenCanPack,
     pub targets: Vec<Target>,
     pub output: PathBuf,
     pub nloop: usize,
@@ -302,7 +302,7 @@ impl Script {
             })
             .collect::<Result<_, _>>()?;
         Ok(BuildResult {
-            packer: plan.packer,
+            entry: plan.entry,
             targets,
             output: plan.output,
             nloop: plan.nloop,

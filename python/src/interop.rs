@@ -76,28 +76,29 @@ pub fn owned_frame_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Frame> {
     frame_from_py(obj)?.clone_frame().map_err(ffi_err)
 }
 
-/// Build a Python `molrs.Frame` from a Rust [`Frame`] — the **return path**.
+/// Stamp an orthorhombic periodic box from `(min, max)` corners onto *frame*.
 ///
-/// Stamps an orthorhombic periodic box from `box_bounds` (`(min, max)` corners)
-/// when present, wraps the frame in a fresh `FrameRef`, exports a
-/// `"molrs.FrameRef"` capsule, and rebuilds it as a `molrs.Frame` through
-/// `Frame._from_ffi_frameref_capsule`. No column marshalling.
-pub fn frame_to_py<'py>(
-    py: Python<'py>,
-    frame: &Frame,
-    box_bounds: Option<([F; 3], [F; 3])>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let mut frame = frame.clone();
-    if let Some((lo, hi)) = box_bounds {
-        let lengths = Array1::from_vec(vec![hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]);
-        let origin = Array1::from_vec(lo.to_vec());
-        let simbox = SimBox::ortho(lengths, origin, [true, true, true])
-            .map_err(|e| PyValueError::new_err(format!("building periodic box: {e:?}")))?;
-        frame.simbox = Some(simbox);
-    }
-    // Move the result frame into a fresh standalone store and export its capsule.
+/// No-op when *box_bounds* is `None`. Call once before [`frame_to_py`].
+pub fn stamp_box_bounds(frame: &mut Frame, box_bounds: Option<([F; 3], [F; 3])>) -> PyResult<()> {
+    let Some((lo, hi)) = box_bounds else {
+        return Ok(());
+    };
+    let lengths = Array1::from_vec(vec![hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]);
+    let origin = Array1::from_vec(lo.to_vec());
+    let simbox = SimBox::ortho(lengths, origin, [true, true, true])
+        .map_err(|e| PyValueError::new_err(format!("building periodic box: {e:?}")))?;
+    frame.simbox = Some(simbox);
+    Ok(())
+}
+
+/// One-shot Rust ``Frame`` → Python ``molrs.Frame``.
+///
+/// Two cdylibs cannot share a pyclass, so this clones into a standalone
+/// ``FrameRef`` capsule. Do it once and keep the Python object.
+pub fn frame_to_py<'py>(py: Python<'py>, frame: &Frame) -> PyResult<Bound<'py, PyAny>> {
     let fref = FrameRef::new_standalone();
-    fref.with_mut(|slot| *slot = frame).map_err(ffi_err)?;
+    fref.with_mut(|slot| *slot = frame.clone())
+        .map_err(ffi_err)?;
     let capsule = export_frame_capsule(py, fref)?;
     let molrs = PyModule::import(py, "molrs")?;
     molrs

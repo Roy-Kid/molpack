@@ -1,5 +1,6 @@
 //! Context layer for packmol-aligned packing runtime.
 
+pub(crate) mod build;
 pub mod model;
 pub mod pack_context;
 pub mod state;

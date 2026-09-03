@@ -1,8 +1,8 @@
 //! Python binding for the molpack script loader.
 //!
 //! Exposes a single function :func:`load_script` that parses an `.inp`
-//! script and returns a ready-to-run :class:`Molpack` plus target list.
-//! Everything downstream — attaching handlers, running ``pack()``,
+//! script and returns a ready-to-run :class:`GenCanPack` plus target list.
+//! Everything downstream — attaching handlers, running ``run()``,
 //! writing output — stays in Python hands.
 //!
 //! The loader does **not** touch molecule files in Rust. Each
@@ -20,8 +20,8 @@ use pyo3::types::PyDict;
 
 use molpack::script::{self, ScriptPlan, StructurePlan};
 
+use crate::entry::PyGenCanPack;
 use crate::helpers::script_error_to_pyerr;
-use crate::packer::PyPacker;
 use crate::target::{PyTarget, target_from_frame};
 
 /// Output of [`load_script`] — four fields bundled as a PyClass so
@@ -29,9 +29,10 @@ use crate::target::{PyTarget, target_from_frame};
 /// tuple-unpacking (``packer, targets, output, nloop = load_script(...)``).
 #[pyclass(name = "ScriptJob", module = "molpack", sequence)]
 pub struct PyScriptJob {
-    /// Packer pre-configured with ``tolerance`` and ``seed`` from the script.
+    /// `GenCanPack` pre-configured with ``tolerance`` / ``seed`` /
+    /// periodic box from the script.
     #[pyo3(get)]
-    pub packer: Py<PyPacker>,
+    pub packer: Py<PyGenCanPack>,
     /// Targets ready to be packed.
     #[pyo3(get)]
     pub targets: Vec<PyTarget>,
@@ -126,12 +127,11 @@ pub fn load_script(
         .map(|sp| build_target(py, sp, plan.filetype.as_deref(), &loader))
         .collect::<PyResult<_>>()?;
 
-    let packer = PyPacker {
-        tolerance: Some(script_ast.tolerance),
-        seed: script_ast.seed,
-        periodic_box: script_ast.pbc.map(|pbc| (pbc.min, pbc.max)),
-        ..PyPacker::default()
-    };
+    let packer = PyGenCanPack::from_script(
+        Some(script_ast.tolerance),
+        script_ast.seed,
+        script_ast.pbc.map(|pbc| (pbc.min, pbc.max)),
+    );
 
     Ok(PyScriptJob {
         packer: Py::new(py, packer)?,

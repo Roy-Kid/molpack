@@ -58,8 +58,8 @@ mod analysis;
 mod geometry;
 
 use molpack::{
-    AbovePlaneRestraint, BelowPlaneRestraint, CenteringMode, F, InsideBoxRestraint, Molpack,
-    OptimizeSelect, ProgressHandler, Target, TorsionMcOptimizer,
+    AbovePlaneRestraint, BelowPlaneRestraint, CenteringMode, F, GenCanPack, InsideBoxRestraint,
+    OptimizeSelect, PackEngine, ProgressHandler, Target, TorsionMcOptimizer,
 };
 
 // ── system definition ──────────────────────────────────────────────────────
@@ -146,7 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         torsion.rotatable_bond_count()
     );
 
-    let mut packer = Molpack::new()
+    let mut packer = GenCanPack::new()
         .with_tolerance(TOLERANCE)
         .with_seed(20_260_807);
     // Control switch: packing the same system with rigid chains is what shows
@@ -159,7 +159,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     if std::env::var_os("MOLPACK_ADSORPTION_PROGRESS").is_some() {
-        packer = packer.with_handler(ProgressHandler::new());
+        packer = packer.with_handler(Box::new(ProgressHandler::new()));
     }
 
     let targets = [substrate, chains, solvent];
@@ -167,7 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(300);
-    let result = packer.pack_with_report(&targets, max_loops)?;
+    let result = packer.run(&targets, max_loops)?;
 
     report(&result, &sticky)?;
     Ok(())

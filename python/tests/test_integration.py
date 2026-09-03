@@ -1,6 +1,6 @@
 """End-to-end integration tests using real PDB fixtures.
 
-Exercises the full loader → Target → Molpack → PackResult pipeline at
+Exercises the full loader → Target → GenCanPack → PackResult pipeline at
 small scale. For the full Packmol-equivalent workloads see the
 scripts under ``python/examples/``.
 """
@@ -28,8 +28,8 @@ def urea_frame():
     return molrs.io.read_pdb(str(DATA_ROOT / "pack_mixture" / "urea.pdb"))
 
 
-def _packer() -> molpack.Molpack:
-    return molpack.Molpack().with_tolerance(2.0).with_progress(False)
+def _packer() -> molpack.GenCanPack:
+    return molpack.GenCanPack().with_tolerance(2.0).with_progress(False)
 
 
 @pytest.mark.integration
@@ -42,7 +42,7 @@ class TestSmallBoxPack:
                 molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
             )
         )
-        result = _packer().with_seed(42).pack_with_report([target], max_loops=200)
+        result = _packer().with_seed(42).run([target], max_loops=200)
 
         assert result.converged
         assert result.natoms == 60
@@ -59,11 +59,7 @@ class TestSmallBoxPack:
             molpack.Target(urea_frame, count=10).with_name("urea").with_restraint(box)
         )
 
-        result = (
-            _packer()
-            .with_seed(1_234_567)
-            .pack_with_report([water, urea], max_loops=200)
-        )
+        result = _packer().with_seed(1_234_567).run([water, urea], max_loops=200)
 
         w_natoms = water_frame["atoms"].nrows
         u_natoms = urea_frame["atoms"].nrows
@@ -83,9 +79,12 @@ class TestReproducibility:
                 )
             )
 
-        packer = molpack.Molpack().with_progress(False).with_seed(7)
-        r1 = packer.pack_with_report([make()], max_loops=100)
-        r2 = packer.pack_with_report([make()], max_loops=100)
+        # One engine, one run: build a fresh engine per run.
+        def packer():
+            return molpack.GenCanPack().with_progress(False).with_seed(7)
+
+        r1 = packer().run([make()], max_loops=100)
+        r2 = packer().run([make()], max_loops=100)
         np.testing.assert_array_equal(r1.positions, r2.positions)
 
     def test_different_seeds_differ(self, water_frame):
@@ -96,9 +95,9 @@ class TestReproducibility:
                 molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
             )
         )
-        packer = molpack.Molpack().with_progress(False)
-        r1 = packer.with_seed(1).pack_with_report([target], max_loops=100)
-        r2 = packer.with_seed(2).pack_with_report([target], max_loops=100)
+        packer = molpack.GenCanPack().with_progress(False)
+        r1 = packer.with_seed(1).run([target], max_loops=100)
+        r2 = packer.with_seed(2).run([target], max_loops=100)
         assert not np.array_equal(r1.positions, r2.positions)
 
 
@@ -116,7 +115,7 @@ class TestPeriodicBox:
             _packer()
             .with_seed(42)
             .with_periodic_box((0.0, 0.0, 0.0), (20.0, 20.0, 20.0))
-            .pack_with_report([target], max_loops=50)
+            .run([target], max_loops=50)
         )
         assert result.natoms == 5 * water_frame["atoms"].nrows
 
@@ -139,7 +138,7 @@ class TestPeriodicBox:
                 _packer()
                 .with_seed(42)
                 .with_periodic_box((0.0, 0.0, 0.0), (30.0, 30.0, 30.0))
-                .pack_with_report([target], max_loops=10)
+                .run([target], max_loops=10)
             )
 
     def test_load_script_wires_pbc_to_packer(self, tmp_path):
@@ -160,9 +159,7 @@ class TestPeriodicBox:
             "end structure\n"
         )
         job = molpack.load_script(script_path)
-        result = job.packer.with_progress(False).pack_with_report(
-            job.targets, max_loops=job.nloop
-        )
+        result = job.packer.with_progress(False).run(job.targets, max_loops=job.nloop)
         assert result.natoms == 8 * 3  # water.pdb = 3 atoms/molecule
 
 
@@ -177,7 +174,7 @@ class TestCompositeRestraints:
             )
             .with_restraint(molpack.OutsideSphereRestraint([15.0, 15.0, 15.0], 5.0))
         )
-        result = _packer().with_seed(42).pack_with_report([target], max_loops=150)
+        result = _packer().with_seed(42).run([target], max_loops=150)
 
         centres = result.positions
         sphere_centre = np.array([15.0, 15.0, 15.0])
@@ -198,9 +195,9 @@ TOLERANCE = 2.0
 _PRECISION_SLACK = 0.05  # absolute slack on `precision = 1e-2`
 
 
-def _packer_with_tolerance(tolerance: float = TOLERANCE) -> molpack.Molpack:
+def _packer_with_tolerance(tolerance: float = TOLERANCE) -> molpack.GenCanPack:
     return (
-        molpack.Molpack()
+        molpack.GenCanPack()
         .with_tolerance(tolerance)
         .with_precision(0.01)
         .with_progress(False)
@@ -239,11 +236,7 @@ class TestRestraintSatisfaction:
             .with_name("water")
             .with_restraint(molpack.InsideSphereRestraint(centre.tolist(), radius))
         )
-        result = (
-            _packer_with_tolerance()
-            .with_seed(42)
-            .pack_with_report([target], max_loops=150)
-        )
+        result = _packer_with_tolerance().with_seed(42).run([target], max_loops=150)
 
         dists = np.linalg.norm(result.positions - centre, axis=1)
         # Allow a small slack so the optimizer's `precision=0.01` floor
@@ -262,11 +255,7 @@ class TestRestraintSatisfaction:
                 molpack.InsideBoxRestraint(box_min.tolist(), box_max.tolist())
             )
         )
-        result = (
-            _packer_with_tolerance()
-            .with_seed(42)
-            .pack_with_report([target], max_loops=150)
-        )
+        result = _packer_with_tolerance().with_seed(42).run([target], max_loops=150)
 
         positions = result.positions
         assert (positions >= box_min - _PRECISION_SLACK).all(), (
@@ -285,11 +274,7 @@ class TestRestraintSatisfaction:
                 molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [18.0, 18.0, 18.0])
             )
         )
-        result = (
-            _packer_with_tolerance()
-            .with_seed(42)
-            .pack_with_report([target], max_loops=200)
-        )
+        result = _packer_with_tolerance().with_seed(42).run([target], max_loops=200)
 
         atoms_per_mol = water_frame["atoms"].nrows
         worst = _max_pairwise_violation(
@@ -312,11 +297,7 @@ class TestRestraintSatisfaction:
             )
             .with_restraint(molpack.OutsideSphereRestraint(centre.tolist(), radius))
         )
-        result = (
-            _packer_with_tolerance()
-            .with_seed(42)
-            .pack_with_report([target], max_loops=200)
-        )
+        result = _packer_with_tolerance().with_seed(42).run([target], max_loops=200)
 
         # Skip when convergence stalls — outside-sphere is a harder
         # objective and a tiny seed can leave residual penalty. The

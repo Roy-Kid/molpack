@@ -11,7 +11,8 @@
 //! would be wrong in exactly the cases the partition is wrong.
 
 use molpack::{
-    AbovePlaneRestraint, BelowPlaneRestraint, F, InsideCellRegion, Molpack, RegionRestraint, Target,
+    AbovePlaneRestraint, BelowPlaneRestraint, F, GenCanPack, InsideCellRegion, PackEngine,
+    RegionRestraint, Target,
 };
 
 /// Lattice vectors (columns of H) for a cell given by lengths and angles, in
@@ -84,10 +85,10 @@ fn pack_in_cell(
     let cell = InsideCellRegion::from_lengths_angles(lengths, angles, pbc).expect("cell");
     let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[tolerance / 2.0], n)
         .with_restraint(RegionRestraint(cell));
-    Molpack::new()
+    GenCanPack::new()
         .with_seed(seed)
         .with_tolerance(tolerance)
-        .pack_with_report(&[target], 30)
+        .run(&[target], 30)
         .expect("pack")
         .positions()
         .to_vec()
@@ -185,10 +186,10 @@ fn the_cell_is_declared_once_by_the_region_alone() {
 #[test]
 fn a_declared_cell_and_a_periodic_box_are_mutually_exclusive() {
     let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 4);
-    let err = Molpack::new()
+    let err = GenCanPack::new()
         .with_cell(HEX_LENGTHS, HEX_ANGLES, [true; 3])
         .with_periodic_box([0.0; 3], [20.0; 3], [true; 3])
-        .pack_with_report(&[target], 2)
+        .run(&[target], 2)
         .expect_err("declaring both a cell and a box must be rejected");
     assert!(
         format!("{err}").contains("mutually exclusive"),
@@ -199,9 +200,9 @@ fn a_declared_cell_and_a_periodic_box_are_mutually_exclusive() {
 #[test]
 fn a_degenerate_cell_is_rejected() {
     let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 4);
-    let err = Molpack::new()
+    let err = GenCanPack::new()
         .with_cell([10.0, 10.0, 10.0], [170.0, 170.0, 170.0], [true; 3])
-        .pack_with_report(&[target], 2)
+        .run(&[target], 2)
         .expect_err("degenerate cell must be rejected");
     assert!(
         format!("{err}").contains("invalid packing cell"),
@@ -220,9 +221,9 @@ fn a_plane_across_a_periodic_axis_is_rejected() {
     let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 8)
         .with_restraint(RegionRestraint(cell))
         .with_restraint(AbovePlaneRestraint::new([0.0, 0.0, 1.0], 5.0));
-    let err = Molpack::new()
+    let err = GenCanPack::new()
         .with_seed(1)
-        .pack_with_report(&[target], 2)
+        .run(&[target], 2)
         .expect_err("plane across a periodic axis must be rejected");
     let msg = format!("{err}");
     assert!(
@@ -240,7 +241,7 @@ fn a_plane_along_a_confined_axis_is_accepted() {
     let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 8)
         .with_restraint(RegionRestraint(cell))
         .with_restraint(AbovePlaneRestraint::new([0.0, 0.0, 1.0], 5.0));
-    let result = Molpack::new().with_seed(1).pack_with_report(&[target], 10);
+    let result = GenCanPack::new().with_seed(1).run(&[target], 10);
     assert!(
         result.is_ok(),
         "expected the slab plane to be accepted: {result:?}"
@@ -255,9 +256,9 @@ fn a_plane_in_the_periodic_plane_is_rejected_naming_the_first_axis() {
     let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 8)
         .with_restraint(RegionRestraint(cell))
         .with_restraint(BelowPlaneRestraint::new([1.0, 0.0, 0.0], 5.0));
-    let err = Molpack::new()
+    let err = GenCanPack::new()
         .with_seed(1)
-        .pack_with_report(&[target], 2)
+        .run(&[target], 2)
         .expect_err("plane across a periodic axis must be rejected");
     assert!(
         format!("{err}").contains("periodic lattice direction 0"),

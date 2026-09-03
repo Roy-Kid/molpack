@@ -116,7 +116,7 @@ fn build_mixture(target_atoms: usize, seed: u64) -> (PackContext, Vec<F>) {
     coor.extend_from_slice(&b);
     sys.coor = coor;
 
-    // Radii: tolerance/2 = 1.0 for tolerance 2.0, as Molpack::pack assigns.
+    // Radii: tolerance/2 = 1.0 for tolerance 2.0, as a pack run assigns.
     sys.radius.fill(1.0);
     sys.radius_ini.fill(1.0);
     sys.fscale.fill(1.0);

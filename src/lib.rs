@@ -20,7 +20,7 @@
 //!   restraint scopes, handlers, relaxers, PBC, running the canonical
 //!   examples.
 //! - [`concepts`] — every abstraction defined in one place: `AtomRestraint`,
-//!   `Region`, `Handler`, `Objective`, `Target`, `Molpack`,
+//!   `Region`, `Handler`, `Objective`, `Target`, `PackEngine`,
 //!   `PackContext`; the scope equivalence law; the two-scale contract;
 //!   the direction-3 extension pattern.
 //! - [`architecture`] — module map, dependency graph, core-type
@@ -38,7 +38,7 @@
 //! ## Quick example
 //!
 //! ```rust,no_run
-//! use molpack::{InsideBoxRestraint, Molpack, Target};
+//! use molpack::{GenCanPack, InsideBoxRestraint, PackEngine, Target};
 //!
 //! let positions = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
 //! let radii     = [1.52, 1.20, 1.20];
@@ -47,13 +47,13 @@
 //!     .with_name("water")
 //!     .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0, 40.0, 40.0], [false; 3]));
 //!
-//! let frame = Molpack::new()
+//! let result = GenCanPack::new()
 //!     .with_tolerance(2.0)
 //!     .with_precision(0.01)
 //!     .with_seed(42)
-//!     .pack(&[target], 200)?;
+//!     .run(&[target], 200)?;
 //!
-//! let natoms = frame.get("atoms").and_then(|b| b.nrows()).unwrap_or(0);
+//! let natoms = result.natoms();
 //! println!("packed {natoms} atoms");
 //! # Ok::<(), molpack::PackError>(())
 //! ```
@@ -62,12 +62,13 @@
 //!
 //! | Category | Items |
 //! |---|---|
-//! | Builder | [`Molpack`], [`MolpackLogLevel`], [`PackResult`] |
+//! | Engine entries | [`PackEngine`], [`GenCanPack`], [`CbmcGrow`], [`LogLevel`], [`PackResult`] |
 //! | Target  | [`Target`], [`CenteringMode`] |
+//! | Template bond graph + geometry reader | [`Topology`], [`TopologyError`], [`frame_positions`] |
 //! | AtomRestraint trait + 14 concrete structs | [`AtomRestraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…AtomRestraint` |
 //! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideCellRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
 //! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`PhaseInfo`], [`PhaseReport`] |
-//! | Optimizer (`ff`) | [`OptimizeSelect`] + `Molpack::with_optimizer` + molrs [`Optimizer`] / [`TorsionMcOptimizer`] |
+//! | Optimizer (`ff`) | [`OptimizeSelect`] + `GenCanPack::with_optimizer` + molrs [`Optimizer`] / [`TorsionMcOptimizer`] |
 //! | Errors | [`PackError`] |
 //! | Validation | [`validate_from_targets`], [`ValidationReport`], [`ViolationMetrics`] |
 //! | Examples harness | [`ExampleCase`], [`build_targets`], [`example_dir_from_manifest`], [`render_inp_script`] |
@@ -83,7 +84,7 @@
 //! - `cli` — build the `molpack` binary and its integration tests (pulls in
 //!   `clap` and implies `io`).
 //! - `ff` — pull in molrs's `ff` module (MMFF94/MMFF94s typifiers + L-BFGS) and enable the
-//!   in-loop [`Optimizer`] bindings via `Molpack::with_optimizer`.
+//!   in-loop [`Optimizer`] bindings via `GenCanPack::with_optimizer`.
 //!
 //! Precision is fixed at `f64` via `molrs::types::F`.
 
@@ -92,10 +93,12 @@ pub mod assemble;
 pub mod cases;
 pub mod constraints;
 pub mod context;
+pub mod entry;
 pub mod error;
 pub mod euler;
 pub mod frame;
 pub mod gencan;
+pub mod grow;
 pub mod handler;
 pub mod initial;
 pub mod movebad;
@@ -103,26 +106,31 @@ mod numerics;
 pub mod objective;
 #[cfg(feature = "ff")]
 pub mod optimizer;
-pub mod packer;
 mod random;
 pub mod region;
 pub mod restraint;
 pub mod script;
+pub mod solver;
 pub mod target;
+pub mod topology;
 pub mod validation;
 
 #[cfg(feature = "io")]
 pub use cases::{ExampleCase, build_targets, example_dir_from_manifest, render_inp_script};
 pub use context::PackContext;
+pub use entry::PackResult;
+pub use entry::{PackEngine, PackSettings};
 pub use error::PackError;
 pub use frame::{compute_mol_ids, context_to_frame, finalize_frame, frame_to_coords};
+pub use gencan::entry::GenCanPack;
+pub use grow::entry::CbmcGrow;
+pub use grow::lattice::{LatticeConfig, LatticeGrow};
 pub use handler::{
-    EarlyStopHandler, Handler, LammpsLogHandler, MolpackLogLevel, NullHandler, PhaseInfo,
-    PhaseReport, ProgressHandler, StepInfo, XYZHandler,
+    EarlyStopHandler, Handler, LammpsLogHandler, LogLevel, NullHandler, PhaseInfo, PhaseReport,
+    ProgressHandler, StepInfo, XYZHandler,
 };
 pub use molrs::Element;
 pub use molrs::types::F;
-pub use packer::{Molpack, PackResult};
 pub use region::{
     Aabb, And, InsideBoxRegion, InsideCellRegion, InsideSphereRegion, Not, Or, OutsideSphereRegion,
     Region, RegionExt, RegionRestraint,
@@ -141,9 +149,10 @@ pub use restraint::{
     OutsideCylinderRestraint, OutsideEllipsoidRestraint, OutsideSphereRestraint,
 };
 pub use target::{Angle, Axis, CenteringMode, Placement, Target};
+pub use topology::{Topology, TopologyError, frame_positions};
 pub use validation::{ValidationReport, ViolationMetrics, validate_from_targets};
 
-// Custom-objective extension surface. `Molpack::pack` drives a `dyn Objective`
+// Custom-objective extension surface. An engine run drives a `dyn Objective`
 // through GENCAN; downstream code that implements a bespoke objective (or wants
 // to evaluate the packing energy/gradient directly) names these at the crate
 // root rather than reaching into the `objective` / `constraints` modules.
@@ -179,7 +188,7 @@ pub mod extending {}
 ///
 /// let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 10)
 ///     .with_restraint(InsideBoxRestraint::new([0.0; 3], [10.0; 3], [false; 3]));
-/// let frame = Molpack::new().pack(&[target], 100)?;
+/// let result = GenCanPack::new().run(&[target], 100)?;
 /// # Ok::<(), molpack::PackError>(())
 /// ```
 ///
@@ -200,9 +209,11 @@ pub mod prelude {
         Axis,
         BelowGaussianRestraint,
         BelowPlaneRestraint,
+        CbmcGrow,
         CenteringMode,
         // Handlers
         EarlyStopHandler,
+        GenCanPack,
         Handler,
         InsideBoxRegion,
         InsideBoxRestraint,
@@ -214,8 +225,7 @@ pub mod prelude {
         InsideSphereRestraint,
         // Core builder + result + error
         LammpsLogHandler,
-        Molpack,
-        MolpackLogLevel,
+        LogLevel,
         Not,
         NullHandler,
         Or,
@@ -225,6 +235,7 @@ pub mod prelude {
         OutsideEllipsoidRestraint,
         OutsideSphereRegion,
         OutsideSphereRestraint,
+        PackEngine,
         PackError,
         PackResult,
         PhaseInfo,

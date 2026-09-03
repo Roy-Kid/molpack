@@ -33,15 +33,17 @@ slab = InsideBoxRestraint(
 )
 ```
 
-### Declaring PBC on the packer
+### Declaring PBC on the engine entry
 
 For a **fully-periodic** cell you can skip the restraint and declare the
-box directly on the packer (Packmol's `pbc` keyword):
+box directly on the entry (Packmol's `pbc` keyword). `with_periodic_box`
+is a shared builder, so it reads the same on `GenCanPack` and
+`CbmcGrow`:
 
 ```python
-from molpack import Molpack
+from molpack import GenCanPack
 
-packer = Molpack().with_periodic_box([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
+packer = GenCanPack().with_periodic_box([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
 ```
 
 This is equivalent to a single `InsideBoxRestraint(..., periodic=(True,
@@ -62,7 +64,7 @@ geometric region as defined, regardless of the periodic cell.
 
 ## System-wide PBC derivation
 
-At `pack()` time the packer scans every restraint on every target for
+At `run()` time the entry scans every restraint on every target for
 a declared periodic box. The rules are:
 
 - **Zero declarations** — non-periodic run.
@@ -73,13 +75,13 @@ a declared periodic box. The rules are:
 ## Errors
 
 A zero-length axis on a periodic box, or `max < min` on any axis,
-raises `InvalidPBCBoxError` at `pack()` time:
+raises `InvalidPBCBoxError` at `run()` time:
 
 ```python
 from molpack import InvalidPBCBoxError
 
 try:
-    packer.pack(...)
+    packer.run(targets, max_loops=200)
 except InvalidPBCBoxError as e:
     ...
 ```
@@ -101,8 +103,8 @@ cell_max = [30.0, 30.0, 30.0]
 box = InsideBoxRestraint(cell_min, cell_max, periodic=(True, True, True))
 target = target.with_restraint(box)
 
-result = Molpack().with_seed(42).pack([target], max_loops=200)
+result = GenCanPack().with_seed(42).run([target], max_loops=200)
 ```
 
-Or broadcast it globally via `Molpack.with_global_restraint(box)` when
+Or broadcast it globally via `GenCanPack.with_global_restraint(box)` when
 several species share the same cell.

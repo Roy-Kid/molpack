@@ -209,33 +209,56 @@ A [`Target`](crate::Target) describes one molecule type:
 - Its attached relaxers.
 - Optional fixed placement (Euler + translation).
 - Optional Euler-angle bounds (`with_rotation_bound(Axis, Angle, Angle)`).
+- Optional per-copy mass override (`with_mass`) for density-sized boxes.
+- Optionally built from a previous run's output as one fixed obstacle
+  ([`Target::fixed_from(&result)`](crate::Target::fixed_from)) — the
+  chaining primitive for staged packs.
 
-Targets are snapshotted at `pack()` entry — mutating a `Target` after
-passing it to the packer has no effect.
+The packing algorithm is *not* a target property: you pick it by picking
+the engine entry ([`GenCanPack`](crate::GenCanPack) or
+[`CbmcGrow`](crate::CbmcGrow)), and every target in that call is packed
+by it. An unsupported target/entry combination is a named error, never a
+silent fall-back.
 
-## Molpack
+Targets are snapshotted at `run()` entry — mutating a `Target` after
+passing it to an engine has no effect.
 
-[`Molpack`](crate::Molpack) is the builder facade:
+## PackEngine and its entries
+
+[`PackEngine`](crate::PackEngine) is the shared lifecycle: one entry type
+per algorithm, all with the same builders and the same terminal verb.
+[`GenCanPack`](crate::GenCanPack) is rigid-body GENCAN descent;
+[`CbmcGrow`](crate::CbmcGrow) is configurational-bias chain growth.
 
 ```text
-Molpack::new()
+GenCanPack::new()
     .with_log_level(...)
     .with_handler(...)
     .with_global_restraint(...)  // broadcast to every target
     .with_periodic_box(min, max) // or via periodic InsideBoxRestraint
-    .pack(&[targets], max_loops)
+    .run(&[targets], max_loops)  // -> PackResult
 ```
 
 Every tuning knob (`with_tolerance`, `with_precision`,
 `with_inner_iterations`, `with_seed`, `with_avoid_overlap`, …) has a
-Packmol-matching default, so `Molpack::new().pack(&targets, max_loops)`
+Packmol-matching default, so `GenCanPack::new().run(&targets, max_loops)`
 is a complete call. You only set a knob to *change* its default — e.g.
 `with_avoid_overlap(false)` to let solvent seed inside a fixed solute
 (on by default), or `with_seed(n)` to pick a different RNG stream (the
 default seed is Packmol's `1_234_567`).
 
-Every setter consumes and returns `self`. `pack` takes `&mut self`
-(handlers are invoked through it).
+Every setter consumes and returns `self`, and so does `run` — an engine
+is one-shot by construction, which is what makes it impossible to lose
+its handler set on a second call. To stage two algorithms, run the first
+entry and feed its output to the second as a fixed matrix:
+
+```text
+let grown = CbmcGrow::new(prior).with_density(0.9).run(&[chain], 60)?;
+let full  = GenCanPack::new().run(&[Target::fixed_from(&grown), solvent], 200)?;
+```
+
+Both entries return the same [`PackResult`](crate::PackResult) —
+`frame`, `fdist`, `frest`, `converged`, `softened`.
 
 ## PackContext
 
@@ -257,12 +280,12 @@ against synthetic test problems will interact with it.
 ## Scope equivalence law
 
 ```text
-molpack.with_global_restraint(r)
+engine.with_global_restraint(r)
     ≡  for t in targets { t.with_restraint(r.clone()) }
 ```
 
 There is no separate "global-restraint" storage path in `PackContext`.
-The broadcast happens inside `pack()`; each target receives an
+The broadcast happens inside `PackEngine::run()`; each target receives an
 `Arc::clone` of every global restraint (refcount bump, not a deep
 copy).
 

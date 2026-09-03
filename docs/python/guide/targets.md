@@ -20,7 +20,7 @@ target = Target(frame, count)
   |--------|---------------|
   | `molrs.io.read_pdb(path)` | `"symbol"` |
   | `molrs.io.read_xyz(path)` | `"element"` |
-  | `molrs.Frame.from_dict({"blocks": {"atoms": {...}}, "meta": {}})` | `"element"` |
+  | `molrs.Frame({"atoms": {...}})` | `"element"` |
   | `molpy.Frame` | `"element"` |
 
 - `count` — number of copies to produce.
@@ -31,22 +31,19 @@ A display label is optional:
 target = Target(frame, count).with_name("water")
 ```
 
-Build a frame in memory (no PDB file) with `molrs.Frame.from_dict`:
+Build a frame in memory (no PDB file) with `molrs.Frame`:
 
 ```python
 import molrs
 import numpy as np
 
-frame = molrs.Frame.from_dict({
-    "blocks": {
-        "atoms": {
-            "x": np.array([0.00,  0.96, -0.24]),
-            "y": np.array([0.00,  0.00,  0.93]),
-            "z": np.zeros(3),
-            "element": ["O", "H", "H"],
-        }
-    },
-    "meta": {},
+frame = molrs.Frame({
+    "atoms": {
+        "x": np.array([0.00,  0.96, -0.24]),
+        "y": np.array([0.00,  0.00,  0.93]),
+        "z": np.zeros(3),
+        "element": ["O", "H", "H"],
+    }
 })
 water = Target(frame, count=100).with_name("water")
 ```

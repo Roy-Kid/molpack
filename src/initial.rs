@@ -340,17 +340,25 @@ pub fn initial(
         "[{:.3}s] initial restmol → sizemin/sizemax",
         t0.elapsed().as_secs_f64()
     );
-    restmol(
-        0,
-        0,
-        x,
-        sys,
-        precision,
-        movebad_cfg.gencan_maxit,
-        true,
-        &mut workspace,
-    );
-    let cm0 = [x[0], x[1], x[2]];
+    // Zero movable molecules (a fixed-only pack, or a mixed pack whose only
+    // gencan-side targets are fixed): there is no type 0 to size, and every
+    // later movable-molecule loop is empty. sizemin/sizemax get rebuilt from
+    // the fixed atoms in step 5, so an origin placeholder is enough here.
+    let cm0 = if x.is_empty() {
+        [0.0, 0.0, 0.0]
+    } else {
+        restmol(
+            0,
+            0,
+            x,
+            sys,
+            precision,
+            movebad_cfg.gencan_maxit,
+            true,
+            &mut workspace,
+        );
+        [x[0], x[1], x[2]]
+    };
     sys.sizemin = [cm0[0] - sidemax, cm0[1] - sidemax, cm0[2] - sidemax];
     sys.sizemax = [cm0[0] + sidemax, cm0[1] + sidemax, cm0[2] + sidemax];
     log::debug!(
@@ -525,7 +533,7 @@ pub fn initial(
     // Packmol initial.f90 lines 272-317
     // Caller-declared cell if there is one, else a non-periodic box around the
     // atoms found in phase 1.
-    sys.simbox = match cell {
+    let simbox = match cell {
         Some(bx) => bx,
         None => SimBox::ortho(
             array![
@@ -538,58 +546,7 @@ pub fn initial(
         )
         .expect("fallback cell must have positive extent on every axis"),
     };
-    let periodic = sys.simbox.pbc();
-
-    let cell_side = if radmax > 0.0 {
-        discale * 1.01 * radmax
-    } else {
-        1.0
-    };
-    log::debug!(
-        "[{:.3}s] setting up cell grid (cell_side={:.4})",
-        t0.elapsed().as_secs_f64(),
-        cell_side
-    );
-    // Raw grid resolution: one cell per `cell_side` along each lattice
-    // direction. Sized from plane distances rather than edge lengths, which is
-    // what keeps cells at least `cell_side` wide once the cell is tilted.
-    let raw = CellGrid::for_cutoff(&sys.simbox, cell_side)
-        .celldim()
-        .map(|d| d as usize);
-    // Cap the total cell count. With no spatial constraint the fallback box is
-    // ±`sidemax` (default 1000 Å) wide, which drives the raw grid to ~10⁹ cells
-    // and OOMs `resize_cell_arrays` (each cell costs ~120 B across the cell
-    // arrays). There is no benefit to having far more cells than atoms, so the
-    // budget scales with `ntotat` under a hard ceiling. Coarser cells only slow
-    // the neighbor search — they never change the packing result.
-    let max_total_cells = sys.ntotat.max(1).saturating_mul(64).clamp(1 << 16, 1 << 22);
-    let raw_total = raw[0].saturating_mul(raw[1]).saturating_mul(raw[2]);
-    let shrink = if raw_total > max_total_cells {
-        (raw_total as f64 / max_total_cells as f64).cbrt()
-    } else {
-        1.0
-    };
-    let dims = raw.map(|raw_k| ((raw_k as f64 / shrink).floor() as u32).max(1));
-    sys.grid = CellGrid::with_dims(dims, periodic);
-    log::debug!(
-        "[{:.3}s] celldim={:?}  periodic={:?}",
-        t0.elapsed().as_secs_f64(),
-        sys.grid.celldim(),
-        periodic
-    );
-
-    sys.resize_cell_arrays();
-
-    // Add fixed atoms to latomfix (Packmol lines 303-318)
-    for icart in free_atoms..sys.ntotat {
-        let pos = sys.xcart[icart];
-        let icell = sys.grid.cell_of(&sys.simbox, pos);
-        if sys.latomfix[icell] == NONE_IDX {
-            sys.fixed_cells.push(icell);
-        }
-        sys.latomnext[icart] = sys.latomfix[icell];
-        sys.latomfix[icell] = icart as u32;
-    }
+    install_simbox_and_grid(sys, simbox, radmax, discale, free_atoms);
 
     // ── 7. Random initial point using cm_min/cm_max ───────────────────────────
     // Packmol initial.f90 lines 362-427
@@ -739,6 +696,68 @@ fn random_angle_for_type(itype: usize, axis: usize, sys: &PackContext, rng: &mut
         (center - half_width) + 2.0 * uniform01(rng) * half_width
     } else {
         TWO_PI * uniform01(rng)
+    }
+}
+
+// ── install_simbox_and_grid ────────────────────────────────────────────────
+
+/// Install the resolved simulation box and cell grid on the context and bin
+/// the fixed atoms — stage-② infrastructure shared by [`initial`] and the
+/// solver dispatch (a solver that skips `initial` still needs a populated
+/// grid for the shared-objective evaluation).
+///
+/// Extracted verbatim from `initial` (Packmol initial.f90 lines 272-317);
+/// behavior-preserving, guarded by the `examples_batch` regression.
+pub(crate) fn install_simbox_and_grid(
+    sys: &mut PackContext,
+    simbox: SimBox,
+    radmax: F,
+    discale: F,
+    free_atoms: usize,
+) {
+    sys.simbox = simbox;
+    let periodic = sys.simbox.pbc();
+
+    let cell_side = if radmax > 0.0 {
+        discale * 1.01 * radmax
+    } else {
+        1.0
+    };
+    log::debug!("setting up cell grid (cell_side={cell_side:.4})");
+    // Raw grid resolution: one cell per `cell_side` along each lattice
+    // direction. Sized from plane distances rather than edge lengths, which is
+    // what keeps cells at least `cell_side` wide once the cell is tilted.
+    let raw = CellGrid::for_cutoff(&sys.simbox, cell_side)
+        .celldim()
+        .map(|d| d as usize);
+    // Cap the total cell count. With no spatial constraint the fallback box is
+    // ±`sidemax` (default 1000 Å) wide, which drives the raw grid to ~10⁹ cells
+    // and OOMs `resize_cell_arrays` (each cell costs ~120 B across the cell
+    // arrays). There is no benefit to having far more cells than atoms, so the
+    // budget scales with `ntotat` under a hard ceiling. Coarser cells only slow
+    // the neighbor search — they never change the packing result.
+    let max_total_cells = sys.ntotat.max(1).saturating_mul(64).clamp(1 << 16, 1 << 22);
+    let raw_total = raw[0].saturating_mul(raw[1]).saturating_mul(raw[2]);
+    let shrink = if raw_total > max_total_cells {
+        (raw_total as f64 / max_total_cells as f64).cbrt()
+    } else {
+        1.0
+    };
+    let dims = raw.map(|raw_k| ((raw_k as f64 / shrink).floor() as u32).max(1));
+    sys.grid = CellGrid::with_dims(dims, periodic);
+    log::debug!("celldim={:?}  periodic={:?}", sys.grid.celldim(), periodic);
+
+    sys.resize_cell_arrays();
+
+    // Add fixed atoms to latomfix (Packmol lines 303-318)
+    for icart in free_atoms..sys.ntotat {
+        let pos = sys.xcart[icart];
+        let icell = sys.grid.cell_of(&sys.simbox, pos);
+        if sys.latomfix[icell] == NONE_IDX {
+            sys.fixed_cells.push(icell);
+        }
+        sys.latomnext[icart] = sys.latomfix[icell];
+        sys.latomfix[icell] = icart as u32;
     }
 }
 

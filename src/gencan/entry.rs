@@ -1,0 +1,259 @@
+//! `GenCanPack` — the rigid-body GENCAN packing entry.
+
+use molrs::types::F;
+
+use crate::entry::result::Placements;
+use crate::entry::setup::CellDecl;
+use crate::entry::{EngineSetup, PackEngine, PackResult, PackSettings};
+use crate::error::PackError;
+use crate::gencan::solver::{GencanSettings, GencanSolver};
+use crate::handler::Handler;
+#[cfg(feature = "ff")]
+use crate::optimizer::OptimizerBinding;
+use crate::solver::Solver;
+
+/// Rigid-body packing via the GENCAN bound-constrained optimizer
+/// (Birgin & Martínez) — the Packmol algorithm as its own entry.
+///
+/// Shared knobs (`with_seed`, `with_tolerance`, boxes, handlers, …) come
+/// from [`PackEngine`]; everything on this type is GENCAN-only and means
+/// nothing to a growth entry.
+pub struct GenCanPack {
+    settings: PackSettings,
+    handlers: Vec<Box<dyn Handler>>,
+    inner_iterations: usize,
+    init_passes: Option<usize>,
+    init_box_half_size: F,
+    perturb_fraction: F,
+    random_perturb: bool,
+    perturb: bool,
+    avoid_overlap: bool,
+    seed_placements: Option<Placements>,
+    #[cfg(feature = "ff")]
+    optimizers: Vec<OptimizerBinding>,
+}
+
+impl Default for GenCanPack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GenCanPack {
+    pub fn new() -> Self {
+        // One home for the GENCAN defaults: `GencanSettings::default()`.
+        let d = GencanSettings::default();
+        Self {
+            settings: PackSettings::default(),
+            handlers: Vec::new(),
+            inner_iterations: d.inner_iterations,
+            init_passes: d.init_passes,
+            init_box_half_size: d.init_box_half_size,
+            perturb_fraction: d.perturb_fraction,
+            random_perturb: d.random_perturb,
+            perturb: d.perturb,
+            avoid_overlap: d.avoid_overlap,
+            seed_placements: None,
+            #[cfg(feature = "ff")]
+            optimizers: Vec::new(),
+        }
+    }
+
+    /// Continue on a previous entry's placement solution (placement-seeding
+    /// spec, engine-entry-split 门槛 2): the free copies start EXACTLY where
+    /// `result` left them — `initial()` is skipped, movebad is disabled, and
+    /// the GENCAN phases push remaining contacts apart by rigid-body descent
+    /// (Auhl slow push-off). The cell travels with the seed; do not declare
+    /// a box, density, or cell on a seeded engine. The run's free targets
+    /// must match the seed's shape (`PackError::SeedMismatch` otherwise);
+    /// fixed targets may be appended after the free ones.
+    pub fn seeded_from(mut self, result: &PackResult) -> Self {
+        let cell = &result.placements.cell;
+        let hv = cell.h_view();
+        let ov = cell.origin_view();
+        let mut h = [[0.0 as F; 3]; 3];
+        for (i, row) in h.iter_mut().enumerate() {
+            for (j, v) in row.iter_mut().enumerate() {
+                *v = hv[[i, j]];
+            }
+        }
+        // The seed's cell flows through the shared settings — one source of
+        // truth, and the existing mutual-exclusion errors fire if the caller
+        // declares a second box.
+        self.settings.cell = Some(CellDecl::Matrix {
+            h,
+            origin: [ov[0], ov[1], ov[2]],
+            pbc: cell.pbc(),
+        });
+        self.seed_placements = Some(result.placements.clone());
+        self
+    }
+
+    /// Bind an in-loop optimizer to a selection of copies (feature `ff`).
+    #[cfg(feature = "ff")]
+    pub fn with_optimizer(
+        mut self,
+        select: crate::OptimizeSelect,
+        optimizer: impl molrs::optimize::Optimizer + 'static,
+    ) -> Self {
+        self.optimizers.push(crate::optimizer::OptimizerBinding {
+            select,
+            optimizer: Box::new(optimizer),
+        });
+        self
+    }
+
+    /// GENCAN inner iterations (`maxit`).
+    pub fn with_inner_iterations(mut self, n: usize) -> Self {
+        self.inner_iterations = n.max(1);
+        self
+    }
+
+    /// Initialization outer loops (`nloop0`); default `20 * ntype`.
+    pub fn with_init_passes(mut self, n: usize) -> Self {
+        self.init_passes = Some(n);
+        self
+    }
+
+    /// Maximum system half-size in the initial restmol stage (`sidemax`).
+    pub fn with_init_box_half_size(mut self, half_size: F) -> Self {
+        self.init_box_half_size = half_size;
+        self
+    }
+
+    /// Stall-perturbation heuristic: fraction perturbed / random selection /
+    /// master switch (Packmol `movefrac` / `movebadrandom`).
+    pub fn with_perturb(mut self, fraction: F, random: bool, enabled: bool) -> Self {
+        self.perturb_fraction = fraction;
+        self.random_perturb = random;
+        self.perturb = enabled;
+        self
+    }
+
+    /// Reject initial placements that overlap a fixed molecule.
+    pub fn with_avoid_overlap(mut self, on: bool) -> Self {
+        self.avoid_overlap = on;
+        self
+    }
+}
+
+impl PackEngine for GenCanPack {
+    fn settings(&self) -> &PackSettings {
+        &self.settings
+    }
+
+    fn validate(&self, targets: &[crate::target::Target]) -> Result<(), PackError> {
+        let Some(seed) = &self.seed_placements else {
+            return Ok(());
+        };
+        // The seed covers the free copies; their shape must match per copy.
+        let expected: Vec<usize> = targets
+            .iter()
+            .filter(|t| t.fixed_at.is_none())
+            .flat_map(|t| std::iter::repeat_n(t.natoms(), t.count))
+            .collect();
+        if expected != seed.copy_atoms {
+            return Err(PackError::SeedMismatch {
+                expected: expected.iter().sum(),
+                got: seed.copy_atoms.iter().sum(),
+            });
+        }
+        Ok(())
+    }
+    fn settings_mut(&mut self) -> &mut PackSettings {
+        &mut self.settings
+    }
+    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>> {
+        &mut self.handlers
+    }
+
+    fn prepare(
+        &self,
+        sys: &mut crate::context::PackContext,
+        x: &mut [F],
+        setup: &EngineSetup<'_>,
+    ) -> Result<(), PackError> {
+        let Some(seed) = &self.seed_placements else {
+            return Ok(());
+        };
+        // Same installation the growth entry performs — the seed's cell was
+        // resolved through the shared settings into `setup.cell`.
+        let simbox = setup
+            .cell
+            .clone()
+            .expect("seeded_from installed the cell declaration");
+        let radmax = sys.radius.iter().cloned().fold(0.0 as F, F::max);
+        crate::initial::install_simbox_and_grid(
+            sys,
+            simbox,
+            radmax,
+            self.settings.discale(),
+            setup.ntotat_free,
+        );
+        // Inject the placement solution verbatim (zero-conversion chaining).
+        sys.coor[..setup.ntotat_free].copy_from_slice(&seed.coor);
+        x.copy_from_slice(&seed.x);
+        Ok(())
+    }
+
+    fn solver(&mut self, setup: &EngineSetup<'_>) -> Result<Box<dyn Solver>, PackError> {
+        let s = &self.settings;
+        let gencan = GencanSettings {
+            inner_iterations: self.inner_iterations,
+            init_passes: self.init_passes,
+            init_box_half_size: self.init_box_half_size,
+            perturb_fraction: self.perturb_fraction,
+            random_perturb: self.random_perturb,
+            perturb: self.perturb,
+            avoid_overlap: self.avoid_overlap,
+            discale: s.discale(),
+            seed: s.seed(),
+            // A seeded run continues from injected placements: skip
+            // `initial()`, disable movebad — rigid-body descent only.
+            push_off: self.seed_placements.is_some(),
+        };
+        let solver = GencanSolver::new(
+            gencan,
+            setup.maxmove_per_type.to_vec(),
+            setup.cell.clone(),
+            setup.ntype,
+            setup.ntype_with_fixed,
+        );
+        // The bindings are handed to the solver once; `run(self)` consumes
+        // the entry, so there is no second `solver()` call to run bare.
+        #[cfg(feature = "ff")]
+        let solver = solver.with_optimizers(std::mem::take(&mut self.optimizers));
+        Ok(Box::new(solver))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::target::Target;
+
+    /// The entry lifecycle is deterministic: same targets, same seed,
+    /// bit-identical positions and verdict. (Bitwise parity against the
+    /// deleted `Molpack` path was proven before its removal —
+    /// engine-entry-split migration record.)
+    #[test]
+    fn gencan_entry_is_deterministic() {
+        let coords = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
+        let run = || {
+            GenCanPack::new()
+                .with_seed(11)
+                .with_tolerance(2.0)
+                .with_periodic_box([0.0; 3], [20.0; 3], [true; 3])
+                .run(&[Target::from_coords(&coords, &[1.0, 1.0], 6)], 50)
+                .expect("entry pack runs")
+        };
+        let (a, b) = (run(), run());
+        assert!(a.converged);
+        assert_eq!(a.fdist.to_bits(), b.fdist.to_bits());
+        for (pa, pb) in a.positions().iter().zip(b.positions().iter()) {
+            for k in 0..3 {
+                assert_eq!(pa[k].to_bits(), pb[k].to_bits());
+            }
+        }
+    }
+}

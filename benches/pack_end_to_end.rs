@@ -1,7 +1,7 @@
-//! Regression alarm for the full `Molpack::pack` pipeline.
+//! Regression alarm for the full `GenCanPack` pipeline.
 //!
 //! Drives a small, fully-synthesized two-species mixture through the public
-//! `Molpack::pack` entry point — initial placement, the three-phase GENCAN
+//! `GenCanPack::run` entry point — initial placement, the three-phase GENCAN
 //! loop, and frame assembly — so a regression anywhere in the end-to-end path
 //! shows up. This is the coarse "catastrophic-regression" alarm that
 //! complements the per-kernel microbenches in the sibling bench files.
@@ -16,7 +16,9 @@
 use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use molpack::{F, InsideBoxRestraint, InsideCellRegion, Molpack, RegionRestraint, Target};
+use molpack::{
+    F, GenCanPack, InsideBoxRestraint, InsideCellRegion, PackEngine, RegionRestraint, Target,
+};
 
 const SEED: u64 = 42;
 const BOX_SIDE: F = 25.0;
@@ -84,12 +86,12 @@ fn hexagonal_targets() -> [Target; 2] {
 }
 
 fn run(targets: &[Target], parallel: bool) {
-    let mut packer = Molpack::new()
+    let packer = GenCanPack::new()
         .with_tolerance(2.0)
         .with_precision(0.01)
         .with_parallel_eval(parallel)
         .with_seed(SEED);
-    std::hint::black_box(packer.pack(targets, MAX_LOOPS).expect("pack"));
+    std::hint::black_box(packer.run(targets, MAX_LOOPS).expect("pack"));
 }
 
 fn bench_pack_end_to_end(c: &mut Criterion) {

@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use molpack::MolpackLogLevel;
 use molpack::script::{self, BuildResult, ScriptError};
+use molpack::{LogLevel, PackEngine};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -115,7 +115,7 @@ fn configure_parallel(threads: Option<usize>) -> Result<(), String> {
 fn run(src: &str, base_dir: &std::path::Path, parallel: bool) -> Result<(), ScriptError> {
     let script_ast = script::parse(src)?;
     let BuildResult {
-        mut packer,
+        mut entry,
         targets,
         output,
         nloop,
@@ -123,12 +123,12 @@ fn run(src: &str, base_dir: &std::path::Path, parallel: bool) -> Result<(), Scri
 
     // CLI defaults to screen output; library callers stay headless unless
     // configured on the builder.
-    packer = packer.with_log_level(MolpackLogLevel::Progress);
+    entry = entry.with_log_level(LogLevel::Progress);
     if parallel {
-        packer = packer.with_parallel_eval(true);
+        entry = entry.with_parallel_eval(true);
     }
 
-    let frame = packer.pack(&targets, nloop)?;
+    let frame = entry.run(&targets, nloop)?.frame;
     script::write_frame(&output, &frame)?;
     println!("Output written to: {}", output.display());
 

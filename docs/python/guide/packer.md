@@ -1,15 +1,18 @@
 # Packer
 
-`Molpack` drives the GENCAN-based three-phase optimizer. All tuning
-is through `with_*` builder methods — the constructor takes no
-arguments.
+`GenCanPack` drives the GENCAN-based three-phase optimizer. It is one of
+two engine entries — the other, `CbmcGrow`, grows chains instead of
+placing rigid bodies; see [Chain growth](growth.md). You pick the
+algorithm by picking the entry, and both share the builder names below.
+All tuning is through `with_*` builder methods — the `GenCanPack`
+constructor takes no arguments.
 
 ## Constructor
 
 ```python
-from molpack import Molpack
+from molpack import GenCanPack
 
-packer = Molpack()
+packer = GenCanPack()
 ```
 
 All defaults match Packmol's reference behaviour. Override any of
@@ -17,30 +20,28 @@ them via the builders below.
 
 ## Builder methods
 
-Every builder returns a **new** `Molpack`:
+Every builder returns a **new** `GenCanPack`:
 
 ```python
 packer = (
-    Molpack()
+    GenCanPack()
     .with_tolerance(2.0)            # minimum allowed pairwise distance (Å)
     .with_precision(0.01)           # convergence threshold on fdist and frest
     .with_inner_iterations(20)      # GENCAN inner-loop cap (Packmol `maxit`)
     .with_init_passes(0)            # initial compaction passes (Packmol `nloop0`; 0 = auto)
     .with_init_box_half_size(1000)  # hard bound on init placement (Packmol `sidemax`)
-    .with_perturb_fraction(0.05)    # fraction of atoms re-sampled per stall
-    .with_random_perturb(False)     # randomize perturbation target selection
-    .with_perturb(True)             # enable the stall-perturbation heuristic
+    .with_perturb(0.05, False, True)  # stall heuristic: fraction, random pick, on/off
     .with_seed(42)                  # deterministic RNG
     .with_parallel_eval(False)      # rayon-backed pair-kernel eval (opt-in)
-    .with_lammps_output(True)       # attach LAMMPS-style screen output
-    .with_log_level("progress")     # quiet | summary | progress | verbose
-    .with_log_frequency(1)          # print every N outer steps
+    .with_progress(True)            # LAMMPS-style screen output
 )
 ```
 
-Use `.with_lammps_output(False)` or `.with_log_level("quiet")` to run
-silently (the default). `.with_progress()` is kept as a compatibility
-alias for enabling/disabling progress output.
+Runs are silent by default; `.with_progress(True)` turns the screen log
+on and `.with_progress(False)` turns it back off. Finer control:
+`.with_log_level("quiet" | "summary" | "progress" | "verbose")` (an
+explicit level wins over `with_progress`) and `.with_log_frequency(n)`
+to print every *n*-th loop.
 
 A few more builders cover specific needs:
 
@@ -48,10 +49,15 @@ A few more builders cover specific needs:
 packer = (
     packer
     .with_periodic_box([0, 0, 0], [30, 30, 30])  # fully-periodic cell (Packmol `pbc`)
+    .with_density(0.9)                            # or: size a cubic cell from g/cm³
     .with_avoid_overlap(True)                     # reject init placements onto a fixed molecule
-    .with_xyz_output("traj.xyz", every=5)         # record the packing trajectory
 )
 ```
+
+`with_tolerance`, `with_precision`, `with_seed`, `with_periodic_box`,
+`with_density`, `with_parallel_eval`, `with_progress`, `with_handler`,
+and `with_global_restraint` are the shared entry builders — they exist
+on `CbmcGrow` too. The rest are GENCAN-only.
 
 ## Global restraints
 
@@ -86,14 +92,14 @@ the `Handler` Protocol in `molpack`.
 ## Periodic boundaries
 
 PBC can be declared per-axis on an `InsideBoxRestraint`, or as a
-fully-periodic cell directly on the packer via
+fully-periodic cell directly on the entry via
 `.with_periodic_box(min, max)`. See
 [Periodic boundaries](periodic-boundaries.md).
 
 ## Running
 
 ```python
-frame = packer.pack(targets, max_loops=200)
+result = packer.run(targets, max_loops=200)
 ```
 
 - `targets`   — list of `Target` objects (must be non-empty).
@@ -103,12 +109,9 @@ Raises one of the typed `PackError` subclasses on failure
 (`NoTargetsError`, `InvalidPBCBoxError`,
 `ConflictingPeriodicBoxesError`, …).
 
-`pack()` returns a `molrs.Frame`. To retrieve structured diagnostics,
-use `pack_with_report()`:
-
-```python
-result = packer.pack_with_report(targets, max_loops=200)
-```
+`run()` is the entry's only terminal verb and it consumes the entry —
+one engine, one run. Calling `run()` twice on the same object raises
+`RuntimeError`; build a fresh `GenCanPack` for the next pack.
 
 ## PackResult
 
@@ -120,6 +123,7 @@ result.natoms      # int
 result.converged   # bool — True iff both fdist and frest < precision
 result.fdist       # float — final distance-violation sum
 result.frest       # float — final restraint-violation sum
+result.softened    # int — growth-only; always 0 on the GenCanPack path
 ```
 
 Inspect convergence:
@@ -129,9 +133,9 @@ if not result.converged:
     print(f"not converged: fdist={result.fdist:.4f} frest={result.frest:.4f}")
 ```
 
-`PackResult.frame` is the same Frame returned by `pack()`. Pass it to a
-writer of your choice (e.g. `molrs.io.write_pdb`). molpack does **not**
-provide writers.
+`PackResult.frame` is the packed frame. Pass it to a writer of your
+choice (e.g. `molrs.io.write_pdb`). molpack does **not** provide
+writers.
 
 ## Reproducibility
 

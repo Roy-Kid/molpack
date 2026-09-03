@@ -7,7 +7,7 @@
 //! that overrides the selected atoms. Per-atom values are a **per-type
 //! template** — every copy of a type gets the same ones.
 
-use molpack::{F, InsideBoxRestraint, Molpack, Target};
+use molpack::{F, GenCanPack, InsideBoxRestraint, PackEngine, Target};
 
 fn coords(n: usize) -> Vec<[F; 3]> {
     (0..n).map(|i| [i as F * 3.0, 0.0, 0.0]).collect()
@@ -101,10 +101,10 @@ fn a_bulky_atom_enforces_a_larger_separation() {
         .with_name("small")
         .with_restraint(cell);
 
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_tolerance(2.0)
         .with_seed(5)
-        .pack_with_report(&[bulky, small], 80)
+        .run(&[bulky, small], 80)
         .expect("pack");
 
     let pos = result.positions();
@@ -134,10 +134,10 @@ fn per_atom_radii_apply_to_every_copy() {
         .with_atom_radius(&[0], 5.0)
         .with_restraint(cell);
 
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_tolerance(2.0)
         .with_seed(9)
-        .pack_with_report(&[dumbbell], 80)
+        .run(&[dumbbell], 80)
         .expect("pack");
 
     let pos = result.positions();
@@ -270,10 +270,10 @@ fn a_soft_species_absorbs_the_crowding() {
         .with_name("firm")
         .with_restraint(cell);
 
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_tolerance(4.0)
         .with_seed(3)
-        .pack_with_report(&[soft, firm], 60)
+        .run(&[soft, firm], 60)
         .expect("pack");
 
     let pos = result.positions();
@@ -340,9 +340,9 @@ fn a_short_radius_at_or_above_the_radius_is_rejected() {
         .with_radius(2.0)
         .with_short_radius(2.0)
         .with_restraint(cell);
-    let err = Molpack::new()
+    let err = GenCanPack::new()
         .with_tolerance(4.0)
-        .pack_with_report(&[bad], 10)
+        .run(&[bad], 10)
         .expect_err("a short radius >= radius must be rejected");
     let msg = err.to_string();
     assert!(msg.contains("short radius"), "{msg}");
@@ -356,11 +356,11 @@ fn global_short_tolerance_applies_to_every_atom() {
     let t = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.5], 8)
         .with_name("a")
         .with_restraint(cell);
-    let result = Molpack::new()
+    let result = GenCanPack::new()
         .with_tolerance(4.0)
         .with_short_tolerance(2.0, 3.0)
         .with_seed(1)
-        .pack_with_report(&[t], 30)
+        .run(&[t], 30)
         .expect("pack");
     assert_eq!(result.natoms(), 8);
 }
@@ -368,7 +368,7 @@ fn global_short_tolerance_applies_to_every_atom() {
 #[test]
 #[should_panic(expected = "smaller than the tolerance")]
 fn global_short_tolerance_must_be_below_the_tolerance() {
-    let _ = Molpack::new()
+    let _ = GenCanPack::new()
         .with_tolerance(2.0)
         .with_short_tolerance(4.0, 3.0);
 }
