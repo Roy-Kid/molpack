@@ -10,6 +10,10 @@ use rand::rngs::SmallRng;
 
 use crate::constraints::EvalMode;
 use crate::context::PackContext;
+// The unscaled verdict is a shared primitive owned by the context layer, not
+// by this solver: growth evaluates the same way, and the pipeline layer must
+// not import `gencan/`.
+use crate::context::pack_state::evaluate_unscaled;
 use crate::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::handler::{Handler, PhaseInfo, PhaseReport, StepInfo};
 use crate::initial::SwapState;
@@ -18,36 +22,10 @@ use crate::numerics::objective_small_floor;
 #[cfg(feature = "ff")]
 use crate::optimizer::{ResolvedBinding, run_optimizer_bindings};
 
-/// Evaluate the packing objective once under **unscaled** radii (`radius_ini`),
-/// restoring the caller's `radius` values on return.
-///
-/// On return, `sys.fdist` / `sys.frest` / `sys.fdist_atom` / `sys.frest_atom`
-/// reflect the unscaled evaluation (the radius-dependent inner state); only
-/// `sys.radius` itself is rolled back to what it was on entry.
-///
-/// Returns `(f_total, fdist, frest)` from the unscaled evaluation — the exact
-/// triple the packer's main loop feeds to `flast` / `fimp` / handler `StepInfo`.
-///
-/// Pulled out of `pack()` in phase A.4.1 to de-duplicate three inline copies
-/// of the same swap-evaluate-restore dance (Packmol `computef` emulation).
-pub fn evaluate_unscaled(sys: &mut PackContext, xwork: &[F]) -> (F, F, F) {
-    sys.work.radiuswork.copy_from_slice(&sys.radius);
-    for i in 0..sys.ntotat {
-        sys.set_radius(i, sys.radius_ini[i]);
-    }
-    let f_total = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
-    let fdist = sys.fdist;
-    let frest = sys.frest;
-    for i in 0..sys.ntotat {
-        sys.set_radius(i, sys.work.radiuswork[i]);
-    }
-    (f_total, fdist, frest)
-}
-
 /// Outcome of one main-loop iteration inside a packing phase.
 ///
 /// Pulled out of `pack()` in phase A.4.3 to isolate the ~140-line per-iteration
-/// body that runs movebad → relaxers → pgencan → radii schedule. `Continue`
+/// body that runs movebad → in-loop optimizers → pgencan → radii schedule. `Continue`
 /// means "run the next iteration"; `Converged` means the convergence predicate
 /// fired inside this iteration; `EarlyStop` means a `Handler::should_stop()`
 /// returned true.
@@ -64,7 +42,7 @@ pub enum IterOutcome {
 ///
 /// 1. `movebad` when `radscale == 1.0` and previous `fimp <= 10%` (unless
 ///    disabled).
-/// 2. Per-target relaxer MC block.
+/// 2. Per-target in-loop optimizer block (`run_optimizer_bindings`, feature `ff`).
 /// 3. `pgencan` on the working coordinate vector.
 /// 4. Unscaled-radii statistics (`fdist` / `frest` / `fimp`).
 /// 5. Handler `on_step` notification; early stop if any handler opts in.

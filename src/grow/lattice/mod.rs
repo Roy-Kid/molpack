@@ -9,7 +9,7 @@
 //! a melt-density walk completes in milliseconds where continuum growth
 //! grinds. The walk decides only the torsion sequence; decoration rebuilds
 //! every atom from the template's true internal coordinates
-//! ([`decorate`]), and the shared objective judges the decorated result at
+//! (`decorate`), and the shared objective judges the decorated result at
 //! full tolerance — residual contacts are reported honestly and belong to
 //! the seeded GENCAN push-off (`GenCanPack::seeded_from`), never hidden.
 
@@ -23,7 +23,7 @@ use molrs::types::F;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-use crate::constraints::EvalMode;
+use crate::context::pack_state::evaluate_unscaled;
 use crate::context::{PackContext, RigidView};
 use crate::entry::{EngineSetup, PackEngine, PackSettings};
 use crate::error::PackError;
@@ -270,13 +270,12 @@ impl Solver for LatticeSolver {
         // `sys.xcart` as it finished, including the forced completions above.
         x.capture_from_xcart(sys);
 
-        // Final verdict from the shared objective, never self-reported.
-        sys.scale = 1.0;
-        sys.scale2 = 0.01;
-        let _ = sys.evaluate(x.as_slice(), EvalMode::FOnly, None);
-        let converged =
-            !aborted && softened == 0 && sys.fdist == 0.0 && sys.frest < budget.precision;
-        SolveOutcome::new(converged, sys.fdist, sys.frest, softened)
+        // Final verdict from the shared objective, never self-reported: the
+        // same unscaled primitive the continuum driver calls, which also owns
+        // the `scale` / `scale2` handling this site used to spell out.
+        let (_, fdist, frest) = evaluate_unscaled(sys, x.as_slice());
+        let converged = !aborted && softened == 0 && fdist == 0.0 && frest < budget.precision;
+        SolveOutcome::new(converged, fdist, frest, softened)
     }
 }
 

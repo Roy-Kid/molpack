@@ -39,7 +39,7 @@
 
 use molrs::types::F;
 
-use crate::constraints::EvalMode;
+use crate::context::pack_state::evaluate_unscaled;
 use crate::context::{PackContext, RigidView};
 use crate::grow::config::{GrowConfig, GrowError};
 use crate::grow::field::OverlapField;
@@ -418,11 +418,11 @@ impl Solver for GrowthSolver {
         x.capture_from_xcart(sys);
 
         // ── Final verdict from the shared objective, never self-reported ──
-        sys.scale = 1.0;
-        sys.scale2 = 0.01;
-        let _ = sys.evaluate(x.as_slice(), EvalMode::FOnly, None);
-        let converged =
-            !aborted && softened == 0 && sys.fdist == 0.0 && sys.frest < budget.precision;
-        SolveOutcome::new(converged, sys.fdist, sys.frest, softened)
+        // One unscaled evaluation, the crate's single primitive for it: it
+        // sets the unscaled `scale` / `scale2` pair this site used to write
+        // inline and gives the caller's values back afterwards.
+        let (_, fdist, frest) = evaluate_unscaled(sys, x.as_slice());
+        let converged = !aborted && softened == 0 && fdist == 0.0 && frest < budget.precision;
+        SolveOutcome::new(converged, fdist, frest, softened)
     }
 }
