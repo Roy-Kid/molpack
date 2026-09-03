@@ -15,29 +15,35 @@ type plus PDB/XYZ I/O.
 
 ## 2. Load or build a template
 
-=== "From a PDB file"
+A **template** is one copy of the molecule you want many of — its atom
+positions and element symbols, in any orientation. molpack takes the template
+as a `molrs.Frame`, the shared MolCrafts container for atomic data, so any
+loader molrs supports will do. Read one from a Protein Data Bank (PDB) file:
 
-    ```python
-    import molrs
+```python
+import molrs
 
-    frame = molrs.io.read_pdb("water.pdb")
-    ```
+frame = molrs.io.read_pdb("water.pdb")
+```
 
-=== "In-memory (no file)"
+Or build one in memory, with no file involved — here a water molecule with the
+oxygen at the origin:
 
-    ```python
-    import molrs
-    import numpy as np
+```python
+import molrs
+import numpy as np
 
-    frame = molrs.Frame({
-        "atoms": {
-            "x": np.array([0.00, 0.96, -0.24]),
-            "y": np.array([0.00, 0.00, 0.93]),
-            "z": np.zeros(3),
-            "element": ["O", "H", "H"],
-        }
-    })
-    ```
+frame = molrs.Frame({
+    "atoms": {
+        "x": np.array([0.00, 0.96, -0.24]),
+        "y": np.array([0.00, 0.00, 0.93]),
+        "z": np.zeros(3),
+        "element": ["O", "H", "H"],
+    }
+})
+```
+
+Coordinates are in ångström (Å) throughout molpack.
 
 ## 3. Define the target
 

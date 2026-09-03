@@ -105,8 +105,8 @@ pub struct PackContext {
     /// Shares `xcart`'s index space exactly (type-major, copy-major,
     /// atom-minor, free types then fixed types), so `icart` addresses both.
     /// Copies of one type start identical; in-loop optimizers
-    /// ([`crate::optimizer`]) relax each copy independently, after which they
-    /// diverge. Size: `ntotat`.
+    /// (module `crate::optimizer`, feature `ff`) relax each copy
+    /// independently, after which they diverge. Size: `ntotat`.
     pub coor: Vec<[F; 3]>,
 
     // ---- Radii ----

@@ -129,26 +129,42 @@ Use `Region` when you want compositional geometry (intersection /
 union / complement). Use `Restraint` directly when you want a specific
 penalty shape (linear vs quadratic, custom stiffness, multi-atom).
 
-## Relaxer
+## In-loop optimizer (feature `ff`)
 
-A [`Relaxer`](crate::Relaxer) modifies a target's **reference geometry**
-between outer optimizer calls. Use cases: torsion-MC sampling for
-flexible chains, local MD relaxation, gradient descent on bond-angle
-targets.
+Rigid-body packing never changes a molecule's internal shape. An **in-loop
+optimizer** does: it rewrites a copy's **reference geometry** — the conformer
+all of that copy's Cartesian positions are generated from — between outer
+GENCAN calls. Use cases: torsion Monte-Carlo sampling for flexible chains
+(propose a rotation about a rotatable bond, accept it with probability
+`min(1, exp(-ΔE / T))`), or force-field minimisation of a strained conformer.
 
-Two-part design — builder + runner:
+The seam is molrs's `Optimizer` trait, one method over a `Frame`:
 
-- `Relaxer::spawn(&self, frame, ref_coords) -> Box<dyn RelaxerRunner>` is
-  called once at `pack()` entry.
-- `RelaxerRunner::on_iter(&mut self, coords, f_current, evaluate, rng)`
-  runs between movebad and GENCAN each outer iteration; returns
-  `Some(new_coords)` on accept, `None` on reject.
+```text
+pub trait Optimizer: Send + Sync {
+    fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String>;
+}
+```
 
-Relaxers require `count == 1` because all copies share the same
-reference coords.
+An implementation is attached to the *engine*, not the target, by naming which
+targets it applies to:
 
-Built-in: [`TorsionMcRelaxer`](crate::TorsionMcRelaxer) (Metropolis
-torsion sampling with self-avoidance).
+- `OptimizeSelect::per_copy(names)` — every copy of every named target,
+  independently. `OptimizeSelect::joint(names)` — all of them as one movable
+  group. `.with_environment(rcut)` adds nearby atoms as frozen context.
+- `GenCanPack::with_optimizer(select, optimizer)` binds the pair. Bindings are
+  resolved by target name once at `run()` entry and fire in the all-type phase
+  only, where the coordinate vector covers every molecule.
+- After each call molpack re-evaluates the packing objective and reverts the
+  conformer if it got worse, so an optimizer cannot damage a pack.
+
+Because each copy is relaxed on its own, copies of one target start identical
+and then diverge — there is no `count == 1` restriction.
+
+Built-in: `TorsionMcOptimizer` (Metropolis torsion sampling with
+self-avoidance). All the names in this section — `OptimizeSelect`,
+`TorsionMcOptimizer`, `with_optimizer` — require the `ff` Cargo feature, so
+they are written in plain code font here rather than linked.
 
 ## Handler
 
@@ -169,7 +185,7 @@ pub trait Handler: Send {
 ```
 
 Observer contract: `sys` is always `&PackContext`, never `&mut`.
-Handlers cannot modify packer state — use a `Relaxer` if you need to.
+Handlers cannot modify packer state — bind an in-loop optimizer if you need to.
 
 Built-ins: [`NullHandler`](crate::NullHandler),
 [`ProgressHandler`](crate::ProgressHandler),
@@ -206,7 +222,7 @@ A [`Target`](crate::Target) describes one molecule type:
 - Input coordinates + centered reference coordinates.
 - Van der Waals radii, element symbols, copy count, name.
 - Its attached restraints (per-target + per-atom-subset).
-- Its attached relaxers.
+- Its attached collective restraints (one penalty over the whole species).
 - Optional fixed placement (Euler + translation).
 - Optional Euler-angle bounds (`with_rotation_bound(Axis, Angle, Angle)`).
 - Optional per-copy mass override (`with_mass`) for density-sized boxes.
@@ -273,9 +289,9 @@ Structure (`molpack/src/context/`):
 - `RuntimeState` — mutable per-iteration state (x, coor, radius).
 - `WorkBuffers` — scratch arrays (xcart, gxcar, radiuswork).
 
-Users rarely touch `PackContext` directly — it's passed through
-handlers and relaxers. Power users implementing a custom `Objective`
-against synthetic test problems will interact with it.
+Users rarely touch `PackContext` directly — it reaches them through
+handler callbacks and the in-loop optimizer bridge. Power users implementing a
+custom `Objective` against synthetic test problems will interact with it.
 
 ## Scope equivalence law
 

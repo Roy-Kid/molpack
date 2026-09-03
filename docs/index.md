@@ -220,7 +220,7 @@ Dense summary of what the engine and each surface cover.
   </div>
   <div>
     <dt>Rust</dt>
-    <dd>Native builders, handlers, relaxers, and feature-gated IO / FF / rayon.</dd>
+    <dd>Native builders, handlers, in-loop optimizers, and feature-gated IO / FF / rayon.</dd>
   </div>
 </dl>
 
@@ -253,7 +253,7 @@ A compact mirror of the navigation tree for returning users.
   </section>
   <section>
     <h3>Rust</h3>
-    <p>Builders, restraints, PBC, handlers, relaxers, and example programs.</p>
+    <p>Builders, restraints, PBC, handlers, in-loop optimizers, and example programs.</p>
   </section>
   <section>
     <h3>Development</h3>
@@ -284,7 +284,7 @@ A compact mirror of the navigation tree for returning users.
   </a>
   <a href="rust/">
     <strong>Rust</strong>
-    <em>Native builders, handlers, and relaxers.</em>
+    <em>Native builders, handlers, and in-loop optimizers.</em>
   </a>
 </div>
 

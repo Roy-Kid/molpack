@@ -4,8 +4,10 @@
 //!
 //! Two front-end shapes are supported:
 //!
-//! - **Native (feature `io`)** — [`Script::build`] reads template files
-//!   via molrs-io and returns a ready-to-run [`BuildResult`]:
+//! - **Native (feature `io`)** — `Script::build` reads template files
+//!   via molrs-io and returns a ready-to-run `BuildResult`. Both names
+//!   are compiled only when the `io` feature is on, so they are written
+//!   in plain code font here rather than as cross-references:
 //!
 //!   ```ignore
 //!   use std::path::Path;

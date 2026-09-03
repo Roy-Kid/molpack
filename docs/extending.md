@@ -1,8 +1,8 @@
 # Extending the Crate
 
-Tutorials for writing your own `AtomRestraint` / `Region` / `Handler` /
-`Relaxer` types. Every extension trait in this crate follows the same
-shape (direction-3 rule — see [`concepts`](crate::concepts)):
+Tutorials for writing your own `AtomRestraint` / `Region` / `Handler` types,
+plus the in-loop optimizer seam. Every extension trait in this crate follows
+the same shape (direction-3 rule — see [`concepts`](crate::concepts)):
 
 > `pub trait X` + N concrete `pub struct` types implementing it.
 > User types `impl X` identically. No built-in/plugin type-level
@@ -320,7 +320,7 @@ Handler notes:
 - **`on_step` is the only required method.** Everything else has a
   default no-op.
 - **`sys` is `&PackContext`, never `&mut`.** Handlers cannot mutate
-  packer state — use a `Relaxer` if you need to.
+  packer state — bind an in-loop optimizer (next section) if you need to.
 - **Multiple handlers run in registration order.** Register your CSV
   handler before `ProgressHandler` to get a row on every step,
   vice-versa otherwise.
@@ -328,94 +328,183 @@ Handler notes:
   the outer loop early. Useful for time budgets or custom convergence
   criteria.
 
-## Custom `Relaxer`
+## Custom in-loop optimizer (feature `ff`)
 
-Goal: a relaxer that tries random rigid-body translations and accepts
-if the objective decreases.
+Everything above places molecules as **rigid bodies**: the packer moves and
+turns a copy, but the copy's internal shape — its *conformer* — stays frozen at
+whatever the template said. A flexible molecule often cannot satisfy its
+restraints in any single rigid pose; it has to change shape *while* it is being
+placed.
 
-![Confinement placement with a custom pivot-MC relaxer](assets/images/paper-confinement-sphere.png)
+That is what an **in-loop optimizer** is for. Once per outer packing iteration,
+the packer hands each selected copy to an object that may rewrite that copy's
+coordinates, and keeps the result only if the packing objective did not get
+worse. The seam is molrs's `Optimizer` trait — one method, which relaxes a
+`Frame` (molrs's atomic-data container) in place:
 
-The confinement example is a molpack extension workflow, not a Packmol parity
-claim: a custom pivot-MC relaxer folds flexible PEO chains before packing, so
-the same engine can place them inside a tight spherical cavity.
+```text
+pub trait Optimizer: Send + Sync {
+    fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String>;
+}
+```
 
-```no_run
+molpack ships one implementation, `TorsionMcOptimizer`: Metropolis
+Monte-Carlo sampling of rotations about a molecule's rotatable bonds.
+("Metropolis Monte-Carlo" means propose a random move, then accept it with
+probability `min(1, exp(-ΔE / T))` — downhill moves always pass, uphill ones
+sometimes do, which is what lets the search escape a bad local shape.) molrs
+ships `LBFGS`, a force-field minimizer. Anything else implementing the trait
+drops into the same slot.
+
+The trait, its molpack implementation, and the `GenCanPack::with_optimizer`
+binder all live behind molpack's `ff` Cargo feature, which pulls in molrs's
+force-field module.
+
+![Flexible chains packed inside a spherical cavity](assets/images/paper-confinement-sphere.png)
+
+Confinement like this is a molpack extension workflow, not a Packmol parity
+claim: an in-loop optimizer reshapes flexible chains while the packer places
+them, so one engine can fit them inside a cavity no rigid pose would clear.
+Two runnable programs drive `TorsionMcOptimizer` exactly this way —
+`cargo run --release --example pack_adsorption --features ff` and
+`cargo run --release --example pack_translocation --features ff`.
+
+### Step 1 — implement `Optimizer`
+
+Goal: a *jiggle* optimizer that proposes random rigid translations of the group
+it is handed and keeps the ones that lower a score. A real optimizer scores
+with a force field; this one just pulls the group toward the origin, so the
+mechanics stay visible.
+
+Two conventions the packer relies on:
+
+- **Coordinates arrive and leave through the `Frame`.** Read them with
+  `molrs::ff::potential::extract_coords` — a flat `[x₀, y₀, z₀, x₁, …]` buffer
+  in ångström — and write them back with `write_coords`.
+- **Frozen atoms are flagged.** When the binding asks for the local
+  environment, the `Frame` also carries neighbouring atoms that must not move.
+  They are marked by a boolean `atoms.free` column; a missing column means
+  every atom is free.
+
+```rust
 use molrs::Frame;
+use molrs::ff::potential::{extract_coords, write_coords};
+use molrs::optimize::{OptReport, Optimizer};
 use molrs::types::F;
-use molpack::{Relaxer, RelaxerRunner};
-use rand::{Rng, RngCore};
+use rand::rngs::SmallRng;
+use rand::{RngExt, SeedableRng};
 
-#[derive(Debug, Clone)]
-pub struct JiggleRelaxer {
+pub struct JiggleOptimizer {
+    /// Trial moves per call.
     pub steps: usize,
+    /// Largest displacement per axis, in ångström.
     pub max_delta: F,
+    rng: SmallRng,
 }
 
-impl Relaxer for JiggleRelaxer {
-    fn spawn(&self, _frame: Option<&Frame>, _ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner> {
-        Box::new(JiggleRunner {
-            steps: self.steps,
-            max_delta: self.max_delta,
-            accepted: 0,
-            total: 0,
-        })
+impl JiggleOptimizer {
+    pub fn new(steps: usize, max_delta: F, seed: u64) -> Self {
+        Self { steps, max_delta, rng: SmallRng::seed_from_u64(seed) }
     }
 }
 
-pub struct JiggleRunner {
-    steps: usize,
-    max_delta: F,
-    accepted: usize,
-    total: usize,
+/// Toy score (Å²): squared distance of the free atoms from the origin.
+fn score(coords: &[F], free: &[bool]) -> F {
+    (0..free.len())
+        .filter(|&i| free[i])
+        .map(|i| {
+            coords[3 * i] * coords[3 * i]
+                + coords[3 * i + 1] * coords[3 * i + 1]
+                + coords[3 * i + 2] * coords[3 * i + 2]
+        })
+        .sum()
 }
 
-impl RelaxerRunner for JiggleRunner {
-    fn on_iter(
-        &mut self,
-        coords: &[[F; 3]],
-        f_current: F,
-        evaluate: &mut dyn FnMut(&[[F; 3]]) -> F,
-        rng: &mut dyn RngCore,
-    ) -> Option<Vec<[F; 3]>> {
-        let mut best = coords.to_vec();
-        let mut best_f = f_current;
-        let mut accepted_any = false;
+impl Optimizer for JiggleOptimizer {
+    fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String> {
+        let mut best = extract_coords(frame)?;
+        let n = best.len() / 3;
+        let free: Vec<bool> = match frame.get("atoms").and_then(|a| a.get_bool("free")) {
+            Some(col) if col.len() == n => col.iter().copied().collect(),
+            _ => vec![true; n],
+        };
+
+        let max_delta = self.max_delta;
+        let mut best_score = score(&best, &free);
+        let mut accepted = 0usize;
+
         for _ in 0..self.steps {
-            let dx = (rng.next_u32() as f64 / u32::MAX as f64 * 2.0 - 1.0) * self.max_delta;
-            let dy = (rng.next_u32() as f64 / u32::MAX as f64 * 2.0 - 1.0) * self.max_delta;
-            let dz = (rng.next_u32() as f64 / u32::MAX as f64 * 2.0 - 1.0) * self.max_delta;
-            let trial: Vec<[F; 3]> = best.iter()
-                .map(|p| [p[0] + dx, p[1] + dy, p[2] + dz])
-                .collect();
-            let f_trial = evaluate(&trial);
-            self.total += 1;
-            if f_trial < best_f {
-                self.accepted += 1;
-                best_f = f_trial;
+            let d = [
+                self.rng.random_range(-max_delta..max_delta),
+                self.rng.random_range(-max_delta..max_delta),
+                self.rng.random_range(-max_delta..max_delta),
+            ];
+            let mut trial = best.clone();
+            for i in 0..n {
+                if !free[i] {
+                    continue; // never move a frozen environment atom
+                }
+                trial[3 * i] += d[0];
+                trial[3 * i + 1] += d[1];
+                trial[3 * i + 2] += d[2];
+            }
+            let trial_score = score(&trial, &free);
+            if trial_score < best_score {
                 best = trial;
-                accepted_any = true;
+                best_score = trial_score;
+                accepted += 1;
             }
         }
-        if accepted_any { Some(best) } else { None }
-    }
-    fn acceptance_rate(&self) -> F {
-        if self.total == 0 { 0.0 } else { self.accepted as F / self.total as F }
+
+        write_coords(frame, &best)?;
+        Ok(OptReport {
+            converged: accepted > 0,
+            n_steps: self.steps,
+            final_energy: best_score,
+            final_fmax: 0.0,
+        })
     }
 }
 ```
 
-Relaxer notes:
+### Step 2 — bind it to a selection
 
-- **Two-part design.** [`Relaxer`](crate::Relaxer) is the immutable
-  builder; [`RelaxerRunner`](crate::RelaxerRunner) holds per-pack
-  state. `spawn()` is called once per target type at `pack()` entry.
-- **`evaluate` closure tests trial coords against the full objective**
-  without mutating the reference — use it as often as you like.
-- **Return `Some(new_coords)` only if something changed.** The packer
-  skips unnecessary cache invalidation when you return `None`.
-- **`count == 1` required.** Multi-copy targets share reference
-  coords; a relaxer that mutates them would silently change all
-  copies.
+`GenCanPack::with_optimizer` takes two arguments: an `OptimizeSelect` saying
+which targets the optimizer sees and how, then the optimizer itself.
+`OptimizeSelect::per_copy(names)` hands over one copy at a time;
+`OptimizeSelect::joint(names)` hands over every copy of the named targets as a
+single movable group. `.with_environment(rcut)` additionally includes every
+atom within `rcut` ångström as frozen context, so a chain folds against its
+real neighbours rather than empty space.
+
+The next snippet is marked `ignore`, so rustdoc shows it without compiling it:
+`with_optimizer` and `OptimizeSelect` exist only in an `ff` build, and doctests
+run on the default feature set.
+
+```ignore
+use molpack::{GenCanPack, OptimizeSelect, PackEngine};
+
+let result = GenCanPack::new()
+    .with_tolerance(2.0)
+    .with_optimizer(
+        OptimizeSelect::per_copy(["chain"]).with_environment(8.0),
+        JiggleOptimizer::new(25, 0.5, 42),
+    )
+    .run(&targets, 200)?;
+```
+
+Optimizer notes:
+
+- **Bindings run in the all-type phase only.** That is the phase whose
+  coordinate vector holds every molecule, so per-copy indexing is unambiguous.
+- **Non-harm is the packer's job, not yours.** After write-back molpack
+  re-evaluates the packing objective and reverts your conformer if it got
+  worse. A `run` that makes things worse wastes time; it cannot break a pack.
+- **A binding is matched by target name.** `Target::with_name("chain")` is what
+  `OptimizeSelect::per_copy(["chain"])` looks up; an unmatched name is skipped
+  with a log warning, which is the usual cause of "my optimizer never ran".
+- **Copies diverge.** Under `per_copy`, each copy's reference conformer is
+  relaxed independently, so copies of one target stop sharing a shape.
 
 ## Testing discipline
 
@@ -454,8 +543,8 @@ Rules:
 - **0-based atom indexing.** `Target::with_atom_restraint` uses
   Rust-native 0-based indices. `&[0, 1]` selects the first two atoms.
   Packmol `.inp` files use 1-based — subtract 1 at the parse boundary.
-- **`count == 1` required for relaxers.** Multi-copy targets share
-  reference coords.
+- **An in-loop optimizer only runs in the all-type phase.** If you expected it
+  during per-type pre-compaction, you will see no effect there.
 - **`radscale` is phase-dependent.** Don't hard-code atomic radii —
   always go through `sys.radius[i]`. `evaluate_unscaled` temporarily
   swaps `radius` with `radius_ini` for user-facing numbers.

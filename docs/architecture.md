@@ -195,12 +195,11 @@ gives the all-types phase a much better seed.
 fn run_phase(phase_id, max_loops):
     handlers.on_phase_start(phase_info)
     radscale := discale            // start with inflated radii (default 1.1)
-    relax_runners := build relaxer runners for this phase
     // Quick-exit: if the unscaled objective is already below precision,
     // skip the whole phase.
     if evaluate_unscaled(sys, x).below(precision): return Converged
     for loop_idx in 0 .. max_loops:
-        result := run_iteration(loop_idx, radscale, relax_runners)
+        result := run_iteration(loop_idx, radscale, optimizer_bindings)
         radscale := decay(radscale)            // → 1.0 over the phase
         handlers.on_step(step_info, sys)
         if result.converged: return Converged
@@ -216,15 +215,18 @@ tolerance as the phase progresses.
 ### Inner: `run_iteration` (one outer step)
 
 ```text
-fn run_iteration(loop_idx, radscale, runners):
+fn run_iteration(loop_idx, radscale, optimizer_bindings):
     // 1. Movebad — relocate the K worst molecules.
     if movebad enabled:
         identify atoms with largest restraint + pair penalty
         perturb their COM/Euler within init_box_half_size
-    // 2. Relaxers — update reference geometry per type (count == 1 only).
-    for (type, runner) in runners:
-        runner.on_iter(ref_coords, f_current, &mut evaluate, rng)
-        if accepted: write back new ref_coords
+    // 2. In-loop optimizers (feature `ff`) — all-type phase only, so that
+    //    COM/Euler indexing covers every molecule.
+    for binding in optimizer_bindings:
+        assemble a Frame per selection (moving copies + frozen neighbours)
+        binding.optimizer.run(&mut frame)
+        map the displacement back into each copy's reference conformer
+        revert the copy if the packing objective got worse
     // 3. GENCAN — bound-constrained quasi-Newton solve.
     pgencan(x, &mut sys, params, precision)
         // Internally: tn_linesearch → CG inner solve → SPG fallback,
@@ -361,5 +363,5 @@ atoms into their regions before pair conflicts matter.
 | What does the initial pre-fit do? | `initial.rs::initial`, `initial.rs::restmol` |
 | How is precision-based termination tested? | `gencan/mod.rs::packmolprecision` |
 | What does `movebad` do? | `movebad.rs::movebad` |
-| How is torsion MC wired in? | `relaxer.rs::TorsionMcRelaxer::on_iter` |
+| How is torsion MC wired in? | `optimizer/torsion_mc.rs::TorsionMcOptimizer::run`, called from `optimizer/mod.rs::run_optimizer_bindings` (feature `ff`) |
 | Where does periodic boundary wrap apply? | `context/pack_context.rs::pbc_distance` |

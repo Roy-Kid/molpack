@@ -16,9 +16,10 @@
 //! This crate is documented in four dedicated modules; start with
 //! [`getting_started`] if you are new.
 //!
-//! - [`getting_started`] — install, hello-world packing, the three
-//!   restraint scopes, handlers, relaxers, PBC, running the canonical
-//!   examples.
+//! - [`getting_started`] — install, load or build a molecule template,
+//!   declare a target with a spatial restraint, run one pack, save the
+//!   result. Written against the Python package, which is the shortest
+//!   path from a loaded structure to a packed box.
 //! - [`concepts`] — every abstraction defined in one place: `AtomRestraint`,
 //!   `Region`, `Handler`, `Objective`, `Target`, `PackEngine`,
 //!   `PackContext`; the scope equivalence law; the two-scale contract;
@@ -27,8 +28,8 @@
 //!   relationships, full `pack()` lifecycle diagram, hot-path
 //!   `evaluate()` walkthrough, invariants, design decisions.
 //! - [`extending`] — tutorials for writing your own `AtomRestraint` /
-//!   `Region` / `Handler`; testing + benchmarking
-//!   discipline; common pitfalls; contributing flow.
+//!   `Region` / `Handler` and for binding an in-loop optimizer; testing +
+//!   benchmarking discipline; common pitfalls; contributing flow.
 //!
 //! Reference material (not rustdoc):
 //!
@@ -70,23 +71,32 @@
 //! | AtomRestraint trait + 14 concrete structs | [`AtomRestraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…AtomRestraint` |
 //! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideCellRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
 //! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`PhaseInfo`], [`PhaseReport`] |
-//! | Optimizer (`ff`) | [`OptimizeSelect`] + `GenCanPack::with_optimizer` + molrs [`Optimizer`] / [`TorsionMcOptimizer`] |
+//! | In-loop optimizer (feature `ff`) | `OptimizeSelect`, `GenCanPack::with_optimizer`, `TorsionMcOptimizer`, and molrs's `Optimizer` trait |
 //! | Errors | [`PackError`] |
 //! | Validation | [`validate_from_targets`], [`ValidationReport`], [`ViolationMetrics`] |
-//! | Examples harness | [`ExampleCase`], [`build_targets`], [`example_dir_from_manifest`], [`render_inp_script`] |
+//! | Examples harness (feature `io`) | `ExampleCase`, `build_targets`, `example_dir_from_manifest`, `render_inp_script` |
+//!
+//! The last two rows name items that exist only when their Cargo feature is
+//! enabled. A default-feature documentation build cannot resolve a link to
+//! something it did not compile, so those names are written in plain code font
+//! rather than as cross-references; build with `--features ff,io` to see them
+//! in this crate's rustdoc.
 //!
 //! ## Feature flags
 //!
 //! - `rayon` — opt into the parallel evaluator (also forwards to `molrs`'s
 //!   `rayon`).
-//! - `io` — pull in molrs's `io` module so [`script::Script::build`] can read
-//!   PDB / SDF / XYZ / LAMMPS files directly. PyO3 / WASM / embedding hosts that
-//!   bring their own loader leave this off and use [`script::Script::lower`]
-//!   with [`script::StructurePlan::apply`] instead.
+//! - `io` — pull in molrs's `io` module so `script::Script::build` can read
+//!   Protein Data Bank (PDB) / structure-data-file (SDF) / XYZ / LAMMPS files
+//!   directly and hand back a `script::BuildResult`. PyO3 / WASM / embedding
+//!   hosts that bring their own loader leave this off and use
+//!   [`script::Script::lower`] with [`script::StructurePlan::apply`] instead.
 //! - `cli` — build the `molpack` binary and its integration tests (pulls in
 //!   `clap` and implies `io`).
-//! - `ff` — pull in molrs's `ff` module (MMFF94/MMFF94s typifiers + L-BFGS) and enable the
-//!   in-loop [`Optimizer`] bindings via `GenCanPack::with_optimizer`.
+//! - `ff` — pull in molrs's `ff` module (typifiers for the Merck Molecular
+//!   Force Field, MMFF94 / MMFF94s, plus the limited-memory
+//!   Broyden–Fletcher–Goldfarb–Shanno minimizer, L-BFGS) and enable the in-loop
+//!   optimizer bindings `GenCanPack::with_optimizer` + `OptimizeSelect`.
 //!
 //! Precision is fixed at `f64` via `molrs::types::F`.
 

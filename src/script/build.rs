@@ -1,10 +1,10 @@
 //! Lower a parsed [`Script`] to either a frame-loader-agnostic
 //! [`ScriptPlan`] (no I/O) or — when the `io` feature is on — a fully
-//! built [`BuildResult`] with templates already read from disk.
+//! built `BuildResult` with templates already read from disk.
 //!
 //! Front-ends pick whichever fits:
 //!
-//! - **Native CLI / examples** — call [`Script::build`] (feature `io`),
+//! - **Native CLI / examples** — call `Script::build` (feature `io`),
 //!   which reads files via molrs-io.
 //! - **PyO3 / WASM / embedding hosts** — call [`Script::lower`], drive
 //!   their own frame loader (e.g. molrs's Python bindings), construct
@@ -78,8 +78,10 @@ impl Script {
     /// touching the filesystem.
     ///
     /// Use this from front-ends that supply their own frame loader. The
-    /// native counterpart that *does* read files is [`Script::build`]
-    /// (gated behind the `io` feature).
+    /// native counterpart that *does* read files is `Script::build`,
+    /// which is compiled only with the `io` feature on — hence a plain
+    /// code span here instead of a cross-reference, since a
+    /// default-feature documentation build has no such item to link to.
     pub fn lower(&self, base_dir: &Path) -> Result<ScriptPlan, ScriptError> {
         if self.structures.is_empty() {
             return Err(ScriptError::NoStructures);

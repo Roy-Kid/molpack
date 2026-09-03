@@ -59,11 +59,19 @@ Format per entry:
 **Why:** 一个事实一个家（键图读取只在叶子），叶子不知道 grow 的"至少 3 原子"规则。
 **How to apply:** 文档与错误消息以新顺序为准；`tests/topology.rs::topology_error_precedence_no_bonds_before_too_small` 钉住叶子侧行为。
 
-## 2026-09-03 — 债务 D-03：docs/ 的三个 doctest 失败与 rustdoc 断链（预存，非本链引入）
+## 2026-09-03 — 债务 D-03：docs/ 的三个 doctest 失败与 rustdoc 断链（预存，非本链引入）— 已清（2026-09-03）
 
-`cargo test -p molcrafts-molpack --doc` 失败 3/19：`docs/getting_started.md:20,28` 是未标注语言的 Python 代码块被 rustdoc 当作 Rust 编译；`docs/extending.md:342` 引用已不存在的 `molpack::Relaxer` / `RelaxerRunner` 与 `rand::RngCore`。`cargo doc --no-deps` 另有约 18 条 intra-doc 断链（`Optimizer`、`TorsionMcOptimizer`、`Script::build`、`crate::Relaxer` …）与一条 `lattice` 链接到私有 `decorate` 的警告。全部属于工作树里在途的 `Relaxer → Handler` 改名与 docs 重写，不由 stage-pipeline 引入。
-**Why:** law § 10——看见即记录；stage-pipeline 各子 spec 的 docs 门是 `cargo doc --no-deps` 零警告，这条债务不清则 04/05 的 ac 无法按字面通过。
-**How to apply:** 路由 `/mol:docs`（Mode A）修 fence 语言标注与死引用；在 stage-pipeline-04 之前清掉，否则其 docs 类验收只能以"新增符号零警告"为准并把预存警告列为例外。
+**根因**：`docs/getting_started.md` 的 MkDocs 内容标签（`=== "…"`）体是 4 空格缩进，CommonMark 视为缩进
+代码块，rustdoc 当作 Rust 编译；`docs/extending.md` / `docs/concepts.md` 仍写 `Relaxer` /
+`RelaxerRunner` / `TorsionMcRelaxer`——这些 trait 已无后继，被 molrs `Optimizer` +
+`GenCanPack::with_optimizer` 取代；`src/lib.rs:73-89` / `src/script/` 的链接指向 `ff` / `io` 门控项，
+默认特性下不可解析；`pack_context.rs:108` 链接门控模块；`lattice/mod.rs:12` 链接私有 `decorate`。
+**处置**：内容标签改为顶层 ```` ```python ```` 围栏；`extending.md` 的 Relaxer 段重写为可编译的
+`Optimizer` 示例（`ff` 门控接线段标 `ignore`）；门控项一律改为代码跨度并注明特性；`Relaxer` 用语全站
+改为 in-loop optimizer / handler。结果：`cargo doc --no-deps` 0 警告，`cargo test --doc` 16 过 2 忽略。
+**余项（未清，站点结构决定，归 07 或 `/mol:docs`）**：`docs/rust/handlers-relaxers.md` 整页（标题、
+`TorsionMcRelaxer` / `Target::with_relaxer` 代码段）、`docs/rust/index.md:41,48`、`zensical.toml:46`
+与 `docs/index.md` 两条导航链接——改名会动 URL，需用户裁定。
 
 ## 2026-09-03 — 债务 D-04：本地 Python 门无法解析环境（molrs 双重 pin）
 
