@@ -16,9 +16,15 @@ This page covers four things, in order:
 ```text
 src/
 ├── lib.rs              public re-exports + rustdoc chapters
-├── entry/              engine entries + the lifecycle they share
-│   ├── mod.rs          PackEngine trait + PackSettings + PackResult + run()
-│   └── setup.rs        density / pbc / cell resolution + restraint broadcast
+├── pipeline/           the lifecycle body — the only one in the crate
+│   ├── mod.rs          Pipeline + the five-part run() (validate → space/state →
+│   │                   chain check → run each stage → assemble)
+│   ├── engine.rs       StageFactory + PackEngine traits, EngineSetup
+│   └── bracket.rs      the handler bracket: adopted-handler tagging, open_bracket, close_bracket
+├── entry/              settings + space + result — no lifecycle, never imports pipeline/
+│   ├── mod.rs          PackSettings + LogSpec
+│   ├── setup.rs        density / pbc / cell resolution + restraint broadcast
+│   └── result.rs       PackResult + the verbatim Placements a run hands the next one
 ├── target.rs           Target — molecule type + per-molecule restraints + fixed_from
 ├── restraint/          AtomRestraint trait + geometric/ and collective/ impls
 ├── region.rs           Region trait + And/Or/Not + RegionRestraint
@@ -68,15 +74,15 @@ src/
 ```text
                        lib.rs
                           │
-                       entry/  (lifecycle — depends on everything below)
+                     pipeline/  (the lifecycle — depends on everything below)
                           │
-       ┌──────────┬──────┴──────┬──────────┬──────────┐
-       ▼          ▼             ▼          ▼          ▼
-    target     initial        gencan     movebad    handler
-       │          │           grow/        │          │
-       │          └────────┐    │          │
-       ▼                   ▼    ▼          ▼
- restraint + region    context/PackContext
+    ┌────────┬────────┬──┴──────┬──────────┬──────────┐
+    ▼        ▼        ▼         ▼          ▼          ▼
+  entry/   target   initial    gencan     movebad    handler
+    │        │                 grow/
+    │        └────────┐         │
+    ▼                 ▼         ▼
+    └───────────► context/PackContext
                             │
                             ▼
                        objective.rs   ← hot path
@@ -85,13 +91,16 @@ src/
 ```
 
 `target` / `restraint` / `region` are pure data — no driver imports.
-`entry/` is the only module that imports everything else. `objective`
-is the narrow waist through which all per-atom work flows.
+`pipeline/` is the only module that imports everything else; `entry/`
+shrank to settings + space + result and imports nothing from `pipeline/` —
+the arrow points one way, `pipeline/` reads `entry/`, never the reverse.
+`objective` is the narrow waist through which all per-atom work flows.
 
-The chain-growth path enters at the same level as `gencan`: the entry's
-`run()` builds one `Stage` from the `stage` seam, and `grow/` (the
-`GrowStage`) consumes the same `PackState` and is judged by the same
-objective — it never calls the GENCAN internals.
+The chain-growth path enters at the same level as `gencan`: a preset's
+`stages()` ([`StageFactory`](crate::StageFactory)) builds one `Stage` from
+the `stage` seam, [`Pipeline::run`](crate::PackEngine::run) drives it, and
+`grow/` (the `GrowStage`) consumes the same `PackState` and is judged by the
+same objective — it never calls the GENCAN internals.
 
 A **stage** is one interchangeable packing algorithm behind four methods:
 `name`, `requires`, `guarantees`, and `run`. The middle two declare the
@@ -106,32 +115,40 @@ how many times it had to relax a constructive guarantee. The run's
 `fdist` / `frest` verdict is read off the state afterwards, so no
 algorithm grades its own paper.
 
-There is no mixed-algorithm pack inside one call: staging is explicit in
-user code — run `CbmcGrow`, then hand its output to `GenCanPack` as a
-fixed obstacle via `Target::fixed_from(&result)`.
+A [`Pipeline`](crate::pipeline::Pipeline) composes several stages behind one
+call — `Pipeline::new().with_stage(CbmcGrow::new(prior)).with_stage(GenCanPack::new()).run(..)`
+runs chain growth, then rigid-body push-off, in one lifecycle, continuing
+from the first stage's placements rather than re-placing from scratch. Still
+out of scope: parallel or branching stage graphs (v1 is a linear sequence
+only). For two genuinely independent packs, run each to completion and hand
+the earlier result to the next as a **fixed** obstacle via
+`Target::fixed_from(&result)`.
 
 ## Data flow
 
 ```text
 USER INPUTS                 ─→  Target / PackEngine builders
-  Frame, count, restraints,       (GenCanPack | CbmcGrow)
+  Frame, count, restraints,       (GenCanPack | CbmcGrow | Pipeline)
   handlers, tolerance, seed
-                            ─→  PackEngine::run()
+                            ─→  PackEngine::run()      (one line per preset)
+                            ─→  Pipeline::run()          the lifecycle body
                                 a. broadcast global → per-target restraints
                                 b. snapshot every Target
-                                c. build PackContext
+                                c. build PackContext, wrap into PackState
                                      ModelData (immutable topology)
                                      RuntimeState (x, coor, radius)
                                      WorkBuffers (xcart, gxcar, scratch)
                                 d. flatten restraints → CSR pool
-                                e. initial placement → x[0..6·ntotmol]
+                                e. per stage: Stage::run(state, targets, …)
+                                     GENCAN: install grid, then initial
+                                     placement — or continue from a seed
 
 PER-ITERATION                ─→  evaluate(x, mode, &mut g)
-  GENCAN reads x,                  → expand_molecules: x → xcart
-  reads f / g via                  → restraint penalties per atom
-  &mut dyn Objective              → cell list + pair penalties
-                                  → project gradient back: gxcar → g
-                                  returns f_total, fdist, frest
+  (inside a stage's own loop —      → expand_molecules: x → xcart
+   GencanStage for the rigid path)  → restraint penalties per atom
+  reads f / g via                   → cell list + pair penalties
+  &mut dyn Objective                → project gradient back: gxcar → g
+                                     returns f_total, fdist, frest
 
 OUTPUT                       ─→  PackResult
                                   frame, plus converged, fdist,
@@ -170,21 +187,51 @@ where `i` is molecule type, `m` is copy index, `a` is atom index.
 
 ## Algorithms
 
-Three nested loops drive the packer.
+One lifecycle loop over stages, then three nested loops inside the
+rigid-body stage.
 
-### Outer: `GenCanPack::run()` (one call)
+### The lifecycle: `Pipeline::run()` (one call)
 
 ```text
 fn run(targets, max_loops):
     validate inputs (non-empty, valid PBC, atoms > 0)
-    broadcast engine.global_restraints → each target's molecule_restraints
-    split targets into free / fixed
-    build PackContext
-    run init_passes of restmol():        // geometric pre-fit, no pair kernel
-        for each free target type:
-            place molecules randomly inside their restraints
-            relax restraint penalties only
-    handlers.on_start, handlers.on_initialized
+    broadcast settings.global_restraints → each target's molecule_restraints
+    resolve packing space; build PackContext, wrap into PackState
+    check the stage chain (empty list / bad order / a preset's non-default settings)
+    handlers.on_start
+    for stage in stages:                  // one stage for a preset's own run
+        state.invalidate_geometry_cache()
+        handlers.on_stage_start
+        outcome := stage.run(state, targets, budget, handlers)
+        state.set_placed(stage.guarantees().placed)
+        handlers.on_stage_end
+        if handlers.should_stop(): break
+    rebuild xcart from the final rigid view; handlers.on_finish
+    assemble Frame into PackResult (+ converged / fdist / frest / softened)
+```
+
+Every preset's `PackEngine::run` is one line —
+`Pipeline::single(self).run(targets, max_loops)` — so `GenCanPack::run()`,
+`CbmcGrow::run()` and `LatticeGrow::run()` all resolve to the loop above. It
+lives once, in `src/pipeline/mod.rs`, never duplicated per entry.
+
+### Outer: `GencanStage::run()` (one stage)
+
+```text
+fn run(state, targets, budget, handlers):
+    if state already placed, or this stage carries a seed:
+        install the box + cell grid
+    if this stage carries a seed:
+        inject the seed's placements verbatim; state.placed := All
+    push_off := state.placed == All
+    if push_off:
+        write_xcart(state)                        // continue from what is there
+    else:
+        run init_passes of restmol():              // geometric pre-fit, no pair kernel
+            for each free target type:
+                place molecules randomly inside their restraints
+                relax restraint penalties only
+    handlers.on_initialized
     for phase in 0 ..= ntype:
         if phase < ntype:
             comptype[i] := (i == phase)  // PER-TYPE pre-compaction
@@ -192,14 +239,15 @@ fn run(targets, max_loops):
             comptype[i] := true          // ALL-TYPES main phase
         report := run_phase(phase, max_loops, …)
         if report.error_phase: break
-    handlers.on_finish
-    assemble Frame into PackResult (+ converged / fdist / frest / softened)
+    return StageOutcome::new(converged, 0)
 ```
 
-Steps outside the `for phase` loop belong to the shared `PackEngine`
-lifecycle in `src/entry/mod.rs`; the phase loop itself is GENCAN's, in
-`src/gencan/`. `CbmcGrow::run()` reuses the same lifecycle and swaps the
-phase loop for the growth round loop.
+The preamble — box/grid install, seed injection, the `initial()`-vs-push-off
+choice — and the phase loop both live in `GencanStage::run`
+(`src/gencan/solver.rs`); nothing above the stage boundary decides when
+`initial()` (and the `movebad` heuristic it configures) runs. `CbmcGrow`'s
+`GrowStage` (`src/grow/driver.rs`) is a peer stage under the same lifecycle,
+with the phase loop above replaced by its own growth round loop.
 
 Why per-type pre-compaction first: if every type optimizes simultaneously
 from a random start, cross-type interference traps the solver in shallow
@@ -354,7 +402,7 @@ engine.with_global_restraint(r)
 ```
 
 There is no separate global-restraint storage path. The broadcast at
-`PackEngine::run()` entry is the implementation.
+`Pipeline::run()` entry is the implementation.
 
 **Restraint vs Constraint.** Packmol implements all 15 "constraints" as
 soft penalties. Naming reflects mechanism, not user intent → `Restraint`.

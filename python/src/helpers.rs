@@ -84,6 +84,14 @@ pub fn pack_error_to_pyerr(e: molpack::PackError) -> PyErr {
         | molpack::PackError::DensityConflictsWithBox
         | molpack::PackError::SeedMismatch { .. }
         | molpack::PackError::UnknownMass { .. } => pyo3::exceptions::PyValueError::new_err(msg),
+        // A badly composed run — a stage chained where its precondition
+        // cannot hold, a preset carrying a second set of shared settings, or
+        // a pipeline with no stages at all. The wheel exposes no pipeline
+        // surface yet, so these are unreachable from Python today; the arm
+        // exists so the mapping stays total and the message is never lost.
+        molpack::PackError::StageOrder { .. }
+        | molpack::PackError::PresetSettingsInsidePipeline { .. }
+        | molpack::PackError::NoStages => pyo3::exceptions::PyValueError::new_err(msg),
     }
 }
 

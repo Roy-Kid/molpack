@@ -38,6 +38,7 @@
 //! force-completed exactly as on a handler abort, each forced placement counted
 //! in `softened`, and the outcome is `converged == false`.
 
+use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 
 use crate::context::pack_state::evaluate_unscaled;
@@ -64,6 +65,11 @@ use crate::target::Target;
 pub struct GrowStage {
     seed: u64,
     species: Vec<Species>,
+    /// The box this stage grows into, and the radius up-scaling its cell
+    /// grid is sized from. `None` only for a stage built directly from
+    /// templates and never handed a cell — it then grows in whatever box the
+    /// state already carries; the entry always supplies one.
+    cell: Option<(SimBox, F)>,
 }
 
 impl GrowStage {
@@ -90,7 +96,21 @@ impl GrowStage {
                 cfg: config.clone(),
             });
         }
-        Ok(Self { seed, species })
+        Ok(Self {
+            seed,
+            species,
+            cell: None,
+        })
+    }
+
+    /// The box to grow into, with the `discale` its cell grid is sized from.
+    ///
+    /// Installed at the top of [`run`](Stage::run) rather than here: a stage
+    /// is re-entrant, and the box is state the run owns, not configuration
+    /// the stage consumes.
+    pub(crate) fn with_resolved_cell(mut self, cell: SimBox, discale: F) -> Self {
+        self.cell = Some((cell, discale));
+        self
     }
 
     fn max_soft_shell(&self) -> F {
@@ -123,6 +143,13 @@ impl Stage for GrowStage {
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
     ) -> StageOutcome {
+        // ── The box and its cell grid ──────────────────────────────────────
+        // See `install_resolved_cell` for why `radmax` reads `radius_ini`.
+        if let Some((cell, discale)) = &self.cell {
+            let sys = state.ctx_mut();
+            crate::initial::install_resolved_cell(sys, cell, *discale);
+        }
+
         let (sys, x) = state.rigid_split_mut();
         // ── Field over the final box ───────────────────────────────────────
         let origin: [F; 3] = {

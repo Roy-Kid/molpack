@@ -52,6 +52,9 @@ Format per entry:
 
 **Why:** 架构师在 stage-pipeline 链第三次 design-mode 里发现（law § 9 / § 10）。
 **How to apply:** 任何触及 `install_simbox_and_grid` 调用点的改动先看本条；修正落地后删除本条并在 05 的 rustdoc 里去掉引用。
+**2026-09-03 更新（05 落地）**：三个阶段前奏的网格 `radmax` 统一改从 `radius_ini` 推导（`max(radius)` 在
+`run_phase` 之后是缩放值，后继阶段会装错网格）；两种拼写已同源。余下的只是覆盖半径本身：
+`max(radius_ini)`（±1 模板覆盖 ≈ 1.01·discale·R）vs `initial()` 的 `2·max(radius_ini)`（配对截断 2·discale·R）。
 
 ## 2026-09-03 — 决定：模板错误的报告顺序随 `Topology` 叶子改变
 

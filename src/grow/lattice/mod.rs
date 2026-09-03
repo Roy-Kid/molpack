@@ -21,6 +21,7 @@ pub(crate) mod saw;
 pub use config::LatticeConfig;
 pub use entry::LatticeGrow;
 
+use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
@@ -50,6 +51,11 @@ pub struct LatticeStage {
     seed: u64,
     cfg: LatticeConfig,
     species: Vec<LatticeSpecies>,
+    /// The box this stage tiles, and the radius up-scaling its cell grid is
+    /// sized from. `None` only for a stage built directly from templates and
+    /// never handed a cell — it then tiles whatever box the state already
+    /// carries; the entry always supplies one.
+    cell: Option<(SimBox, F)>,
 }
 
 impl LatticeStage {
@@ -76,7 +82,18 @@ impl LatticeStage {
             seed,
             cfg: cfg.clone(),
             species,
+            cell: None,
         })
+    }
+
+    /// The box to tile, with the `discale` its cell grid is sized from.
+    ///
+    /// Installed at the top of [`run`](Stage::run) rather than here: a stage
+    /// is re-entrant, and the box is state the run owns, not configuration
+    /// the stage consumes.
+    pub(crate) fn with_resolved_cell(mut self, cell: SimBox, discale: F) -> Self {
+        self.cell = Some((cell, discale));
+        self
     }
 
     /// trans/gauche weights from the torsion prior: `States` sums the
@@ -131,6 +148,13 @@ impl Stage for LatticeStage {
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
     ) -> StageOutcome {
+        // ── The box and its cell grid ──────────────────────────────────────
+        // See `install_resolved_cell` for why `radmax` reads `radius_ini`.
+        if let Some((cell, discale)) = &self.cell {
+            let sys = state.ctx_mut();
+            crate::initial::install_resolved_cell(sys, cell, *discale);
+        }
+
         let (sys, x) = state.rigid_split_mut();
         let origin: [F; 3] = {
             let v = sys.simbox.origin_view();

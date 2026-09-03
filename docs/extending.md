@@ -671,9 +671,16 @@ impl Stage for ShakeStage {
 
 A stage does not run itself. The lifecycle around it — validation, restraint
 broadcast, context construction, handler bracketing, the lab-frame rebuild,
-frame assembly — belongs to the [`PackEngine`](crate::PackEngine) trait, and an
-**entry** is a type implementing it. Its `solver` method is the one thing an
-entry must supply: the stage it drives.
+frame assembly — lives in exactly one place: [`Pipeline`](crate::pipeline::Pipeline)'s
+[`run`](crate::PackEngine::run), reached through the
+[`PackEngine`](crate::PackEngine) trait. An **entry** is a type that plugs into
+that lifecycle by implementing [`StageFactory`](crate::StageFactory); its
+`stages` method is the one thing an entry must supply: the stage(s) it drives,
+built from the run's resolved [`EngineSetup`](crate::pipeline::EngineSetup).
+`PackEngine` then adds the shared `with_*` builders plus a one-line `run` that
+hands the entry to the lifecycle as its sole stage source
+(`Pipeline::single(self).run(targets, max_loops)`) — the same code path a
+hand-composed pipeline runs, not a second implementation to keep in step.
 
 ```rust
 # struct ShakeStage { step: [molpack::F; 3] }
@@ -685,8 +692,8 @@ entry must supply: the stage it drives.
 #            _budget: &molpack::Budget, _handlers: &mut [Box<dyn molpack::Handler>])
 #            -> molpack::StageOutcome { molpack::StageOutcome::new(true, 0) }
 # }
-use molpack::entry::EngineSetup;
-use molpack::{F, Handler, PackEngine, PackError, PackSettings, Stage};
+use molpack::pipeline::EngineSetup;
+use molpack::{F, Handler, PackEngine, PackError, PackSettings, Pipeline, Stage, StageFactory};
 
 pub struct ShakePack {
     settings: PackSettings,
@@ -700,10 +707,22 @@ impl ShakePack {
     }
 }
 
-impl PackEngine for ShakePack {
+impl StageFactory for ShakePack {
     fn settings(&self) -> &PackSettings {
         &self.settings
     }
+
+    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
+        std::mem::take(&mut self.handlers)
+    }
+
+    /// The factory's single contribution: which stage(s) this run drives.
+    fn stages(&mut self, _setup: &EngineSetup<'_>) -> Result<Vec<Box<dyn Stage>>, PackError> {
+        Ok(vec![Box::new(ShakeStage { step: self.step })])
+    }
+}
+
+impl PackEngine for ShakePack {
     fn settings_mut(&mut self) -> &mut PackSettings {
         &mut self.settings
     }
@@ -711,9 +730,14 @@ impl PackEngine for ShakePack {
         &mut self.handlers
     }
 
-    /// The entry's single contribution: which algorithm this run drives.
-    fn solver(&mut self, _setup: &EngineSetup<'_>) -> Result<Box<dyn Stage>, PackError> {
-        Ok(Box::new(ShakeStage { step: self.step }))
+    /// One line: hand the entry to the crate's one lifecycle body as its
+    /// sole stage source — every preset writes exactly this.
+    fn run(
+        self,
+        targets: &[molpack::Target],
+        max_loops: usize,
+    ) -> Result<molpack::PackResult, PackError> {
+        Pipeline::single(self).run(targets, max_loops)
     }
 }
 ```
@@ -721,11 +745,47 @@ impl PackEngine for ShakePack {
 `ShakePack` now has every shared builder (`with_seed`, `with_tolerance`,
 `with_handler`, `with_global_restraint`, …) and the terminal
 `run(&targets, max_loops)`, exactly like `GenCanPack`, because all of them are
-provided methods on `PackEngine`. Two knobs are worth knowing before you write
-a real stage: `EngineSetup` (the resolved targets, cell and context shape) is
-what `solver` reads to build the stage, and `PackEngine::prepare` is the hook
-for an entry that already knows where molecules go and wants to write the
-placement vector before the stage takes over.
+provided methods on `PackEngine`. `EngineSetup` (the resolved targets, cell and
+context shape) is the one thing `stages` reads to build its stage(s) from —
+there is no separate hook for pre-loading a placement vector before a stage
+runs. Instead, each stage's own `run` does that as its own prelude: the
+shipped GENCAN stage installs its grid, and — only if it inherited a seed via
+`seeded_from` — copies the seed's placements in, before deciding whether to
+skip `initial()` and continue from what is already there.
+
+### Composing stages
+
+A single-entry `run` is `Pipeline::single(self)` under the hood, so the same
+lifecycle also runs a hand-built sequence of stages directly, with no entry
+type of your own. [`Pipeline::new`](crate::pipeline::Pipeline::new) builds an
+empty pipeline; [`with_stage`](crate::pipeline::Pipeline::with_stage) appends
+one factory at a time — a chain grower feeding a rigid-body packer, for
+example:
+
+```no_run
+use molpack::grow::TorsionPrior;
+use molpack::{CbmcGrow, GenCanPack, PackEngine, Pipeline, Target};
+# let targets: Vec<Target> = Vec::new();
+let result = Pipeline::new()
+    .with_stage(CbmcGrow::new(TorsionPrior::Uniform))
+    .with_stage(GenCanPack::new())
+    .with_seed(42)
+    .with_periodic_box([0.0; 3], [30.0; 3], [true; 3])
+    .run(&targets, 100)?;
+# Ok::<(), molpack::PackError>(())
+```
+
+`with_stage` treats what a factory carries two ways, so nothing is silently
+dropped. Its **handlers are adopted** — appended to the pipeline's own set in
+stage order, so they go on to observe every stage in the run, not just the one
+that carried them in. Its **shared settings are refused** the moment any knob
+is off its default (`PackError::PresetSettingsInsidePipeline`, naming the
+offending knob) — tolerance, precision, seed and the cell are one ruler shared
+by the whole run, and two stages each bringing their own would leave the
+objective with no single ruler to read. That is why the example above sets
+`with_seed` and `with_periodic_box` on the `Pipeline` itself rather than on
+`CbmcGrow` or `GenCanPack`: those knobs belong to the run, never to one stage
+inside it.
 
 Stage notes:
 

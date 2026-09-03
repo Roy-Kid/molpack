@@ -1,12 +1,13 @@
 //! `CbmcGrow` — the continuum configurational-bias chain-growth entry.
 
-use crate::entry::{EngineSetup, PackEngine, PackSettings};
+use crate::entry::{PackResult, PackSettings};
 use crate::error::PackError;
 use crate::grow::GrowStage;
 use crate::grow::config::GrowConfig;
 use crate::grow::prior::{AnglePrior, TorsionPrior};
 use crate::grow::validate_grow_cell;
 use crate::handler::Handler;
+use crate::pipeline::{EngineSetup, PackEngine, Pipeline, StageFactory};
 use crate::stage::Stage;
 use crate::target::Target;
 use molrs::types::F;
@@ -109,18 +110,12 @@ impl CbmcGrow {
     }
 }
 
-impl PackEngine for CbmcGrow {
+impl StageFactory for CbmcGrow {
     fn settings(&self) -> &PackSettings {
         &self.settings
     }
-    fn settings_mut(&mut self) -> &mut PackSettings {
-        &mut self.settings
-    }
-    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>> {
-        &mut self.handlers
-    }
 
-    fn validate(&self, targets: &[Target]) -> Result<(), PackError> {
+    fn validate_targets(&self, targets: &[Target]) -> Result<(), PackError> {
         for (i, t) in targets.iter().enumerate() {
             crate::grow::validate_template(t.template.as_ref())
                 .map_err(|source| PackError::Grow { target: i, source })?;
@@ -134,27 +129,32 @@ impl PackEngine for CbmcGrow {
         Ok(())
     }
 
-    fn prepare(
-        &self,
-        sys: &mut crate::context::PackContext,
-        _x: &mut [F],
-        setup: &EngineSetup<'_>,
-    ) -> Result<(), PackError> {
-        let simbox = validate_grow_cell(setup.cell.clone(), 0)?;
-        let radmax = sys.radius.iter().cloned().fold(0.0 as F, F::max);
-        crate::initial::install_simbox_and_grid(
-            sys,
-            simbox,
-            radmax,
-            self.settings.discale(),
-            setup.ntotat_free,
-        );
-        Ok(())
+    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
+        std::mem::take(self.handlers_mut())
     }
 
-    fn solver(&mut self, setup: &EngineSetup<'_>) -> Result<Box<dyn Stage>, PackError> {
-        let stage = GrowStage::from_targets(setup.targets, &self.config, self.settings.seed())
+    fn stages(&mut self, setup: &EngineSetup<'_>) -> Result<Vec<Box<dyn Stage>>, PackError> {
+        // Growth needs a box to grow into — a named error, resolved here so
+        // it is reported before any stage runs. The stage installs it (and
+        // the matching cell grid) at the top of its own run.
+        let stage = GrowStage::from_targets(setup.targets, &self.config, setup.settings.seed())
             .map_err(|(target, source)| PackError::Grow { target, source })?;
-        Ok(Box::new(stage))
+        let cell = validate_grow_cell(setup.cell.clone(), 0)?;
+        Ok(vec![Box::new(
+            stage.with_resolved_cell(cell, setup.settings.discale()),
+        )])
+    }
+}
+
+impl PackEngine for CbmcGrow {
+    fn settings_mut(&mut self) -> &mut PackSettings {
+        &mut self.settings
+    }
+    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>> {
+        &mut self.handlers
+    }
+
+    fn run(self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError> {
+        Pipeline::single(self).run(targets, max_loops)
     }
 }

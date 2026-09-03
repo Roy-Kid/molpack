@@ -2,16 +2,17 @@
 
 use molrs::types::F;
 
-use crate::context::RigidView;
 use crate::entry::result::Placements;
 use crate::entry::setup::CellDecl;
-use crate::entry::{EngineSetup, PackEngine, PackResult, PackSettings};
+use crate::entry::{PackResult, PackSettings};
 use crate::error::PackError;
 use crate::gencan::solver::{GencanSettings, GencanStage};
 use crate::handler::Handler;
 #[cfg(feature = "ff")]
 use crate::optimizer::OptimizerBinding;
+use crate::pipeline::{EngineSetup, PackEngine, Pipeline, StageFactory};
 use crate::stage::Stage;
+use crate::target::Target;
 
 /// Rigid-body packing via the GENCAN bound-constrained optimizer
 /// (Birgin & Martínez) — the Packmol algorithm as its own entry.
@@ -147,12 +148,12 @@ impl GenCanPack {
     }
 }
 
-impl PackEngine for GenCanPack {
+impl StageFactory for GenCanPack {
     fn settings(&self) -> &PackSettings {
         &self.settings
     }
 
-    fn validate(&self, targets: &[crate::target::Target]) -> Result<(), PackError> {
+    fn validate_targets(&self, targets: &[Target]) -> Result<(), PackError> {
         let Some(seed) = &self.seed_placements else {
             return Ok(());
         };
@@ -170,46 +171,15 @@ impl PackEngine for GenCanPack {
         }
         Ok(())
     }
-    fn settings_mut(&mut self) -> &mut PackSettings {
-        &mut self.settings
-    }
-    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>> {
-        &mut self.handlers
+
+    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
+        std::mem::take(self.handlers_mut())
     }
 
-    fn prepare(
-        &self,
-        sys: &mut crate::context::PackContext,
-        x: &mut [F],
-        setup: &EngineSetup<'_>,
-    ) -> Result<(), PackError> {
-        let Some(seed) = &self.seed_placements else {
-            return Ok(());
-        };
-        // Same installation the growth entry performs — the seed's cell was
-        // resolved through the shared settings into `setup.cell`.
-        let simbox = setup
-            .cell
-            .clone()
-            .expect("seeded_from installed the cell declaration");
-        let radmax = sys.radius.iter().cloned().fold(0.0 as F, F::max);
-        crate::initial::install_simbox_and_grid(
-            sys,
-            simbox,
-            radmax,
-            self.settings.discale(),
-            setup.ntotat_free,
-        );
-        // Inject the placement solution verbatim (zero-conversion chaining).
-        // The view is built from bare slices — `context` never names this
-        // layer's snapshot type, so the unpacking happens here.
-        let seeded = RigidView::install_seed(seed.rigid.as_slice(), &seed.coor, sys);
-        x.copy_from_slice(seeded.as_slice());
-        Ok(())
-    }
-
-    fn solver(&mut self, setup: &EngineSetup<'_>) -> Result<Box<dyn Stage>, PackError> {
-        let s = &self.settings;
+    fn stages(&mut self, setup: &EngineSetup<'_>) -> Result<Vec<Box<dyn Stage>>, PackError> {
+        // Shared knobs come from the run (`setup.settings`), algorithm knobs
+        // from this entry — one ruler, one owner each.
+        let s = setup.settings;
         let gencan = GencanSettings {
             inner_iterations: self.inner_iterations,
             init_passes: self.init_passes,
@@ -220,9 +190,6 @@ impl PackEngine for GenCanPack {
             avoid_overlap: self.avoid_overlap,
             discale: s.discale(),
             seed: s.seed(),
-            // A seeded run continues from injected placements: skip
-            // `initial()`, disable movebad — rigid-body descent only.
-            push_off: self.seed_placements.is_some(),
         };
         let stage = GencanStage::new(
             gencan,
@@ -231,13 +198,30 @@ impl PackEngine for GenCanPack {
             setup.ntype,
             setup.ntype_with_fixed,
         );
-        // The bindings are handed to the stage once; `run(self)` consumes
-        // the entry, so there is no second `solver()` call to run bare. The
-        // stage keeps them for every run it is given — this take is the
-        // entry's one-shot handover, not a per-run one.
+        // Both handovers are the entry's one-shot move, not a per-run one:
+        // `run(self)` consumes the entry, so there is no second `stages()`
+        // call to run bare, and the stage keeps what it is given for every
+        // run it is asked to do.
+        let stage = match self.seed_placements.take() {
+            Some(seed) => stage.with_seed_placements(seed),
+            None => stage,
+        };
         #[cfg(feature = "ff")]
         let stage = stage.with_optimizers(std::mem::take(&mut self.optimizers));
-        Ok(Box::new(stage))
+        Ok(vec![Box::new(stage)])
+    }
+}
+
+impl PackEngine for GenCanPack {
+    fn settings_mut(&mut self) -> &mut PackSettings {
+        &mut self.settings
+    }
+    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>> {
+        &mut self.handlers
+    }
+
+    fn run(self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError> {
+        Pipeline::single(self).run(targets, max_loops)
     }
 }
 

@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use molpack::entry::PackEngine;
+use molpack::PackEngine;
 use molpack::{CbmcGrow, GenCanPack, LatticeGrow, LogLevel};
 use pyo3::prelude::*;
 

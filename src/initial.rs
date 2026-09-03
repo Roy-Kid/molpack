@@ -779,3 +779,22 @@ pub(crate) fn install_simbox_and_grid(
         sys.latomfix[icell] = icart as u32;
     }
 }
+
+/// Derive `radmax` and the free-atom count from the context, then install
+/// the resolved cell and its grid — the shared "box and its cell grid"
+/// prelude for every stage that hands `run` an already-resolved [`SimBox`]
+/// (growth, lattice growth, and a GENCAN stage that continues from existing
+/// placements).
+///
+/// `radmax` reads `radius_ini`, the *unscaled* packing radius: `radius` is
+/// GENCAN's transient working copy (scaled by `discale` at each phase
+/// start), so reading it here would size the grid from whatever the
+/// *previous* stage happened to leave behind. On a freshly built context the
+/// two are equal, which is what keeps this bitwise the pre-pipeline
+/// derivation. (Debt D-02 — this `1.01 * discale * radmax` coverage vs
+/// `initial()`'s `2 * max(radius_ini)` — is untouched here.)
+pub(crate) fn install_resolved_cell(sys: &mut PackContext, cell: &SimBox, discale: F) {
+    let radmax = sys.radius_ini.iter().cloned().fold(0.0 as F, F::max);
+    let free_atoms = sys.ntotat - sys.nfixedat;
+    install_simbox_and_grid(sys, cell.clone(), radmax, discale, free_atoms);
+}

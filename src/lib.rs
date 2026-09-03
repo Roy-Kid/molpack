@@ -63,7 +63,9 @@
 //!
 //! | Category | Items |
 //! |---|---|
-//! | Engine entries | [`PackEngine`], [`GenCanPack`], [`CbmcGrow`], [`LogLevel`], [`PackResult`] |
+//! | Engine entries | [`PackEngine`], [`GenCanPack`], [`CbmcGrow`], [`LatticeGrow`], [`LogLevel`] |
+//! | Run lifecycle | [`Pipeline`], [`StageFactory`], [`pipeline::EngineSetup`], [`PackResult`] |
+//! | Shared settings + space | [`PackSettings`] (`entry`) |
 //! | Target  | [`Target`], [`CenteringMode`] |
 //! | Rigid placement vector | [`RigidView`] |
 //! | Stage seam (Rust-only) | [`Stage`], [`Requires`], [`Guarantees`], [`StageOutcome`], [`Budget`], [`PackState`], [`Placed`] |
@@ -118,6 +120,7 @@ mod numerics;
 pub mod objective;
 #[cfg(feature = "ff")]
 pub mod optimizer;
+pub mod pipeline;
 mod random;
 pub mod region;
 pub mod restraint;
@@ -131,7 +134,7 @@ pub mod validation;
 pub use cases::{ExampleCase, build_targets, example_dir_from_manifest, render_inp_script};
 pub use context::{PackContext, PackState, Placed, RigidView};
 pub use entry::PackResult;
-pub use entry::{PackEngine, PackSettings};
+pub use entry::PackSettings;
 pub use error::PackError;
 pub use frame::{compute_mol_ids, context_to_frame, finalize_frame, frame_to_coords};
 pub use gencan::entry::GenCanPack;
@@ -143,6 +146,7 @@ pub use handler::{
 };
 pub use molrs::Element;
 pub use molrs::types::F;
+pub use pipeline::{PackEngine, Pipeline, StageFactory};
 pub use region::{
     Aabb, And, InsideBoxRegion, InsideCellRegion, InsideSphereRegion, Not, Or, OutsideSphereRegion,
     Region, RegionExt, RegionRestraint,

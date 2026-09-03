@@ -53,6 +53,29 @@ pub enum PackError {
     /// cannot provide one (nor did `Target::with_mass`). Named error, not a
     /// guess.
     UnknownMass { target: usize },
+    /// A stage was chained where its entry precondition cannot hold: nothing
+    /// before it leaves the placements the stage declares it needs
+    /// (`Stage::requires`). Reported before any stage runs and before any
+    /// handler is notified.
+    StageOrder {
+        /// The offending stage's `Stage::name`.
+        stage: &'static str,
+        /// The precondition that was not met, rendered (e.g. `"placed: all"`).
+        needs: &'static str,
+    },
+    /// A preset entry carrying a non-default *shared* setting was handed to
+    /// `Pipeline::with_stage`. The shared settings are one ruler for the whole
+    /// run; two stages each holding one would leave the shared objective with
+    /// no single ruler, and picking a winner silently is the debt this error
+    /// exists to prevent.
+    PresetSettingsInsidePipeline {
+        /// The name of the first stage that preset produces.
+        stage: &'static str,
+        /// The `PackSettings` field the preset set (e.g. `"seed"`).
+        knob: &'static str,
+    },
+    /// A pipeline was run with no stages at all.
+    NoStages,
 }
 
 impl fmt::Display for PackError {
@@ -106,6 +129,22 @@ impl fmt::Display for PackError {
                 f,
                 "with_density needs target {target}'s mass, but its elements do not \
                  resolve one — set Target::with_mass(amu) for element-less species"
+            ),
+            PackError::StageOrder { stage, needs } => write!(
+                f,
+                "stage `{stage}` requires {needs} but nothing before it placed the \
+                 molecules; put a placing stage (GenCanPack, CbmcGrow, LatticeGrow) \
+                 in front of it"
+            ),
+            PackError::PresetSettingsInsidePipeline { stage, knob } => write!(
+                f,
+                "preset `{stage}` carries a non-default `{knob}` inside a pipeline; \
+                 set `{knob}` on the Pipeline instead (shared settings are one ruler)"
+            ),
+            PackError::NoStages => write!(
+                f,
+                "the pipeline has no stages; add one with `with_stage` or run a \
+                 preset directly"
             ),
             PackError::SeedMismatch { expected, got } => write!(
                 f,

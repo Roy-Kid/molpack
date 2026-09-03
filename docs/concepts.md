@@ -216,6 +216,45 @@ constructive guarantee). The violation maxima are read off `sys`, the
 post-stage `PackContext` — the same place `on_finish` reads them — so the
 shared objective stays the only ruler.
 
+## Pipeline
+
+A [`Pipeline`](crate::pipeline::Pipeline) is what actually runs a sequence of
+stages. [`Pipeline::new().with_stage(a).with_stage(b)`](crate::pipeline::Pipeline::with_stage)
+composes as many stages as a run needs, and
+[`Pipeline::single(engine)`](crate::pipeline::Pipeline::single) wraps one
+[`PackEngine`](crate::PackEngine) the same way — which is why every preset's
+`run` is one line, `Pipeline::single(self).run(targets, max_loops)`. There is
+exactly one lifecycle in the crate: a hand-composed pipeline and a preset's own
+run are the same code path, never two implementations that could drift apart.
+
+What a pipeline tracks between stages is the [`Placed`](crate::Placed) marker
+from the Stage explanation above: it starts at `Placed::None`, and after each
+stage returns it advances to whatever that stage's
+[`Guarantees`](crate::Guarantees) declared — never by inspecting what the
+stage actually did. A stage whose [`Requires`](crate::Requires) needs
+`Placed::All` where the marker is still `Placed::None` is a named error,
+[`PackError::StageOrder`](crate::PackError::StageOrder), raised before any
+handler is notified and before any stage runs.
+
+The run's verdict — `fdist`, `frest`, `converged` — is read off the shared
+[`PackContext`](crate::PackContext) after the *last* stage returns, never
+assembled from what the individual stages self-reported: the same one-ruler
+rule the Stage explanation describes for a single algorithm, applied across a
+whole chain. `on_stage_start` / `on_stage_end` bracket each stage in turn, so a
+handler watching a two-stage run sees both brackets fire and `info.stage.index`
+move from `0` to `1` partway through, while `on_start` / `on_finish` still
+bracket only the run as a whole, once.
+
+A stage source handed to `with_stage` may carry handlers and shared settings of
+its own. Its handlers are **adopted** — appended to the pipeline's own set, in
+stage order, so they go on to watch every later stage too. Its
+[`PackSettings`](crate::PackSettings) are **refused** the moment any knob
+differs from the default
+([`PackError::PresetSettingsInsidePipeline`](crate::PackError::PresetSettingsInsidePipeline),
+naming the offending knob): tolerance, precision, seed and the cell are one
+ruler for the whole run, and two stages each bringing their own would leave
+that ruler ambiguous. Declare shared knobs on the `Pipeline` itself instead.
+
 ## Objective
 
 The [`Objective`](crate::objective::Objective) trait abstracts over

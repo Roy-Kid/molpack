@@ -11,7 +11,8 @@ use molrs::types::F;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-use crate::context::{PackState, Placed};
+use crate::context::{PackState, Placed, RigidView};
+use crate::entry::result::Placements;
 use crate::gencan::phases::{PhaseOutcome, run_phase};
 use crate::gencan::{GencanParams, GencanWorkspace};
 use crate::handler::Handler;
@@ -45,10 +46,6 @@ pub struct GencanSettings {
     /// RNG seed; the solver owns its stream (bit-parity with the packer's
     /// former single `SmallRng`, which reached the GENCAN stage undrawn).
     pub seed: u64,
-    /// Continue from a pre-seeded state (skip `initial()` and movebad —
-    /// the coordinates are already placed, e.g. by a growth stage). Not a
-    /// `GenCanPack` builder knob; set by chaining code.
-    pub push_off: bool,
 }
 
 impl Default for GencanSettings {
@@ -63,7 +60,6 @@ impl Default for GencanSettings {
             avoid_overlap: true,
             discale: 1.1,
             seed: 1_234_567,
-            push_off: false,
         }
     }
 }
@@ -72,20 +68,21 @@ impl Default for GencanSettings {
 ///
 /// Construction captures everything the former `run_gencan_stages` read
 /// beyond the seam signature: the GENCAN knobs, the per-type move quota,
-/// the resolved cell, the phase-shape counts, and the push-off flag (skip
-/// `initial()` and movebad — the entry seeded the state from a previous run,
-/// see [`GenCanPack::seeded_from`](crate::GenCanPack::seeded_from)).
+/// the resolved cell, and the phase-shape counts. Whether the stage starts
+/// from scratch or continues from placements it was handed is **not** stored
+/// here — it is read off the state on entry (see [`run`](Stage::run)), which
+/// is the only home that fact has.
 ///
-/// The optimizer bindings stay on the stage for its whole life and are
-/// resolved afresh on every [`run`](Stage::run) — the seam's re-entrancy
-/// contract: a stage does not consume its own configuration.
+/// The optimizer bindings and the placement seed stay on the stage for its
+/// whole life and are read afresh on every [`run`](Stage::run) — the seam's
+/// re-entrancy contract: a stage does not consume its own configuration.
 pub struct GencanStage {
     settings: GencanSettings,
     maxmove_per_type: Vec<usize>,
     cell: Option<SimBox>,
     ntype: usize,
     ntype_with_fixed: usize,
-    push_off: bool,
+    seed_placements: Option<Placements>,
     #[cfg(feature = "ff")]
     optimizers: Vec<OptimizerBinding>,
     rng: SmallRng,
@@ -105,18 +102,29 @@ impl GencanStage {
         ntype_with_fixed: usize,
     ) -> Self {
         let rng = SmallRng::seed_from_u64(settings.seed);
-        let push_off = settings.push_off;
         Self {
             settings,
             maxmove_per_type,
             cell,
             ntype,
             ntype_with_fixed,
-            push_off,
+            seed_placements: None,
             #[cfg(feature = "ff")]
             optimizers: Vec::new(),
             rng,
         }
+    }
+
+    /// Continue from a previous run's placement solution.
+    ///
+    /// Kept off the constructor for the same reason as the optimizer
+    /// bindings: it is an option of the seeded spelling only, and the
+    /// stage is perfectly usable without it. Installed by
+    /// [`run`](Stage::run), not here, so a second run re-injects the same
+    /// bits rather than silently running degraded.
+    pub(crate) fn with_seed_placements(mut self, placements: Placements) -> Self {
+        self.seed_placements = Some(placements);
+        self
     }
 
     /// Bind in-loop optimizers (feature `ff`). Kept off the constructor so
@@ -134,8 +142,9 @@ impl Stage for GencanStage {
         Self::NAME
     }
 
-    /// Nothing: GENCAN seeds its own placements with `initial()`, and a
-    /// push-off run reads placements the entry installed before the seam.
+    /// Nothing: GENCAN can place from scratch with `initial()`. When the
+    /// state *does* arrive placed, it continues from those placements
+    /// instead — see the preamble on [`run`](Stage::run).
     fn requires(&self) -> Requires {
         Requires::new(Placed::None)
     }
@@ -145,6 +154,32 @@ impl Stage for GencanStage {
         Guarantees::new(Placed::All)
     }
 
+    /// # Preamble
+    ///
+    /// Three things happen before the packing loop, all of them decided in
+    /// state vocabulary rather than by a flag the caller set:
+    ///
+    /// 1. **The box and the cell grid** are installed only when this run will
+    ///    *continue* from placements that already exist — the state says
+    ///    [`Placed::All`], or this stage carries a placement seed (which makes
+    ///    it so in step 2). Starting from nothing, `initial()` owns the box
+    ///    and the grid itself (synthesizing a fall-back box from `sidemax`
+    ///    when nothing was declared), so installing one here would be a second
+    ///    owner. The box is the entry's resolved cell when there is one, else
+    ///    the one the context already carries — which is how a GENCAN stage
+    ///    that follows another stage in a chain lands on the same box, and the
+    ///    same `radmax`, as the hand-written `seeded_from` spelling.
+    /// 2. **The seed**, if this stage carries one, is injected verbatim
+    ///    ([`RigidView::install_seed`](crate::RigidView::install_seed)) and the
+    ///    state's marker advances to [`Placed::All`]. Order matters: the grid
+    ///    first, the coordinates second. The seed is borrowed, never taken —
+    ///    a second run re-injects the same bits (the seam's re-entrancy
+    ///    contract).
+    /// 3. **Push-off** is then simply `state.placed() == Placed::All`: skip
+    ///    `initial()`, materialize `xcart` from the placements already there,
+    ///    and keep movebad off so molecules are separated by descent rather
+    ///    than teleported. No flag records it anywhere: the state is the one
+    ///    home of that fact.
     fn run(
         &mut self,
         state: &mut PackState,
@@ -152,6 +187,23 @@ impl Stage for GencanStage {
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
     ) -> StageOutcome {
+        // ① Box + cell grid, only for a run that continues from placements.
+        if state.placed() == Placed::All || self.seed_placements.is_some() {
+            let sys = state.ctx_mut();
+            let simbox = self.cell.clone().unwrap_or_else(|| sys.simbox.clone());
+            // See `install_resolved_cell` for why `radmax` reads `radius_ini`
+            // (Debt D-02 is recorded there too).
+            crate::initial::install_resolved_cell(sys, &simbox, self.settings.discale);
+        }
+        // ② The seed's conformers and placements, verbatim.
+        if let Some(seed) = &self.seed_placements {
+            let (sys, x) = state.rigid_split_mut();
+            *x = RigidView::install_seed(seed.rigid.as_slice(), &seed.coor, sys);
+            state.set_placed(Placed::All);
+        }
+        // ③ Continue from what is placed, or place from nothing.
+        let push_off = state.placed() == Placed::All;
+
         let (sys, x) = state.rigid_split_mut();
         let init_passes = self.settings.init_passes.unwrap_or(20 * self.ntype);
         let movebad_cfg = MoveBadConfig {
@@ -160,7 +212,7 @@ impl Stage for GencanStage {
             movebadrandom: self.settings.random_perturb,
             gencan_maxit: self.settings.inner_iterations,
         };
-        if !self.push_off {
+        if !push_off {
             initial(
                 x.as_mut_slice(),
                 sys,
@@ -234,7 +286,7 @@ impl Stage for GencanStage {
                 budget.max_loops,
                 self.settings.discale,
                 budget.precision,
-                self.push_off || !self.settings.perturb,
+                push_off || !self.settings.perturb,
                 &movebad_cfg,
                 &gencan_params,
                 sys,

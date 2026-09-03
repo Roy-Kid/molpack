@@ -1,29 +1,24 @@
-//! Per-algorithm engine entries and their shared lifecycle (engine-entry-split).
+//! Shared settings, packing space, and the run's result.
 //!
-//! One entry type per packing algorithm (`GenCanPack`, `CbmcGrow`, …), all
-//! implementing [`PackEngine`]: the trait owns the lifecycle — validation,
-//! space resolution, context construction, handler bracketing, assembly —
-//! and each entry contributes exactly one thing, its [`Stage`].
+//! Three things every packing run needs, none of which belongs to one
+//! algorithm:
 //!
-//! `run` consumes the entry by value: an engine is one shot by construction,
-//! which is what makes the handler set impossible to lose silently (the old
-//! `pack(&mut self)` drained its handlers on first use and ran headless on
-//! the second).
+//! * [`PackSettings`] — the knobs the shared infrastructure reads (contact
+//!   tolerance, precision, seed, the box or cell declaration, global
+//!   restraints, screen logging via [`LogSpec`]). One ruler per run:
+//!   algorithm-specific knobs live on their own entry type, never here.
+//! * `setup.rs` — resolving a density / periodic box / cell declaration into
+//!   the one space the run packs into, and broadcasting global restraints
+//!   onto every target.
+//! * `result.rs` — [`PackResult`] and the verbatim placement solution it
+//!   carries, which is what makes one run continuable from another.
 //!
-//! The lifecycle also owns the run's state: the [`PackContext`] and the
-//! rigid placement vector ([`RigidView`](crate::RigidView), sized from the
-//! free copy count) are wrapped into one [`PackState`], offered field-wise
-//! to [`PackEngine::prepare`], handed to the [`Stage`] as the state it
-//! optimizes, and — in the run's last stage, after the stage returns — taken
-//! apart again so the placements can be expanded back into lab-frame
-//! coordinates with
-//! [`RigidView::write_xcart`](crate::RigidView::write_xcart). No entry
-//! re-derives those coordinates from the placements itself, and the same
-//! view is what the result carries away for a later seeded run.
-//!
-//! The lifecycle also advances the state's placement marker, by the
-//! guarantee the stage declares rather than by inspection — the same rule
-//! the multi-stage pipeline follows.
+//! What is deliberately *not* here: the entries themselves — `GenCanPack`
+//! lives with GENCAN (`crate::gencan`), `CbmcGrow` and `LatticeGrow` with
+//! growth (`crate::grow`) — and the lifecycle that drives them, which
+//! belongs to the type that owns it, [`Pipeline`](crate::Pipeline). This
+//! module names neither: settings and space are read by the lifecycle, they
+//! do not run it. The dependency arrow points one way only.
 
 pub(crate) mod result;
 pub(crate) mod setup;
@@ -31,17 +26,10 @@ pub(crate) mod setup;
 pub use result::PackResult;
 pub(crate) use result::positions_in_target_order;
 
-use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
-use ndarray::Array1;
 
-use crate::context::build::{ContextKnobs, build_context};
-use crate::context::{PackContext, PackState};
-use crate::error::PackError;
-use crate::handler::{Handler, LammpsLogHandler, LogLevel};
-use crate::stage::{Budget, Stage};
-use crate::target::Target;
-use setup::{CellDecl, PeriodicSpec, broadcast_global_restraints, resolve_pack_space};
+use crate::handler::LogLevel;
+use setup::{CellDecl, PeriodicSpec};
 
 /// Built-in screen logging: detail level + print cadence.
 #[derive(Debug, Clone, Copy)]
@@ -94,282 +82,72 @@ impl PackSettings {
     pub fn seed(&self) -> u64 {
         self.seed.unwrap_or(1_234_567)
     }
-}
 
-/// Everything the lifecycle resolved before handing control to the entry's
-/// [`Stage`]: the targets (post-broadcast), the space, and the context
-/// shape. Borrowed — valid only inside [`PackEngine::solver`] /
-/// [`PackEngine::prepare`].
-pub struct EngineSetup<'a> {
-    pub targets: &'a [Target],
-    pub cell: Option<SimBox>,
-    pub maxmove_per_type: &'a [usize],
-    pub ntype: usize,
-    pub ntype_with_fixed: usize,
-    pub ntotmol_free: usize,
-    pub ntotat: usize,
-    pub ntotat_free: usize,
-}
-
-/// One packing algorithm behind one lifecycle.
-///
-/// Entries supply their [`Stage`] (and optionally validation and context
-/// preparation); the provided [`run`](Self::run) owns everything shared:
-/// space resolution, restraint broadcast, context construction, the run's
-/// [`RigidView`](crate::RigidView) and the lab-frame rebuild that closes it
-/// out, handler bracketing (`on_start` / `on_finish`, log-handler
-/// injection), and frame assembly. `fdist` / `frest` come from the shared
-/// objective — the seam's one-ruler guarantee.
-pub trait PackEngine: Sized {
-    /// Read the shared settings.
-    fn settings(&self) -> &PackSettings;
-    /// Mutate the shared settings (used by the provided `with_*` builders).
-    fn settings_mut(&mut self) -> &mut PackSettings;
-    /// The entry's handler set.
-    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>>;
-    /// Entry-specific target validation — named rejections only, never a
-    /// silent fallback to another algorithm.
-    fn validate(&self, _targets: &[Target]) -> Result<(), PackError> {
-        Ok(())
-    }
-    /// Entry-specific context preparation, run once the stage is built and
-    /// before it takes over.
+    /// The name of the first knob this set holds that is not the default, or
+    /// `None` when every knob is untouched.
     ///
-    /// `x` is the backing buffer of the run's
-    /// [`RigidView`](crate::RigidView) — the flat `6 * ntotmol_free`
-    /// placement vector, COM block then Euler block — so an entry that
-    /// already knows where the molecules go writes it here. Growth installs
-    /// the box and cell grid; a seeded GENCAN run installs the seed's
-    /// conformers into `sys.coor` and its placements into `x` (see
-    /// [`RigidView::install_seed`](crate::RigidView::install_seed)). An
-    /// unseeded GENCAN run touches neither: `sys.coor` already holds the
-    /// templates' reference conformers from context construction, and `x`
-    /// stays zeroed until its own `initial()` pass fills it.
-    fn prepare(
-        &self,
-        _sys: &mut PackContext,
-        _x: &mut [F],
-        _setup: &EngineSetup<'_>,
-    ) -> Result<(), PackError> {
-        Ok(())
-    }
-    /// The algorithm: build this entry's [`Stage`] for the resolved setup.
-    fn solver(&mut self, setup: &EngineSetup<'_>) -> Result<Box<dyn Stage>, PackError>;
+    /// The question a multi-stage run has to ask of a preset it was handed:
+    /// these settings are *shared*, so a stage that carries its own would
+    /// give the run a second ruler. The answer is a field name, which is what
+    /// lets the refusal tell the caller exactly what to move.
+    ///
+    /// The body destructures [`PackSettings`] **completely** — no `..` — so a
+    /// knob added later fails to compile here instead of slipping silently
+    /// past the check.
+    pub fn first_non_default_knob(&self) -> Option<&'static str> {
+        let default = PackSettings::default();
+        let PackSettings {
+            tolerance,
+            precision,
+            discale,
+            seed,
+            parallel_eval,
+            short_tolerance,
+            periodic_box,
+            density,
+            cell,
+            log,
+            global_restraints,
+        } = self;
 
-    // ── Shared builders (bound once, forwarded to `PackSettings`) ────────
-
-    fn with_tolerance(mut self, tolerance: F) -> Self {
-        self.settings_mut().tolerance = Some(tolerance);
-        self
-    }
-    fn with_precision(mut self, precision: F) -> Self {
-        self.settings_mut().precision = Some(precision);
-        self
-    }
-    fn with_seed(mut self, seed: u64) -> Self {
-        self.settings_mut().seed = Some(seed);
-        self
-    }
-    fn with_periodic_box(mut self, min: [F; 3], max: [F; 3], pbc: [bool; 3]) -> Self {
-        self.settings_mut().periodic_box = Some((min, max, pbc));
-        self
-    }
-    fn with_density(mut self, rho: F) -> Self {
-        self.settings_mut().density = Some(rho);
-        self
-    }
-    fn with_parallel_eval(mut self, on: bool) -> Self {
-        self.settings_mut().parallel_eval = on;
-        self
-    }
-    fn with_log_level(mut self, level: LogLevel) -> Self {
-        self.settings_mut().log.level = level;
-        self
-    }
-    fn with_log_frequency(mut self, n: usize) -> Self {
-        self.settings_mut().log.frequency = n.max(1);
-        self
-    }
-    fn with_handler(mut self, handler: Box<dyn Handler>) -> Self {
-        self.handlers_mut().push(handler);
-        self
-    }
-    /// Declare the packing cell by lengths and angles (script `cell`).
-    fn with_cell(mut self, lengths: [F; 3], angles_deg: [F; 3], pbc: [bool; 3]) -> Self {
-        self.settings_mut().cell = Some(CellDecl::LengthsAngles {
-            lengths,
-            angles_deg,
-            pbc,
-        });
-        self
-    }
-    /// Declare the packing cell by its lattice matrix.
-    fn with_cell_matrix(mut self, h: [[F; 3]; 3], origin: [F; 3], pbc: [bool; 3]) -> Self {
-        self.settings_mut().cell = Some(CellDecl::Matrix { h, origin, pbc });
-        self
-    }
-    /// Packmol's optional second, shorter-range penalty. Declare the
-    /// tolerance first: the distance must stay below it.
-    fn with_short_tolerance(mut self, distance: F, scale: F) -> Self {
-        assert!(
-            distance > 0.0 && !distance.is_nan(),
-            "short tolerance distance must be positive, got {distance}"
-        );
-        assert!(
-            scale > 0.0 && !scale.is_nan(),
-            "short tolerance scale must be positive, got {scale}"
-        );
-        let tolerance = self.settings().tolerance();
-        assert!(
-            distance < tolerance,
-            "short tolerance distance {distance} must be smaller than the tolerance {tolerance}"
-        );
-        // Stored halved: the context wants the per-atom short radius.
-        self.settings_mut().short_tolerance = Some((distance / 2.0, scale));
-        self
-    }
-    /// Broadcast a restraint to every target at run time.
-    fn with_global_restraint(mut self, r: impl crate::restraint::AtomRestraint + 'static) -> Self {
-        self.settings_mut()
-            .global_restraints
-            .push(std::sync::Arc::new(r));
-        self
-    }
-
-    /// Run the packing. Consumes the entry: one engine, one run.
-    fn run(mut self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError> {
-        if targets.is_empty() {
-            return Err(PackError::NoTargets);
+        if *tolerance != default.tolerance {
+            return Some("tolerance");
         }
-        for (i, t) in targets.iter().enumerate() {
-            if t.natoms() == 0 {
-                return Err(PackError::EmptyMolecule(i));
-            }
+        if *precision != default.precision {
+            return Some("precision");
         }
-        self.validate(targets)?;
-
-        // Stage ①: space + restraint broadcast (shared).
-        let settings = self.settings();
-        let broadcast = broadcast_global_restraints(targets, &settings.global_restraints);
-        let targets: &[Target] = &broadcast;
-        let space = resolve_pack_space(
-            settings.density,
-            settings.periodic_box,
-            settings.cell,
-            targets,
-        )?;
-
-        // Stage ②: context.
-        let knobs = ContextKnobs {
-            tolerance: settings.tolerance(),
-            short_tolerance: settings.short_tolerance,
-            parallel_eval: settings.parallel_eval,
-        };
-        let built = build_context(&knobs, targets)?;
-        let mut state = PackState::new(built.sys, built.ntotmol_free);
-
-        let setup = EngineSetup {
-            targets,
-            cell: space.cell.clone(),
-            maxmove_per_type: &built.maxmove_per_type,
-            ntype: built.ntype,
-            ntype_with_fixed: built.ntype_with_fixed,
-            ntotmol_free: built.ntotmol_free,
-            ntotat: built.ntotat,
-            ntotat_free: built.ntotat_free,
-        };
-
-        // Stages ③④: the algorithm, bracketed by the handlers.
-        let mut stage = self.solver(&setup)?;
-        {
-            let (sys, view) = state.rigid_split_mut();
-            self.prepare(sys, view.as_mut_slice(), &setup)?;
+        if *discale != default.discale {
+            return Some("discale");
         }
-
-        let log = self.settings().log;
-        let (tolerance, precision, seed) = {
-            let s = self.settings();
-            (s.tolerance(), s.precision(), s.seed())
-        };
-        let mut handlers = std::mem::take(self.handlers_mut());
-        if log.level.is_enabled() {
-            handlers.push(Box::new(LammpsLogHandler::new(
-                log.level,
-                log.frequency,
-                tolerance,
-                precision,
-                seed,
-                max_loops,
-                built.ntype_with_fixed,
-                space.pbc,
-            )));
+        if *seed != default.seed {
+            return Some("seed");
         }
-        for h in handlers.iter_mut() {
-            h.on_start(built.ntotat, built.ntotmol_free);
+        if *parallel_eval != default.parallel_eval {
+            return Some("parallel_eval");
         }
-        state.ctx_mut().ntotmol = built.ntotmol_free;
-
-        let budget = Budget::new(max_loops, precision);
-        let outcome = stage.run(&mut state, targets, &budget, &mut handlers);
-        // The marker moves by what the stage declared, not by inspecting the
-        // result — the pipeline advances it the same way.
-        state.set_placed(stage.guarantees().placed);
-
-        // Stage ⑤: xcart rebuild, finish bracket, assembly.
-        {
-            let ctx = state.ctx_mut();
-            for itype in 0..built.ntype_with_fixed {
-                ctx.comptype[itype] = true;
-            }
-            ctx.ntotmol = built.ntotmol_free;
+        if *short_tolerance != default.short_tolerance {
+            return Some("short_tolerance");
         }
-        let (mut sys, view) = state.into_parts();
-        view.write_xcart(&mut sys);
-        for h in handlers.iter_mut() {
-            h.on_finish(&sys);
+        if *periodic_box != default.periodic_box {
+            return Some("periodic_box");
         }
-
-        // The placement solution, captured verbatim for cross-entry seeding
-        // (placement-seeding spec): the frame below is derived VIEW data —
-        // re-deriving (coor, rigid) from it would recompute COMs and break
-        // bitwise continuity.
-        let placements = result::Placements {
-            rigid: view.clone(),
-            coor: sys.coor[..built.ntotat_free].to_vec(),
-            copy_atoms: targets
-                .iter()
-                .filter(|t| t.fixed_at.is_none())
-                .flat_map(|t| std::iter::repeat_n(t.natoms(), t.count))
-                .collect(),
-            cell: sys.simbox.clone(),
-        };
-
-        let xcart = std::mem::take(&mut sys.xcart);
-        let positions = positions_in_target_order(targets, &xcart, built.ntotat_free);
-        let mut frame = crate::assemble::assemble_frame(targets, &positions);
-        if let Some((min, max, flags)) = space.pbc {
-            let lengths = Array1::from_vec(vec![max[0] - min[0], max[1] - min[1], max[2] - min[2]]);
-            let origin = Array1::from_vec(min.to_vec());
-            if let Ok(simbox) = SimBox::ortho(lengths, origin, flags) {
-                frame.simbox = Some(simbox);
-            }
+        if *density != default.density {
+            return Some("density");
         }
-        // A DECLARED cell (with_cell / a seeded run's inherited cell) is
-        // user-stated geometry and belongs on the output frame; a box merely
-        // inferred from restraints stays off it, as documented.
-        if frame.simbox.is_none()
-            && let Some(cell) = &space.cell
-        {
-            frame.simbox = Some(cell.clone());
+        // `CellDecl` carries floats a caller cannot be expected to reproduce
+        // exactly, and the default is "no declaration", so presence is the
+        // whole question.
+        if cell.is_some() {
+            return Some("cell");
         }
-
-        Ok(PackResult {
-            frame,
-            placements,
-            fdist: sys.fdist,
-            frest: sys.frest,
-            converged: outcome.converged,
-            softened: outcome.softened,
-        })
+        if log.level != default.log.level || log.frequency != default.log.frequency {
+            return Some("log");
+        }
+        // Restraint objects are `dyn` and not comparable; the default is the
+        // empty set, so emptiness is the whole question.
+        if !global_restraints.is_empty() {
+            return Some("global_restraints");
+        }
+        None
     }
 }
