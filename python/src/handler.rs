@@ -33,12 +33,49 @@ use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
 // ============================================================================
+// PyStageInfo — which stage of the run a callback came from. Kept nested
+// (unlike `PhaseInfo`, flattened below) because a pipeline's stage identity
+// reads as one thing: `info.stage.index` / `.total` / `.name`.
+// ============================================================================
+
+/// Identifies the stage a callback comes from. A single-stage run reports
+/// ``index == 0`` and ``total == 1``.
+#[pyclass(name = "StageInfo", frozen, skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyStageInfo {
+    /// 0-based index of this stage in the run.
+    #[pyo3(get)]
+    pub index: usize,
+    /// How many stages the run has.
+    #[pyo3(get)]
+    pub total: usize,
+    /// The stage's own name.
+    #[pyo3(get)]
+    pub name: String,
+}
+
+#[pymethods]
+impl PyStageInfo {
+    fn __repr__(&self) -> String {
+        format!(
+            "StageInfo({}, {}/{})",
+            self.name,
+            self.index + 1,
+            self.total
+        )
+    }
+}
+
+// ============================================================================
 // PyStepInfo — read-only snapshot passed to `on_step`. Flattens Rust's
 // nested `PhaseInfo` for Python ergonomics.
 // ============================================================================
 
 #[pyclass(name = "StepInfo", frozen)]
 pub struct PyStepInfo {
+    /// Which stage of the run this callback came from.
+    #[pyo3(get)]
+    pub stage: PyStageInfo,
     /// 0-based outer-loop iteration within the current phase.
     #[pyo3(get)]
     pub loop_idx: usize,
@@ -80,6 +117,11 @@ pub struct PyStepInfo {
 impl PyStepInfo {
     fn from_info(info: &StepInfo) -> Self {
         Self {
+            stage: PyStageInfo {
+                index: info.stage.index,
+                total: info.stage.total,
+                name: info.stage.name.to_owned(),
+            },
             loop_idx: info.loop_idx,
             max_loops: info.max_loops,
             phase: info.phase.phase,
@@ -99,7 +141,11 @@ impl PyStepInfo {
 impl PyStepInfo {
     fn __repr__(&self) -> String {
         format!(
-            "StepInfo(phase={}/{}, loop={}/{}, fdist={:.3e}, frest={:.3e}, improvement={:.2}%)",
+            "StepInfo(stage={} {}/{}, phase={}/{}, loop={}/{}, \
+             fdist={:.3e}, frest={:.3e}, improvement={:.2}%)",
+            self.stage.name,
+            self.stage.index + 1,
+            self.stage.total,
             self.phase + 1,
             self.total_phases,
             self.loop_idx + 1,

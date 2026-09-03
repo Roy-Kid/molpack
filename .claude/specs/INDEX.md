@@ -4,7 +4,7 @@ Status legend: **DRAFT** (under review) → **APPROVED** (ready to implement) �
 
 Add via `/mol:spec <feature description>`. Implement via `/mol:impl <slug>` (chains: `/mol:impl-all <prefix>`). Close via `/mol:close <slug>`, which deletes the spec, its acceptance file, and this entry. Specs are active artifacts — finished ones do not stay here.
 
-## packing-taxonomy (chain — implement in order, start with `stage-pipeline`)
+## packing-taxonomy (chain — `stage-pipeline` 01–07 landed 2026-09-03; next: `grow-axes` / `dg-refine`)
 
 来源：grow 族算法评审 + packing 分类 rev 2（2026-09-02，用户裁定：所有 packer 共享 Stage/Pipeline trait 管理生命周期与 handler；全部化学、力场无关；键长不必精确，后接力场 minimize；生成族按六条正交轴组合）。顺序（architect 裁定）：`stage-pipeline`（含共享叶子 `src/topology.rs`）先落地；`grow-axes` 可在其前后独立落地（预设写在今天的 `PackEngine` 上）；`dg-refine` 前置 `src/objective.rs` 的行为保持拆分，该拆分与 DRAFT `pair-loop-context-split` 合并为一次 objective 重组。
 
@@ -15,7 +15,7 @@ Add via `/mol:spec <feature description>`. Implement via `/mol:impl <slug>` (cha
   - stage-pipeline-04-stage — DONE 2026-09-03（10/10 verified；`src/solver.rs` → `src/stage.rs`，`Stage { name, requires, guarantees, run }` 收 `&mut PackState`，`StageOutcome { converged, softened }` 不带裁决；`GencanStage` / `GrowStage` / `LatticeStage`，`grow/lattice/entry.rs` 拆出；optimizer 绑定改借用形消除 `mem::take`（`ff` 再入测试）；`StepInfo.stage` + `on_stage_start/end` 钩子；`PackState`/`Placed` 升 `pub`；docs/ 跟随改名；随本段提交关闭并删除）
   - stage-pipeline-05-pipeline — DONE 2026-09-03（12/12 verified，ac-010 的 tox 门受 D-04 限制留待 CI；`src/pipeline/{mod,engine,bracket}.rs`：`StageFactory` / `PackEngine`（`run` 必需）/ `EngineSetup`（含 `settings` 引用）迁入，`Pipeline::{new, single, with_stage}`，生命周期体 validate / resolve_stages / run_stages / assemble，衔接检查与设置检查在任何 handler 通知前，handler 采纳，`StageTagger` 改写 `StepInfo.stage`，push-off 状态化（`GencanSettings.push_off` 删除），`prepare()`/`solver()` 删除，三处网格前奏共用 `install_resolved_cell`（radmax 从 `radius_ini`）；两组逐位等价门绿；docs 三页跟随；随本段提交关闭并删除）
   - stage-pipeline-06-combinators — DONE 2026-09-03（9/9 verified；`Stage::run` 改为可失败 `Result<StageOutcome, PackError>`（对 04 的修正）；`src/invariant.rs`：`Layers` L0–L5 位集落在唯一消费者 `Invariant::layer()` 旁、`Violation`、`RestraintsSatisfied`（读共享 `frest`）；`src/pipeline/combinators.rs`：`Repeat`/`Until`、`Guarded`/`OnViolation`（同阶段重跑或具名失败，永不换算法），`with_repeat`/`with_guarded` 经 `with_stage` 同一采纳路径；`PackError::InvariantViolated`；`Repeat` 第二遍逐位 ≡ `seeded_from`，`fdist` 单调断言撤回；预算修正 combinators ≤ 320 / mod ≤ 500；随本段提交关闭并删除）
-  - [stage-pipeline-07-bindings](./stage-pipeline-07-bindings.md) — Python `Pipeline` 镜像（每入口 `IntoStageFactory` + 单一注册表）、`StepInfo.stage`、`.pyi`/`_protocols`、五个文档页 + 仓库知识 + `/mol:map` — **APPROVED**
+  - stage-pipeline-07-bindings — DONE 2026-09-03（7/7 verified；Python `Pipeline([stage, …])` / `.with_stage` / 共享 `with_*` / `run`，每入口 `IntoStageFactory`（`to_stage_factory`）+ 唯一 `stage_entry_registry!`（派发 + `TypeError` 文案），阶段对象的 handler 经 `take_handlers` 被采纳，`StepInfo.stage` → `StageInfo{index,total,name}`；`.pyi`/`_protocols`/`__init__` 同步；五个文档页 + CLAUDE.md + conventions + `/mol:map` 蓝图刷新；Python 门 `tox -c python -e py` 167 过（含 9 条 `test_pipeline.py`，两金标）；顺带修 tox `commands_pre[3]` 路径 bug；随本段提交关闭并删除）
 - [dg-refine](./dg-refine.md) — 笛卡尔距离几何精修阶段 `DgRefine`：软核 overlap 项 + 分子内重叠项 + 1-2/1-3 键距弹簧 + 可选手性/约束项，复用 gencan 线搜索原语与 `gxcar`，半径阶梯 s₀→1；熔体密度 push-off 不再出境到 MD — **DRAFT**
 - [grow-axes](./grow-axes.md) — 一个 `Grow<Space, ExcludedVolume>` 驱动 + Selector / Escape / Schedule 三个 enum；CbmcGrow / LatticeGrow 成为预设（后者获得哈希流与轮转），新增 `WalkGrow`（理想链，Auhl 路线第一步）；删除 relax / serial / void_bias 旗标，软化按链局部化 — **DRAFT**
 

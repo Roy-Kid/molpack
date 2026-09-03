@@ -7,8 +7,11 @@
 //! | `Target`         | [`PyTarget`]         | Molecule specification for packing |
 //! | `GenCanPack`     | [`PyGenCanPack`]     | Rigid-body GENCAN packing entry    |
 //! | `CbmcGrow`       | [`PyCbmcGrow`]       | Chain-growth entry                 |
+//! | `LatticeGrow`    | [`PyLatticeGrow`]    | Lattice-growth entry               |
+//! | `Pipeline`       | [`PyPipeline`]       | Entries composed as stages         |
 //! | `PackResult`     | [`PyPackResult`]     | Frame + diagnostics from `run()`   |
 //! | `StepInfo`       | [`PyStepInfo`]       | Read-only snapshot for handlers    |
+//! | `StageInfo`      | [`PyStageInfo`]      | Which stage a callback came from   |
 //! | `StepContext`    | [`PyStepContext`]    | Callback-scoped live-context guard |
 //! | `InsideBox`      | [`PyInsideBox`]      | Box restraint                      |
 //! | `InsideSphere`   | [`PyInsideSphere`]   | Sphere restraint (inside)          |
@@ -41,7 +44,7 @@ use constraint::{
 };
 
 mod handler;
-use handler::{PyStepContext, PyStepInfo};
+use handler::{PyStageInfo, PyStepContext, PyStepInfo};
 
 mod grow;
 
@@ -49,7 +52,7 @@ mod target;
 use target::PyTarget;
 
 mod entry;
-use entry::{PyCbmcGrow, PyGenCanPack, PyLatticeGrow};
+use entry::{PyCbmcGrow, PyGenCanPack, PyLatticeGrow, PyPipeline};
 mod result;
 use result::PyPackResult;
 
@@ -90,8 +93,10 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGenCanPack>()?;
     m.add_class::<PyCbmcGrow>()?;
     m.add_class::<PyLatticeGrow>()?;
+    m.add_class::<PyPipeline>()?;
     m.add_class::<PyPackResult>()?;
     m.add_class::<PyStepInfo>()?;
+    m.add_class::<PyStageInfo>()?;
     m.add_class::<PyStepContext>()?;
 
     m.add_class::<PyScriptJob>()?;

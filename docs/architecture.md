@@ -28,6 +28,8 @@ src/
 │   ├── setup.rs        density / pbc / cell resolution + restraint broadcast
 │   └── result.rs       PackResult + the verbatim Placements a run hands the next one
 ├── target.rs           Target — molecule type + per-molecule restraints + fixed_from
+├── topology.rs         Topology — template bond graph (CSR adjacency) read once
+│                       from a Frame's bonds block + frame_positions reader
 ├── restraint/          AtomRestraint trait + geometric/ and collective/ impls
 ├── region.rs           Region trait + And/Or/Not + RegionRestraint
 ├── handler.rs          Handler trait + LogLevel + 4 built-in observers
@@ -94,7 +96,7 @@ src/
                             └── constraints/  (EvalMode facade)
 ```
 
-`target` / `restraint` / `region` are pure data — no driver imports.
+`target` / `topology` / `restraint` / `region` are pure data — no driver imports.
 `pipeline/` is the only module that imports everything else; `entry/`
 shrank to settings + space + result and imports nothing from `pipeline/` —
 the arrow points one way, `pipeline/` reads `entry/`, never the reverse.

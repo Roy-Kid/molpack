@@ -25,6 +25,27 @@ The shared builders (`with_seed`, `with_tolerance`, handlers, boxes, …) and
 the terminal `run` come from the `PackEngine` trait, so it has to be in scope.
 `GenCanPack` is the rigid-body entry; `CbmcGrow` is the chain-growth one.
 
+Each entry is a **single-stage preset**: calling `.run(...)` on `GenCanPack`
+or `CbmcGrow` drives exactly one packing algorithm end to end (internally,
+`Pipeline::single(self).run(...)`). When a pack needs more than one algorithm
+in sequence — grow a chain, then push it apart with rigid-body descent —
+compose stages directly with `Pipeline` instead of chaining separate runs:
+
+```rust
+use molpack::{CbmcGrow, GenCanPack, Pipeline};
+
+let result = Pipeline::new()
+    .with_stage(CbmcGrow::new(prior))
+    .with_stage(GenCanPack::new())
+    .run(&targets, max_loops)?;
+```
+
+`Pipeline` drives every stage through the same lifecycle a preset uses,
+continuing from the first stage's placements rather than re-placing from
+scratch. See [Composing stages](../extending.md#composing-stages) for the
+full walkthrough, including the shared-settings rule and the two stage
+combinators (`with_repeat`, `with_guarded`).
+
 ## Install
 
 ```bash

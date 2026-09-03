@@ -5,12 +5,18 @@
 //! The shared `with_*` builders are bound ONCE, in `entry_pymethods!` —
 //! the macro stamps the same forwarders into each entry's `#[pymethods]`
 //! block, so the shared surface cannot drift between entries.
+//!
+//! `Pipeline` takes those same entry objects as its stages. How an entry
+//! becomes one is stamped by the same macro, next to the entry
+//! (`IntoStageFactory`), and *which* objects may be one is the single
+//! `stage_entry_registry!` table below — both the dispatch and the
+//! `TypeError` text come from it, so `PyPipeline` never names a concrete
+//! entry type and a fourth entry registers itself in one line.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use molpack::PackEngine;
-use molpack::{CbmcGrow, GenCanPack, LatticeGrow, LogLevel};
+use molpack::{CbmcGrow, GenCanPack, LatticeGrow, LogLevel, PackEngine, StageFactory};
 use pyo3::prelude::*;
 
 use crate::constraint::extract_restraint;
@@ -95,6 +101,12 @@ impl SharedKnobs {
         if let Some(n) = self.log_frequency {
             engine = engine.with_log_frequency(n);
         }
+        // One flag per `apply` call — shared by the handlers this call
+        // attaches, whether they land on a standalone entry or on one stage
+        // of a pipeline. The lifecycle polls every handler
+        // (`handlers.iter().any(|h| h.should_stop())`), so a stage handler
+        // asking to stop still stops the whole run, and a raised exception
+        // still reaches `finish_run` through the shared `take_err` stash.
         let stop_flag = Arc::new(AtomicBool::new(false));
         for py_h in &self.py_handlers {
             let wrapper = PyHandlerWrapper::new(py_h.clone_ref(py), Arc::clone(&stop_flag));
@@ -145,8 +157,28 @@ fn finish_run(
     })
 }
 
+/// How an entry object becomes a pipeline stage.
+///
+/// Stamped by [`entry_pymethods!`] next to each entry, so the conversion
+/// lives with the entry it converts and a new entry cannot forget to
+/// provide one. The body is the entry's own `build_engine` — the very
+/// construction its `run` uses, so a stage and a standalone run are the
+/// same engine — followed by [`SharedKnobs::apply`], which attaches this
+/// object's Python handlers (the pipeline *adopts* them) and carries any
+/// non-default shared knob through so the Rust side refuses it **by name**.
+/// The binding neither strips a knob nor drops a handler.
+///
+/// `to_` and not `into_`: the entry object stays owned by the interpreter,
+/// so the conversion borrows it and the caller's stage object is still
+/// usable afterwards.
+trait IntoStageFactory {
+    fn to_stage_factory(&self, py: Python<'_>) -> PyResult<Box<dyn StageFactory>>;
+}
+
 /// One `#[pymethods]` block per entry: the shared builders (stamped
-/// identically for every entry) plus the entry's own methods.
+/// identically for every entry), the entry's own methods, and its
+/// [`IntoStageFactory`] body — which is why every entry must define
+/// `fn build_engine(&self, py: Python<'_>) -> PyResult<impl PackEngine>`.
 macro_rules! entry_pymethods {
     ($ty:ty { $($extra:tt)* }) => {
         #[pymethods]
@@ -226,6 +258,56 @@ macro_rules! entry_pymethods {
 
             $($extra)*
         }
+
+        impl IntoStageFactory for $ty {
+            fn to_stage_factory(&self, py: Python<'_>) -> PyResult<Box<dyn StageFactory>> {
+                Ok(Box::new(self.shared.apply(py, self.build_engine(py)?)?))
+            }
+        }
+    };
+}
+
+/// The one table of entry pyclasses a `Pipeline` accepts as a stage.
+///
+/// It generates both halves of the answer — the ordered dispatch and the
+/// `TypeError` text listing what was expected — so the two cannot drift and
+/// a new entry costs exactly one line, next to its own pyclass.
+macro_rules! stage_entry_registry {
+    ($($ty:ty => $name:literal),+ $(,)?) => {
+        /// The accepted entries, in dispatch order.
+        const STAGE_ENTRIES: &[&str] = &[$($name),+];
+
+        fn not_a_stage(obj: &Bound<'_, pyo3::types::PyAny>) -> PyErr {
+            let got = obj
+                .get_type()
+                .name()
+                .and_then(|n| n.extract::<String>())
+                .unwrap_or_else(|_| "?".to_owned());
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "stage must be one of {} (got {got})",
+                STAGE_ENTRIES.join(", ")
+            ))
+        }
+
+        /// Type-check a candidate stage where the caller hands it over, so a
+        /// pipeline holding something it cannot run is never constructible.
+        fn check_stage(obj: &Bound<'_, pyo3::types::PyAny>) -> PyResult<()> {
+            $(if obj.is_instance_of::<$ty>() {
+                return Ok(());
+            })+
+            Err(not_a_stage(obj))
+        }
+
+        /// Convert a stage object into the factory the Rust pipeline takes.
+        fn stage_from_py(
+            py: Python<'_>,
+            obj: &Bound<'_, pyo3::types::PyAny>,
+        ) -> PyResult<Box<dyn StageFactory>> {
+            $(if let Ok(entry) = obj.cast::<$ty>() {
+                return entry.borrow().to_stage_factory(py);
+            })+
+            Err(not_a_stage(obj))
+        }
     };
 }
 
@@ -301,26 +383,7 @@ entry_pymethods!(PyGenCanPack {
     ) -> PyResult<PyPackResult> {
         self.shared.guard_one_shot()?;
         let rust_targets: Vec<_> = targets.into_iter().map(|t| t.inner).collect();
-        let mut engine = GenCanPack::new();
-        if let Some(seed) = &self.seed {
-            engine = engine.seeded_from(seed);
-        }
-        if let Some(n) = self.inner_iterations {
-            engine = engine.with_inner_iterations(n);
-        }
-        if let Some(n) = self.init_passes {
-            engine = engine.with_init_passes(n);
-        }
-        if let Some(h) = self.init_box_half_size {
-            engine = engine.with_init_box_half_size(h);
-        }
-        if let Some((f, r, e)) = self.perturb {
-            engine = engine.with_perturb(f, r, e);
-        }
-        if let Some(on) = self.avoid_overlap {
-            engine = engine.with_avoid_overlap(on);
-        }
-        let engine = self.shared.apply(py, engine)?;
+        let engine = self.shared.apply(py, self.build_engine(py)?)?;
         let pb = self.shared.periodic_box;
         finish_run(py, engine.run(&rust_targets, max_loops), pb)
     }
@@ -351,6 +414,31 @@ impl PyGenCanPack {
             perturb: None,
             avoid_overlap: None,
         }
+    }
+
+    /// The Rust engine these knobs describe — one home for that
+    /// construction, read by `run` and by the pipeline conversion alike.
+    fn build_engine(&self, _py: Python<'_>) -> PyResult<GenCanPack> {
+        let mut engine = GenCanPack::new();
+        if let Some(seed) = &self.seed {
+            engine = engine.seeded_from(seed);
+        }
+        if let Some(n) = self.inner_iterations {
+            engine = engine.with_inner_iterations(n);
+        }
+        if let Some(n) = self.init_passes {
+            engine = engine.with_init_passes(n);
+        }
+        if let Some(h) = self.init_box_half_size {
+            engine = engine.with_init_box_half_size(h);
+        }
+        if let Some((f, r, e)) = self.perturb {
+            engine = engine.with_perturb(f, r, e);
+        }
+        if let Some(on) = self.avoid_overlap {
+            engine = engine.with_avoid_overlap(on);
+        }
+        Ok(engine)
     }
 
     fn clone_fields(&self) -> Self {
@@ -474,38 +562,7 @@ entry_pymethods!(PyCbmcGrow {
     ) -> PyResult<PyPackResult> {
         self.shared.guard_one_shot()?;
         let rust_targets: Vec<_> = targets.into_iter().map(|t| t.inner).collect();
-        let mut engine = CbmcGrow::new(self.prior.clone());
-        if let Some(n) = self.trials {
-            engine = engine.with_trials(n);
-        }
-        if let Some(n) = self.retract {
-            engine = engine.with_retract(n);
-        }
-        if let Some((e, w)) = self.relax {
-            engine = engine.with_relax(e, w);
-        }
-        if let Some(b) = self.selectivity {
-            engine = engine.with_selectivity(b);
-        }
-        if let Some(n) = self.soften_after {
-            engine = engine.with_soften_after(n);
-        }
-        if let Some(s) = self.min_hard_scale {
-            engine = engine.with_min_hard_scale(s);
-        }
-        if let Some(d) = self.exclusion_depth {
-            engine = engine.with_exclusion_depth(d);
-        }
-        if let Some(ref ap) = self.angle_prior {
-            engine = engine.with_angle_prior(ap.clone());
-        }
-        if let Some(w) = self.soft_shell {
-            engine = engine.with_soft_shell(w);
-        }
-        engine = engine
-            .with_serial(self.serial)
-            .with_void_bias(self.void_bias);
-        let engine = self.shared.apply(py, engine)?;
+        let engine = self.shared.apply(py, self.build_engine(py)?)?;
         let pb = self.shared.periodic_box;
         finish_run(py, engine.run(&rust_targets, max_loops), pb)
     }
@@ -552,11 +609,7 @@ entry_pymethods!(PyLatticeGrow {
     ) -> PyResult<PyPackResult> {
         self.shared.guard_one_shot()?;
         let rust_targets: Vec<_> = targets.into_iter().map(|t| t.inner).collect();
-        let mut engine = LatticeGrow::new(self.prior.clone());
-        if let Some(on) = self.occupancy_guard {
-            engine = engine.with_occupancy_guard(on);
-        }
-        let engine = self.shared.apply(py, engine)?;
+        let engine = self.shared.apply(py, self.build_engine(py)?)?;
         let pb = self.shared.periodic_box;
         finish_run(py, engine.run(&rust_targets, max_loops), pb)
     }
@@ -567,6 +620,16 @@ entry_pymethods!(PyLatticeGrow {
 });
 
 impl PyLatticeGrow {
+    /// The Rust engine these knobs describe — one home for that
+    /// construction, read by `run` and by the pipeline conversion alike.
+    fn build_engine(&self, _py: Python<'_>) -> PyResult<LatticeGrow> {
+        let mut engine = LatticeGrow::new(self.prior.clone());
+        if let Some(on) = self.occupancy_guard {
+            engine = engine.with_occupancy_guard(on);
+        }
+        Ok(engine)
+    }
+
     fn clone_fields(&self) -> Self {
         Python::attach(|py| Self {
             shared: self.shared.clone_ref(py),
@@ -577,6 +640,42 @@ impl PyLatticeGrow {
 }
 
 impl PyCbmcGrow {
+    /// The Rust engine these knobs describe — one home for that
+    /// construction, read by `run` and by the pipeline conversion alike.
+    fn build_engine(&self, _py: Python<'_>) -> PyResult<CbmcGrow> {
+        let mut engine = CbmcGrow::new(self.prior.clone());
+        if let Some(n) = self.trials {
+            engine = engine.with_trials(n);
+        }
+        if let Some(n) = self.retract {
+            engine = engine.with_retract(n);
+        }
+        if let Some((e, w)) = self.relax {
+            engine = engine.with_relax(e, w);
+        }
+        if let Some(b) = self.selectivity {
+            engine = engine.with_selectivity(b);
+        }
+        if let Some(n) = self.soften_after {
+            engine = engine.with_soften_after(n);
+        }
+        if let Some(s) = self.min_hard_scale {
+            engine = engine.with_min_hard_scale(s);
+        }
+        if let Some(d) = self.exclusion_depth {
+            engine = engine.with_exclusion_depth(d);
+        }
+        if let Some(ref ap) = self.angle_prior {
+            engine = engine.with_angle_prior(ap.clone());
+        }
+        if let Some(w) = self.soft_shell {
+            engine = engine.with_soft_shell(w);
+        }
+        Ok(engine
+            .with_serial(self.serial)
+            .with_void_bias(self.void_bias))
+    }
+
     fn clone_fields(&self) -> Self {
         Python::attach(|py| Self {
             shared: self.shared.clone_ref(py),
@@ -592,6 +691,99 @@ impl PyCbmcGrow {
             soft_shell: self.soft_shell,
             serial: self.serial,
             void_bias: self.void_bias,
+        })
+    }
+}
+
+// The single table: which entry objects may be a pipeline stage. A fourth
+// entry adds one line here, next to its own pyclass — the dispatch and the
+// `TypeError` text follow, and `PyPipeline` below stays untouched.
+stage_entry_registry!(
+    PyGenCanPack => "GenCanPack",
+    PyCbmcGrow => "CbmcGrow",
+    PyLatticeGrow => "LatticeGrow",
+);
+
+/// A sequence of stages behind one lifecycle, one settings set and one
+/// handler set (1:1 mirror of the Rust `Pipeline`).
+///
+/// The shared knobs are the run's — declare them here, not on a stage. A
+/// stage's own Python handlers travel with it and are **adopted**: they
+/// observe the whole run. A stage carrying a non-default shared knob is
+/// refused by name at `run` (`ValueError`), never silently stripped.
+///
+/// The stage objects are kept as the Python objects the caller handed over
+/// and turned into Rust factories at `run` — `Box<dyn StageFactory>` is not
+/// clonable, while these consuming builders hand back a fresh pipeline on
+/// every call. The type check does not wait for `run`: it fires where the
+/// stage is handed over, so an unrunnable pipeline is not constructible.
+#[pyclass(name = "Pipeline")]
+pub struct PyPipeline {
+    shared: SharedKnobs,
+    stages: Vec<Py<pyo3::types::PyAny>>,
+}
+
+// The shared macro also stamps `IntoStageFactory` on `PyPipeline` (a Rust
+// `Pipeline` is itself a `StageFactory`), but `PyPipeline` is deliberately
+// NOT in `stage_entry_registry!`: nesting pipelines stays a Rust-only
+// extension point in v1, so that impl has no caller by design.
+entry_pymethods!(PyPipeline {
+    #[new]
+    #[pyo3(signature = (stages = None))]
+    fn new(py: Python<'_>, stages: Option<Vec<Py<pyo3::types::PyAny>>>) -> PyResult<Self> {
+        let stages = stages.unwrap_or_default();
+        for stage in &stages {
+            check_stage(stage.bind(py))?;
+        }
+        Ok(Self {
+            shared: SharedKnobs::default(),
+            stages,
+        })
+    }
+
+    /// Append a stage — one of the entry objects the registry accepts.
+    fn with_stage(&self, py: Python<'_>, stage: Py<pyo3::types::PyAny>) -> PyResult<Self> {
+        check_stage(stage.bind(py))?;
+        let mut c = self.clone_fields();
+        c.stages.push(stage);
+        Ok(c)
+    }
+
+    /// Run the chain. One pipeline, one run.
+    fn run(
+        &mut self,
+        py: Python<'_>,
+        targets: Vec<PyTarget>,
+        max_loops: usize,
+    ) -> PyResult<PyPackResult> {
+        self.shared.guard_one_shot()?;
+        let rust_targets: Vec<_> = targets.into_iter().map(|t| t.inner).collect();
+        let engine = self.shared.apply(py, self.build_engine(py)?)?;
+        let pb = self.shared.periodic_box;
+        finish_run(py, engine.run(&rust_targets, max_loops), pb)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Pipeline({} stages)", self.stages.len())
+    }
+});
+
+impl PyPipeline {
+    /// The Rust engine these knobs describe: one factory per stage object,
+    /// in the order they were added, each converted through the registry.
+    /// Nothing here names a concrete entry type.
+    fn build_engine(&self, py: Python<'_>) -> PyResult<molpack::Pipeline> {
+        let mut pipeline = molpack::Pipeline::new();
+        for stage in &self.stages {
+            pipeline = pipeline.with_stage(stage_from_py(py, stage.bind(py))?);
+        }
+        Ok(pipeline)
+    }
+
+    fn clone_fields(&self) -> Self {
+        Python::attach(|py| Self {
+            shared: self.shared.clone_ref(py),
+            stages: self.stages.iter().map(|s| s.clone_ref(py)).collect(),
         })
     }
 }

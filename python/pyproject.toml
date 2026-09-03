@@ -189,7 +189,7 @@ commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import ast; from pathlib import Path; src=Path('{toxinidir}')/'..'/'..'/'molpy'/'src'/'molpy'/'version.py'.read_text(); v=next(n.value.value for n in ast.parse(src).body if isinstance(n, ast.Assign) and getattr(n.targets[0],'id',None)=='version'); assert tuple(map(int, v.split('.')[:2]))==(0,14), f'sibling molpy {{v}} not on 0.14.*'",
+    "import ast; from pathlib import Path; src=(Path('{toxinidir}')/'..'/'..'/'molpy'/'src'/'molpy'/'version.py').read_text(); v=next(n.value.value for n in ast.parse(src).body if isinstance(n, ast.Assign) and getattr(n.targets[0],'id',None)=='version'); assert tuple(map(int, v.split('.')[:2]))==(0,14), f'sibling molpy {{v}} not on 0.14.*'",
   ],
   [
     "{envpython}",

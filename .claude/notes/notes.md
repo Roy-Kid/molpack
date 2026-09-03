@@ -81,6 +81,13 @@ Format per entry:
 `uv run --directory python --group typecheck …` 与 `--group dev`（tox）都在解析阶段失败：`molcrafts-molpy` 0.14.0（同级 `../molpy`）把 `molcrafts-molrs` 钉为 `git+https://github.com/MolCrafts/molrs.git@dev#subdirectory=molrs-python`，而 `python/pyproject.toml` 的 `[tool.uv.sources]` 把它钉为 `path = "../../molrs/molrs-python"`，uv 拒绝冲突 URL。chain-growth-solver Task 11 落地记录里已提到同一问题（当时靠 `maturin build` + `uv pip install` 绕过）。
 **Why:** 法则 P3——molrs / molpy 的 pin 由人手工管理；harness 不得自动改 pin。它使 `mol_project.build.check` 的 Python 段与 `ci.local` 的 tox 段在本机不可运行，stage-pipeline-05（`python/src/entry.rs` 一行 import）与 -07（Python 镜像）的 Python 验收只能在 CI 或修好 pin 后验证。
 **How to apply:** 由 owner 统一 `../molpy` 与 `python/pyproject.toml` 对 molrs 的 pin（同为 path 或同为 git）；在此之前，`/mol:impl` 对 Python 验收项标注"本环境不可运行，待 CI"。
+**2026-09-03 更新（07 落地前）**：直接调用 `tox -c python -e py`（prek pre-push 的拼写）**在本地能通过**——tox 环境用 pip
+从路径安装 sibling molrs / molpy，pip 不读 molpy 的 `[tool.uv.sources]` git 源，绕开了 uv 的 URL 冲突；
+158 个 Python 测试全绿。顺带修了 `python/pyproject.toml` tox `commands_pre[3]` 的优先级 bug
+（`Path(..)/'version.py'.read_text()` 先对字符串调用 `.read_text()`，加括号），该 bug 也会让 CI 的
+tox 步骤在越过 uv 后失败。余下的债只剩 `uv run --directory python --group dev tox -e py` 这一拼写
+（law P4 与 CI 用它）仍因 molpy 的 git pin 无法解析——统一 pin 仍归用户。
+
 
 ## 2026-09-03 — 发现：`PlacementsMut` 的 COM 访问器无越界保护
 

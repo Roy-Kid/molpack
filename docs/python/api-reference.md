@@ -7,7 +7,9 @@ from molpack import (
     # Core
     Target, PackResult, StepInfo,
     # Engine entries — one per packing algorithm
-    GenCanPack, CbmcGrow,
+    GenCanPack, CbmcGrow, LatticeGrow,
+    # Multi-stage composition
+    Pipeline,
     # Typed values
     Angle, Axis, CenteringMode,
     # Geometric (per-atom) restraints
@@ -121,8 +123,8 @@ Target(frame, count: int)
 ## Engine entries
 
 One entry class per packing algorithm; you pick the algorithm by picking
-the entry. Both are immutable builders — every `with_*` returns a new
-instance — and both expose the same terminal verb:
+the entry. All three are immutable builders — every `with_*` returns a new
+instance — and all three expose the same terminal verb:
 
 ```python
 .run(targets: list[Target], max_loops: int) -> PackResult
@@ -235,10 +237,49 @@ builders; one extra knob:
 Linear sp³ heavy-atom backbones only in v1 — branched and non-tetrahedral
 templates are named rejections.
 
+### `Pipeline`
+
+Composes stage objects — `GenCanPack`, `CbmcGrow`, and `LatticeGrow`
+instances — into one multi-algorithm run: grow a chain, then hand it to
+rigid-body descent, in one lifecycle and one `PackResult` rather than two
+separate `run()` calls. See [Composing stages](guide/packer.md#composing-stages)
+for the full walkthrough.
+
+```python
+Pipeline(stages: Sequence[GenCanPack | CbmcGrow | LatticeGrow] | None = None)
+```
+
+**Builders**
+
+- `.with_stage(stage: GenCanPack | CbmcGrow | LatticeGrow)` — append one
+  more stage; returns a new `Pipeline`.
+- The shared builders — same as [`GenCanPack`](#shared-builders):
+  `.with_tolerance`, `.with_precision`, `.with_seed`,
+  `.with_periodic_box`, `.with_density`, `.with_parallel_eval`,
+  `.with_progress`, `.with_handler`, `.with_global_restraint`. Set these on
+  the `Pipeline`, never on a stage object that goes into one — a stage
+  carrying a non-default shared setting raises `ValueError` naming the
+  stage and the setting.
+
+**Running**
+
+```python
+.run(targets: list[Target], max_loops: int) -> PackResult
+```
+
+Each stage's own `.with_handler(...)` callbacks are adopted into the
+pipeline's handler set and fire for every stage in the run, not only the
+one they were attached to. Raises `ValueError` for an empty pipeline, a
+stage-ordering error, or a stage carrying a non-default shared setting
+(each naming the offending stage); raises `TypeError`, listing the three
+supported entries, for any object passed to `Pipeline([...])` or
+`.with_stage(x)` that is not a `GenCanPack`, `CbmcGrow`, or `LatticeGrow`.
+
 ### Chaining two entries
 
-There is no mixed-algorithm pack inside one `run()`, and no hidden
-fallback. Stage it in user code, in one of two shapes:
+An entry's own `run()` never mixes algorithms, and there is no hidden
+fallback between them. Outside `Pipeline` (above), stage it in user code
+instead, in one of two shapes:
 
 ```python
 # Push-off: continue the SAME free targets on the grown state.
@@ -321,7 +362,20 @@ info.improvement_pct
 info.radscale
 info.precision
 info.relaxer_acceptance  # list[tuple[int, float]]
+info.stage               # StageInfo — which packing algorithm emitted this step
 ```
+
+### `StageInfo`
+
+Read-only triple identifying the stage a step belongs to. Load-bearing
+inside a multi-stage [`Pipeline`](#pipeline); present, with `index = 0` and
+`total = 1`, on every single-entry run too.
+
+- `.index : int` — 0-based position of this stage in the run; monotonic
+  across a multi-stage `Pipeline`.
+- `.total : int` — number of stages in the run.
+- `.name : str` — the stage's own name: `"gencan"`, `"growth"`, or
+  `"lattice"`.
 
 ---
 

@@ -27,6 +27,12 @@ class Handler(Protocol):
     float64 NumPy array on access — handlers that never touch it pay
     nothing. Atoms the growth solver has not placed yet sit at their
     sentinel positions.
+
+    ``info.stage`` says which stage of the run the callback came from
+    (``index`` / ``total`` / ``name``); a single-stage run reports
+    ``index == 0`` and ``total == 1``. A handler attached to an entry that
+    is then handed to a ``Pipeline`` as a stage is *adopted* by the
+    pipeline — it observes the whole run, not only that stage.
     """
 
     def on_start(self, ntotat: int, ntotmol: int) -> None: ...

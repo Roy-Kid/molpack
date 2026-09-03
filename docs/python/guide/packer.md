@@ -79,7 +79,7 @@ Attach any object implementing some subset of `on_start(ntotat, ntotmol)`,
 
 ```python
 class MyHandler:
-    def on_step(self, info):
+    def on_step(self, info, ctx):
         print(f"phase={info.phase} loop={info.loop_idx} fdist={info.fdist:.3f}")
         return None  # or True to request early stop
 
@@ -136,6 +136,100 @@ if not result.converged:
 `PackResult.frame` is the packed frame. Pass it to a writer of your
 choice (e.g. `molrs.io.write_pdb`). molpack does **not** provide
 writers.
+
+## Composing stages
+
+`GenCanPack`, `CbmcGrow`, and `LatticeGrow` are each a **single-stage
+preset**: calling `.run(...)` on one of them drives exactly one packing
+algorithm end to end. When a pack needs more than one algorithm in the same
+run — grow a chain, then compact it with rigid-body descent — compose the
+stage objects with `Pipeline` instead of writing two separate `run()` calls:
+
+```python
+from molpack import CbmcGrow, GenCanPack, Pipeline, TorsionPrior
+
+prior = TorsionPrior.uniform()  # see the Chain growth guide for a real prior
+result = (
+    Pipeline([CbmcGrow(prior), GenCanPack()])
+    .with_seed(7)
+    .run(targets, max_loops=200)
+)
+```
+
+`Pipeline([stage, ...])` accepts a list of stage objects at construction, and
+`.with_stage(x)` appends one more; both accept `GenCanPack`, `CbmcGrow`, and
+`LatticeGrow` instances. The pipeline runs every stage in one lifecycle,
+continuing from the previous stage's placements rather than starting over —
+the same continuation `.seeded_from` gives you across two separate runs (see
+[Staging a mixed pack](growth.md#staging-a-mixed-pack)), but in one call and
+one `PackResult`.
+
+### Shared settings live on the pipeline, not the stages
+
+`with_tolerance`, `with_precision`, `with_seed`, `with_periodic_box`,
+`with_density`, and the rest of the shared builders are one ruler for the
+whole run — declare them on the `Pipeline`, never on a stage object that goes
+into one. A stage object that still carries a non-default shared setting when
+it enters a `Pipeline` raises `ValueError`, naming both the offending stage
+and the setting, rather than silently picking one of two conflicting values:
+
+```python
+Pipeline([CbmcGrow(prior), GenCanPack().with_seed(7)]).run(targets, max_loops=200)
+# ValueError: preset `gencan` carries a non-default `seed` inside a pipeline;
+#             set `seed` on the Pipeline instead (shared settings are one ruler)
+```
+
+### Handlers travel with their stage
+
+A stage object's own `.with_handler(...)` callback is **not** dropped when
+that stage is composed into a `Pipeline` — it is adopted into the pipeline's
+handler set and keeps firing for every stage in the run, not only the one it
+was attached to:
+
+```python
+class CountSteps:
+    def __init__(self):
+        self.count = 0
+    def on_step(self, info, ctx):
+        self.count += 1
+
+counter = CountSteps()
+result = Pipeline([GenCanPack().with_handler(counter)]).run(targets, max_loops=200)
+assert counter.count > 0
+```
+
+### `StepInfo.stage` names the running algorithm
+
+Inside a multi-stage pipeline, `info.stage` on every `StepInfo` a handler
+receives tells you which stage emitted that step:
+
+```python
+class WatchStages:
+    def on_step(self, info, ctx):
+        s = info.stage
+        print(f"stage {s.index + 1}/{s.total} ({s.name}) loop={info.loop_idx}")
+        return None
+
+Pipeline([CbmcGrow(prior), GenCanPack()]).with_handler(WatchStages()).run(targets, max_loops=200)
+```
+
+`info.stage.index` is 0-based and increases monotonically over the run,
+`info.stage.total` is the number of stages the pipeline holds, and
+`info.stage.name` is the stage's own name — `"gencan"`, `"growth"`, or
+`"lattice"`. A single-entry run (`GenCanPack().run(...)` directly, with no
+`Pipeline`) reports the same triple, with `index = 0` and `total = 1`.
+
+### Composition errors
+
+- An empty pipeline (no stages by the time `.run(...)` is called) raises
+  `ValueError`.
+- A stage-ordering error — a stage whose `requires` the previous stage did
+  not `guarantee` — raises `ValueError` naming the stage.
+- A preset entering the pipeline with a non-default shared setting (above)
+  raises `ValueError` naming the stage and the setting.
+- An object that is not one of `GenCanPack`, `CbmcGrow`, or `LatticeGrow`
+  passed to `Pipeline([...])` or `.with_stage(x)` raises `TypeError`, listing
+  the three supported entries.
 
 ## Reproducibility
 

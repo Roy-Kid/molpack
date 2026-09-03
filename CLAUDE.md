@@ -40,7 +40,7 @@ sibling `../molrs` path dependency.
 
 ## Where things live
 
-- Source code: `src/` (library; CLI in `src/bin/molpack/`), `python/src/` (PyO3 wheel), `python/python/molpack/` (package)
+- Source code: `src/` (library — lifecycle in `src/pipeline/`, the packing-algorithm seam in `src/stage.rs`, template bond graph in `src/topology.rs`, run state in `src/context/pack_state.rs` + `src/context/rigid_view.rs`, post-stage checks in `src/invariant.rs`; CLI in `src/bin/molpack/`), `python/src/` (PyO3 wheel), `python/python/molpack/` (package)
 - Tests: unit tests in-module (`#[cfg(test)]`); integration tests in `tests/`, one file per subsystem; Python tests in `python/tests/`; `benches/`, `examples/`
 - Public documentation: `docs/` (Zensical site: Rust guide + `docs/python/`)
 - Passive project knowledge: `.claude/notes/` — `law.md` (rulebook), `conventions.md` (features, style, gates, layout, molrs sibling + ABI), `architecture.md` (blueprint via `/mol:map`), `notes.md` (decisions)

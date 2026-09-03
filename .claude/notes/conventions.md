@@ -37,6 +37,17 @@ frame (the PyO3 `target_from_frame` helper) and lowers scripts with
 
 - TDD: RED first, then GREEN, then refactor. 80% coverage minimum.
 - Unit tests live in-module (`#[cfg(test)]`); integration tests in `tests/`, one file per subsystem (`grow.rs`, `pipeline.rs`, `examples_batch.rs`, …); Python tests in `python/tests/`.
+- `stage-pipeline` chain, one file per subsystem, each owning only its own type's contract:
+  `tests/topology.rs` (the bond-graph leaf `src/topology.rs`); `tests/context_rigid_view.rs`
+  (the rigid placement vector `src/context/rigid_view.rs`); `src/context/pack_state/tests.rs`
+  (`PackState` + `evaluate_unscaled`, in-crate rather than in `tests/` because both were
+  `pub(crate)` when written and so invisible to an integration test in a separate crate — mounted
+  from `src/context/pack_state.rs` via `#[cfg(test)] mod tests;` and still collected by the
+  ordinary `--lib` gate); `tests/stage.rs` (the `Stage` seam's own contract — object safety,
+  `requires`/`guarantees`, re-entrancy — on fake stages only, never a production stage; what each
+  concrete stage declares stays with its owner, `tests/gencan.rs` / `tests/grow.rs`);
+  `tests/pipeline.rs` (the multi-stage lifecycle body `src/pipeline/`); `tests/invariant.rs`
+  (`Layers` / `Invariant` / `RestraintsSatisfied`, `src/invariant.rs`).
 - `cargo test -p molcrafts-molpack --lib --tests` — fast tier, must always be green (`mol_project.build.test`). A single test: append `-- <name filter>` (`build.test_single`).
 - `cargo test -p molcrafts-molpack --release --features io --test examples_batch -- --ignored` — Packmol regression (five official examples, fixed seed). Requires test data: `bash ../molrs/scripts/fetch-test-data.sh` (one time).
 - `uv run --directory python --group dev tox -e py` — Python wheel, isolated and non-editable (`maturin develop` is not the gate).
