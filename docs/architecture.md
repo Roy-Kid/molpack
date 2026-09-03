@@ -20,6 +20,8 @@ src/
 │   ├── mod.rs          Pipeline + the five-part run() (validate → space/state →
 │   │                   chain check → run each stage → assemble)
 │   ├── engine.rs       StageFactory + PackEngine traits, EngineSetup
+│   ├── combinators.rs  Repeat (Until) + Guarded (OnViolation) — combinators
+│   │                   are Stage impls, so mod.rs needs no branch for either
 │   └── bracket.rs      the handler bracket: adopted-handler tagging, open_bracket, close_bracket
 ├── entry/              settings + space + result — no lifecycle, never imports pipeline/
 │   ├── mod.rs          PackSettings + LogSpec
@@ -47,6 +49,8 @@ src/
 │   ├── cg.rs           conjugate-gradient inner solve
 │   └── spg.rs          spectral projected gradient fallback
 ├── stage.rs            Stage seam — the interface every packing algorithm implements
+├── invariant.rs        Layers (L0–L5 repair-cost ladder) + Invariant trait +
+│                       Violation + RestraintsSatisfied — consumed by combinators.rs::Guarded
 ├── grow/               chain-growth path, peer of the GENCAN path
 │   ├── entry.rs        CbmcGrow — the chain-growth engine entry (honest verdicts)
 │   ├── lattice/        LatticeStage — diamond-lattice SAW for melt density
@@ -109,7 +113,9 @@ out, as a `Placed` marker — `Placed::None` (nothing placed yet) or
 `Placed::All` (every free molecule has a placement). `run` receives a
 `PackState`: the run's `PackContext`, plus that marker, plus the rigid
 placement vector `RigidView` (three centre-of-mass and three Euler values
-per free molecule). What `run` returns, a `StageOutcome`, is only what
+per free molecule). `run` returns `Result<StageOutcome, PackError>`: a stage
+that cannot do its job fails with a named error, never by disguising failure
+as `converged = false`. On the `Ok` side, `StageOutcome` is only what
 the stage alone knows — whether it met its own convergence criterion, and
 how many times it had to relax a constructive guarantee. The run's
 `fdist` / `frest` verdict is read off the state afterwards, so no
@@ -202,7 +208,8 @@ fn run(targets, max_loops):
     for stage in stages:                  // one stage for a preset's own run
         state.invalidate_geometry_cache()
         handlers.on_stage_start
-        outcome := stage.run(state, targets, budget, handlers)
+        outcome := stage.run(state, targets, budget, handlers)?  // named PackError
+                                                                  // skips on_stage_end + on_finish
         state.set_placed(stage.guarantees().placed)
         handlers.on_stage_end
         if handlers.should_stop(): break
@@ -239,7 +246,7 @@ fn run(state, targets, budget, handlers):
             comptype[i] := true          // ALL-TYPES main phase
         report := run_phase(phase, max_loops, …)
         if report.error_phase: break
-    return StageOutcome::new(converged, 0)
+    return Ok(StageOutcome::new(converged, 0))
 ```
 
 The preamble — box/grid install, seed injection, the `initial()`-vs-push-off

@@ -535,7 +535,8 @@ pub trait Stage: Send {
     fn requires(&self) -> Requires;
     fn guarantees(&self) -> Guarantees;
     fn run(&mut self, state: &mut PackState, targets: &[Target],
-           budget: &Budget, handlers: &mut [Box<dyn Handler>]) -> StageOutcome;
+           budget: &Budget, handlers: &mut [Box<dyn Handler>])
+           -> Result<StageOutcome, PackError>;
 }
 ```
 
@@ -543,6 +544,18 @@ Of the four arguments to `run`, `state` is the run's geometry — the subject of
 the next section — while `targets` are the molecule types the caller passed to
 the engine's `run`, `budget` is the caller's iteration allowance, and
 `handlers` are the observers to notify while you work.
+
+`run` itself returns a `Result`, not a bare outcome: a stage that cannot do
+its job fails with a named [`PackError`](crate::PackError), never by
+returning `Ok` with `converged: false`. The two report different things —
+`converged = false` is the honest "I ran to completion and did not reach my
+own criterion", while `Err` is "I could not complete the run at all" — and
+collapsing the second into the first would let an outright failure through
+disguised as a merely unconverged run. The lifecycle propagates that `Err` out
+of [`PackEngine::run`](crate::PackEngine::run) on the same path as its own
+validation errors: the failing stage gets no `on_stage_end`, the run gets no
+`on_finish`, and no half-built result is assembled. molpack's three built-in
+stages always return `Ok`.
 
 ### The state a stage is handed
 
@@ -603,8 +616,9 @@ Borrow your configuration, do not take it.
 
 ### `StageOutcome` carries no verdict
 
-`run` returns `StageOutcome::new(converged, softened)`, and those two numbers
-are all a stage reports: whether it met its own convergence criterion, and how
+`run` returns `Ok(StageOutcome::new(converged, softened))` on a successful
+run, and those two numbers are all a stage reports: whether it met its own
+convergence criterion, and how
 many times it had to relax a constructive guarantee (growth's hard-core
 softening rungs; always `0` on the rigid-body path, which relaxes nothing). The
 run's verdict — the largest inter-molecular overlap `fdist` and the largest
@@ -616,7 +630,8 @@ score.
 
 ```rust
 use molpack::{
-    Budget, F, Guarantees, Handler, PackState, Placed, Requires, Stage, StageOutcome, Target,
+    Budget, F, Guarantees, Handler, PackError, PackState, Placed, Requires, Stage, StageOutcome,
+    Target,
 };
 
 /// Nudges every molecule by a fixed offset. Not useful — just the smallest
@@ -647,7 +662,7 @@ impl Stage for ShakeStage {
         _targets: &[Target],
         _budget: &Budget,
         _handlers: &mut [Box<dyn Handler>],
-    ) -> StageOutcome {
+    ) -> Result<StageOutcome, PackError> {
         // `self.step` is read, never taken — re-entrancy contract.
         let (_ctx, x) = state.rigid_split_mut();
         for i in 0..x.nmol() {
@@ -662,7 +677,7 @@ impl Stage for ShakeStage {
             );
         }
         // Placements only: the lifecycle expands them into `xcart`.
-        StageOutcome::new(true, 0)
+        Ok(StageOutcome::new(true, 0))
     }
 }
 ```
@@ -690,7 +705,9 @@ hand-composed pipeline runs, not a second implementation to keep in step.
 #     fn guarantees(&self) -> molpack::Guarantees { molpack::Guarantees::new(molpack::Placed::All) }
 #     fn run(&mut self, _state: &mut molpack::PackState, _targets: &[molpack::Target],
 #            _budget: &molpack::Budget, _handlers: &mut [Box<dyn molpack::Handler>])
-#            -> molpack::StageOutcome { molpack::StageOutcome::new(true, 0) }
+#            -> Result<molpack::StageOutcome, molpack::PackError> {
+#         Ok(molpack::StageOutcome::new(true, 0))
+#     }
 # }
 use molpack::pipeline::EngineSetup;
 use molpack::{F, Handler, PackEngine, PackError, PackSettings, Pipeline, Stage, StageFactory};
@@ -786,6 +803,124 @@ objective with no single ruler to read. That is why the example above sets
 `with_seed` and `with_periodic_box` on the `Pipeline` itself rather than on
 `CbmcGrow` or `GenCanPack`: those knobs belong to the run, never to one stage
 inside it.
+
+### Custom invariants and combinators
+
+Composing stages linearly, as above, covers a pipeline whose stages each run
+once. Two situations need more than that: repeating a body of stages until
+some condition is met, and refusing to accept a stage's exit until a property
+of the resulting state has been verified. molpack answers both with an
+[`Invariant`](crate::Invariant) trait plus two `Stage` combinators,
+[`Pipeline::with_repeat`](crate::pipeline::Pipeline::with_repeat) and
+[`Pipeline::with_guarded`](crate::pipeline::Pipeline::with_guarded).
+
+An [`Invariant`](crate::Invariant) is a property of a
+[`PackState`](crate::PackState) a caller can demand — "restraints are
+satisfied within tolerance", say — checked *after* a stage has already run.
+It is never a second algorithm competing with the stage itself:
+
+```text
+pub trait Invariant: Send {
+    fn name(&self) -> &'static str;
+    fn layer(&self) -> Layers;
+    fn check(&self, state: &PackState) -> Vec<Violation>;
+}
+```
+
+`check` reads the **shared objective's own verdict** off the state — the same
+`fdist` / `frest` numbers [`StageOutcome`](crate::StageOutcome) deliberately
+does not carry — and reports every way the property is broken as a
+[`Violation`](crate::Violation), or an empty `Vec` when it holds. An invariant
+that computed its own second measure of "is this satisfied" would be exactly
+the mistake the one-ruler rule exists to catch, so reuse the objective's
+numbers rather than re-deriving them; molpack's own
+[`RestraintsSatisfied`](crate::RestraintsSatisfied) does this by comparing
+`state.ctx().frest` against a tolerance. `layer` names which rung of the
+repair-cost ladder ([`Layers`](crate::Layers), documented where it is
+consumed) a violation sits on — from a wrong bond graph that nothing
+downstream can repair, to bond lengths and angles a downstream force-field
+minimization fixes for free — which is what tells a caller whether *rerunning
+the same stage* can plausibly help at all.
+
+The smallest possible invariant, useful as a placeholder while wiring up a
+guarded stage:
+
+```rust
+use molpack::{Invariant, Layers, PackState, Violation};
+
+#[derive(Debug, Clone, Copy)]
+pub struct AlwaysSatisfied;
+
+impl Invariant for AlwaysSatisfied {
+    fn name(&self) -> &'static str {
+        "always-satisfied"
+    }
+
+    fn layer(&self) -> Layers {
+        Layers::EMPTY
+    }
+
+    fn check(&self, _state: &PackState) -> Vec<Violation> {
+        vec![]
+    }
+}
+```
+
+Two combinators build on `Invariant`, and are themselves
+[`Stage`](crate::Stage)s — the pipeline needs no branch for either, because
+chain-checking, handler bracketing and the run's final verdict read them
+exactly as they read `GenCanPack`.
+
+- [`with_repeat(body, until)`](crate::pipeline::Pipeline::with_repeat) runs a
+  `Vec<Box<dyn StageFactory>>` body repeatedly:
+  [`Until::Passes(n)`](crate::Until::Passes) stops after exactly `n` passes
+  (`Passes(0)` contributes **no stage at all**, never a silently clamped
+  single pass), and [`Until::Converged`](crate::Until::Converged)
+  stops the first time a pass ends with the body's last stage reporting its
+  own convergence — unbounded by construction, so a body that never converges
+  repeats until a handler asks the run to stop. Each pass *continues* from
+  where the last one left off, the same `Placed::All` continuation a seeded
+  run uses, so `Repeat` around a chain-growth stage feeding a rigid-body one
+  is a real "connect, then refine, then connect again" recipe rather than `n`
+  independent packs.
+- [`with_guarded(stage, invariants, on_violation)`](crate::pipeline::Pipeline::with_guarded)
+  runs `stage`, then checks every invariant against the state it left. On the
+  first broken one, [`OnViolation`](crate::OnViolation) has exactly two
+  answers, never a third: `Fail` returns
+  [`PackError::InvariantViolated`](crate::PackError::InvariantViolated)
+  immediately; `Rerun { max }` reruns **the same stage** up to `max` more
+  times and, if it is still broken once that budget is spent, reports
+  `converged: false` (logged, not silently dropped) instead of looping
+  forever. `Rerun { max: 0 }` is `Fail`.
+
+That "same stage or named failure" rule is not an oversight: it is the
+project's law that the *user* picks the packing method — molpack never
+guesses on their behalf. A guard that quietly swapped in a different
+algorithm when one failed would be exactly that guess, so `OnViolation` has
+no such arm and never will.
+
+```no_run
+use molpack::grow::TorsionPrior;
+use molpack::{
+    CbmcGrow, GenCanPack, Invariant, OnViolation, PackEngine, Pipeline, RestraintsSatisfied,
+    StageFactory, Target, Until,
+};
+# let targets: Vec<Target> = Vec::new();
+
+let body: Vec<Box<dyn StageFactory>> = vec![
+    Box::new(CbmcGrow::new(TorsionPrior::Uniform)),
+    Box::new(GenCanPack::new()),
+];
+let invariants: Vec<Box<dyn Invariant>> = vec![Box::new(RestraintsSatisfied::new(1e-3))];
+
+let result = Pipeline::new()
+    .with_repeat(body, Until::Converged)
+    .with_guarded(GenCanPack::new(), invariants, OnViolation::Rerun { max: 2 })
+    .with_seed(42)
+    .with_periodic_box([0.0; 3], [30.0; 3], [true; 3])
+    .run(&targets, 100)?;
+# Ok::<(), molpack::PackError>(())
+```
 
 Stage notes:
 

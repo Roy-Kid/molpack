@@ -216,6 +216,14 @@ constructive guarantee). The violation maxima are read off `sys`, the
 post-stage `PackContext` — the same place `on_finish` reads them — so the
 shared objective stays the only ruler.
 
+[`Stage::run`](crate::Stage::run) itself is fallible: it returns
+`Result<StageOutcome, PackError>`, not a bare `StageOutcome`. A stage that
+cannot do its job fails with a named [`PackError`](crate::PackError), never
+by reporting `converged: false` — that flag means only "I ran to completion
+and did not reach my own criterion". A stage that returns `Err` gets no
+`on_stage_end` at all; the run propagates the error instead, on the same path
+as its own validation errors.
+
 ## Pipeline
 
 A [`Pipeline`](crate::pipeline::Pipeline) is what actually runs a sequence of
@@ -254,6 +262,74 @@ differs from the default
 naming the offending knob): tolerance, precision, seed and the cell are one
 ruler for the whole run, and two stages each bringing their own would leave
 that ruler ambiguous. Declare shared knobs on the `Pipeline` itself instead.
+
+## Invariants and combinators
+
+Composing stages linearly, as above, covers a pipeline whose stages each run
+once. Two situations need more than that: repeating a body of stages until
+some condition holds, and refusing to accept a stage's exit until a property
+of the resulting state has been verified.
+
+An [`Invariant`](crate::Invariant) is a property of a
+[`PackState`](crate::PackState) that is checked *after* a stage has already
+run — never a second algorithm competing with the stage itself:
+
+```text
+pub trait Invariant: Send {
+    fn name(&self) -> &'static str;
+    fn layer(&self) -> Layers;
+    fn check(&self, state: &PackState) -> Vec<Violation>;
+}
+```
+
+`check` reads the shared objective's own verdict off the state (`frest`, for
+the built-in [`RestraintsSatisfied`](crate::RestraintsSatisfied)) and reports
+every broken property as a [`Violation`](crate::Violation) — never a second,
+independently computed metric; that would be exactly the mistake the
+one-ruler rule exists to catch. `layer` names where a violation sits on the
+repair-cost ladder, [`Layers`](crate::Layers): a six-rung bit set ordered from
+the almost-unrepairable down to the cheapest to fix.
+
+- **L0 connectivity** — which atoms are bonded to which; nothing downstream
+  can repair a wrong bond graph, so it is fixed once, when the template is
+  read, and never again.
+- **L1 topological state** — knots, entanglement, catenation; undoing one
+  needs a chain to pass through itself, which no local move or minimizer can
+  do.
+- **L2 chain statistics** — end-to-end distance, radius of gyration,
+  orientation; fixing these means re-growing the chain, reptation-scale
+  motion far beyond a packing run.
+- **L3 density** — density and its homogeneity; repairable only by moving
+  whole molecules between regions, global and slow but mechanical.
+- **L4 local overlaps** — overlaps between neighbouring atoms; the classic
+  push-off, removed by a short descent on the shared objective.
+- **L5 local geometry** — bond lengths and angles; the cheapest rung, fixed
+  for free by the user's own force field in the first steps of minimization.
+
+[`Pipeline::with_repeat(body, until)`](crate::pipeline::Pipeline::with_repeat)
+runs a body of stages repeatedly: [`Until::Passes(n)`](crate::Until::Passes)
+stops after exactly `n` passes (`Passes(0)` contributes no stage at all,
+never a silently clamped single pass), and
+[`Until::Converged`](crate::Until::Converged) stops the first time a pass's
+last stage reports its own convergence. Each pass
+*continues* from where the previous one left off — the same `Placed::All`
+continuation a seeded run uses — rather than packing again from nothing.
+
+[`Pipeline::with_guarded(stage, invariants, on_violation)`](crate::pipeline::Pipeline::with_guarded)
+runs `stage`, then checks every invariant against the state it left.
+[`OnViolation`](crate::OnViolation) answers a broken invariant two ways,
+never a third: `Fail` returns a named
+[`PackError::InvariantViolated`](crate::PackError::InvariantViolated)
+immediately; `Rerun { max }` reruns **the same stage** up to `max` more times
+and, once that budget is spent still broken, reports `converged: false`
+rather than looping forever. `Guarded` never switches to a different
+algorithm to work around a violation — the user picks the packing method,
+and molpack does not guess on their behalf.
+
+Both combinators are themselves [`Stage`](crate::Stage) implementations, so
+`Pipeline` needs no branch for either: chain-checking, handler bracketing and
+the run's final verdict read a `Repeat` or a `Guarded` exactly as they read
+`GenCanPack`.
 
 ## Objective
 

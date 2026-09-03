@@ -396,3 +396,104 @@ fn non_harm_gate_rejects_a_harmful_conformer() {
          (input {bond_len}) means the gate let a 5x inflation through"
     );
 }
+
+// ── bindings under a combinator (spec 06, ac-005) ──────────────────────────
+
+/// A repeated GENCAN stage still resolves its optimizer bindings on the
+/// second pass.
+///
+/// This is the end-to-end half of `src/gencan/solver.rs`'s in-crate
+/// `optimizer_bindings_survive_a_second_run`: that test drives one stage
+/// twice by hand, this one lets `Repeat{Passes(2)}` do it through the public
+/// surface. A stage that moved its bindings out of `self` on the first pass
+/// would keep running afterwards — silently without its optimizer — so the
+/// observable is the call counter, compared against the same fixture run for
+/// a single pass.
+///
+/// **Why the fixture is unsatisfiable.** In-loop optimizers run only inside
+/// the all-type phase's iteration loop, and a phase that is already a
+/// solution short-circuits past it. Twelve dimers restrained into a 4 Å cube
+/// at a 4 Å contact tolerance cannot be solved, so both passes enter the
+/// loop; the two `Passes(1)` guards below — a non-zero count and an
+/// unconverged verdict — are what keep that true.
+#[test]
+fn repeat_second_pass_still_resolves_optimizer_bindings() {
+    use molpack::{PackEngine, Pipeline, StageFactory, Until};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// An optimizer that only counts its calls and leaves the frame alone,
+    /// so the non-harm gate is a no-op and the counter is the single thing
+    /// this test observes.
+    struct CountingOptimizer {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl molrs::optimize::Optimizer for CountingOptimizer {
+        fn run(
+            &mut self,
+            _frame: &mut molrs::store::frame::Frame,
+        ) -> Result<molpack::OptReport, String> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            Ok(molpack::OptReport {
+                converged: true,
+                n_steps: 0,
+                final_energy: 0.0,
+                final_fmax: 0.0,
+            })
+        }
+    }
+
+    /// Run the identical fixture under `until`, and report how often the
+    /// bound optimizer was called plus the run's verdict.
+    fn calls_under(until: Until) -> (usize, bool) {
+        let coords = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
+        let targets = [Target::from_coords(&coords, &[1.0, 1.0], 12)
+            .with_name("dimer")
+            .with_restraint(InsideBoxRestraint::new([0.0; 3], [4.0; 3], [false; 3]))];
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let body: Vec<Box<dyn StageFactory>> = vec![Box::new(GenCanPack::new().with_optimizer(
+            OptimizeSelect::per_copy(["dimer"]),
+            CountingOptimizer {
+                calls: Arc::clone(&calls),
+            },
+        ))];
+
+        // Tolerance 4.0, not the contact distance the dimers could actually
+        // reach: at 2.0 this fixture is SOLVED by the end of pass 1
+        // (fdist 0, frest 0.0097 < precision 0.01), and pass 2 then exits at
+        // the "already a solution" check before `run_iteration` — so the
+        // counter could not advance for a reason that has nothing to do with
+        // the bindings. The guard below keeps that failure loud.
+        let result = Pipeline::new()
+            .with_repeat(body, until)
+            .with_tolerance(4.0)
+            .with_seed(7)
+            .run(&targets, 2)
+            .expect("the repeated GENCAN pipeline runs");
+
+        (calls.load(Ordering::Relaxed), result.converged)
+    }
+
+    let (one_pass, converged) = calls_under(Until::Passes(1));
+    assert!(
+        one_pass > 0,
+        "fixture guard: a single pass never reached the in-loop optimizer, \
+         so this test cannot say anything about the second one"
+    );
+    assert!(
+        !converged,
+        "fixture must not converge on pass 1: a solved state short-circuits \
+         pass 2 before `run_iteration`, which would make the comparison below \
+         vacuous"
+    );
+
+    let (two_passes, _) = calls_under(Until::Passes(2));
+    assert!(
+        two_passes > one_pass,
+        "the optimizer counter did not advance on the second pass \
+         (Passes(1): {one_pass}, Passes(2): {two_passes}) — a repeated stage \
+         that consumes its own optimizer bindings degrades silently"
+    );
+}

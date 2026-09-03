@@ -21,33 +21,21 @@
 //!
 //! # The repair-cost ladder
 //!
-//! Structural defects in a packed configuration are not equally expensive to
-//! repair. The crate orders them as a six-rung ladder, cheapest to fix at the
-//! bottom:
-//!
-//! | Rung | Defect | Why it sits there |
-//! |---|---|---|
-//! | **L0** | Connectivity — which atoms are bonded to which | Nothing downstream can repair a wrong bond graph; it is decided when the template is read and never again. |
-//! | **L1** | Topological state — knots, entanglement, catenation | Undoing a knot needs a chain to pass through itself; no local move and no minimizer reaches it. |
-//! | **L2** | Large-scale chain statistics — end-to-end distance, radius of gyration, orientation | Fixing these means re-growing a chain: reptation-scale motion, far beyond a packing run. |
-//! | **L3** | Density and its homogeneity | Repairable only by moving whole molecules between regions — global, slow, but mechanical. |
-//! | **L4** | Local overlaps between neighbours | The classic push-off: a short descent on the shared objective removes them. |
-//! | **L5** | Bond lengths and angles | The cheapest of all — the user's force field fixes these in the first steps of minimization. |
-//!
-//! The ladder is the vocabulary for reasoning about where a run's quality
-//! comes from, and it is deliberately **prose here, not a type**. Nothing in
-//! this crate branches on a rung today: the seam's declarations
-//! ([`Requires`] / [`Guarantees`]) are about placement shape, and the type
-//! that will encode the ladder belongs next to its only consumer — the
-//! invariant checker, which is a different producer in a later step of this
-//! chain. Writing the type here first would be a concept with no reader.
+//! Structural defects are not equally expensive to repair, and the crate
+//! orders them as a six-rung ladder L0–L5. The ladder is a **type**, and it
+//! lives with its only reader: [`Layers`](crate::invariant::Layers), next to
+//! [`Invariant::layer`](crate::Invariant::layer). Nothing here branches on a
+//! rung — this seam's declarations ([`Requires`] / [`Guarantees`]) are about
+//! placement shape — so the table and the rung names are documented there,
+//! once.
 //!
 //! **The rule the ladder exists for: a stage is responsible only for the
 //! layers it declares.** A stage that promises nothing about chain
 //! statistics has not failed when they are poor; a stage that promises no
 //! overlaps has failed when overlaps remain. A caller composes a run by
 //! stacking stages until every rung it cares about is owned by someone, and
-//! the seam's job is to make each stage say which ones those are.
+//! guards the ones that matter with
+//! [`Pipeline::with_guarded`](crate::Pipeline::with_guarded).
 //!
 //! # Where the verdict lives
 //!
@@ -69,10 +57,11 @@
 //!   and both growth paths validate their cell from theirs. A pre-flight
 //!   hook nobody implements is a step a caller can forget plus a concept
 //!   nobody pays for. The seam is exactly four methods.
-//! * **No layer type.** See the ladder above: prose until there is a reader
-//!   that branches on it.
+//! * **No layer type of its own.** The ladder is
+//!   [`Layers`](crate::invariant::Layers), owned by the module that reads it.
 
 use crate::context::{PackState, Placed};
+use crate::error::PackError;
 use crate::handler::Handler;
 use crate::target::Target;
 use molrs::types::F;
@@ -125,13 +114,23 @@ pub trait Stage: Send {
     /// optimizers, trees or priors out of `self` on the first call keeps
     /// running afterwards — it just runs *degraded*, with no error and no
     /// name for what it lost. Borrow the configuration, do not take it.
+    ///
+    /// # Failure
+    ///
+    /// A stage that cannot do its job **fails by a named
+    /// [`PackError`]** — it never disguises failure as `converged = false`,
+    /// which is the honest report of "I ran and did not reach my criterion"
+    /// and nothing else. The lifecycle propagates the error out of
+    /// [`PackEngine::run`](crate::PackEngine::run) on the same path as its
+    /// own validation errors: the failing stage gets no `on_stage_end`, the
+    /// run gets no `on_finish`, and no half-built result is assembled.
     fn run(
         &mut self,
         state: &mut PackState,
         targets: &[Target],
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
-    ) -> StageOutcome;
+    ) -> Result<StageOutcome, PackError>;
 }
 
 /// A stage's entry precondition: the placement shape the state must already
@@ -201,7 +200,7 @@ impl Budget {
     }
 }
 
-/// What a stage reports about its own run — and nothing more.
+/// What a stage reports about its own *successful* run — and nothing more.
 ///
 /// Both fields are facts only the stage knows. The run's verdict is *not*
 /// here: it lives on the state the stage just finished writing (see the

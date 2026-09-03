@@ -28,7 +28,10 @@
 //!    by the stage's [`Guarantees`](crate::Guarantees) (declared, never
 //!    inspected), `on_stage_end` fires, `softened` accumulates. A handler
 //!    asking to stop ends the run there: later stages never start, and the
-//!    verdict is honestly `converged == false`.
+//!    verdict is honestly `converged == false`. A stage that *fails* returns
+//!    a named [`PackError`] instead, which propagates on the same path as
+//!    part 1's refusals: no `on_stage_end` for it, no `on_finish` for the
+//!    run, no half-built result.
 //! 5. **Assemble.** The lab-frame coordinates are rebuilt from the rigid view
 //!    with [`RigidView::write_xcart`](crate::RigidView::write_xcart),
 //!    `on_finish` closes the bracket, and the frame plus the placement
@@ -54,6 +57,23 @@
 //! handler is wrapped once by `bracket.rs`'s private `StageTagger`, which
 //! overwrites `StepInfo.stage` from a shared slot updated before each stage;
 //! neither [`Stage`] nor [`PackState`] learns where it sits.
+//!
+//! # Combinators: what they cost, and how to take them back out
+//!
+//! [`with_repeat`](Pipeline::with_repeat) and
+//! [`with_guarded`](Pipeline::with_guarded) build the two stages
+//! [`combinators`] defines, and both go through
+//! [`with_stage`](Pipeline::with_stage), so handler adoption and the
+//! settings refusal have one spelling. Their first real consumer is the
+//! `dg-refine` recipe: "connect ⇄ refine" alternates to convergence
+//! (`Repeat { Until::Converged }`), and its ring closure needs a guarded
+//! retry (`Guarded { RingClosed, Rerun { max } }`). They rest on two earlier
+//! promises — the re-entrancy contract on [`Stage::run`]
+//! (a repeated stage keeps its own configuration) and the `Placed::All`
+//! continuation below (pass *n+1* continues pass *n* instead of re-running
+//! `initial()`). If that consumer is ever dropped, the whole feature comes
+//! out as a unit: `combinators.rs`, `src/invariant.rs`, these two builders
+//! and `PackError::InvariantViolated` — nothing else depends on them.
 //!
 //! # The cache boundary
 //!
@@ -81,6 +101,7 @@
 //! this crate does.
 
 mod bracket;
+pub mod combinators;
 pub mod engine;
 
 use molrs::spatial::simbox::SimBox;
@@ -93,9 +114,11 @@ use crate::entry::setup::{ResolvedSpace, broadcast_global_restraints, resolve_pa
 use crate::entry::{PackResult, PackSettings, positions_in_target_order, result};
 use crate::error::PackError;
 use crate::handler::{Handler, StageInfo};
+use crate::invariant::Invariant;
 use crate::stage::{Budget, Stage};
 use crate::target::Target;
 use bracket::{close_bracket, open_bracket};
+use combinators::{GuardedFactory, OnViolation, RepeatFactory, Until};
 
 pub use engine::{EngineSetup, PackEngine, StageFactory};
 
@@ -168,6 +191,30 @@ impl Pipeline {
         self.handlers.extend(stage.take_handlers());
         self.factories.push(Box::new(stage));
         self
+    }
+
+    /// Append `body` as one stage that runs it until `until` is met.
+    ///
+    /// Semantics — `Passes(0)`, the unbounded `Converged`, what a pass owes
+    /// its stages — are on [`Until`] and in [`combinators`].
+    pub fn with_repeat(self, body: Vec<Box<dyn StageFactory>>, until: Until) -> Self {
+        self.with_stage(RepeatFactory { body, until })
+    }
+
+    /// Append `stage` as one stage whose exit must satisfy `invariants`,
+    /// answering a violation by `on_violation` — a rerun of the same stage
+    /// or a named failure, never another algorithm (see [`OnViolation`]).
+    pub fn with_guarded(
+        self,
+        stage: impl StageFactory + 'static,
+        invariants: Vec<Box<dyn Invariant>>,
+        on_violation: OnViolation,
+    ) -> Self {
+        self.with_stage(GuardedFactory {
+            inner: Box::new(stage),
+            invariants,
+            on_violation,
+        })
     }
 }
 
@@ -249,8 +296,9 @@ impl Pipeline {
     /// stage emits. Per stage: invalidate the geometry cache, fire
     /// `on_stage_start`/`on_stage_end`, `set_placed` by the stage's declared
     /// guarantee, and stop early the moment a handler asks for one. Returns
-    /// `(last_converged, softened)`. This loop, not the bracket around it,
-    /// is the heart of the lifecycle — it stays here, not in `bracket.rs`.
+    /// `(last_converged, softened)`, or the error a stage failed with —
+    /// which skips its `on_stage_end` and the run's `on_finish`. This loop,
+    /// not the bracket around it, is the heart of the lifecycle.
     fn run_stages(
         state: &mut PackState,
         stages: &mut [Box<dyn Stage>],
@@ -259,7 +307,7 @@ impl Pipeline {
         budget: &Budget,
         own_handlers: Vec<Box<dyn Handler>>,
         handlers: &mut Vec<Box<dyn Handler>>,
-    ) -> (bool, usize) {
+    ) -> Result<(bool, usize), PackError> {
         let (tagged, position) = open_bracket(own_handlers, stages, setup, space, budget);
         *handlers = tagged;
         state.ctx_mut().ntotmol = setup.ntotmol_free;
@@ -279,7 +327,7 @@ impl Pipeline {
             }
             *position.lock().expect("stage position mutex") = info;
 
-            let outcome = stage.run(state, setup.targets, budget, handlers);
+            let outcome = stage.run(state, setup.targets, budget, handlers)?;
             // By what the stage declared, never by inspecting the result.
             state.set_placed(stage.guarantees().placed);
 
@@ -293,7 +341,7 @@ impl Pipeline {
                 break;
             }
         }
-        (last_converged, softened)
+        Ok((last_converged, softened))
     }
     fn assemble(
         mut state: PackState,
@@ -423,7 +471,7 @@ impl PackEngine for Pipeline {
             &budget,
             own_handlers,
             &mut handlers,
-        );
+        )?;
 
         // ── 5. Rebuild, close the bracket, assemble ───────────────────────
         Ok(Self::assemble(

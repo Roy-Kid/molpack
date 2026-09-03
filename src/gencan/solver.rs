@@ -13,6 +13,7 @@ use rand::rngs::SmallRng;
 
 use crate::context::{PackState, Placed, RigidView};
 use crate::entry::result::Placements;
+use crate::error::PackError;
 use crate::gencan::phases::{PhaseOutcome, run_phase};
 use crate::gencan::{GencanParams, GencanWorkspace};
 use crate::handler::Handler;
@@ -186,7 +187,7 @@ impl Stage for GencanStage {
         targets: &[Target],
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
-    ) -> StageOutcome {
+    ) -> Result<StageOutcome, PackError> {
         // ① Box + cell grid, only for a run that continues from placements.
         if state.placed() == Placed::All || self.seed_placements.is_some() {
             let sys = state.ctx_mut();
@@ -315,7 +316,7 @@ impl Stage for GencanStage {
             );
         }
 
-        StageOutcome::new(converged, 0)
+        Ok(StageOutcome::new(converged, 0))
     }
 }
 
@@ -366,7 +367,9 @@ mod tests {
         ));
 
         let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
-        let outcome = stage.run(&mut state, &targets, &Budget::new(50, 0.01), &mut handlers);
+        let outcome = stage
+            .run(&mut state, &targets, &Budget::new(50, 0.01), &mut handlers)
+            .expect("gencan stage runs");
 
         assert_eq!(stage.name(), "gencan");
         assert!(outcome.converged, "6 dimers in a 20 Å box must converge");
@@ -486,7 +489,9 @@ mod tests {
         let budget = Budget::new(2, 0.01);
         let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
 
-        stage.run(&mut state, &targets, &budget, &mut handlers);
+        stage
+            .run(&mut state, &targets, &budget, &mut handlers)
+            .expect("gencan stage runs");
         let after_first = calls.load(Ordering::Relaxed);
         assert!(
             after_first > 0,
@@ -494,7 +499,9 @@ mod tests {
              so this test cannot say anything about the second one"
         );
 
-        stage.run(&mut state, &targets, &budget, &mut handlers);
+        stage
+            .run(&mut state, &targets, &budget, &mut handlers)
+            .expect("gencan stage runs a second time");
         let after_second = calls.load(Ordering::Relaxed);
 
         assert!(

@@ -65,6 +65,7 @@
 //! |---|---|
 //! | Engine entries | [`PackEngine`], [`GenCanPack`], [`CbmcGrow`], [`LatticeGrow`], [`LogLevel`] |
 //! | Run lifecycle | [`Pipeline`], [`StageFactory`], [`pipeline::EngineSetup`], [`PackResult`] |
+//! | Stage combinators (Rust-only) | [`Until`], [`OnViolation`], [`Invariant`], [`Layers`], [`Violation`], [`RestraintsSatisfied`] |
 //! | Shared settings + space | [`PackSettings`] (`entry`) |
 //! | Target  | [`Target`], [`CenteringMode`] |
 //! | Rigid placement vector | [`RigidView`] |
@@ -115,6 +116,7 @@ pub mod gencan;
 pub mod grow;
 pub mod handler;
 pub mod initial;
+pub mod invariant;
 pub mod movebad;
 mod numerics;
 pub mod objective;
@@ -144,8 +146,10 @@ pub use handler::{
     EarlyStopHandler, Handler, LammpsLogHandler, LogLevel, NullHandler, PhaseInfo, PhaseReport,
     ProgressHandler, StepInfo, XYZHandler,
 };
+pub use invariant::{Invariant, Layers, RestraintsSatisfied, Violation};
 pub use molrs::Element;
 pub use molrs::types::F;
+pub use pipeline::combinators::{OnViolation, Until};
 pub use pipeline::{PackEngine, Pipeline, StageFactory};
 pub use region::{
     Aabb, And, InsideBoxRegion, InsideCellRegion, InsideSphereRegion, Not, Or, OutsideSphereRegion,

@@ -76,6 +76,28 @@ pub enum PackError {
     },
     /// A pipeline was run with no stages at all.
     NoStages,
+    /// A guarded stage finished with an invariant broken, and the guard's
+    /// policy was to fail rather than rerun (`OnViolation::Fail`, or a
+    /// `Rerun` budget of zero). molpack does not answer this by switching to
+    /// another algorithm — the caller picked the method, so the caller picks
+    /// the remedy.
+    ///
+    /// The payload is rendered, deliberately: the layer arrives as its name
+    /// (`Layers::name`) and not as a `Layers`, so this module keeps no
+    /// dependency on `invariant` or `stage`.
+    InvariantViolated {
+        /// `Stage::name` of the guarded stage that left the invariant broken.
+        stage: &'static str,
+        /// `Invariant::name` of the invariant that was broken.
+        invariant: &'static str,
+        /// The rung of the repair-cost ladder the defect sits on, rendered
+        /// (e.g. `"L3 density"`).
+        layer: &'static str,
+        /// The atoms the violation named, as indices into the run's own
+        /// atoms. May be empty when the invariant knows *that* it broke but
+        /// not *where*.
+        atoms: Vec<usize>,
+    },
 }
 
 impl fmt::Display for PackError {
@@ -146,6 +168,31 @@ impl fmt::Display for PackError {
                 "the pipeline has no stages; add one with `with_stage` or run a \
                  preset directly"
             ),
+            PackError::InvariantViolated {
+                stage,
+                invariant,
+                layer,
+                atoms,
+            } => {
+                // Bounded rendering: a dense melt can name hundreds of atoms;
+                // the count is exact, the list is a preview.
+                const SHOWN_ATOMS: usize = 8;
+                let shown = &atoms[..atoms.len().min(SHOWN_ATOMS)];
+                let more = atoms.len().saturating_sub(SHOWN_ATOMS);
+                write!(
+                    f,
+                    "stage `{stage}` left invariant `{invariant}` ({layer}) broken \
+                     on {} atom(s) {shown:?}{}: raise `max` on `OnViolation::Rerun`, \
+                     relax the invariant's tolerance, or put a different stage in \
+                     front — molpack never switches algorithm for you",
+                    atoms.len(),
+                    if more > 0 {
+                        format!(" and {more} more")
+                    } else {
+                        String::new()
+                    }
+                )
+            }
             PackError::SeedMismatch { expected, got } => write!(
                 f,
                 "seeded run: the free targets declare {expected} atoms but the seed \

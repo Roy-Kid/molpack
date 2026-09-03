@@ -23,8 +23,8 @@
 
 use molpack::handler::StageInfo;
 use molpack::{
-    Budget, Guarantees, Handler, PackContext, PackState, Placed, Requires, Stage, StageOutcome,
-    StepInfo, Target,
+    Budget, Guarantees, Handler, PackContext, PackError, PackState, Placed, Requires, Stage,
+    StageOutcome, StepInfo, Target,
 };
 
 // ── the fake stage ─────────────────────────────────────────────────────────
@@ -87,13 +87,13 @@ impl Stage for FakeStage {
         _targets: &[Target],
         _budget: &Budget,
         _handlers: &mut [Box<dyn Handler>],
-    ) -> StageOutcome {
+    ) -> Result<StageOutcome, PackError> {
         self.runs += 1;
         // Read the configuration; deliberately do NOT move or drain it — a
         // stage's own configuration must survive every run it is given.
         let _configured: u32 = self.config.iter().sum();
         state.set_placed(self.guarantees);
-        StageOutcome::new(true, self.softened_per_run)
+        Ok(StageOutcome::new(true, self.softened_per_run))
     }
 }
 
@@ -288,7 +288,9 @@ fn a_stage_keeps_its_configuration_across_runs() {
     let mut stage = FakeStage::new("alpha", Placed::None, Placed::All, 0);
     let config_at_construction = stage.config.len();
 
-    let first = stage.run(&mut state, &targets, &budget, &mut handlers);
+    let first = stage
+        .run(&mut state, &targets, &budget, &mut handlers)
+        .expect("the fake stage runs");
     let config_after_first = stage.config.len();
     assert_eq!(
         state.placed(),
@@ -296,7 +298,9 @@ fn a_stage_keeps_its_configuration_across_runs() {
         "the first run must move the marker"
     );
 
-    let second = stage.run(&mut state, &targets, &budget, &mut handlers);
+    let second = stage
+        .run(&mut state, &targets, &budget, &mut handlers)
+        .expect("the fake stage runs a second time");
 
     assert_eq!(stage.runs, 2, "both calls must reach the stage body");
     assert_eq!(
@@ -352,7 +356,9 @@ fn stage_regression_fake_chain_outcome_golden() {
     let mut observed_converged = Vec::with_capacity(chain.len());
     let mut softened_total = 0usize;
     for stage in chain.iter_mut() {
-        let outcome = stage.run(&mut state, &targets, &budget, &mut handlers);
+        let outcome = stage
+            .run(&mut state, &targets, &budget, &mut handlers)
+            .expect("the fake stage runs");
         softened_total += outcome.softened;
         observed_converged.push(outcome.converged);
         observed_placed.push(state.placed());

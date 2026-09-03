@@ -1,5 +1,6 @@
 //! Contract tests for the multi-stage lifecycle body
-//! (`.claude/specs/stage-pipeline-05-pipeline.md`, `src/pipeline/`).
+//! (`.claude/specs/stage-pipeline-05-pipeline.md`,
+//! `.claude/specs/stage-pipeline-06-combinators.md`, `src/pipeline/`).
 //!
 //! [`Pipeline`](molpack::Pipeline) is the ONE place a molpack run's five
 //! phases live — validate, build state, check the stage chain, run each
@@ -28,6 +29,12 @@
 //!    `StepInfo.stage` is monotone with `total` = the stage count, and a
 //!    mid-run `should_stop` leaves `converged == false` with the growth
 //!    stage's bonded geometry intact (ac-009).
+//! 4. **A combinator is a stage.** `Repeat` runs its body `n` times and its
+//!    second pass CONTINUES the first (bitwise `seeded_from`, 06 ac-002);
+//!    `Guarded` reruns the same stage or fails by name and never switches
+//!    algorithm (06 ac-003); both report one stage identity however often
+//!    the body runs (06 ac-006), adopt the body's handlers and refuse its
+//!    shared settings.
 //!
 //! Fixtures are copied, never `mod`-shared: the chain / water templates
 //! below mirror `tests/grow.rs` and `tests/packer.rs` so that a change to
@@ -45,13 +52,15 @@ use molpack::grow::TorsionPrior;
 use molpack::handler::StageInfo;
 use molpack::pipeline::EngineSetup;
 use molpack::{
-    Budget, CbmcGrow, F, GenCanPack, Guarantees, Handler, InsideBoxRestraint, LatticeGrow,
-    PackContext, PackEngine, PackError, PackResult, PackSettings, PackState, Pipeline, Placed,
-    Requires, Stage, StageFactory, StageOutcome, StepInfo, Target,
+    Budget, CbmcGrow, F, GenCanPack, Guarantees, Handler, InsideBoxRestraint, Invariant,
+    LatticeGrow, Layers, OnViolation, PackContext, PackEngine, PackError, PackResult, PackSettings,
+    PackState, Pipeline, Placed, Requires, RestraintsSatisfied, Stage, StageFactory, StageOutcome,
+    StepInfo, Target, Until, Violation,
 };
 use molrs::store::block::Block;
 use molrs::store::frame::Frame;
 use ndarray::Array1;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 // ── templates (copied from tests/grow.rs and tests/packer.rs) ─────────────
@@ -368,7 +377,7 @@ impl Stage for NeedsPlacedStage {
         _targets: &[Target],
         _budget: &Budget,
         _handlers: &mut [Box<dyn Handler>],
-    ) -> StageOutcome {
+    ) -> Result<StageOutcome, PackError> {
         panic!(
             "the stage-order check let a stage requiring Placed::All run first \
              — the chain must be rejected before any stage executes"
@@ -981,4 +990,584 @@ fn pipeline_regression_single_stage_gencan_golden() {
             );
         }
     }
+}
+
+// ── 8. the two combinators (spec 06) ──────────────────────────────────────
+//
+// `Repeat` and `Guarded` are stages, so everything above still applies to
+// them: they are resolved by the same chain check, bracketed by the same
+// handlers, and report ONE stage identity no matter how often their body
+// runs. What is new here is the body's run count, the honest `softened` sum,
+// the continuation of a repeated GENCAN pass, and the named refusal a broken
+// invariant produces.
+
+/// A stage that moves no atoms and counts its runs through a shared counter.
+///
+/// The combinators are about *how often* and *under what condition* a stage
+/// runs, so the body they wrap only has to be countable — a real algorithm
+/// would add arithmetic that hides the count. When asked, the stage also
+/// emits one `on_inner_iter` per run: that is how a handler learns the body
+/// did a unit of work from *inside* a combinator, because
+/// [`StepInfo`](molpack::StepInfo) is `#[non_exhaustive]` and an integration
+/// test therefore cannot build one to drive `on_step`.
+struct CountingStage {
+    runs: Arc<AtomicUsize>,
+    converged: bool,
+    softened: usize,
+    signal: bool,
+}
+
+impl Stage for CountingStage {
+    fn name(&self) -> &'static str {
+        "counting"
+    }
+
+    fn requires(&self) -> Requires {
+        Requires::new(Placed::None)
+    }
+
+    fn guarantees(&self) -> Guarantees {
+        Guarantees::new(Placed::All)
+    }
+
+    fn run(
+        &mut self,
+        state: &mut PackState,
+        _targets: &[Target],
+        _budget: &Budget,
+        handlers: &mut [Box<dyn Handler>],
+    ) -> Result<StageOutcome, PackError> {
+        self.runs.fetch_add(1, Ordering::Relaxed);
+        if self.signal {
+            for h in handlers.iter_mut() {
+                h.on_inner_iter(0, 0.0, state.ctx());
+            }
+        }
+        Ok(StageOutcome::new(self.converged, self.softened))
+    }
+}
+
+/// The factory that produces one [`CountingStage`], carrying default shared
+/// settings so a pipeline has nothing to refuse.
+struct CountingFactory {
+    settings: PackSettings,
+    runs: Arc<AtomicUsize>,
+    converged: bool,
+    softened: usize,
+    signal: bool,
+}
+
+impl CountingFactory {
+    fn new(runs: &Arc<AtomicUsize>) -> Self {
+        Self {
+            settings: PackSettings::default(),
+            runs: Arc::clone(runs),
+            converged: false,
+            softened: 0,
+            signal: false,
+        }
+    }
+
+    /// The produced stage reports its own convergence criterion as met.
+    fn converging(mut self) -> Self {
+        self.converged = true;
+        self
+    }
+
+    /// The produced stage reports `n` relaxations per run.
+    fn with_softened(mut self, n: usize) -> Self {
+        self.softened = n;
+        self
+    }
+
+    /// The produced stage emits one `on_inner_iter` per run.
+    fn signalling(mut self) -> Self {
+        self.signal = true;
+        self
+    }
+}
+
+impl StageFactory for CountingFactory {
+    fn settings(&self) -> &PackSettings {
+        &self.settings
+    }
+
+    fn stages(&mut self, _setup: &EngineSetup<'_>) -> Result<Vec<Box<dyn Stage>>, PackError> {
+        Ok(vec![Box::new(CountingStage {
+            runs: Arc::clone(&self.runs),
+            converged: self.converged,
+            softened: self.softened,
+            signal: self.signal,
+        })])
+    }
+}
+
+/// One factory as a combinator body.
+fn body(factory: impl StageFactory + 'static) -> Vec<Box<dyn StageFactory>> {
+    vec![Box::new(factory)]
+}
+
+/// An invariant that is never satisfied — the shape `OnViolation` is defined
+/// against. It reads nothing from the state, so the rerun count it produces
+/// is the combinator's own arithmetic and not a fixture's.
+struct AlwaysViolated;
+
+impl Invariant for AlwaysViolated {
+    fn name(&self) -> &'static str {
+        "always-violated"
+    }
+
+    fn layer(&self) -> Layers {
+        Layers::L4_LOCAL_OVERLAPS
+    }
+
+    fn check(&self, _state: &PackState) -> Vec<Violation> {
+        vec![Violation {
+            atoms: vec![0],
+            what: "this invariant never holds".to_string(),
+        }]
+    }
+}
+
+/// A handler that asks for a stop as soon as the body has signalled one unit
+/// of work. `should_stop` must be honoured from *inside* a combinator, not
+/// only between the pipeline's own stages.
+struct StopOnFirstSignal {
+    signals: Arc<AtomicUsize>,
+}
+
+impl Handler for StopOnFirstSignal {
+    fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {}
+
+    fn on_inner_iter(&mut self, _iter: u32, _f: F, _sys: &PackContext) {
+        self.signals.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn should_stop(&self) -> bool {
+        self.signals.load(Ordering::Relaxed) >= 1
+    }
+}
+
+/// `Until::Passes(n)` runs the body exactly `n` times and sums what each pass
+/// relaxed — the same honest accumulation a linear chain performs, so a
+/// repeated stage cannot under-report by reusing the last pass's count.
+#[test]
+fn repeat_passes_runs_body_n_times_and_sums_softened() {
+    const SOFTENED_PER_RUN: usize = 3;
+    let runs = Arc::new(AtomicUsize::new(0));
+
+    let result = boxfree_settings(Pipeline::new().with_repeat(
+        body(CountingFactory::new(&runs).with_softened(SOFTENED_PER_RUN)),
+        Until::Passes(2),
+    ))
+    .run(&boxfree_targets(), FREE_LOOPS)
+    .expect("a Repeat{Passes(2)} pipeline runs");
+
+    assert_eq!(
+        runs.load(Ordering::Relaxed),
+        2,
+        "Until::Passes(2) must run the body exactly twice"
+    );
+    assert_eq!(
+        result.softened,
+        2 * SOFTENED_PER_RUN,
+        "the repeated stage's softened count is the SUM over its passes \
+         (2 × {SOFTENED_PER_RUN}), not one pass's own count"
+    );
+}
+
+/// The core of ac-002: the second pass **continues** from the first.
+///
+/// `Repeat{Passes(2)}` around one GENCAN stage is bitwise
+/// `GenCanPack::seeded_from(&pass1)` — the same comparison
+/// `pipeline_gencan_then_gencan_equals_seeded_from_bitwise` makes for two
+/// explicit stages. Without it, "repeat" and "run the whole thing again from
+/// a fresh `initial()`" are indistinguishable in a test.
+///
+/// **Why bitwise equality is the whole proof, and `fdist` is not part of
+/// it.** One more outer loop is *not* monotone in the unscaled `fdist`:
+/// `run_phase` restarts `radscale` at `discale` for every phase, so a
+/// continuation legitimately climbs before it descends again. Measured on
+/// this fixture, pass 1 ends at `fdist = 9.0308` and all three continuation
+/// spellings — `seeded_from`, `[GenCanPack, GenCanPack]` and this `Repeat` —
+/// end at `9.7624`, bit for bit. Agreeing with the seeded spelling to the
+/// bit is therefore the assertion that separates "continued" from
+/// "re-`initial()`ed"; a `fdist` inequality would only be asserting the
+/// radius schedule.
+#[test]
+fn repeat_second_pass_continues_from_the_first_bitwise() {
+    let targets = dense_targets();
+
+    let pass1 = dense_settings(GenCanPack::new())
+        .run(&targets, DENSE_LOOPS)
+        .expect("the first GENCAN pass runs");
+    assert!(
+        !pass1.converged,
+        "guard: this fixture must NOT converge in {DENSE_LOOPS} loop(s) \
+         (fdist = {}), otherwise a second pass that re-initialised would be \
+         indistinguishable from one that continued",
+        pass1.fdist
+    );
+
+    let repeated =
+        dense_settings(Pipeline::new().with_repeat(body(GenCanPack::new()), Until::Passes(2)))
+            .run(&targets, DENSE_LOOPS)
+            .expect("a Repeat{Passes(2)} GENCAN pipeline runs");
+
+    let seeded = GenCanPack::new()
+        .seeded_from(&pass1)
+        .with_seed(DENSE_SEED)
+        .with_tolerance(DENSE_TOL)
+        .run(&targets, DENSE_LOOPS)
+        .expect("the hand-written seeded spelling runs");
+
+    assert_bitwise_equal(
+        &repeated,
+        &seeded,
+        "Repeat{Passes(2)} vs seeded_from(pass1)",
+    );
+}
+
+/// `Until::Converged` stops after the first pass whose body converged: the
+/// body runs once, not `n` times, and never "one more for luck".
+#[test]
+fn repeat_until_converged_stops_after_first_converged_pass() {
+    let runs = Arc::new(AtomicUsize::new(0));
+
+    boxfree_settings(Pipeline::new().with_repeat(
+        body(CountingFactory::new(&runs).converging()),
+        Until::Converged,
+    ))
+    .run(&boxfree_targets(), FREE_LOOPS)
+    .expect("a Repeat{Converged} pipeline runs");
+
+    assert_eq!(
+        runs.load(Ordering::Relaxed),
+        1,
+        "the body converged on its first pass, so Until::Converged must not \
+         run it again"
+    );
+}
+
+/// `Until::Passes(0)` contributes NO stage — not a silently clamped one pass.
+/// A pipeline holding only that is therefore empty, which is the named
+/// [`PackError::NoStages`]; behind a real stage it is simply a no-op.
+#[test]
+fn repeat_passes_zero_contributes_no_stage() {
+    let alone = Arc::new(AtomicUsize::new(0));
+    let err = boxfree_settings(
+        Pipeline::new().with_repeat(body(CountingFactory::new(&alone)), Until::Passes(0)),
+    )
+    .run(&boxfree_targets(), FREE_LOOPS)
+    .expect_err("a pipeline whose only combinator contributes no stage is empty");
+    assert!(
+        matches!(err, PackError::NoStages),
+        "expected PackError::NoStages, got {err:?}"
+    );
+    assert_eq!(
+        alone.load(Ordering::Relaxed),
+        0,
+        "Passes(0) must not run the body at all"
+    );
+
+    let after = Arc::new(AtomicUsize::new(0));
+    let result = boxfree_settings(
+        Pipeline::new()
+            .with_stage(GenCanPack::new())
+            .with_repeat(body(CountingFactory::new(&after)), Until::Passes(0)),
+    )
+    .run(&boxfree_targets(), FREE_LOOPS)
+    .expect("a pipeline with one real stage runs even if a combinator is empty");
+    assert!(result.fdist.is_finite() && result.frest.is_finite());
+    assert_eq!(
+        after.load(Ordering::Relaxed),
+        0,
+        "Passes(0) after a real stage still runs the body zero times"
+    );
+}
+
+/// A guard that holds changes nothing: `Guarded(stage, [invariant], _)` with
+/// a satisfied invariant is bitwise the bare stage. A combinator that
+/// perturbed the run it observes would make every guarded result a different
+/// run from the unguarded one.
+#[test]
+fn guarded_passing_invariant_leaves_result_bitwise() {
+    let targets = boxfree_targets();
+    // The box-free fixture ends at frest ≈ 3.0e-4 (pinned by
+    // `pipeline_regression_single_stage_gencan_golden`), well inside 1.0.
+    let invariants: Vec<Box<dyn Invariant>> = vec![Box::new(RestraintsSatisfied::new(1.0))];
+
+    let guarded = boxfree_settings(Pipeline::new().with_guarded(
+        GenCanPack::new(),
+        invariants,
+        OnViolation::Fail,
+    ))
+    .run(&targets, FREE_LOOPS)
+    .expect("a guarded GENCAN stage whose invariant holds runs");
+    let plain = boxfree_settings(Pipeline::new().with_stage(GenCanPack::new()))
+        .run(&targets, FREE_LOOPS)
+        .expect("the unguarded spelling runs");
+
+    assert_bitwise_equal(&guarded, &plain, "Guarded(gencan, [satisfied]) vs gencan");
+    assert_eq!(
+        guarded.converged, plain.converged,
+        "a satisfied guard must not change the verdict either"
+    );
+}
+
+/// `OnViolation::Fail` surfaces a NAMED error out of `Pipeline::run`, naming
+/// the stage, the invariant, its rung on the repair-cost ladder and the atoms
+/// involved — never a quietly unconverged result and never another algorithm
+/// (law P8).
+///
+/// The atom list itself is exercised on a hand-built state in
+/// `tests/invariant.rs`: `frest_atom` is movebad-only bookkeeping
+/// (`src/movebad.rs`), so which atoms a real run's final state attributes the
+/// residual to is the GENCAN schedule's business, not this file's.
+#[test]
+fn guarded_fail_returns_named_error() {
+    // frest ≈ 3.0e-4 on this fixture, so a tolerance of exactly 0.0 is
+    // unsatisfiable by construction.
+    let invariants: Vec<Box<dyn Invariant>> = vec![Box::new(RestraintsSatisfied::new(0.0))];
+
+    let err = boxfree_settings(Pipeline::new().with_guarded(
+        GenCanPack::new(),
+        invariants,
+        OnViolation::Fail,
+    ))
+    .run(&boxfree_targets(), FREE_LOOPS)
+    .expect_err("an unsatisfiable guard under OnViolation::Fail must fail by name");
+
+    match &err {
+        PackError::InvariantViolated {
+            stage,
+            invariant,
+            layer,
+            atoms,
+        } => {
+            assert_eq!(*stage, "gencan", "the error names the guarded stage");
+            assert!(
+                !invariant.is_empty(),
+                "the error must name the invariant that was broken"
+            );
+            assert!(
+                !layer.is_empty(),
+                "the error must render the layer the defect sits on"
+            );
+            for (k, &icart) in atoms.iter().enumerate() {
+                assert!(
+                    icart < 180,
+                    "reported atom {k} is index {icart}, outside the \
+                     fixture's 60 waters × 3 atoms — the payload must index \
+                     the run's own atoms"
+                );
+            }
+            let msg = format!("{err}");
+            assert!(
+                msg.contains(*invariant) && msg.contains(*layer),
+                "Display must name the invariant and its layer, got: {msg}"
+            );
+        }
+        other => panic!("expected PackError::InvariantViolated, got {other:?}"),
+    }
+}
+
+/// `OnViolation::Rerun { max }` reruns the SAME stage at most `max` more
+/// times and then reports honestly: `Ok` with `converged == false`, never a
+/// dead loop and never a switch to another algorithm. `Rerun { max: 0 }` is
+/// `Fail`.
+#[test]
+fn guarded_rerun_max_two_reruns_twice_then_unconverged() {
+    let runs = Arc::new(AtomicUsize::new(0));
+    let invariants: Vec<Box<dyn Invariant>> = vec![Box::new(AlwaysViolated)];
+
+    // The body reports `converged == true`; the guard's verdict must win.
+    let result = boxfree_settings(Pipeline::new().with_guarded(
+        CountingFactory::new(&runs).converging(),
+        invariants,
+        OnViolation::Rerun { max: 2 },
+    ))
+    .run(&boxfree_targets(), FREE_LOOPS)
+    .expect("an exhausted Rerun budget is a result, not an error");
+
+    assert_eq!(
+        runs.load(Ordering::Relaxed),
+        3,
+        "Rerun{{max: 2}} is one run plus at most two reruns of the SAME stage"
+    );
+    assert!(
+        !result.converged,
+        "a stage that failed its guard on every attempt must not be reported \
+         as converged, whatever the stage itself claims"
+    );
+
+    let zero_runs = Arc::new(AtomicUsize::new(0));
+    let zero_invariants: Vec<Box<dyn Invariant>> = vec![Box::new(AlwaysViolated)];
+    let err = boxfree_settings(Pipeline::new().with_guarded(
+        CountingFactory::new(&zero_runs).converging(),
+        zero_invariants,
+        OnViolation::Rerun { max: 0 },
+    ))
+    .run(&boxfree_targets(), FREE_LOOPS)
+    .expect_err("Rerun{max: 0} has no budget left, so it is Fail");
+    match &err {
+        PackError::InvariantViolated {
+            stage, invariant, ..
+        } => {
+            assert_eq!(*stage, "counting");
+            assert_eq!(*invariant, "always-violated");
+        }
+        other => panic!("expected PackError::InvariantViolated, got {other:?}"),
+    }
+    assert_eq!(
+        zero_runs.load(Ordering::Relaxed),
+        1,
+        "Rerun{{max: 0}} runs the stage once and then fails, exactly like Fail"
+    );
+}
+
+/// A combinator is ONE stage to the run around it: the inner passes never
+/// move `StepInfo.stage.index` or `total`, and the names a handler sees are
+/// the top-level ones. Nesting a combinator inside another does not change
+/// that (ac-006).
+#[test]
+fn combinators_keep_stage_index_monotone() {
+    let flat = shared();
+    dense_settings(
+        Pipeline::new()
+            .with_handler(observer(&flat))
+            .with_stage(GenCanPack::new())
+            .with_repeat(body(GenCanPack::new()), Until::Passes(2)),
+    )
+    .run(&dense_targets(), DENSE_LOOPS)
+    .expect("a [gencan, repeat] pipeline runs");
+
+    {
+        let t = flat.lock().expect("observer mutex");
+        let names: Vec<&'static str> = t.stage_starts.iter().map(|&(_, _, n)| n).collect();
+        assert_eq!(
+            names,
+            vec!["gencan", "repeat"],
+            "a combinator reports itself as ONE stage, under its own name"
+        );
+        for &(index, total, _) in t.steps.iter() {
+            assert_eq!(
+                total, 2,
+                "the run has two TOP-LEVEL stages; an inner pass must not \
+                 change the total"
+            );
+            assert!(index < total, "stage index {index} out of range");
+        }
+        for pair in t.steps.windows(2) {
+            let (prev, cur) = (pair[0].0, pair[1].0);
+            assert!(
+                cur >= prev,
+                "StepInfo.stage.index went {prev} → {cur} — a repeated body \
+                 must not walk the index backwards"
+            );
+        }
+    }
+
+    // Nested: Guarded(Repeat([gencan])). The invariant list is empty on
+    // purpose — this test is about stage identity, and the guard's own
+    // verdict is pinned by the two tests above.
+    let nested = shared();
+    let inner = Pipeline::new().with_repeat(body(GenCanPack::new()), Until::Passes(2));
+    dense_settings(
+        Pipeline::new()
+            .with_handler(observer(&nested))
+            .with_guarded(inner, Vec::new(), OnViolation::Fail),
+    )
+    .run(&dense_targets(), DENSE_LOOPS)
+    .expect("a Guarded(Repeat([gencan])) pipeline runs");
+
+    let t = nested.lock().expect("observer mutex");
+    let names: Vec<&'static str> = t.stage_starts.iter().map(|&(_, _, n)| n).collect();
+    assert_eq!(
+        names,
+        vec!["guarded"],
+        "the outer combinator is the only top-level stage"
+    );
+    for &(index, total, _) in t.steps.iter() {
+        assert_eq!(total, 1, "one top-level stage means total == 1");
+        assert_eq!(index, 0, "…and index 0, however deep the nesting goes");
+    }
+}
+
+/// A body factory's handlers are **adopted** exactly as `with_stage` adopts
+/// them, and its non-default shared settings are refused BY NAME exactly as
+/// `with_stage` refuses them — a combinator is not a hole in either rule.
+#[test]
+fn repeat_adopts_body_handlers_and_refuses_settings() {
+    let tally = shared();
+    boxfree_settings(Pipeline::new().with_repeat(
+        body(GenCanPack::new().with_handler(observer(&tally))),
+        Until::Passes(2),
+    ))
+    .run(&boxfree_targets(), FREE_LOOPS)
+    .expect("a Repeat whose body carries a handler runs");
+
+    {
+        let t = tally.lock().expect("observer mutex");
+        assert!(
+            !t.steps.is_empty(),
+            "the handler carried in by the body preset saw no on_step events \
+             — with_repeat must adopt a body's handlers, not drop them"
+        );
+        assert_eq!(t.starts, 1, "an adopted handler is bracketed once per RUN");
+        assert_eq!(t.finishes, 1);
+    }
+
+    let err = Pipeline::new()
+        .with_repeat(body(GenCanPack::new().with_seed(7)), Until::Passes(2))
+        .run(&boxfree_targets(), 1)
+        .expect_err("a body preset carrying a seed must be refused");
+    match &err {
+        PackError::PresetSettingsInsidePipeline { stage, knob } => {
+            assert_eq!(
+                *knob, "seed",
+                "the refusal names the knob so the user knows what to move \
+                 onto the pipeline"
+            );
+            let msg = format!("{err}");
+            assert!(
+                msg.contains(*stage) && msg.contains(*knob),
+                "Display must name stage and knob, got: {msg}"
+            );
+        }
+        other => panic!("expected PackError::PresetSettingsInsidePipeline, got {other:?}"),
+    }
+}
+
+/// A handler asking to stop from inside a combinator body ends the run there:
+/// the remaining passes never start and the verdict is honestly
+/// `converged == false`.
+#[test]
+fn repeat_should_stop_yields_immediately() {
+    let runs = Arc::new(AtomicUsize::new(0));
+    let signals = Arc::new(AtomicUsize::new(0));
+
+    let result = boxfree_settings(
+        Pipeline::new()
+            .with_handler(Box::new(StopOnFirstSignal {
+                signals: Arc::clone(&signals),
+            }))
+            .with_repeat(
+                body(CountingFactory::new(&runs).converging().signalling()),
+                Until::Passes(3),
+            ),
+    )
+    .run(&boxfree_targets(), FREE_LOOPS)
+    .expect("a run stopped from inside a combinator still returns Ok");
+
+    assert_eq!(
+        runs.load(Ordering::Relaxed),
+        1,
+        "the body signalled a stop during its first pass, so passes 2 and 3 \
+         must never start"
+    );
+    assert!(
+        !result.converged,
+        "a run abandoned mid-combinator must never be reported as converged"
+    );
 }

@@ -43,6 +43,7 @@ use molrs::types::F;
 
 use crate::context::pack_state::evaluate_unscaled;
 use crate::context::{PackState, Placed};
+use crate::error::PackError;
 use crate::grow::config::{GrowConfig, GrowError};
 use crate::grow::field::OverlapField;
 use crate::grow::internal::InternalTree;
@@ -142,7 +143,7 @@ impl Stage for GrowStage {
         _targets: &[Target],
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
-    ) -> StageOutcome {
+    ) -> Result<StageOutcome, PackError> {
         // ── The box and its cell grid ──────────────────────────────────────
         // See `install_resolved_cell` for why `radmax` reads `radius_ini`.
         if let Some((cell, discale)) = &self.cell {
@@ -476,6 +477,6 @@ impl Stage for GrowStage {
         // inline and gives the caller's values back afterwards.
         let (_, fdist, frest) = evaluate_unscaled(sys, x.as_slice());
         let converged = !aborted && softened == 0 && fdist == 0.0 && frest < budget.precision;
-        StageOutcome::new(converged, softened)
+        Ok(StageOutcome::new(converged, softened))
     }
 }
