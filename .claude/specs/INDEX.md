@@ -10,7 +10,7 @@ Add via `/mol:spec <feature description>`. Implement via `/mol:impl <slug>` (cha
 
 - stage-pipeline（父 spec 已按 large-spec-split 拆为 7 段链并删除，2026-09-02；设计理由分布在各子 spec 的 Design 里；三轮 architect design-mode 记录见本会话）：
   - stage-pipeline-01-topology — DONE 2026-09-03（6/6 verified；`src/topology.rs` 叶子落地，grow 三处消费者改接，`GrowError::Topology` 收敛；随 squash 提交关闭并删除）
-  - [stage-pipeline-02-view](./stage-pipeline-02-view.md) — `src/context/rigid_view.rs` `RigidView { x, nmol }` 吸收 `PlacementsMut`、`init_xcart_from_x` 两个方向、种子注入、两处生长写回；连续驱动 abort 路径先把 `xcart` 变成唯一的家；`push_off` 不动 — **APPROVED**
+  - stage-pipeline-02-view — DONE 2026-09-03（7/7 verified；`src/context/rigid_view.rs` `RigidView { x, nmol }` 吸收 `PlacementsMut` / `init_xcart_from_x` 两个方向 / 种子注入 / 两处生长写回；连续驱动 abort 路径先同步 `xcart`，`grow_abort_writeback_golden` 逐位金标前后皆绿；`Solver::solve` 收 `&mut RigidView`；`push_off` 未动；`initial()` 的临时视图过桥记为 D-05 归 05；随本段提交关闭并删除）
   - [stage-pipeline-03-state](./stage-pipeline-03-state.md) — `src/context/pack_state.rs` `PackState { ctx, placed, rigid }`（`pub(crate)`，包裹不抽取）；未缩放裁决原语的唯一归属（三处副本合一，`scale`/`scale2` 对称存还） — **APPROVED**
   - [stage-pipeline-04-stage](./stage-pipeline-04-stage.md) — `src/solver.rs` → `src/stage.rs`：`Stage { name, requires, guarantees, run }`、`StageOutcome { converged, softened }`；三个 `*Stage` 实现者；`Stage::run` 可重入契约（`GencanStage` 借用形 optimizer 绑定）；`StepInfo.stage` + 两个 handler 钩子 — **APPROVED**
   - [stage-pipeline-05-pipeline](./stage-pipeline-05-pipeline.md) — `src/pipeline/{engine,mod}.rs`：`StageFactory`（含 `take_handlers`）/ `PackEngine`（`run` 必需）/ `EngineSetup` 迁入，`Pipeline::{new, single, with_stage}`，衔接检查、handler 采纳、settings 具名拒绝、push-off 状态化（`Placed::All`）、阶段边界缓存失效；两组 `≡ seeded_from` 逐位门 — **APPROVED**

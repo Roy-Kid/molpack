@@ -11,15 +11,15 @@ use molrs::types::F;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-use crate::context::PackContext;
+use crate::context::{PackContext, RigidView};
 use crate::gencan::phases::{PhaseOutcome, run_phase};
 use crate::gencan::{GencanParams, GencanWorkspace};
 use crate::handler::Handler;
-use crate::initial::{SwapState, init_xcart_from_x, initial};
+use crate::initial::{SwapState, initial};
 use crate::movebad::MoveBadConfig;
 #[cfg(feature = "ff")]
 use crate::optimizer::{OptimizerBinding, ResolvedBinding, resolve_bindings};
-use crate::solver::{Budget, PlacementsMut, SolveOutcome, Solver};
+use crate::solver::{Budget, SolveOutcome, Solver};
 use crate::target::Target;
 
 /// GENCAN-only knobs (engine-entry-split: these live on `GenCanPack`, never
@@ -72,8 +72,9 @@ impl Default for GencanSettings {
 ///
 /// Construction captures everything the former `run_gencan_stages` read
 /// beyond the seam signature: the GENCAN knobs, the per-type move quota,
-/// the resolved cell, the phase-shape counts, and the push-off flag
-/// (skip `initial()` and movebad — the state is already seeded by growth).
+/// the resolved cell, the phase-shape counts, and the push-off flag (skip
+/// `initial()` and movebad — the entry seeded the state from a previous run,
+/// see [`GenCanPack::seeded_from`](crate::GenCanPack::seeded_from)).
 pub struct GencanSolver {
     settings: GencanSettings,
     maxmove_per_type: Vec<usize>,
@@ -128,11 +129,10 @@ impl Solver for GencanSolver {
         &mut self,
         sys: &mut PackContext,
         targets: &[Target],
-        mut x: PlacementsMut<'_>,
+        x: &mut RigidView,
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
     ) -> SolveOutcome {
-        let x = x.as_mut_slice();
         let init_passes = self.settings.init_passes.unwrap_or(20 * self.ntype);
         let movebad_cfg = MoveBadConfig {
             movefrac: self.settings.perturb_fraction,
@@ -142,7 +142,7 @@ impl Solver for GencanSolver {
         };
         if !self.push_off {
             initial(
-                x,
+                x.as_mut_slice(),
                 sys,
                 budget.precision,
                 self.settings.discale,
@@ -154,11 +154,11 @@ impl Solver for GencanSolver {
                 &mut self.rng,
             );
         } else {
-            // Push-off (spec §5.4/§5.7): the state in `sys.coor`/`x` is
-            // already seeded (by growth) and the grid installed — materialize
-            // xcart from that state and keep it; movebad stays disabled so
-            // molecules are pushed apart by descent, never teleported.
-            init_xcart_from_x(x, sys);
+            // Push-off: `x` and `sys.coor` were seeded from a previous run
+            // and the grid is installed — materialize xcart from that state
+            // and keep it; movebad stays disabled so molecules are pushed
+            // apart by descent, never teleported.
+            x.write_xcart(sys);
         }
 
         // Notify handlers: initialization complete, xcart is valid
@@ -199,7 +199,7 @@ impl Solver for GencanSolver {
         // reducing GENCAN problem size by up to 60x vs full n.
 
         // Save initial full x before phasing (Packmol swaptype action=0)
-        let mut swap = SwapState::init(x, sys);
+        let mut swap = SwapState::init(x.as_slice(), sys);
 
         let total_phases = self.ntype + 1;
 
@@ -216,7 +216,7 @@ impl Solver for GencanSolver {
                 &movebad_cfg,
                 &gencan_params,
                 sys,
-                x,
+                x.as_mut_slice(),
                 &mut swap,
                 #[cfg(feature = "ff")]
                 &mut optimizer_bindings,
@@ -271,7 +271,7 @@ mod tests {
         )
         .expect("context builds");
         let mut sys = built.sys;
-        let mut x = vec![0.0 as F; 6 * built.ntotmol_free];
+        let mut x = RigidView::fresh(built.ntotmol_free);
 
         let cell = SimBox::ortho(
             Array1::from_vec(vec![20.0, 20.0, 20.0]),
@@ -296,7 +296,7 @@ mod tests {
         let outcome = solver.solve(
             &mut sys,
             &targets,
-            PlacementsMut::new(&mut x, built.ntotmol_free),
+            &mut x,
             &Budget::new(50, 0.01),
             &mut handlers,
         );

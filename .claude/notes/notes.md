@@ -70,3 +70,20 @@ Format per entry:
 `uv run --directory python --group typecheck …` 与 `--group dev`（tox）都在解析阶段失败：`molcrafts-molpy` 0.14.0（同级 `../molpy`）把 `molcrafts-molrs` 钉为 `git+https://github.com/MolCrafts/molrs.git@dev#subdirectory=molrs-python`，而 `python/pyproject.toml` 的 `[tool.uv.sources]` 把它钉为 `path = "../../molrs/molrs-python"`，uv 拒绝冲突 URL。chain-growth-solver Task 11 落地记录里已提到同一问题（当时靠 `maturin build` + `uv pip install` 绕过）。
 **Why:** 法则 P3——molrs / molpy 的 pin 由人手工管理；harness 不得自动改 pin。它使 `mol_project.build.check` 的 Python 段与 `ci.local` 的 tox 段在本机不可运行，stage-pipeline-05（`python/src/entry.rs` 一行 import）与 -07（Python 镜像）的 Python 验收只能在 CI 或修好 pin 后验证。
 **How to apply:** 由 owner 统一 `../molpy` 与 `python/pyproject.toml` 对 molrs 的 pin（同为 path 或同为 git）；在此之前，`/mol:impl` 对 Python 验收项标注"本环境不可运行，待 CI"。
+
+## 2026-09-03 — 发现：`PlacementsMut` 的 COM 访问器无越界保护
+
+`set_com(nmol, ..)` 的偏移 `3*nmol` 正好是分子 0 的 Euler 槽，不 panic 而静默串块；`set_euler(nmol, ..)` 才越界 panic。`stage-pipeline-02` 的 `RigidView` 访问器加显式 `i < nmol` 断言并有测试钉住。
+**Why:** law § 8（非法状态不可表示）；tester 在写 02 的 RED 时用参考桩实测发现。
+**How to apply:** 任何按 (COM 块 | Euler 块) 布局索引的代码都要显式检查分子下标，不能依赖偏移算术。
+
+## 2026-09-03 — 债务 D-05：`initial()` 仍讲扁平切片，借临时 `RigidView` 过桥两次
+
+**现象**：02 把 xcart 重建收进 `RigidView::write_xcart` 后，`src/initial.rs` 的两处内部重建
+（首猜后、Phase-1 后）各自 `RigidView::fresh(ntotmol)` → `copy_from_slice(x)` → `write_xcart`，
+因为 `initial(x: &mut [F], ..)` 的 460 行主体全是 `ilubar / ilugan / icart` 偏移算术，唯一真实
+调用方 `gencan/solver.rs::GencanSolver::solve` 手里其实握着 `&mut RigidView`。
+**为何不在 02 改**：改签名只是把摩擦搬成三处 `let x = view.as_mut_slice();` 重绑，主体不变；
+两次 6N 堆分配不在热路径。02 的 Files / Tasks 不含 `initial()` 的重构（law § 4）。
+**归属**：05——`GencanStage::run` 前奏接管 `prepare()` 后，`initial()` 或改收 `&mut RigidView`
+整段持有一个视图，或被前奏吸收；届时删除这两处过桥。

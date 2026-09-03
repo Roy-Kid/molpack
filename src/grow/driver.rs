@@ -40,7 +40,7 @@
 use molrs::types::F;
 
 use crate::constraints::EvalMode;
-use crate::context::PackContext;
+use crate::context::{PackContext, RigidView};
 use crate::grow::config::{GrowConfig, GrowError};
 use crate::grow::field::OverlapField;
 use crate::grow::internal::InternalTree;
@@ -49,7 +49,7 @@ use crate::grow::moves::{
     retract, stream, uniform,
 };
 use crate::handler::{Handler, PhaseInfo, StepInfo};
-use crate::solver::{Budget, PlacementsMut, SolveOutcome, Solver};
+use crate::solver::{Budget, SolveOutcome, Solver};
 use crate::target::Target;
 
 /// The chain-growth solver. Built from the Grow targets before `solve`;
@@ -101,7 +101,7 @@ impl Solver for GrowthSolver {
         &mut self,
         sys: &mut PackContext,
         _targets: &[Target],
-        mut x: PlacementsMut<'_>,
+        x: &mut RigidView,
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
     ) -> SolveOutcome {
@@ -399,28 +399,23 @@ impl Solver for GrowthSolver {
                     force_place(chain, sp, &mut field, origin, lengths, self.seed);
                     softened += 1;
                 }
+                // `sys.xcart` is the single lab-frame home of the placed
+                // atoms; the round loop syncs it at every round end, so the
+                // forced completion has to sync it as well or the stages
+                // placed here would live only in `Chain.coords`. Same shape
+                // as the lattice driver's abort path (`grow/lattice/mod.rs`).
+                for (a, p) in chain.coords.iter().enumerate() {
+                    sys.xcart[chain.base + a] = *p;
+                }
             }
         }
 
-        // ── Writeback contract (spec Design §2) ────────────────────────────
-        for chain in &chains {
-            let na = chain.coords.len();
-            let mut com = [0.0 as F; 3];
-            for p in &chain.coords {
-                for k in 0..3 {
-                    com[k] += p[k];
-                }
-            }
-            for v in com.iter_mut() {
-                *v /= na as F;
-            }
-            for (a, p) in chain.coords.iter().enumerate() {
-                sys.coor[chain.base + a] = [p[0] - com[0], p[1] - com[1], p[2] - com[2]];
-            }
-            x.set_com(chain.mol, com);
-            x.set_euler(chain.mol, [0.0, 0.0, 0.0]);
-            debug_assert_eq!(x.euler(chain.mol), [0.0; 3]);
-        }
+        // ── Writeback: `RigidView::capture_from_xcart` ─────────────────────
+        // `sys.xcart` is the lab-frame home every chain has synced into — at
+        // each round end and, for the forced completion above, in the abort
+        // loop — so the view captures the placements from there. One
+        // derivation, shared with the lattice driver.
+        x.capture_from_xcart(sys);
 
         // ── Final verdict from the shared objective, never self-reported ──
         sys.scale = 1.0;

@@ -2,6 +2,7 @@
 
 use molrs::types::F;
 
+use crate::context::RigidView;
 use crate::entry::result::Placements;
 use crate::entry::setup::CellDecl;
 use crate::entry::{EngineSetup, PackEngine, PackResult, PackSettings};
@@ -59,14 +60,23 @@ impl GenCanPack {
         }
     }
 
-    /// Continue on a previous entry's placement solution (placement-seeding
-    /// spec, engine-entry-split 门槛 2): the free copies start EXACTLY where
-    /// `result` left them — `initial()` is skipped, movebad is disabled, and
-    /// the GENCAN phases push remaining contacts apart by rigid-body descent
-    /// (Auhl slow push-off). The cell travels with the seed; do not declare
-    /// a box, density, or cell on a seeded engine. The run's free targets
-    /// must match the seed's shape (`PackError::SeedMismatch` otherwise);
-    /// fixed targets may be appended after the free ones.
+    /// Continue from a previous run's placement solution: the free copies
+    /// start EXACTLY where `result` left them, bit for bit.
+    ///
+    /// Two things are switched off for such a run. The random-placement pass
+    /// (`initial()`) is skipped, since the placements already exist; and so is
+    /// movebad, the stall heuristic that picks up the worst-placed molecules
+    /// and drops them elsewhere in the box. What is left is continuous
+    /// rigid-body descent, which separates the remaining contacts while
+    /// keeping the structure it was handed — the "slow push-off" of Auhl et al.
+    /// 2003: an overlapped melt is opened up by continuous minimization, never
+    /// by re-randomizing a configuration whose large-scale chain statistics
+    /// were expensive to build.
+    ///
+    /// The cell travels with the seed; do not declare a box, density, or cell
+    /// on a seeded engine. The run's free targets must match the seed's shape
+    /// ([`PackError::SeedMismatch`] otherwise); fixed targets may be appended
+    /// after the free ones.
     pub fn seeded_from(mut self, result: &PackResult) -> Self {
         let cell = &result.placements.cell;
         let hv = cell.h_view();
@@ -191,8 +201,10 @@ impl PackEngine for GenCanPack {
             setup.ntotat_free,
         );
         // Inject the placement solution verbatim (zero-conversion chaining).
-        sys.coor[..setup.ntotat_free].copy_from_slice(&seed.coor);
-        x.copy_from_slice(&seed.x);
+        // The view is built from bare slices — `context` never names this
+        // layer's snapshot type, so the unpacking happens here.
+        let seeded = RigidView::install_seed(seed.rigid.as_slice(), &seed.coor, sys);
+        x.copy_from_slice(seeded.as_slice());
         Ok(())
     }
 

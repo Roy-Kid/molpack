@@ -5,8 +5,10 @@
 //! ── Section: Task 1 — named rejections + result surface ───────────────────
 //!
 //! Covers the entry seam: the named `GrowError` rejections (no silent
-//! degradation, spec principle 3), the `PlacementsMut` layout contract, and
-//! `PackResult::softened`. NO growth algorithm is exercised here.
+//! degradation, spec principle 3) and `PackResult::softened`. NO growth
+//! algorithm is exercised here. The rigid-placement layout contract lives in
+//! `tests/context_rigid_view.rs` (`rigid_view_layout` /
+//! `rigid_view_set_com_out_of_range_panics`).
 //!
 //! Later sections: Task 2 (internal-coordinate round-trips + random-vars
 //! invariants), Task 3 (overlap field), Task 4 (torsion priors / C∞
@@ -17,7 +19,6 @@
 use molpack::grow::field::{OverlapField, Probe};
 use molpack::grow::internal::InternalTree;
 use molpack::grow::{GrowConfig, GrowError, TorsionPrior};
-use molpack::solver::PlacementsMut;
 use molpack::{
     CbmcGrow, F, GenCanPack, Handler, InsideSphereRestraint, PackContext, PackEngine, PackError,
     PackResult, StepInfo, Target, TopologyError,
@@ -185,52 +186,6 @@ fn grow_rejects_tiny_template() {
         ),
         "expected PackError::Grow(TemplateTooSmall(2)), got {err:?}"
     );
-}
-
-// ── PlacementsMut: layout contract ─────────────────────────────────────────
-
-/// The typed view writes into the Packmol flat-vector convention
-/// (`src/initial.rs::init_xcart_from_x`): COM of molecule i at
-/// `x[3*i .. 3*i+3]`, Euler of molecule i at
-/// `x[3*nmol + 3*i .. 3*nmol + 3*i + 3]`.
-#[test]
-fn placements_view_layout() {
-    let nmol = 3;
-    let mut x = vec![0.0 as F; 6 * nmol];
-    {
-        let mut view = PlacementsMut::new(&mut x, nmol);
-        assert_eq!(view.nmol(), nmol);
-        view.set_com(1, [1.0, 2.0, 3.0]);
-        view.set_euler(2, [0.1, 0.2, 0.3]);
-        // Read back through the typed accessors.
-        assert_eq!(view.com(1), [1.0, 2.0, 3.0]);
-        assert_eq!(view.euler(2), [0.1, 0.2, 0.3]);
-        // Untouched copies read zero.
-        assert_eq!(view.com(0), [0.0; 3]);
-        assert_eq!(view.euler(0), [0.0; 3]);
-    }
-    // Raw slots: COM block first, Euler block at 3*nmol.
-    assert_eq!(&x[3..6], &[1.0, 2.0, 3.0], "com(1) slot");
-    assert_eq!(
-        &x[15..18],
-        &[0.1, 0.2, 0.3],
-        "euler(2) slot = x[3*3 + 3*2 ..]"
-    );
-    // Every other slot untouched.
-    for (i, &v) in x.iter().enumerate() {
-        if !(3..6).contains(&i) && !(15..18).contains(&i) {
-            assert_eq!(v, 0.0, "slot {i} must be untouched");
-        }
-    }
-}
-
-/// A backing slice whose length is not `6 * nmol` is a programming error and
-/// must be rejected at construction.
-#[test]
-#[should_panic]
-fn placements_view_rejects_bad_len() {
-    let mut x = vec![0.0 as F; 7];
-    let _ = PlacementsMut::new(&mut x, 1);
 }
 
 // ── Section: Task 2 — InternalTree: internal-coordinate decomposition ──────
@@ -1565,6 +1520,101 @@ fn grow_abort_keeps_bonded_geometry() {
     );
 }
 
+/// Characterization golden for the abort completion path
+/// (`.claude/specs/stage-pipeline-02-view.md`, Task 2).
+///
+/// The continuum driver syncs `chain.coords` into `sys.xcart` at the END of a
+/// round only; the abort completion loop then keeps moving atoms with
+/// `force_place` without syncing, so today's writeback block must read
+/// `chain.coords` to be correct. Moving `xcart` to be the single home (and
+/// the writeback to `RigidView::capture_from_xcart`, which reads `ctx.xcart`)
+/// must not move a single bit of the answer. These literals pin that.
+///
+/// Provenance: captured 2026-09-03 from the build at commit c8fb40e
+/// (`cargo test -p molcrafts-molpack`, default features, debug profile) with
+/// a scratch harness that printed `PackResult::positions()` through `{:?}`
+/// (shortest round-trip form) for exactly this fixture. Deterministic by
+/// construction: fixed seed 7, fixed stop_after, no wall-clock, no threads.
+/// The run aborts after 2 rounds with 6 forced placements, so the abort
+/// completion path IS exercised.
+#[test]
+fn grow_abort_writeback_golden() {
+    // Unwrapped lab-frame positions — growth does not wrap into the box, so
+    // coordinates outside `[0, 14]` are expected and part of the golden.
+    const GOLDEN: [[F; 3]; 18] = [
+        [6.960950727955596, 1.2876400376932167, 3.617693024965275],
+        [7.68775644288166, 2.457652934396787, 2.951567455497975],
+        [9.159888433744518, 2.4482765704772875, 3.3682681697735872],
+        [9.40329260787971, 1.3071109923141822, 4.357912313508713],
+        [10.814791573019656, 1.4251069244160106, 4.936399678466913],
+        [10.885033188836235, 0.675961130655507, 6.268595870886941],
+        [11.727187056008203, 5.611401891774847, 12.800862080686782],
+        [11.297571317298337, 4.50730764820194, 11.832716317714103],
+        [12.51593652550088, 4.009731814063756, 11.052392981703148],
+        [13.58912942202339, 5.100014860120379, 11.031419514295132],
+        [14.126112885232246, 5.2607651229180465, 9.607794523909426],
+        [15.64827655186169, 5.106309479190209, 9.615619235650529],
+        [2.091397543916382, 10.61917964641629, 5.627510535377444],
+        [1.4579490039634453, 11.497973776561347, 4.547064412679006],
+        [-0.05835140097951674, 11.293687410805898, 4.546661006877859],
+        [-0.40194945716705366, 10.017432296902328, 5.317383563975504],
+        [-1.9205392935375896, 9.902896032193846, 5.4645785127296564],
+        [-2.2935937549473175, 8.457418264951658, 5.799726828003418],
+    ];
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let (n_beads, copies, bond, box_len) = (6usize, 3usize, 1.53 as F, 14.0 as F);
+    let target = Target::new(chain_frame(n_beads, bond, true), copies);
+    let result = CbmcGrow::new(TorsionPrior::Uniform)
+        .with_seed(7)
+        .with_tolerance(2.0)
+        .with_periodic_box([0.0; 3], [box_len; 3], [true; 3])
+        .with_handler(Box::new(Recorder {
+            events: Arc::clone(&events),
+            stop_after: 2,
+        }))
+        .run(&[target], 50)
+        .expect("a should_stop abort still returns Ok");
+
+    assert!(
+        !result.converged,
+        "an aborted grow pack must not be reported as converged"
+    );
+    assert!(
+        result.softened > 0,
+        "the golden is only meaningful when the abort completion path ran \
+         (force_place counts as softening); got softened = {}",
+        result.softened
+    );
+    let rounds = events.lock().expect("recorder mutex").len();
+    assert!(
+        rounds < 10,
+        "growth recorded {rounds} rounds — this golden pins an ABORT, not a \
+         completed schedule"
+    );
+
+    let pos = result.positions();
+    assert_eq!(
+        pos.len(),
+        GOLDEN.len(),
+        "fixture shape changed: {} atoms vs {} golden rows",
+        pos.len(),
+        GOLDEN.len()
+    );
+    for (i, (got, want)) in pos.iter().zip(GOLDEN.iter()).enumerate() {
+        for k in 0..3 {
+            assert_eq!(
+                got[k].to_bits(),
+                want[k].to_bits(),
+                "atom {i} component {k}: abort writeback moved a bit \
+                 (got {}, golden {})",
+                got[k],
+                want[k]
+            );
+        }
+    }
+}
+
 // ── Section: push-off — the explicit free-target chain (门槛 2) ────────────
 //
 // When growth ends unconverged (softened > 0), the entry says so and stops.
@@ -1621,7 +1671,8 @@ fn grow_infeasible(l: F, max_loops: usize) -> PackResult {
 ///
 /// 1. xcart at the seeded run's `on_initialized` is BITWISE the grown
 ///    result's positions (zero-conversion chaining: the seed carries
-///    (coor, x) verbatim, and `init_xcart_from_x` re-materializes the same
+///    (coor, rigid) verbatim, and `RigidView::write_xcart` — called from the
+///    push-off branch in `gencan/solver.rs` — re-materializes the same
 ///    xcart from the same bits). A seeded run that re-ran `initial()`
 ///    would re-randomize every COM/Euler before `on_initialized` fires and
 ///    break this by Ångströms; a chain that rebuilt the seed from the

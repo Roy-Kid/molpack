@@ -24,14 +24,14 @@ use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
 use crate::constraints::EvalMode;
-use crate::context::PackContext;
+use crate::context::{PackContext, RigidView};
 use crate::entry::{EngineSetup, PackEngine, PackSettings};
 use crate::error::PackError;
 use crate::grow::internal::InternalTree;
 use crate::grow::prior::TorsionPrior;
 use crate::grow::{GrowError, validate_grow_cell};
 use crate::handler::{Handler, PhaseInfo, StepInfo};
-use crate::solver::{Budget, PlacementsMut, SolveOutcome, Solver};
+use crate::solver::{Budget, SolveOutcome, Solver};
 use crate::target::Target;
 
 use decorate::{Backbone, analyze_backbone, decorate_chain};
@@ -110,7 +110,7 @@ impl Solver for LatticeSolver {
         &mut self,
         sys: &mut PackContext,
         _targets: &[Target],
-        mut x: PlacementsMut<'_>,
+        x: &mut RigidView,
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
     ) -> SolveOutcome {
@@ -145,13 +145,10 @@ impl Solver for LatticeSolver {
         let mut softened = 0usize;
         let mut aborted = false;
 
-        // Chains in xcart order, one walk + decoration each.
-        struct Done {
-            base: usize,
-            mol: usize,
-            coords: Vec<[F; 3]>,
-        }
-        let mut done: Vec<Done> = Vec::with_capacity(sys.ntotmol);
+        // Bases of the chains already walked + decorated, in xcart order:
+        // their coordinates live in `sys.xcart` (the lab-frame home the
+        // writeback reads), so the driver only tracks which copies are done.
+        let mut done: Vec<usize> = Vec::with_capacity(sys.ntotmol);
         let mut mol = 0usize;
         'outer: for itype in 0..sys.ntype {
             let sp = &self.species[itype];
@@ -205,7 +202,7 @@ impl Solver for LatticeSolver {
                 for (a, p) in coords.iter().enumerate() {
                     sys.xcart[base + a] = *p;
                 }
-                done.push(Done { base, mol, coords });
+                done.push(base);
                 mol += 1;
 
                 // Handler visibility: one StepInfo per finished chain.
@@ -245,7 +242,7 @@ impl Solver for LatticeSolver {
                 let n_bb = sp.backbone.atoms.len();
                 for imol in 0..sys.nmols[itype] {
                     let base = sys.idfirst[itype] + imol * na;
-                    if done.iter().any(|d| d.base == base) {
+                    if done.contains(&base) {
                         continue;
                     }
                     let walk = forced_zigzag(&lat, &mut field, m as u32, n_bb, &mut rng);
@@ -261,35 +258,17 @@ impl Solver for LatticeSolver {
                     for (a, p) in coords.iter().enumerate() {
                         sys.xcart[base + a] = *p;
                     }
-                    done.push(Done {
-                        base,
-                        mol: m,
-                        coords,
-                    });
+                    done.push(base);
                     m += 1;
                 }
             }
         }
 
         // Writeback contract: per-copy COM into x, centered conformer into
-        // this copy's own `coor` block (identical to the continuum driver).
-        for d in &done {
-            let na = d.coords.len();
-            let mut com = [0.0 as F; 3];
-            for p in &d.coords {
-                for k in 0..3 {
-                    com[k] += p[k];
-                }
-            }
-            for v in com.iter_mut() {
-                *v /= na as F;
-            }
-            for (a, p) in d.coords.iter().enumerate() {
-                sys.coor[d.base + a] = [p[0] - com[0], p[1] - com[1], p[2] - com[2]];
-            }
-            x.set_com(d.mol, com);
-            x.set_euler(d.mol, [0.0, 0.0, 0.0]);
-        }
+        // this copy's own `coor` block — one derivation, shared with the
+        // continuum driver. Every chain wrote its coordinates into
+        // `sys.xcart` as it finished, including the forced completions above.
+        x.capture_from_xcart(sys);
 
         // Final verdict from the shared objective, never self-reported.
         sys.scale = 1.0;

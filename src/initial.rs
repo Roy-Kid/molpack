@@ -19,8 +19,7 @@ use ndarray::array;
 use std::time::Instant;
 
 use crate::constraints::EvalMode;
-use crate::context::{NONE_IDX, PackContext};
-use crate::euler::{compcart, eulerrmat};
+use crate::context::{NONE_IDX, PackContext, RigidView};
 use crate::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::movebad::{MoveBadConfig, movebad};
 use crate::random::uniform01;
@@ -299,8 +298,18 @@ fn init_loop_one_type(
 
 // ── full initialization ────────────────────────────────────────────────────
 
-/// Full initialization procedure.
-/// Faithful port of `initial.f90`.
+/// Full initialization procedure: place every free molecule at random inside
+/// the resolved bounds, then relax those placements against the geometric
+/// restraints alone — the inter-molecular overlap term stays switched off
+/// (`sys.init1`) until the main loop takes over. Faithful port of
+/// `initial.f90`; the exact call order is listed at module level.
+///
+/// `x` is the run's flat rigid placement vector, `6 * sys.ntotmol` values in
+/// the layout [`RigidView`] owns: the centre-of-mass block first, the Euler
+/// block second. This routine drives it as a bare slice because its body is
+/// offset arithmetic throughout (`ilubar` / `ilugan` / `icart`, as in the
+/// Fortran), and lends it to a temporary [`RigidView`] at the two points
+/// where it needs lab-frame coordinates rebuilt.
 #[allow(clippy::too_many_arguments)]
 pub fn initial(
     x: &mut [F],
@@ -391,8 +400,14 @@ pub fn initial(
         }
     }
 
-    // Init xcart (Packmol initial.f90 lines 121-138)
-    init_xcart_from_x(x, sys);
+    // Init xcart (Packmol initial.f90 lines 121-138). The rebuild has one
+    // home — `RigidView::write_xcart`; this routine still drives the flat
+    // layout, so it lends the placements to a view for the crossing.
+    {
+        let mut view = RigidView::fresh(sys.ntotmol);
+        view.as_mut_slice().copy_from_slice(x);
+        view.write_xcart(sys);
+    }
 
     let free_atoms = sys.ntotat - sys.nfixedat;
     // Packmol's initial.f90 lines 140-165 re-flip fixedatom=true on the
@@ -449,7 +464,11 @@ pub fn initial(
     );
 
     // Update xcart from the Phase-1 result
-    init_xcart_from_x(x, sys);
+    {
+        let mut view = RigidView::fresh(sys.ntotmol);
+        view.as_mut_slice().copy_from_slice(x);
+        view.write_xcart(sys);
+    }
 
     // Packmol sets radmax as the maximum *diameter* (2 * radius),
     // not the maximum radius (packmol.f90 lines 532-534).
@@ -758,40 +777,5 @@ pub(crate) fn install_simbox_and_grid(
         }
         sys.latomnext[icart] = sys.latomfix[icell];
         sys.latomfix[icell] = icart as u32;
-    }
-}
-
-// ── init_xcart_from_x ──────────────────────────────────────────────────────
-
-/// Initialize xcart from x (COM + Euler angles).
-pub fn init_xcart_from_x(x: &[F], sys: &mut PackContext) {
-    let mut ilubar = 0usize;
-    let mut ilugan = sys.ntotmol * 3;
-    let mut icart = 0usize;
-
-    for itype in 0..sys.ntype {
-        for _imol in 0..sys.nmols[itype] {
-            let xcm = [x[ilubar], x[ilubar + 1], x[ilubar + 2]];
-            let beta = x[ilugan];
-            let gama = x[ilugan + 1];
-            let teta = x[ilugan + 2];
-            let (v1, v2, v3) = eulerrmat(beta, gama, teta);
-
-            for _ in 0..sys.natoms[itype] {
-                // `coor` shares `xcart`'s index space — this copy's own
-                // reference conformer sits at the same offset.
-                let pos = compcart(&xcm, &sys.coor[icart], &v1, &v2, &v3);
-                sys.xcart[icart] = pos;
-                // Packmol's initial.f90 sets fixedatom=false on every free
-                // atom here, but in Rust that bit is already false from
-                // construction and `sync_atom_props` has been called —
-                // writing it again would desync `atom_props` flags.
-                debug_assert!(!sys.fixedatom[icart]);
-                icart += 1;
-            }
-
-            ilugan += 3;
-            ilubar += 3;
-        }
     }
 }

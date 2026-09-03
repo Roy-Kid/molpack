@@ -64,6 +64,8 @@
 //! |---|---|
 //! | Engine entries | [`PackEngine`], [`GenCanPack`], [`CbmcGrow`], [`LogLevel`], [`PackResult`] |
 //! | Target  | [`Target`], [`CenteringMode`] |
+//! | Rigid placement vector | [`RigidView`] |
+//! | Solver seam (Rust-only) | [`solver::Solver`], [`solver::Budget`], [`solver::SolveOutcome`] |
 //! | Template bond graph + geometry reader | [`Topology`], [`TopologyError`], [`frame_positions`] |
 //! | AtomRestraint trait + 14 concrete structs | [`AtomRestraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…AtomRestraint` |
 //! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideCellRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
@@ -117,7 +119,7 @@ pub mod validation;
 
 #[cfg(feature = "io")]
 pub use cases::{ExampleCase, build_targets, example_dir_from_manifest, render_inp_script};
-pub use context::PackContext;
+pub use context::{PackContext, RigidView};
 pub use entry::PackResult;
 pub use entry::{PackEngine, PackSettings};
 pub use error::PackError;

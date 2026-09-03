@@ -5,19 +5,20 @@
 use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 
+use crate::context::RigidView;
 use crate::target::Target;
 
 /// The solver-native placement solution for the FREE copies, captured
-/// verbatim at the end of a run (placement-seeding spec): the packed
-/// (COM | Euler) vector, the per-copy centered reference conformers in
-/// xcart order, a per-copy atom-count fingerprint for validation, and the
+/// verbatim at the end of a run: the run's [`RigidView`] (the packed
+/// COM + Euler placement vector), the per-copy centered reference conformers
+/// in xcart order, a per-copy atom-count fingerprint for validation, and the
 /// simbox the run installed. A later entry continues on this state with
 /// zero conversion — reconstructing from the assembled frame would recompute
 /// COMs and lose bitwise continuity ((p − com) + com ≠ p).
 #[derive(Debug, Clone)]
 pub(crate) struct Placements {
-    /// `6 * n_free_mol`: COM block then Euler block (the solver `x`).
-    pub(crate) x: Vec<F>,
+    /// The run's rigid degrees of freedom, as the solver left them.
+    pub(crate) rigid: RigidView,
     /// Per-copy centered reference coordinates for the free atoms.
     pub(crate) coor: Vec<[F; 3]>,
     /// Atoms per free copy, in xcart (declared) order.

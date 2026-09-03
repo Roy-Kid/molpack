@@ -9,6 +9,16 @@
 //! which is what makes the handler set impossible to lose silently (the old
 //! `pack(&mut self)` drained its handlers on first use and ran headless on
 //! the second).
+//!
+//! The lifecycle also owns the run's rigid placement vector: one
+//! [`RigidView`], sized from the free copy count, is created next to the
+//! [`PackContext`](crate::context::PackContext), offered to
+//! [`PackEngine::prepare`], handed to the [`Solver`] as the state it
+//! optimizes, and — in the run's last stage, after the solver returns —
+//! expanded back into lab-frame coordinates with
+//! [`RigidView::write_xcart`]. No entry re-derives those coordinates from the
+//! placements itself, and the same view is what the result carries away for a
+//! later seeded run.
 
 pub(crate) mod result;
 pub(crate) mod setup;
@@ -20,12 +30,11 @@ use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use ndarray::Array1;
 
+use crate::context::RigidView;
 use crate::context::build::{ContextKnobs, build_context};
 use crate::error::PackError;
 use crate::handler::{Handler, LammpsLogHandler, LogLevel};
-use crate::initial::init_xcart_from_x;
-
-use crate::solver::{Budget, PlacementsMut, Solver};
+use crate::solver::{Budget, Solver};
 use crate::target::Target;
 use setup::{CellDecl, PeriodicSpec, broadcast_global_restraints, resolve_pack_space};
 
@@ -101,7 +110,8 @@ pub struct EngineSetup<'a> {
 ///
 /// Entries supply their [`Solver`] (and optionally validation and context
 /// preparation); the provided [`run`](Self::run) owns everything shared:
-/// space resolution, restraint broadcast, context construction, handler
+/// space resolution, restraint broadcast, context construction, the run's
+/// [`RigidView`] and the lab-frame rebuild that closes it out, handler
 /// bracketing (`on_start` / `on_finish`, log-handler injection), and frame
 /// assembly. `fdist` / `frest` come from the shared objective — the seam's
 /// one-ruler guarantee.
@@ -117,10 +127,18 @@ pub trait PackEngine: Sized {
     fn validate(&self, _targets: &[Target]) -> Result<(), PackError> {
         Ok(())
     }
-    /// Entry-specific context preparation (e.g. growth installs the box and
-    /// cell grid before its solver runs; a seeded GENCAN run injects the
-    /// seed placements into `sys.coor` / `x`; GENCAN's `initial()` does its
-    /// own otherwise).
+    /// Entry-specific context preparation, run once the solver is built and
+    /// before it takes over.
+    ///
+    /// `x` is the backing buffer of the run's [`RigidView`] — the flat
+    /// `6 * ntotmol_free` placement vector, COM block then Euler block — so an
+    /// entry that already knows where the molecules go writes it here. Growth
+    /// installs the box and cell grid; a seeded GENCAN run installs the seed's
+    /// conformers into `sys.coor` and its placements into `x` (see
+    /// [`RigidView::install_seed`]). An unseeded GENCAN run touches neither:
+    /// `sys.coor` already holds the templates' reference conformers from
+    /// context construction, and `x` stays zeroed until its own `initial()`
+    /// pass fills it.
     fn prepare(
         &self,
         _sys: &mut crate::context::PackContext,
@@ -243,7 +261,7 @@ pub trait PackEngine: Sized {
         };
         let built = build_context(&knobs, targets)?;
         let mut sys = built.sys;
-        let mut x = vec![0.0 as F; 6 * built.ntotmol_free];
+        let mut view = RigidView::fresh(built.ntotmol_free);
 
         let setup = EngineSetup {
             targets,
@@ -258,7 +276,7 @@ pub trait PackEngine: Sized {
 
         // Stages ③④: the algorithm, bracketed by the handlers.
         let mut solver = self.solver(&setup)?;
-        self.prepare(&mut sys, &mut x, &setup)?;
+        self.prepare(&mut sys, view.as_mut_slice(), &setup)?;
 
         let log = self.settings().log;
         let (tolerance, precision, seed) = {
@@ -284,29 +302,23 @@ pub trait PackEngine: Sized {
         sys.ntotmol = built.ntotmol_free;
 
         let budget = Budget::new(max_loops, precision);
-        let outcome = solver.solve(
-            &mut sys,
-            targets,
-            PlacementsMut::new(&mut x, built.ntotmol_free),
-            &budget,
-            &mut handlers,
-        );
+        let outcome = solver.solve(&mut sys, targets, &mut view, &budget, &mut handlers);
         // Stage ⑤: xcart rebuild, finish bracket, assembly.
         for itype in 0..built.ntype_with_fixed {
             sys.comptype[itype] = true;
         }
         sys.ntotmol = built.ntotmol_free;
-        init_xcart_from_x(&x, &mut sys);
+        view.write_xcart(&mut sys);
         for h in handlers.iter_mut() {
             h.on_finish(&sys);
         }
 
         // The placement solution, captured verbatim for cross-entry seeding
         // (placement-seeding spec): the frame below is derived VIEW data —
-        // re-deriving (coor, x) from it would recompute COMs and break
+        // re-deriving (coor, rigid) from it would recompute COMs and break
         // bitwise continuity.
         let placements = result::Placements {
-            x: x.clone(),
+            rigid: view.clone(),
             coor: sys.coor[..built.ntotat_free].to_vec(),
             copy_atoms: targets
                 .iter()
