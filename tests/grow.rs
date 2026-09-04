@@ -16,7 +16,7 @@
 //! `three_state_from_c_inf`). Growth driver + chain statistics +
 //! determinism land with Tasks 5-10.
 
-use molpack::grow::field::{OverlapField, Probe};
+use molpack::grow::field::{BlockKind, OverlapField, Probe};
 use molpack::grow::internal::InternalTree;
 use molpack::grow::{GrowConfig, GrowError, TorsionPrior};
 use molpack::{
@@ -671,6 +671,82 @@ fn field_hard_scale_softens() {
         ),
         Probe::Blocked => panic!("hard_scale 0.8 must admit d = 1.8 > 1.6"),
     }
+}
+
+/// `block_kind` classifies a hard-core hit as same-molecule self-block vs
+/// inter-chain. Every radius is 1.0 Å so contact at `hard_scale = 1.0` is
+/// 2.0 Å. Probe slot 1 (mol 7, template atom 1) sits 0.5 Å from each core
+/// neighbour — well inside that contact. Template atom 4 is the 1-5 partner
+/// (not excluded); template atoms 0–3 are on the exclusion list.
+#[test]
+fn field_block_kind_self_vs_inter() {
+    let mut field = OverlapField::new(
+        [0.0; 3],
+        [20.0; 3],
+        [true; 3],
+        vec![1.0; 4],
+        vec![7, 7, 7, 8],
+        vec![0, 1, 4, 0],
+        2.5,
+    );
+    let excluded: &[u32] = &[0, 1, 2, 3];
+    let p = [5.5, 5.0, 5.0];
+    let hard_scale = 1.0;
+
+    // Empty field / no hard-core hit → None.
+    assert_eq!(
+        field.block_kind(1, p, excluded, hard_scale),
+        None,
+        "empty field: no neighbour, so no hard-core hit"
+    );
+
+    // Same-molecule neighbour ON the exclusion list (template atom 0).
+    field.insert(0, [5.0, 5.0, 5.0]);
+    assert_eq!(
+        field.block_kind(1, p, excluded, hard_scale),
+        None,
+        "d = 0.5 inside contact 2.0, but template atom 0 is excluded → None"
+    );
+    field.remove(0);
+
+    // Far same-molecule non-excluded neighbour: d = 3.0 > contact 2.0.
+    field.insert(2, [8.5, 5.0, 5.0]);
+    assert_eq!(
+        field.block_kind(1, p, excluded, hard_scale),
+        None,
+        "d = 3.0 > contact 2.0: no hard-core hit → None"
+    );
+    field.remove(2);
+
+    // SelfBlocked: same mol, template atom 4 not excluded, inside the core.
+    field.insert(2, [5.0, 5.0, 5.0]);
+    assert_eq!(
+        field.block_kind(1, p, excluded, hard_scale),
+        Some(BlockKind::SelfBlocked),
+        "d = 0.5, mol 7 == mol 7, template atom 4 not excluded → SelfBlocked"
+    );
+    field.remove(2);
+
+    // InterChain: different molecule, inside the hard core.
+    field.insert(3, [5.0, 5.0, 5.0]);
+    assert_eq!(
+        field.block_kind(1, p, excluded, hard_scale),
+        Some(BlockKind::InterChain),
+        "d = 0.5, mol 8 ≠ mol 7 → InterChain"
+    );
+    field.remove(3);
+
+    // SelfBlocked wins: insert the same-mol neighbour first, then the
+    // inter-chain neighbour so the cell-list head is InterChain (a first-hit
+    // scan would otherwise return InterChain).
+    field.insert(2, [5.0, 5.0, 5.0]);
+    field.insert(3, [5.5, 5.5, 5.0]);
+    assert_eq!(
+        field.block_kind(1, p, excluded, hard_scale),
+        Some(BlockKind::SelfBlocked),
+        "same-mol non-excluded core hit must beat an inter-chain core hit \
+         (d_self = 0.5, d_inter = 0.5, both < contact 2.0)"
+    );
 }
 
 // ── Section: Task 4 — TorsionPrior: sampling + C∞ calibration ──────────────
@@ -2322,6 +2398,53 @@ fn grow_softening_needs_repeated_dead_ends() {
         );
     }
     assert_radscale_ladder(&events, min_hard_scale, "KG melt, max_loops = 1");
+}
+
+/// Softening must fire through intermittent commits, not only a consecutive
+/// dead-end streak.
+///
+/// Fixture: 20 × 32-bead zigzag chains (bond 1.53 Å) in a 22 Å periodic box
+/// at tolerance 2.0, `soften_after = 2`, default `min_hard_scale` 0.8,
+/// round-robin. 8 × 12 in 26³ is too sparse to dead-end; the 17 Å livelock of
+/// [`grow_dense_strict_core_terminates_unconverged`] is too jammed
+/// (two-in-a-row already fired the old consecutive gate).
+///
+/// Historical framing (2026-09-04): `Chain.deadends` reset on every successful
+/// commit, so `is_multiple_of(2)` never tripped through interleaved successes
+/// (`radscale = 1.000` for 960 rounds with `soften_after = 2`). The pin is the
+/// cumulative watermark (`deadends_total` vs `rungs_earned`).
+#[test]
+fn grow_ladder_fires_after_intermittent_commits() {
+    let (copies, n_beads, l) = (20usize, 32usize, 22.0 as F);
+    let (soften_after, min_hard_scale) = (2usize, 0.8 as F);
+    let events: StepEvents = Arc::new(Mutex::new(Vec::new()));
+    let cfg = GrowConfig::new(TorsionPrior::Uniform).with_soften_after(soften_after);
+    let target = Target::new(chain_frame(n_beads, 1.53, true), copies);
+    CbmcGrow::from_config(cfg)
+        .with_seed(7)
+        .with_tolerance(2.0)
+        .with_periodic_box([0.0; 3], [l; 3], [true; 3])
+        .with_handler(Box::new(Recorder {
+            events: Arc::clone(&events),
+            stop_after: usize::MAX,
+        }))
+        .run(&[target], 50)
+        .expect("a moderately dense grow pack must return Ok");
+
+    let events = events.lock().expect("recorder mutex");
+    assert!(
+        events.iter().any(|&(_, radscale, _, _)| radscale < 1.0),
+        "radscale stayed 1.0 for {} rounds with soften_after = {soften_after} — \
+         the ladder must fire on cumulative dead ends (`deadends_total` vs \
+         `rungs_earned`), not only on a consecutive streak (2026-09-04 defect: \
+         Chain.deadends reset on every successful commit)",
+        events.len()
+    );
+    assert_radscale_ladder(
+        &events,
+        min_hard_scale,
+        "20 × 32 beads in 22 Å, soften_after = 2",
+    );
 }
 
 /// `AnglePrior::Template` is the default AND the AA behavior: a default

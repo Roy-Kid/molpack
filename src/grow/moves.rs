@@ -16,7 +16,7 @@ use rand::rngs::SmallRng;
 use crate::context::PackContext;
 use crate::euler::eulerrmat;
 use crate::grow::config::GrowConfig;
-use crate::grow::field::{OverlapField, Probe};
+use crate::grow::field::{BlockKind, OverlapField, Probe};
 use crate::grow::internal::InternalTree;
 use crate::grow::prior::{AnglePrior, TorsionPrior};
 use crate::random::uniform01;
@@ -53,10 +53,31 @@ pub(super) struct Chain {
     pub(super) vars: Vec<F>,
     /// Per-stage visit counters — retraction revisits draw fresh streams.
     pub(super) visits: Vec<u32>,
-    /// Consecutive dead ends at the current stage.
-    pub(super) deadends: usize,
+    /// Cumulative dead ends this run; never cleared on commit or rung.
+    pub(super) deadends_total: usize,
+    /// Consecutive dead ends; cleared only on a successful commit.
+    pub(super) deadend_streak: usize,
+    /// Softening rungs this chain has actually taken this run.
+    pub(super) rungs_earned: usize,
     /// Relax epochs completed (keys the relax streams).
     pub(super) relax_epoch: u32,
+}
+
+impl Chain {
+    pub(super) fn record_dead_end(&mut self) {
+        self.deadends_total += 1;
+        self.deadend_streak += 1;
+    }
+    pub(super) fn clear_streak(&mut self) {
+        self.deadend_streak = 0;
+    }
+}
+
+/// Why a proposal trial was refused. Produced at the refusing atom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DeadEnd {
+    Overlap(BlockKind),
+    Restraint,
 }
 
 /// `(icart, template_atom, lab position)` of one placed atom.
@@ -172,8 +193,8 @@ pub(super) fn place_step_sampled(
     }
 }
 
-/// Propose one stage for `chain` against the snapshot field. `None` = dead
-/// end (every trial hard-blocked or restraint-rejected).
+/// Propose one stage for `chain` against the snapshot field. `Err` is the
+/// last failed trial's cause — no second walk, no extra RNG draw.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn propose(
     chain: &Chain,
@@ -184,7 +205,7 @@ pub(super) fn propose(
     origin: [F; 3],
     lengths: [F; 3],
     seed: u64,
-) -> Option<Proposal> {
+) -> Result<Proposal, DeadEnd> {
     let visit = chain.visits[chain.stage.min(chain.visits.len() - 1)];
     let mut rng = stream(
         seed,
@@ -197,6 +218,7 @@ pub(super) fn propose(
     let cap = 60.0 / cfg.selectivity.max(0.1);
 
     let mut trials: Vec<Trial> = Vec::with_capacity(cfg.trials);
+    let mut last_err: Option<DeadEnd> = None;
     if chain.stage == 0 {
         // Seed placement: anchor position + orientation trials.
         for _ in 0..cfg.trials {
@@ -213,7 +235,7 @@ pub(super) fn propose(
             ];
             let mut scratch = chain.coords.clone();
             sp.tree.place_seed(anchor, &rot, &mut scratch);
-            if let Some((atoms, penalty)) = score_atoms(
+            match score_atoms(
                 sp.tree.seed_atoms().iter().copied(),
                 &scratch,
                 chain,
@@ -223,11 +245,12 @@ pub(super) fn propose(
                 hard_scale,
                 cap,
             ) {
-                trials.push(Trial {
+                Ok((atoms, penalty)) => trials.push(Trial {
                     atoms,
                     var: None,
                     penalty,
-                });
+                }),
+                Err(e) => last_err = Some(e),
             }
         }
     } else {
@@ -246,7 +269,7 @@ pub(super) fn propose(
             });
             let mut scratch = chain.coords.clone();
             place_step_sampled(sp, k, &vars, &mut scratch, &mut rng);
-            if let Some((atoms, penalty)) = score_atoms(
+            match score_atoms(
                 sp.tree.step_atoms(k),
                 &scratch,
                 chain,
@@ -256,16 +279,17 @@ pub(super) fn propose(
                 hard_scale,
                 cap,
             ) {
-                trials.push(Trial {
+                Ok((atoms, penalty)) => trials.push(Trial {
                     atoms,
                     var,
                     penalty,
-                });
+                }),
+                Err(e) => last_err = Some(e),
             }
         }
     }
     if trials.is_empty() {
-        return None;
+        return Err(last_err.expect("at least one trial was attempted"));
     }
 
     // Rosenbluth selection among the surviving trials (log-w safe: weights
@@ -288,7 +312,7 @@ pub(super) fn propose(
     }
     let selected = trials.swap_remove(chosen);
     trials.sort_by(|a, b| a.penalty.total_cmp(&b.penalty));
-    Some(Proposal {
+    Ok(Proposal {
         atoms: selected.atoms,
         var: selected.var,
         alternatives: trials,
@@ -296,8 +320,8 @@ pub(super) fn propose(
 }
 
 /// Score one trial's atoms against the field and the restraints.
-/// `Some((atoms, ΣU))`, or `None` when any atom is hard-blocked or violates
-/// a restraint (restraints are hard during growth — spec Design §3).
+/// `Ok((atoms, ΣU))` when every atom has room; `Err` on the first refusing
+/// atom (restraints are hard during growth — spec Design §3).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn score_atoms(
     atoms: impl Iterator<Item = usize>,
@@ -308,13 +332,13 @@ pub(super) fn score_atoms(
     restraints: &RestraintTable,
     hard_scale: F,
     cap: F,
-) -> Option<(Vec<PlacedAtom>, F)> {
+) -> Result<(Vec<PlacedAtom>, F), DeadEnd> {
     let mut placed = Vec::new();
     let mut penalty = 0.0;
     for a in atoms {
         let slot = chain.base + a;
         if restraints.violated(slot, &scratch[a]) {
-            return None;
+            return Err(DeadEnd::Restraint);
         }
         match field.probe(
             slot,
@@ -324,35 +348,57 @@ pub(super) fn score_atoms(
             sp.cfg.soft_shell,
             cap,
         ) {
-            Probe::Blocked => return None,
+            Probe::Blocked => {
+                let kind = field
+                    .block_kind(slot, scratch[a], sp.tree.exclusions(a), hard_scale)
+                    .unwrap_or(BlockKind::InterChain);
+                return Err(DeadEnd::Overlap(kind));
+            }
             Probe::Room(p) => penalty += p,
         }
         placed.push((slot, a, scratch[a]));
     }
-    Some((placed, penalty))
+    Ok((placed, penalty))
 }
 
 /// Commit a proposal against the live field: probe-then-insert per atom so
 /// this round's earlier commits (and the step's own atoms) are seen. Falls
-/// back to the proposal's alternatives; `false` = nothing survived.
+/// back to the proposal's alternatives; `Err` = nothing survived.
+///
+/// On [`Probe::Blocked`], the refusal is classified **before** rollback so
+/// partial inserts of this candidate still sit in the field (same-molecule
+/// siblings are [`BlockKind::SelfBlocked`]). Across candidates the reduced
+/// kind is SelfBlocked-wins: any [`BlockKind::SelfBlocked`] beats
+/// [`BlockKind::InterChain`]; a later alternative does not overwrite an
+/// earlier SelfBlocked (last-alternative-wins is forbidden).
 pub(super) fn commit(
     chain: &mut Chain,
     sp: &Species,
     field: &mut OverlapField,
     prop: Proposal,
     hard_scale: F,
-) -> bool {
+) -> Result<(), BlockKind> {
     let cap = 60.0 / sp.cfg.selectivity.max(0.1);
     let mut candidates = Vec::with_capacity(1 + prop.alternatives.len());
     candidates.push((prop.atoms, prop.var));
     for t in prop.alternatives {
         candidates.push((t.atoms, t.var));
     }
+    let mut reduced: Option<BlockKind> = None;
     'cand: for (atoms, var) in candidates {
         let mut inserted: Vec<usize> = Vec::with_capacity(atoms.len());
         for &(slot, a, p) in &atoms {
             match field.probe(slot, p, sp.tree.exclusions(a), hard_scale, 0.0, cap) {
                 Probe::Blocked => {
+                    let kind = field
+                        .block_kind(slot, p, sp.tree.exclusions(a), hard_scale)
+                        .unwrap_or(BlockKind::InterChain);
+                    reduced = Some(match (reduced, kind) {
+                        (Some(BlockKind::SelfBlocked), _) | (_, BlockKind::SelfBlocked) => {
+                            BlockKind::SelfBlocked
+                        }
+                        (_, k) => k,
+                    });
                     for &s in &inserted {
                         field.remove(s);
                     }
@@ -374,12 +420,12 @@ pub(super) fn commit(
         let idx = chain.stage.min(chain.visits.len() - 1);
         chain.visits[idx] += 1;
         chain.stage += 1;
-        return true;
+        return Ok(());
     }
     // Nothing survived commit-time validation. The caller counts the visit
     // (uniformly for commit failures and proposal dead ends) so the next
     // proposal draws a fresh stream.
-    false
+    Err(reduced.expect("commit classified every rejected candidate"))
 }
 
 pub(super) fn step_var_of(chain: &Chain, sp: &Species) -> Option<usize> {

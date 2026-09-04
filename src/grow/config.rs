@@ -33,14 +33,16 @@ pub struct GrowConfig {
     pub(crate) relax_every: usize,
     /// Tail length (in steps) of the periodic regrowth.
     pub(crate) relax_window: usize,
-    /// Consecutive dead ends at one step before the hard core is softened.
+    /// Cumulative dead ends on a chain per softening rung (`rung_due`
+    /// watermark; one rung multiplies the hard-core scale by 0.97). Not
+    /// consecutive: commits do not reset this cadence.
     pub(crate) soften_after: usize,
-    /// Floor for the *hard-core scale*: the factor multiplying the pair
-    /// contact distance (in Å) a candidate placement must clear. It starts at
-    /// 1.0 — the full declared tolerance — and the softening ladder walks it
-    /// down in 3 % rungs, never below this floor. Default 0.8, i.e. 80 % of
-    /// tolerance: the push-off bound of Auhl et al. 2003, below which a
-    /// downstream force-field relaxation can no longer pull contacts apart.
+    /// Floor for the dimensionless hard-core scale. `1.0` is full declared
+    /// contact (`radius_i + radius_j`); the softening ladder walks the scale
+    /// down by 0.97 per rung, never below this floor. Default 0.8 — Auhl's
+    /// 0.8σ push-off bound, where σ is the excluded-volume (bead) diameter
+    /// (Auhl et al. 2003). Contacts tighter than that floor are a poor
+    /// starting point for a subsequent excluded-volume push-off.
     pub(crate) min_hard_scale: F,
     /// Intramolecular exclusion depth in bonds (3 = 1-2/1-3/1-4, the
     /// all-atom convention; CG templates typically use 1 or 2).
@@ -136,19 +138,36 @@ impl GrowConfig {
         self
     }
 
-    /// Consecutive dead ends at one step before the hard core softens.
+    /// Cumulative dead ends on a chain before the hard core softens by one rung
+    /// (one rung multiplies the dimensionless hard-core scale by 0.97).
+    ///
+    /// The clock is **cumulative** dead ends on that chain (`deadends_total`
+    /// versus the `rungs_earned` watermark), **not** consecutive. A successful
+    /// commit does not reset the softening counter. Clamped ≥ 1; default 50.
+    ///
+    /// The growth driver keeps three private readers. `rung_due` consumes this
+    /// cadence (`deadends_total` against `rungs_earned`) to earn a softening
+    /// rung. `force_due` consumes `2 × soften_after` consecutive
+    /// `deadend_streak` at the `min_hard_scale` floor to force-place a wedged
+    /// chain. `retract_depth` reads the consecutive streak and the separate
+    /// [`with_retract`](Self::with_retract) knob, never this counter.
+    ///
+    /// The Python wheel and `docs/python/api-reference.md` still describe this
+    /// knob as consecutive; that page is left stale on purpose until
+    /// special-bonds-06.
     pub fn with_soften_after(mut self, attempts: usize) -> Self {
         self.soften_after = attempts.max(1);
         self
     }
 
-    /// Softening floor for the hard-core scale — the factor multiplying the
-    /// pair contact distance (in Å) a candidate placement must clear. 1.0 is
-    /// the full declared tolerance, and the softening ladder walks the scale
-    /// down in 3 % rungs but never past this floor. Clamped to `[0.0, 1.0]`;
-    /// the default 0.8 (80 % of tolerance) is the push-off bound of Auhl et al.
-    /// 2003, below which a downstream force-field relaxation can no longer pull
-    /// contacts apart.
+    /// Softening floor for the dimensionless hard-core scale.
+    ///
+    /// `hard_scale` is dimensionless: `1.0` is full declared contact
+    /// (`radius_i + radius_j`); the ladder walks it down by 0.97 per rung
+    /// to this floor. Clamped to `[0.0, 1.0]`; default 0.8 is Auhl's 0.8σ
+    /// push-off bound, where σ is the excluded-volume (bead) diameter
+    /// (Auhl et al. 2003). Contacts tighter than that floor are a poor
+    /// starting point for a subsequent excluded-volume push-off.
     pub fn with_min_hard_scale(mut self, scale: F) -> Self {
         self.min_hard_scale = scale.clamp(0.0, 1.0);
         self

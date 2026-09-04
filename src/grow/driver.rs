@@ -20,12 +20,16 @@
 //! sequence, which is both a debugging property and the other half of the
 //! parallel-equivalence guarantee.
 //!
-//! Dead ends retract (recoil at feeler depth 1 ≡ CBMC); repeated dead ends
-//! soften the hard core down to a floor. Softening is a **ladder**: a rung is
-//! earned when a single chain reaches another `soften_after` dead ends, and the
-//! driver takes at most one rung per round even when two chains earn one in the
-//! same round, because the rung is the driver's global step, not a per-chain
-//! one. [`StageOutcome::softened`](crate::StageOutcome::softened) counts
+//! Dead ends (a proposal or commit that cannot place the pending atoms)
+//! retract already-grown steps and may soften the hard core down to a floor.
+//! Three clocks feed three readers: `deadend_streak` (cleared on a successful
+//! commit) drives `retract_depth` and floor-level `force_due`;
+//! `deadends_total` with `rungs_earned` is the cumulative watermark that
+//! `rung_due` reads to earn a softening rung (one rung multiplies the
+//! dimensionless hard-core scale by 0.97). The driver takes at most one
+//! rung per round even when two chains earn one in the same round, because
+//! the rung is the driver's global step, not a per-chain one.
+//! [`StageOutcome::softened`](crate::StageOutcome::softened) counts
 //! each such shrink *and* each forced
 //! placement, and a structure is only `converged` when that counter is zero, so
 //! the constructive no-overlap guarantee is asserted, never hoped for.
@@ -45,11 +49,11 @@ use crate::context::pack_state::evaluate_unscaled;
 use crate::context::{PackState, Placed};
 use crate::error::PackError;
 use crate::grow::config::{GrowConfig, GrowError};
-use crate::grow::field::OverlapField;
+use crate::grow::field::{BlockKind, OverlapField};
 use crate::grow::internal::InternalTree;
 use crate::grow::moves::{
-    Chain, Proposal, RestraintTable, SALT_SHUFFLE, Species, commit, force_place, propose, relax,
-    retract, stream, uniform,
+    Chain, DeadEnd, Proposal, RestraintTable, SALT_SHUFFLE, Species, commit, force_place, propose,
+    relax, retract, stream, uniform,
 };
 use crate::handler::{Handler, PhaseInfo, StageInfo, StepInfo};
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
@@ -184,7 +188,9 @@ impl Stage for GrowStage {
                     coords: vec![[0.0; 3]; na],
                     vars: vec![0.0; self.species[itype].tree.n_vars()],
                     visits: vec![0; n_steps + 1],
-                    deadends: 0,
+                    deadends_total: 0,
+                    deadend_streak: 0,
+                    rungs_earned: 0,
                     relax_epoch: 0,
                 });
                 mol += 1;
@@ -228,6 +234,8 @@ impl Stage for GrowStage {
 
         let restraint_table = RestraintTable::from_context(sys);
         let mut aborted = false;
+        let mut self_blocked = 0usize;
+        let mut inter_chain = 0usize;
         let mut round: u64 = 0;
         loop {
             let done = chains
@@ -275,7 +283,8 @@ impl Stage for GrowStage {
 
             // Proposal phase: every pending chain scores against the
             // round-start snapshot (no commits have happened yet).
-            let mut proposals: Vec<Option<Option<Proposal>>> =
+            // Outer `None` = this chain was skipped this round.
+            let mut proposals: Vec<Option<Result<Proposal, DeadEnd>>> =
                 (0..n_chains).map(|_| None).collect();
             for &c in &order {
                 let sp = &self.species[chains[c].itype];
@@ -303,27 +312,44 @@ impl Stage for GrowStage {
                 };
                 let sp_idx = chains[c].itype;
                 // Force only a chain that is truly wedged: the core is at its
-                // floor AND the chain kept failing through the escalating
-                // retractions (including full restarts). Anything less keeps
+                // floor AND the streak from *before* this round kept failing
+                // through the escalating retractions. Anything less keeps
                 // retrying — forced placements are the last resort that
                 // breaks the constructive guarantee.
-                // `2 * soften_after` = two full ladder rungs of dead ends past
-                // the floor; one rung's worth is normal softening pressure, not
-                // a wedged chain.
-                let force = hard_scale <= min_hard_scale
-                    && chains[c].deadends >= 2 * self.species[sp_idx].cfg.soften_after;
+                let force = force_due(
+                    hard_scale,
+                    min_hard_scale,
+                    chains[c].deadend_streak,
+                    self.species[sp_idx].cfg.soften_after,
+                );
                 let committed = match prop {
-                    Some(p) => commit(
+                    Ok(p) => match commit(
                         &mut chains[c],
                         &self.species[sp_idx],
                         &mut field,
                         p,
                         hard_scale,
-                    ),
-                    None => false,
+                    ) {
+                        Ok(()) => true,
+                        Err(kind) => {
+                            match kind {
+                                BlockKind::SelfBlocked => self_blocked += 1,
+                                BlockKind::InterChain => inter_chain += 1,
+                            }
+                            false
+                        }
+                    },
+                    Err(DeadEnd::Overlap(kind)) => {
+                        match kind {
+                            BlockKind::SelfBlocked => self_blocked += 1,
+                            BlockKind::InterChain => inter_chain += 1,
+                        }
+                        false
+                    }
+                    Err(DeadEnd::Restraint) => false,
                 };
                 if committed {
-                    chains[c].deadends = 0;
+                    chains[c].clear_streak();
                     continue;
                 }
                 // Every failed attempt — proposal dead end or commit-time
@@ -335,10 +361,10 @@ impl Stage for GrowStage {
                     let idx = stage.min(chains[c].visits.len() - 1);
                     chains[c].visits[idx] += 1;
                 }
-                // Dead end. A chain that exhausted the escape ladder at the
-                // softening floor is force-placed so it stops blocking the
-                // round loop — each forced placement is counted as a
-                // softening event and the result is not converged.
+                // A chain that exhausted the escape ladder at the softening
+                // floor is force-placed so it stops blocking the round loop —
+                // each forced placement is counted as a softening event and
+                // the result is not converged. Force does not increment clocks.
                 if force {
                     force_place(
                         &mut chains[c],
@@ -351,32 +377,25 @@ impl Stage for GrowStage {
                     softened += 1;
                     continue;
                 }
-                chains[c].deadends += 1;
+                chains[c].record_dead_end();
                 let cfg = &self.species[sp_idx].cfg;
-                // The failure count resets only on a successful commit —
-                // softening must NOT reset it, or the retraction depth
-                // never escalates and a chain whose growth front is wedged
-                // in a dense pocket replays shallow retractions forever
-                // (a bonded atom is not a free insertion: it must sit on
-                // its parent's bond sphere, so escaping a pocket needs the
-                // deep retractions).
-                // The ladder is the ONLY path to a smaller hard core: a rung
-                // costs `soften_after` dead ends on THIS chain. An exhausted
-                // budget of any kind may not shrink the core per dead end —
-                // that turns the ladder into a free-fall (1.0 → the floor
-                // inside one round, debt D-01 (i)); a run that cannot make
-                // progress terminates through the round cap instead.
-                if chains[c].deadends.is_multiple_of(cfg.soften_after)
-                    && !rung_this_round
+                // Streak (cleared on commit) feeds retract; total never
+                // resets, so a missed rung stays due. The ladder is the ONLY
+                // path to a smaller hard core — a per-dead-end shrink is the
+                // free-fall of debt D-01 (i).
+                if rung_due(
+                    chains[c].deadends_total,
+                    chains[c].rungs_earned,
+                    cfg.soften_after,
+                ) && !rung_this_round
                     && hard_scale > min_hard_scale
                 {
                     hard_scale = (hard_scale * 0.97).max(min_hard_scale);
                     rung_this_round = true;
+                    chains[c].rungs_earned += 1;
                     softened += 1;
                 }
-                let depth = cfg
-                    .retract
-                    .saturating_mul(1 << (chains[c].deadends / 4).min(12));
+                let depth = retract_depth(cfg.retract, chains[c].deadend_streak);
                 retract(&mut chains[c], &self.species[sp_idx], &mut field, depth);
             }
 
@@ -447,6 +466,19 @@ impl Stage for GrowStage {
         // forced placement breaks the constructive guarantee exactly like a
         // softening rung and is counted as one; the result stays unconverged.
         if aborted {
+            let denom = self_blocked + inter_chain;
+            if denom > 0 {
+                log::warn!(
+                    "growth aborted: {self_blocked}/{denom} overlap dead ends were self-blocked. \
+                     If intramolecular contacts dominate, shrink radii with Target::with_atom_radius \
+                     or widen intramolecular exclusions / special bonds"
+                );
+            } else {
+                log::warn!(
+                    "growth aborted. If intramolecular contacts dominate, shrink radii with \
+                     Target::with_atom_radius or widen intramolecular exclusions / special bonds"
+                );
+            }
             for chain in &mut chains {
                 let sp = &self.species[chain.itype];
                 while chain.stage <= sp.tree.n_steps() {
@@ -478,5 +510,77 @@ impl Stage for GrowStage {
         let (_, fdist, frest) = evaluate_unscaled(sys, x.as_slice());
         let converged = !aborted && softened == 0 && fdist == 0.0 && frest < budget.precision;
         Ok(StageOutcome::new(converged, softened))
+    }
+}
+
+/// Retract depth from the consecutive dead-end streak.
+///
+/// `base.saturating_mul(1 << (streak / 4).min(12))`. Reads `deadend_streak`
+/// only — never `deadends_total`. Feeding the cumulative clock would restore
+/// the exponential whole-chain retract of debt D-01.
+fn retract_depth(base: usize, streak: usize) -> usize {
+    base.saturating_mul(1 << (streak / 4).min(12))
+}
+
+/// Whether this chain has earned another softening rung.
+///
+/// `total >= (rungs_earned + 1).saturating_mul(soften_after)`. Reads
+/// `deadends_total` against the `rungs_earned` watermark; never
+/// `deadend_streak`. A missed take stays due, and a successful commit does
+/// not reset the cumulative counter.
+fn rung_due(total: usize, rungs_earned: usize, soften_after: usize) -> bool {
+    total >= (rungs_earned + 1).saturating_mul(soften_after)
+}
+
+/// Whether this chain is wedged at the softening floor and must force-place.
+///
+/// `hard_scale <= min && streak >= 2 * soften_after` (saturating). Reads
+/// `deadend_streak` at the floor; never `deadends_total` or `rungs_earned`.
+/// `hard_scale` is dimensionless (`1.0` = full declared contact).
+fn force_due(hard_scale: F, min: F, streak: usize, soften_after: usize) -> bool {
+    hard_scale <= min && streak >= 2usize.saturating_mul(soften_after)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retract_depth_reads_deadend_streak() {
+        assert_eq!(retract_depth(10, 0), 10);
+        assert_eq!(retract_depth(10, 3), 10);
+        assert_eq!(retract_depth(10, 4), 20);
+        assert_eq!(retract_depth(10, 8), 40);
+        // Shift cap: `(streak / 4).min(12)` — 48 consecutive is 12 bins.
+        assert_eq!(retract_depth(10, 48), 10 * (1usize << 12));
+    }
+
+    #[test]
+    fn force_due_reads_streak_at_floor() {
+        // Spec edge: streak 0 at the floor must not force-place.
+        assert!(!force_due(0.8 as F, 0.8 as F, 0, 50));
+        assert!(!force_due(0.8 as F, 0.8 as F, 99, 50));
+        assert!(force_due(0.8 as F, 0.8 as F, 100, 50));
+        assert!(!force_due(0.81 as F, 0.8 as F, 100, 50));
+    }
+
+    #[test]
+    fn rung_due_uses_watermark() {
+        assert!(!rung_due(0, 0, 50));
+        assert!(!rung_due(49, 0, 50));
+        assert!(rung_due(50, 0, 50));
+        // First rung already taken; next is due at 100, not at 50 again.
+        assert!(!rung_due(50, 1, 50));
+        assert!(rung_due(100, 1, 50));
+        assert!(rung_due(usize::MAX, 0, 2));
+    }
+
+    #[test]
+    fn missed_rung_still_due() {
+        // The old `is_multiple_of` gate skipped a missed take (3 % 2 != 0)
+        // until the next multiple. A watermark stays due once crossed.
+        assert!(rung_due(3, 0, 2));
+        assert!(rung_due(2, 0, 2));
+        assert!(!rung_due(3, 1, 2));
     }
 }

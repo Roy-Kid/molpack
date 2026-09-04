@@ -78,12 +78,30 @@ impl CbmcGrow {
         self.config = self.config.with_relax(every, window);
         self
     }
-    /// Consecutive dead ends before the hard core softens.
+    /// Cumulative dead ends on a chain before the hard core softens by one rung
+    /// (one rung multiplies the dimensionless hard-core scale by 0.97).
+    ///
+    /// Forwards to [`GrowConfig::with_soften_after`]. The clock is **cumulative**
+    /// dead ends on that chain (`deadends_total` versus the `rungs_earned`
+    /// watermark), **not** consecutive. A successful commit does not reset
+    /// the softening counter.
+    ///
+    /// `rung_due` consumes this cadence; `force_due` consumes
+    /// `2 × soften_after` consecutive streak at the floor; `retract_depth`
+    /// reads the streak and the separate retract knob, never this counter.
+    /// The Python wheel and `docs/python/api-reference.md` still describe this
+    /// knob as consecutive; that page is left stale on purpose until
+    /// special-bonds-06.
     pub fn with_soften_after(mut self, attempts: usize) -> Self {
         self.config = self.config.with_soften_after(attempts);
         self
     }
-    /// Softening floor for the hard-core scale.
+    /// Softening floor for the dimensionless hard-core scale.
+    ///
+    /// Forwards to [`GrowConfig::with_min_hard_scale`]. `1.0` is full declared
+    /// contact (`radius_i + radius_j`); the ladder walks the scale down by
+    /// 0.97 per rung to this floor (default 0.8, Auhl's 0.8σ floor, where σ
+    /// is the excluded-volume / bead diameter).
     pub fn with_min_hard_scale(mut self, scale: F) -> Self {
         self.config = self.config.with_min_hard_scale(scale);
         self

@@ -113,9 +113,10 @@ pub struct StepInfo {
     /// Improvement from last iteration, as percentage (positive = improving).
     pub improvement_pct: F,
     /// GENCAN: current radius scaling factor (starts at discale, decays to
-    /// 1.0). Growth: the hard-core scale — the factor multiplying the pair
-    /// contact distance a placement must clear — which starts at 1.0 and steps
-    /// down in rungs to the floor set by
+    /// 1.0). Growth: the dimensionless hard-core scale — the factor multiplying
+    /// the pair contact distance a placement must clear (`1.0` = full declared
+    /// contact) — which starts at 1.0 and steps down in rungs of 0.97 to the
+    /// floor set by
     /// [`GrowConfig::with_min_hard_scale`](crate::grow::GrowConfig::with_min_hard_scale).
     pub radscale: F,
     /// Convergence precision target.

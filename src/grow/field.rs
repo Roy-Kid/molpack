@@ -3,13 +3,15 @@
 //! Holds every atom placed so far in a uniform cell list over the periodic
 //! box, and answers one question: *may this atom go here, and how roomy is it?*
 //!
-//! Two radii per pair. Inside the **hard core** (`radius_i + radius_j`, the
-//! same contact distance the GENCAN entry enforces) a
-//! placement is refused outright, so a completed structure satisfies molpack's
-//! own overlap criterion by construction rather than by convergence. Between
-//! the hard core and the **soft shell** the placement is allowed but charged,
-//! which is what biases growth towards the roomy directions instead of merely
-//! the legal ones.
+//! Two radii per pair. Inside the **hard core**
+//! (`(radius_i + radius_j) * hard_scale`, radii in Å, `hard_scale`
+//! dimensionless with `1.0` = the same contact distance the GENCAN entry
+//! enforces) a placement is refused outright, so a completed structure
+//! satisfies molpack's own overlap criterion by construction rather than by
+//! convergence. Between the scaled hard core and the **soft shell** (an extra
+//! width in Å, charged only for a different-molecule neighbour) the
+//! placement is allowed but charged, which is what biases growth towards
+//! the roomy directions instead of merely the legal ones.
 //!
 //! Insertion and removal are both O(1) amortised — the growth driver retracts
 //! and regrows constantly, so removal cannot be a rebuild.
@@ -54,6 +56,19 @@ pub enum Probe {
     Blocked,
     /// Allowed, with a dimensionless crowding penalty (`0.0` = clear).
     Room(F),
+}
+
+/// Why a candidate sat inside another atom's hard core.
+///
+/// [`OverlapField::probe`] still returns the unit variant [`Probe::Blocked`]
+/// on the first such neighbour and does not produce this classification —
+/// call [`OverlapField::block_kind`] afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockKind {
+    /// A same-molecule, non-excluded neighbour sits inside the hard core.
+    SelfBlocked,
+    /// A different-molecule neighbour sits inside the hard core.
+    InterChain,
 }
 
 impl OverlapField {
@@ -217,11 +232,20 @@ impl OverlapField {
 
     /// Score a candidate position for `slot`.
     ///
-    /// `excluded` lists same-molecule template atom indices held at template
-    /// geometry (sorted). `hard_scale` shrinks the hard core — the growth
-    /// driver lowers it only when a placement would otherwise dead-end, and
-    /// reports how often it had to. Accumulation stops once the penalty passes
-    /// `penalty_cap`, since the Rosenbluth weight is already negligible there.
+    /// `p` is a lab-frame position in Å. `excluded` lists same-molecule
+    /// template atom indices held at template geometry (sorted). `hard_scale`
+    /// is dimensionless: `1.0` is full declared contact (`radius_i + radius_j`);
+    /// the growth driver walks it down by 0.97 per softening rung to
+    /// `min_hard_scale` (default 0.8, Auhl's 0.8 × σ floor, where σ is the
+    /// excluded-volume / bead diameter) only when a placement would otherwise
+    /// dead-end, and reports how often it had to. For a different-molecule
+    /// pair, `soft_shell` is an extra width in Å added to that *scaled*
+    /// contact: `contact < d < contact + soft_shell` is allowed but charged.
+    /// Same-molecule non-excluded pairs get the hard core only (no soft
+    /// charge) — intramolecular statistics belong to the priors.
+    /// Accumulation of that dimensionless crowding penalty stops once it
+    /// passes `penalty_cap`, since the configurational-bias (Rosenbluth)
+    /// weight is already negligible there.
     pub fn probe(
         &self,
         slot: usize,
@@ -232,7 +256,6 @@ impl OverlapField {
         penalty_cap: F,
     ) -> Probe {
         let p = self.wrap(p);
-        let r_i = self.radius[slot];
         let mol = self.mol_of[slot];
         let mut penalty = 0.0;
         let c0 = self.unflat(self.cell_index(p));
@@ -256,14 +279,11 @@ impl OverlapField {
                         // Skip the probing slot's own (old) position, like
                         // `nearest` does — a relax pass may score a new
                         // candidate before removing the old placement.
-                        if q == slot
-                            || (self.mol_of[q] == mol
-                                && excluded.binary_search(&self.atom_of[q]).is_ok())
-                        {
+                        if self.skip_neighbour(slot, q, excluded) {
                             continue;
                         }
                         let d2 = self.dist2(p, self.pos[q]);
-                        let contact = (r_i + self.radius[q]) * hard_scale;
+                        let contact = self.hard_contact(slot, q, hard_scale);
                         if d2 < contact * contact {
                             return Probe::Blocked;
                         }
@@ -295,10 +315,66 @@ impl OverlapField {
         Probe::Room(penalty)
     }
 
+    /// Classify a hard-core refusal at `p` for `slot`.
+    ///
+    /// Post-failure query: call after [`Self::probe`] returns [`Probe::Blocked`].
+    /// Same skip and scaled-core test as `probe`'s hard-core arm. `p` is a
+    /// lab-frame position in Å. `hard_scale` is dimensionless (`1.0` = full
+    /// declared contact `radius_i + radius_j`). The soft shell is ignored.
+    ///
+    /// Same-molecule hits win: the first [`BlockKind::SelfBlocked`] returns
+    /// immediately; [`BlockKind::InterChain`] is remembered until the 27-cell
+    /// neighbourhood is exhausted. `probe` does not call this and stays
+    /// first-hit (returns `Blocked` on the first core neighbour, without a
+    /// kind).
+    ///
+    /// Returns `None` when no non-excluded neighbour sits inside the scaled
+    /// core (empty field, excluded-only neighbours, or every hit outside
+    /// contact).
+    pub fn block_kind(
+        &self,
+        slot: usize,
+        p: [F; 3],
+        excluded: &[u32],
+        hard_scale: F,
+    ) -> Option<BlockKind> {
+        let p = self.wrap(p);
+        let c0 = self.unflat(self.cell_index(p));
+        let mut seen = [usize::MAX; 27];
+        let mut n_seen = 0usize;
+        let mut inter = None;
+        for dz in -1i64..=1 {
+            for dy in -1i64..=1 {
+                for dx in -1i64..=1 {
+                    let Some(cell) = self.shift(c0, [dx, dy, dz]) else {
+                        continue;
+                    };
+                    if seen[..n_seen].contains(&cell) {
+                        continue;
+                    }
+                    seen[n_seen] = cell;
+                    n_seen += 1;
+                    let mut cur = self.head[cell];
+                    while cur >= 0 {
+                        let q = cur as usize;
+                        cur = self.next[q];
+                        match self.hard_core_kind(slot, q, p, excluded, hard_scale) {
+                            Some(BlockKind::SelfBlocked) => {
+                                return Some(BlockKind::SelfBlocked);
+                            }
+                            Some(BlockKind::InterChain) => inter = Some(BlockKind::InterChain),
+                            None => {}
+                        }
+                    }
+                }
+            }
+        }
+        inter
+    }
+
     /// Smallest non-excluded distance from `p` to any placed atom.
     pub fn nearest(&self, slot: usize, p: [F; 3], excluded: &[u32]) -> F {
         let p = self.wrap(p);
-        let mol = self.mol_of[slot];
         let c0 = self.unflat(self.cell_index(p));
         let mut best = F::INFINITY;
         let mut seen = [usize::MAX; 27];
@@ -318,10 +394,7 @@ impl OverlapField {
                     while cur >= 0 {
                         let q = cur as usize;
                         cur = self.next[q];
-                        if q == slot
-                            || (self.mol_of[q] == mol
-                                && excluded.binary_search(&self.atom_of[q]).is_ok())
-                        {
+                        if self.skip_neighbour(slot, q, excluded) {
                             continue;
                         }
                         let d2 = self.dist2(p, self.pos[q]);
@@ -333,6 +406,48 @@ impl OverlapField {
             }
         }
         best.sqrt()
+    }
+
+    /// Self-slot and same-molecule excluded template atoms — shared by
+    /// `probe`, `nearest`, and `block_kind`.
+    #[inline]
+    fn skip_neighbour(&self, slot: usize, q: usize, excluded: &[u32]) -> bool {
+        q == slot
+            || (self.mol_of[q] == self.mol_of[slot]
+                && excluded.binary_search(&self.atom_of[q]).is_ok())
+    }
+
+    /// Scaled hard-core contact distance (Å) for the (`slot`, `q`) pair.
+    /// `hard_scale` is dimensionless (`1.0` = full declared contact
+    /// `radius_i + radius_j`).
+    #[inline]
+    fn hard_contact(&self, slot: usize, q: usize, hard_scale: F) -> F {
+        (self.radius[slot] + self.radius[q]) * hard_scale
+    }
+
+    /// Hard-core hit kind, or `None` if skipped or outside the scaled core.
+    #[inline]
+    fn hard_core_kind(
+        &self,
+        slot: usize,
+        q: usize,
+        p: [F; 3],
+        excluded: &[u32],
+        hard_scale: F,
+    ) -> Option<BlockKind> {
+        if self.skip_neighbour(slot, q, excluded) {
+            return None;
+        }
+        let contact = self.hard_contact(slot, q, hard_scale);
+        if self.dist2(p, self.pos[q]) < contact * contact {
+            if self.mol_of[q] == self.mol_of[slot] {
+                Some(BlockKind::SelfBlocked)
+            } else {
+                Some(BlockKind::InterChain)
+            }
+        } else {
+            None
+        }
     }
 
     #[inline]
