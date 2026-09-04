@@ -51,12 +51,13 @@ water = Target(frame, count=100).with_name("water")
 ## Read-only properties
 
 ```python
-target.name        # Optional[str]
-target.natoms      # number of template atoms
-target.count       # requested copies
-target.elements    # list[str]
-target.radii       # list[float]
-target.is_fixed    # True if placement is frozen (see below)
+target.name           # Optional[str]
+target.natoms         # number of template atoms
+target.count          # requested copies
+target.elements       # list[str]
+target.radii          # list[float]
+target.special_bonds  # list[float] — intramolecular skip table
+target.is_fixed       # True if placement is frozen (see below)
 ```
 
 All builder methods are **immutable** — they return a new `Target`.
@@ -153,6 +154,34 @@ target = target.with_atom_restraint(
     `with_atom_restraint` uses **0-based** indices, matching Rust
     convention. If you are porting from a Packmol `.inp` file (which
     uses 1-based indices), subtract 1 at the call site.
+
+## Packing radii
+
+The packer separates two atoms by the sum of their packing radii;
+without an override every atom uses the global `tolerance / 2`. Van der
+Waals radii from the source file are not used as packing radii.
+
+```python
+target = target.with_radius(2.0)                    # every atom
+target = target.with_atom_radius(h_indices, 0.85)   # then explicit hydrogen
+```
+
+All-atom chains with explicit hydrogen keep the default depth-3 skip
+table and shrink hydrogen here (~0.85 Å). Indices are **0-based**.
+
+## Intramolecular skip table
+
+Atom pairs close along the chain are exempt from the hard core. The
+table is per-target data, not an engine knob:
+
+```python
+target.special_bonds  # [0.0, 0.0, 0.0, 1.0] by default (depth 3)
+cg = target.with_special_bonds([0.0, 0.0, 1.0])  # CG depth 2
+```
+
+Empty, non-finite, or out-of-range weights raise `ValueError`.
+Fractional weights are stored and refused later at `CbmcGrow.run`. See
+[Chain growth](growth.md) for the all-atom vs CG recipe.
 
 ## Per-target solver budget
 

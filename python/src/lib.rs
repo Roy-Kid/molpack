@@ -10,6 +10,7 @@
 //! | `LatticeGrow`    | [`PyLatticeGrow`]    | Lattice-growth entry               |
 //! | `Pipeline`       | [`PyPipeline`]       | Entries composed as stages         |
 //! | `PackResult`     | [`PyPackResult`]     | Frame + diagnostics from `run()`   |
+//! | `IntraResidual`  | [`PyIntraResidual`]  | Nested scored/exempted intra mins  |
 //! | `StepInfo`       | [`PyStepInfo`]       | Read-only snapshot for handlers    |
 //! | `StageInfo`      | [`PyStageInfo`]      | Which stage a callback came from   |
 //! | `StepContext`    | [`PyStepContext`]    | Callback-scoped live-context guard |
@@ -54,7 +55,7 @@ use target::PyTarget;
 mod entry;
 use entry::{PyCbmcGrow, PyGenCanPack, PyLatticeGrow, PyPipeline};
 mod result;
-use result::PyPackResult;
+use result::{PyIntraResidual, PyPackResult};
 
 mod parallel;
 use parallel::{init_thread_pool, num_threads, rayon_enabled};
@@ -95,6 +96,7 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLatticeGrow>()?;
     m.add_class::<PyPipeline>()?;
     m.add_class::<PyPackResult>()?;
+    m.add_class::<PyIntraResidual>()?;
     m.add_class::<PyStepInfo>()?;
     m.add_class::<PyStageInfo>()?;
     m.add_class::<PyStepContext>()?;

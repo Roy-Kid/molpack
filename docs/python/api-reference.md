@@ -5,7 +5,7 @@ Import surface:
 ```python
 from molpack import (
     # Core
-    Target, PackResult, StepInfo,
+    Target, PackResult, IntraResidual, StepInfo,
     # Engine entries — one per packing algorithm
     GenCanPack, CbmcGrow, LatticeGrow,
     # Multi-stage composition
@@ -91,6 +91,23 @@ Target(frame, count: int)
   Accepts a geometric built-in, a collective (distribution-matching)
   restraint, or any duck-typed `f`/`fg` object — see [Restraints](#restraints).
 - `.with_atom_restraint(indices: Sequence[int], r)` — 0-based indices.
+- `.with_radius(radius: float)` — packing radius for every atom
+  (Packmol `radius`). Raises `ValueError` if not positive.
+- `.with_atom_radius(indices, radius)` — 0-based; all-atom explicit
+  hydrogen keeps the default skip table and uses ~0.85 Å here.
+- `.with_fscale(fscale: float)` / `.with_atom_fscale(indices, fscale)` —
+  overlap-penalty weight (Packmol `fscale`; default 1.0).
+- `.with_short_radius(short_radius: float)` /
+  `.with_atom_short_radius(indices, short_radius)` — second, shorter
+  penalty radius (Packmol `short_radius`).
+- `.with_short_radius_scale(scale: float)` /
+  `.with_atom_short_radius_scale(indices, scale)` — weight of the
+  short-radius penalty.
+- `.with_special_bonds(table: Sequence[float])` — intramolecular skip
+  weights. Slot 0 is 1-2; the last slot is the 1-N tail. Default
+  `[0, 0, 0, 1]` (depth 3). Empty / non-finite / outside `[0, 1]` raise
+  `ValueError`. Fractional `0.5` is stored and refused at
+  `CbmcGrow.run`. This is not a force-field `special_bonds` triple.
 - `.with_perturb_budget(n: int)` — per-target perturbation budget.
 - `.with_centering(mode: CenteringMode)`.
 - `.with_rotation_bound(axis: Axis, center: Angle, half_width: Angle)`.
@@ -116,6 +133,8 @@ Target(frame, count: int)
 - `.count : int`
 - `.elements : list[str]`
 - `.radii : list[float]`
+- `.special_bonds : list[float]` — intramolecular skip table; default
+  `[0.0, 0.0, 0.0, 1.0]`.
 - `.is_fixed : bool`
 
 ---
@@ -213,9 +232,6 @@ Growth-only builders, on top of the shared ones:
   step before the hard core softens (clamped ≥ 1, default 50).
 - `.with_min_hard_scale(scale: float)` — softening floor, clamped to
   `[0, 1]` (default 0.8, the classic push-off bound).
-- `.with_exclusion_depth(depth: int)` — intramolecular exclusion depth
-  in bonds: 3 (default) is the all-atom 1-2/1-3/1-4 convention; CG
-  templates conventionally use 1 or 2.
 - `.with_angle_prior(prior: AnglePrior)` — placement-angle prior
   (default `AnglePrior.template()`).
 - `.with_serial(serial: bool = True)` — grow one chain to completion
@@ -308,6 +324,20 @@ Read-only output container returned by `run()`.
 - `.softened : int` — how many times the growth solver had to relax its
   constructive hard-core guarantee (always 0 on the GENCAN path). See
   [`CbmcGrow`](#cbmcgrow).
+- `.intra : IntraResidual` — same-copy scored vs exempted minima (Å,
+  minimum image). Forwards the assembled residual; does not recompute
+  from positions.
+
+### `IntraResidual`
+
+Nested diagnostic on [`PackResult`](#packresult). Empty class is `+∞`.
+
+- `.scored : float` — minimum same-copy pair distance among pairs the
+  target's skip table scores (Å).
+- `.exempted : float` — minimum same-copy pair distance among pairs the
+  table exempts (Å).
+
+There are no `min_intra_*` aliases.
 
 ---
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import molrs
 import numpy as np
 import pytest
@@ -81,6 +83,29 @@ class TestPackResultProperties:
         assert isinstance(frame, molrs.Frame)
         for col in ("x", "y", "z", "element", "id", "mol_id"):
             assert len(_col(frame, "atoms", col)) == result.natoms
+
+
+class TestIntraResidual:
+    """``PackResult.intra`` forwards nested scored/exempted (Å); never aliases."""
+
+    def test_intra_is_intra_residual_with_scored_exempted_floats(self):
+        # Names and types only — do not recompute minima from positions.
+        result = _make_tiny_pack()
+        intra = result.intra
+        assert type(intra).__name__ == "IntraResidual"
+        assert isinstance(intra, molpack.IntraResidual)
+        assert isinstance(intra.scored, float)
+        assert isinstance(intra.exempted, float)
+
+    def test_no_min_intra_aliases(self):
+        result = _make_tiny_pack()
+        assert not hasattr(result, "min_intra_scored")
+        assert not hasattr(result, "min_intra_exempt")
+
+    def test_bonded_diatomic_scored_is_infinite(self):
+        # Bonds block present: the only same-copy pair is 1-2, so scored is +∞.
+        result = TestFrameTopology()._pack(1)
+        assert result.intra.scored == math.inf
 
 
 class TestFrameTopology:

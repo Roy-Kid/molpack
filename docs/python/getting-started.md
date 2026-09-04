@@ -86,8 +86,8 @@ print(frame["atoms"].nrows)
 by choosing the entry, and `CbmcGrow` is the chain-growth one. Both have
 the same builders and the same terminal verb, `run()`, which returns a
 `PackResult` with `.frame`, `.converged`, `.fdist`, `.frest`,
-`.positions`, and `.softened`. An entry runs once: build a new one for
-each pack.
+`.positions`, `.softened`, and `.intra`. An entry runs once: build a
+new one for each pack.
 
 ## 5. Save
 

@@ -365,6 +365,9 @@ A [`Target`](crate::Target) describes one molecule type:
 - Optional fixed placement (Euler + translation).
 - Optional Euler-angle bounds (`with_rotation_bound(Axis, Angle, Angle)`).
 - Optional per-copy mass override (`with_mass`) for density-sized boxes.
+- Intramolecular skip table (`with_special_bonds`; default depth-3
+  `[0, 0, 0, 1]`). All-atom explicit hydrogen keeps that table and
+  shrinks hydrogen via `with_atom_radius`.
 - Optionally built from a previous run's output as one fixed obstacle
   ([`Target::fixed_from(&result)`](crate::Target::fixed_from)) — the
   chaining primitive for staged packs.
@@ -413,7 +416,7 @@ let full  = GenCanPack::new().run(&[Target::fixed_from(&grown), solvent], 200)?;
 ```
 
 Both entries return the same [`PackResult`](crate::PackResult) —
-`frame`, `fdist`, `frest`, `converged`, `softened`.
+`frame`, `fdist`, `frest`, `converged`, `softened`, `intra`.
 
 ## PackContext
 

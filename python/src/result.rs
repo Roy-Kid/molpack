@@ -2,7 +2,7 @@
 //!
 //! [`PyPackResult`] is returned by every engine entry's ``run()``
 //! (`GenCanPack`, `CbmcGrow`): the packed ``molrs.Frame`` plus structured
-//! diagnostics (`converged` / `fdist` / `frest` / `softened`).
+//! diagnostics (`converged` / `fdist` / `frest` / `softened` / `intra`).
 
 use crate::helpers::NpF;
 use molpack::F;
@@ -10,6 +10,32 @@ use molpack::PackResult;
 use numpy::IntoPyArray;
 use numpy::PyArray2;
 use pyo3::prelude::*;
+
+/// Intra-molecular residual of one configuration: same-copy **scored** vs
+/// **exempted** minima, in Å (minimum image). An empty class is ``+inf``.
+///
+/// Nested on [`PyPackResult`] as ``result.intra.scored`` / ``.exempted``.
+/// Forwards the values assembled in Rust; does not recompute from positions.
+#[pyclass(name = "IntraResidual", frozen, skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyIntraResidual {
+    /// Minimum same-copy pair distance among pairs the table scores (Å).
+    #[pyo3(get)]
+    pub scored: F,
+    /// Minimum same-copy pair distance among pairs the table exempts (Å).
+    #[pyo3(get)]
+    pub exempted: F,
+}
+
+#[pymethods]
+impl PyIntraResidual {
+    fn __repr__(&self) -> String {
+        format!(
+            "IntraResidual(scored={}, exempted={})",
+            self.scored, self.exempted
+        )
+    }
+}
 
 #[pyclass(name = "PackResult", from_py_object)]
 pub struct PyPackResult {
@@ -80,6 +106,18 @@ impl PyPackResult {
     #[getter]
     fn softened(&self) -> usize {
         self.inner.softened
+    }
+
+    /// Same-copy scored vs exempted minima (Å, minimum image).
+    ///
+    /// Forwards [`molpack::PackResult::intra`]; does not recompute from
+    /// positions. An empty class is ``float('inf')``.
+    #[getter]
+    fn intra(&self) -> PyIntraResidual {
+        PyIntraResidual {
+            scored: self.inner.intra.scored,
+            exempted: self.inner.intra.exempted,
+        }
     }
 
     #[getter]

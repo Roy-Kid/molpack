@@ -218,7 +218,7 @@ fn run(targets, max_loops):
         handlers.on_stage_end
         if handlers.should_stop(): break
     rebuild xcart from the final rigid view; handlers.on_finish
-    assemble Frame into PackResult (+ converged / fdist / frest / softened)
+    assemble Frame into PackResult (+ converged / fdist / frest / softened / intra)
 ```
 
 Every preset's `PackEngine::run` is one line —

@@ -225,6 +225,26 @@ impl PyTarget {
         })
     }
 
+    /// Set this target's intramolecular skip table.
+    ///
+    /// Slot 0 is the 1-2 weight; the last slot is the 1-N tail. Default is
+    /// ``[0, 0, 0, 1]`` (depth 3: 1-2/1-3/1-4 exempt). This is not a
+    /// force-field ``special_bonds`` triple.
+    ///
+    /// Fractional weights (Amber 1-4 ``0.5``) are stored here and refused
+    /// later when growth compiles the skip set. All-atom explicit hydrogen
+    /// keeps the default table and shrinks hydrogen via
+    /// :meth:`with_atom_radius`.
+    ///
+    /// Raises ``ValueError`` if the table is empty or a weight is outside
+    /// ``[0, 1]`` or not finite.
+    fn with_special_bonds(&self, table: Vec<NpF>) -> PyResult<Self> {
+        let table = validate_special_bonds(table)?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_special_bonds(table),
+        })
+    }
+
     fn with_perturb_budget(&self, budget: usize) -> Self {
         PyTarget {
             inner: self.inner.clone().with_perturb_budget(budget),
@@ -304,6 +324,11 @@ impl PyTarget {
     }
 
     #[getter]
+    fn special_bonds(&self) -> Vec<F> {
+        self.inner.special_bonds.as_slice().to_vec()
+    }
+
+    #[getter]
     fn is_fixed(&self) -> bool {
         self.inner.fixed_at.is_some()
     }
@@ -337,4 +362,12 @@ fn check_positive(value: F, what: &str) -> PyResult<()> {
         )));
     }
     Ok(())
+}
+
+/// Marshal a Python weight list into [`molpack::BondDistanceWeights`].
+///
+/// Rejects empty, non-finite, or out-of-range entries with ``ValueError``.
+/// Fractional weights are legal here; growth refuses them later.
+fn validate_special_bonds(weights: Vec<NpF>) -> PyResult<molpack::BondDistanceWeights> {
+    molpack::BondDistanceWeights::new(weights).map_err(|e| PyValueError::new_err(e.to_string()))
 }

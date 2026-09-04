@@ -127,8 +127,9 @@ too, if you prefer to control the geometry yourself.
 
 ## All-atom versus coarse-grained templates
 
-Two knobs encode the difference between atomistic and CG chains, and
-both default to the all-atom convention.
+Two per-target settings encode the difference between atomistic and CG
+chains; both default to the all-atom convention. Mixed AA/CG packs are
+one run — each target carries its own table and its own angle prior.
 
 Bond angles: in an all-atom chain they are stiff coordinates, so the
 default `AnglePrior.template()` copies them verbatim from the template.
@@ -141,14 +142,27 @@ melts, `wlc_from_c_inf(1.76)`). The calibration assumes uniform
 torsions; combining a WLC angle prior with a non-uniform torsion prior
 double-counts stiffness.
 
-Exclusion depth: atom pairs close along the chain must be exempt from
-the hard core, because their distances are governed by bonds, angles,
-and the torsion prior — a hard core applied to 1-4 pairs would reject
-every gauche state. `with_exclusion_depth(3)` (the default) is the
-all-atom 1-2/1-3/1-4 convention; CG conventions are shallower, typically
-1 or 2. The depth is a knob on the `CbmcGrow` entry, so it applies to
-every target in that run — a mixed AA/CG system is grown as two runs,
-chained with `Target.fixed_from`.
+Intramolecular skip table: atom pairs close along the chain must be
+exempt from the hard core, because their distances are governed by
+bonds, angles, and the torsion prior — a hard core applied to 1-4 pairs
+would reject every gauche state. The table lives on the target, not the
+engine: `Target.with_special_bonds([0, 0, 0, 1])` is the default
+(Cassandra depth 3: 1-2/1-3/1-4 exempt, 1-5+ scored). CG templates
+conventionally use a shallower table — `[0, 1]` (depth 1) or
+`[0, 0, 1]` (depth 2) — on that target only.
+
+All-atom chains with explicit hydrogen keep the default depth-3 table
+and shrink hydrogen with `Target.with_atom_radius`. Hydrogen's packing
+radius is a first-class per-atom setting, not a reason to deepen the
+skip table. On the 2026-09-04 dp5 PEO melt, depth 3 plus H = 0.85 Å
+finished in 142 rounds / 0.3 s.
+
+```python
+h = [i for i, e in enumerate(chain["atoms"]["element"]) if e == "H"]
+aa = Target(chain, count=25).with_atom_radius(h, 0.85)   # default [0, 0, 0, 1]
+cg = Target(beads, count=40).with_special_bonds([0, 0, 1])  # depth 2
+result = CbmcGrow(prior).with_density(0.5).run([aa, cg], max_loops=60)
+```
 
 ## Reading `softened`
 
@@ -178,6 +192,20 @@ violations out by rigid-body descent (the classic slow push-off). Each
 link reports honestly: the grow result keeps its `softened` count so you
 can see the guarantee was relaxed, and the seeded run's `converged`
 tells you whether the push-off restored the full tolerance.
+
+## Reading `intra`
+
+`PackResult.fdist` is intermolecular only. Same-copy contacts are
+classified into `result.intra.scored` and `result.intra.exempted` (Å,
+minimum image; an empty class is `+∞`). Exempted pairs are the ones the
+target's special-bonds table skipped (1-2/1-3/1-4 at the default);
+scored pairs are intramolecular contacts the hard core was supposed to
+keep.
+
+If scored intramolecular contacts dominate after a depth-3 all-atom run
+with shrunk hydrogens, the residual is the signal to deepen that
+target's table as an escape hatch — `with_special_bonds([0, 0, 0, 0, 0, 1])`
+exempts out to 1-6 — not a reason to change the engine.
 
 ## What growth delivers — and what it does not
 

@@ -104,6 +104,11 @@ class TestTypedSurface:
         assert chained is not base
         assert repr(chained)
 
+    def test_grow_has_no_exclusion_depth_knob(self):
+        # Spec 05 unhooked the engine knob; the table lives on Target.
+        entry = CbmcGrow(TorsionPrior.uniform())
+        assert hasattr(entry, "with_exclusion_depth") is False
+
 
 class TestNamedErrors:
     """Unsupported combinations are named ``ValueError``s — principle 3."""
@@ -120,6 +125,20 @@ class TestNamedErrors:
         )
         with pytest.raises(ValueError, match="cannot be grown"):
             engine.run([target], max_loops=10)
+
+    def test_grow_rejects_non_binary_special_bond(self):
+        # Fractional 1-4 stores on Target; CbmcGrow.run wraps
+        # GrowError::NonBinarySpecialBond in PackError::Grow (ValueError).
+        target = Target(_chain_frame(5), 2).with_special_bonds([0.0, 0.0, 0.5, 1.0])
+        engine = (
+            _grow()
+            .with_seed(7)
+            .with_tolerance(2.0)
+            .with_periodic_box([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
+        )
+        with pytest.raises(ValueError, match="1-4") as excinfo:
+            engine.run([target], max_loops=10)
+        assert "with_atom_radius" in str(excinfo.value)
 
     def test_grow_needs_box(self):
         # Growth needs the final volume from atom 0: no box, no cell, no
