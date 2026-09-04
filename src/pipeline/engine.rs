@@ -21,7 +21,7 @@ use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 
 use crate::entry::setup::CellDecl;
-use crate::entry::{PackResult, PackSettings};
+use crate::entry::{PackSettings, State};
 use crate::error::PackError;
 use crate::handler::{Handler, LogLevel};
 use crate::stage::Stage;
@@ -202,5 +202,5 @@ pub trait PackEngine: StageFactory + Sized {
     }
 
     /// Run the packing. Consumes the engine: one engine, one run.
-    fn run(self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError>;
+    fn run(self, targets: &[Target], max_loops: usize) -> Result<State, PackError>;
 }

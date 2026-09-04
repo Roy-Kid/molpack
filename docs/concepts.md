@@ -394,7 +394,7 @@ GenCanPack::new()
     .with_handler(...)
     .with_global_restraint(...)  // broadcast to every target
     .with_periodic_box(min, max) // or via periodic InsideBoxRestraint
-    .run(&[targets], max_loops)  // -> PackResult
+    .run(&[targets], max_loops)  // -> State
 ```
 
 Every tuning knob (`with_tolerance`, `with_precision`,
@@ -415,7 +415,7 @@ let grown = CbmcGrow::new(prior).with_density(0.9).run(&[chain], 60)?;
 let full  = GenCanPack::new().run(&[Target::fixed_from(&grown), solvent], 200)?;
 ```
 
-Both entries return the same [`PackResult`](crate::PackResult) —
+Both entries return the same [`State`](crate::State) —
 `frame`, `fdist`, `frest`, `converged`, `softened`, `intra`.
 
 ## PackContext
@@ -428,7 +428,7 @@ buffers, counters. All optimizer / movebad / handler code paths take
 Structure (`molpack/src/context/`):
 
 - `ModelData` — topology and inputs (immutable after init).
-- `RuntimeState` — mutable per-iteration state (x, coor, radius).
+- `RuntimeState` — borrowed telemetry view over `PackContext`.
 - `WorkBuffers` — scratch arrays (xcart, gxcar, radiuswork).
 
 Users rarely touch `PackContext` directly — it reaches them through

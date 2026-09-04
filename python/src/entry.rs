@@ -24,7 +24,7 @@ use crate::grow::{PyAnglePrior, PyTorsionPrior};
 use crate::handler::PyHandlerWrapper;
 use crate::helpers::{pack_error_to_pyerr, take_err};
 use crate::parallel::rayon_compiled;
-use crate::result::PyPackResult;
+use crate::result::PyState;
 use crate::target::PyTarget;
 
 type F = molpack::F;
@@ -142,16 +142,16 @@ fn parse_log_level(level: &str) -> PyResult<LogLevel> {
 
 fn finish_run(
     py: Python<'_>,
-    result: Result<molpack::PackResult, molpack::PackError>,
+    result: Result<molpack::State, molpack::PackError>,
     periodic_box: Option<([F; 3], [F; 3])>,
-) -> PyResult<PyPackResult> {
+) -> PyResult<PyState> {
     if let Some(py_err) = take_err() {
         return Err(py_err);
     }
     let mut result = result.map_err(pack_error_to_pyerr)?;
     crate::interop::stamp_box_bounds(&mut result.frame, periodic_box)?;
     let py_frame = crate::interop::frame_to_py(py, &result.frame)?.unbind();
-    Ok(PyPackResult {
+    Ok(PyState {
         inner: result,
         py_frame,
     })
@@ -315,7 +315,7 @@ macro_rules! stage_entry_registry {
 #[pyclass(name = "GenCanPack")]
 pub struct PyGenCanPack {
     shared: SharedKnobs,
-    seed: Option<molpack::PackResult>,
+    seed: Option<molpack::State>,
     inner_iterations: Option<usize>,
     init_passes: Option<usize>,
     init_box_half_size: Option<F>,
@@ -341,7 +341,7 @@ entry_pymethods!(PyGenCanPack {
     /// push-off chain): the free copies start EXACTLY where ``result``
     /// left them; the cell travels with the seed — do not declare a box,
     /// density, or cell on a seeded engine.
-    fn seeded_from(&self, result: &PyPackResult) -> Self {
+    fn with_restart(&self, result: &PyState) -> Self {
         let mut c = self.clone_fields();
         c.seed = Some(result.inner.clone());
         c
@@ -380,7 +380,7 @@ entry_pymethods!(PyGenCanPack {
         py: Python<'_>,
         targets: Vec<PyTarget>,
         max_loops: usize,
-    ) -> PyResult<PyPackResult> {
+    ) -> PyResult<PyState> {
         self.shared.guard_one_shot()?;
         let rust_targets: Vec<_> = targets.into_iter().map(|t| t.inner).collect();
         let engine = self.shared.apply(py, self.build_engine(py)?)?;
@@ -421,7 +421,7 @@ impl PyGenCanPack {
     fn build_engine(&self, _py: Python<'_>) -> PyResult<GenCanPack> {
         let mut engine = GenCanPack::new();
         if let Some(seed) = &self.seed {
-            engine = engine.seeded_from(seed);
+            engine = engine.with_restart(seed);
         }
         if let Some(n) = self.inner_iterations {
             engine = engine.with_inner_iterations(n);
@@ -546,13 +546,13 @@ entry_pymethods!(PyCbmcGrow {
 
     /// Run the growth. One engine, one run. Reports honestly — nothing else
     /// runs on non-convergence. For the rigid push-off, chain explicitly:
-    /// ``GenCanPack().seeded_from(result).run(same_targets, ...)``.
+    /// ``GenCanPack().with_restart(result).run(same_targets, ...)``.
     fn run(
         &mut self,
         py: Python<'_>,
         targets: Vec<PyTarget>,
         max_loops: usize,
-    ) -> PyResult<PyPackResult> {
+    ) -> PyResult<PyState> {
         self.shared.guard_one_shot()?;
         let rust_targets: Vec<_> = targets.into_iter().map(|t| t.inner).collect();
         let engine = self.shared.apply(py, self.build_engine(py)?)?;
@@ -599,7 +599,7 @@ entry_pymethods!(PyLatticeGrow {
         py: Python<'_>,
         targets: Vec<PyTarget>,
         max_loops: usize,
-    ) -> PyResult<PyPackResult> {
+    ) -> PyResult<PyState> {
         self.shared.guard_one_shot()?;
         let rust_targets: Vec<_> = targets.into_iter().map(|t| t.inner).collect();
         let engine = self.shared.apply(py, self.build_engine(py)?)?;
@@ -744,7 +744,7 @@ entry_pymethods!(PyPipeline {
         py: Python<'_>,
         targets: Vec<PyTarget>,
         max_loops: usize,
-    ) -> PyResult<PyPackResult> {
+    ) -> PyResult<PyState> {
         self.shared.guard_one_shot()?;
         let rust_targets: Vec<_> = targets.into_iter().map(|t| t.inner).collect();
         let engine = self.shared.apply(py, self.build_engine(py)?)?;

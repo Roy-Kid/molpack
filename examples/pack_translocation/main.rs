@@ -193,7 +193,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 // ── reporting ──────────────────────────────────────────────────────────────
 
 fn report(
-    result: &molpack::PackResult,
+    result: &molpack::State,
     seg: &geometry::Segments,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pore_len_axial = (PORE_LEN as F - 1.0) * BOND_LEN;
@@ -257,7 +257,7 @@ fn report(
 
 fn write_xyz(
     path: &std::path::Path,
-    result: &molpack::PackResult,
+    result: &molpack::State,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
     let pos = result.positions();

@@ -437,8 +437,9 @@ follow policy (§ 6).
 interchangeable implementations of one seam; they share lifecycle and
 infrastructure, never each other's internals.
 
-**Intent.** Shared: lifecycle stages ①②⑤, `PackContext` / `PackState`,
-the shared objective, `PackResult`. Not shared: drivers.
+**Intent.** Shared: lifecycle stages ①②⑤, `PackContext` / `PackState`
+(live run), the shared objective, frozen public `State`. Not shared:
+drivers.
 
 **Never**
 
@@ -448,7 +449,7 @@ the shared objective, `PackResult`. Not shared: drivers.
 - Never let a solver self-report `fdist` / `frest`; the final verdict
   comes from the shared objective on the final state — one ruler.
 - Never chain a second algorithm silently on non-convergence; chaining
-  is explicit user code (`seeded_from`, `fixed_from`, a `Pipeline`).
+  is explicit user code (`with_restart`, `fixed_from`, a `Pipeline`).
 
 <!-- mol:law:id:user-picks-method -->
 ## P8. The user picks the method

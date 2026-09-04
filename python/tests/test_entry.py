@@ -37,6 +37,13 @@ def _chain5():
 
 
 class TestGenCanPackEntry:
+    def test_public_surface_is_state_not_pack_result(self):
+        assert hasattr(molpack, "State")
+        assert not hasattr(molpack, "PackResult")
+        engine = molpack.GenCanPack()
+        assert hasattr(engine, "with_restart")
+        assert not hasattr(engine, "seeded_from")
+
     def test_deterministic_under_seed(self):
         # Same seed, same targets → bitwise-identical positions. (Parity
         # against the deleted legacy `Molpack` was proven before its
@@ -88,7 +95,7 @@ class TestCbmcGrowEntry:
         )
         pushed = (
             molpack.GenCanPack()
-            .seeded_from(grown)
+            .with_restart(grown)
             .with_seed(9)
             .with_tolerance(1.0)
             .run([target()], max_loops=60)
@@ -108,7 +115,7 @@ class TestCbmcGrowEntry:
         with pytest.raises(ValueError, match="seeded run"):
             (
                 molpack.GenCanPack()
-                .seeded_from(grown)
+                .with_restart(grown)
                 .run([molpack.Target(_chain5(), count=3)], max_loops=10)
             )
 
@@ -133,3 +140,37 @@ class TestCbmcGrowEntry:
         assert packed.converged is True
         assert packed.natoms == grown.natoms + 8
         assert np.array_equal(packed.positions[: grown.natoms], grown.positions)
+
+
+class TestEngineErrorPaths:
+    def test_empty_targets_list_raises(self):
+        packer = molpack.GenCanPack().with_progress(False).with_seed(1)
+        with pytest.raises(molpack.NoTargetsError):
+            packer.run([], max_loops=10)
+
+    def test_invalid_pbc_raises_typed_error(self):
+        import molrs
+
+        positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
+        frame = molrs.Frame(
+            {
+                "atoms": {
+                    "x": positions[:, 0],
+                    "y": positions[:, 1],
+                    "z": positions[:, 2],
+                    "element": ["X"],
+                }
+            }
+        )
+        target = molpack.Target(frame, 1).with_restraint(
+            molpack.InsideBoxRestraint(
+                [0.0, 0.0, 0.0], [0.0, 10.0, 10.0], periodic=(True, True, True)
+            )
+        )
+        packer = molpack.GenCanPack().with_progress(False).with_seed(1)
+        with pytest.raises(molpack.InvalidPBCBoxError):
+            packer.run([target], max_loops=10)
+
+    def test_pack_error_is_runtime_error_subclass(self):
+        assert issubclass(molpack.NoTargetsError, molpack.PackError)
+        assert issubclass(molpack.PackError, RuntimeError)

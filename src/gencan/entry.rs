@@ -4,7 +4,7 @@ use molrs::types::F;
 
 use crate::entry::result::Placements;
 use crate::entry::setup::CellDecl;
-use crate::entry::{PackResult, PackSettings};
+use crate::entry::{PackSettings, State};
 use crate::error::PackError;
 use crate::gencan::solver::{GencanSettings, GencanStage};
 use crate::handler::Handler;
@@ -78,7 +78,7 @@ impl GenCanPack {
     /// on a seeded engine. The run's free targets must match the seed's shape
     /// ([`PackError::SeedMismatch`] otherwise); fixed targets may be appended
     /// after the free ones.
-    pub fn seeded_from(mut self, result: &PackResult) -> Self {
+    pub fn with_restart(mut self, result: &State) -> Self {
         let cell = &result.placements.cell;
         let hv = cell.h_view();
         let ov = cell.origin_view();
@@ -220,7 +220,7 @@ impl PackEngine for GenCanPack {
         &mut self.handlers
     }
 
-    fn run(self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError> {
+    fn run(self, targets: &[Target], max_loops: usize) -> Result<State, PackError> {
         Pipeline::single(self).run(targets, max_loops)
     }
 }

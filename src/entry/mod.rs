@@ -10,7 +10,7 @@
 //! * `setup.rs` — resolving a density / periodic box / cell declaration into
 //!   the one space the run packs into, and broadcasting global restraints
 //!   onto every target.
-//! * `result.rs` — [`PackResult`] and the verbatim placement solution it
+//! * `result.rs` — [`State`] and the verbatim placement solution it
 //!   carries, which is what makes one run continuable from another.
 //!
 //! What is deliberately *not* here: the entries themselves — `GenCanPack`
@@ -24,7 +24,7 @@ pub(crate) mod result;
 pub(crate) mod setup;
 
 pub(crate) use result::positions_in_target_order;
-pub use result::{IntraResidual, PackResult};
+pub use result::{IntraResidual, State};
 
 use molrs::types::F;
 

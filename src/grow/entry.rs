@@ -1,6 +1,6 @@
 //! `CbmcGrow` — the continuum configurational-bias chain-growth entry.
 
-use crate::entry::{PackResult, PackSettings};
+use crate::entry::{PackSettings, State};
 use crate::error::PackError;
 use crate::grow::GrowStage;
 use crate::grow::config::GrowConfig;
@@ -31,7 +31,7 @@ use molrs::types::F;
 /// and `converged` say so and nothing else runs — no hidden second
 /// algorithm (engine-entry-split 门槛 2). For the rigid push-off, chain
 /// explicitly: feed the same free targets to
-/// [`GenCanPack::seeded_from`](crate::GenCanPack::seeded_from) with this
+/// [`GenCanPack::with_restart`](crate::GenCanPack::with_restart) with this
 /// run's result (placement-seeding spec).
 pub struct CbmcGrow {
     settings: PackSettings,
@@ -167,7 +167,7 @@ impl PackEngine for CbmcGrow {
         &mut self.handlers
     }
 
-    fn run(self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError> {
+    fn run(self, targets: &[Target], max_loops: usize) -> Result<State, PackError> {
         Pipeline::single(self).run(targets, max_loops)
     }
 }

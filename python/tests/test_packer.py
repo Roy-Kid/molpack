@@ -320,11 +320,38 @@ class TestGenCanPackRun:
         result = self._packer().with_seed(42).run([t1, t2], max_loops=50)
         assert result.positions.shape[0] == 5
 
-    def test_pack_result_repr(self):
+    def test_state_repr(self):
         result = self._packer().with_seed(1).run([self._make_target(2)], max_loops=30)
         r = repr(result)
-        assert "PackResult" in r
+        assert "State" in r
         assert "converged" in r
+
+
+class TestMultipleRestraints:
+    def test_stacked_restraints(self):
+        positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
+        frame = molrs.Frame(
+            {
+                "atoms": {
+                    "x": positions[:, 0],
+                    "y": positions[:, 1],
+                    "z": positions[:, 2],
+                    "element": ["X"],
+                }
+            }
+        )
+        target = (
+            molpack.Target(frame, 3)
+            .with_restraint(
+                molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
+            )
+            .with_restraint(molpack.OutsideSphereRestraint([10.0, 10.0, 10.0], 2.0))
+        )
+        packer = (
+            molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
+        )
+        result = packer.run([target], max_loops=100)
+        assert result.positions.shape == (3, 3)
 
 
 class TestGenCanPackGlobalRestraint:

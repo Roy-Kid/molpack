@@ -41,7 +41,7 @@
 //!
 //! The two violation maxima the shared objective produces — the largest
 //! inter-molecular contact violation and the largest restraint violation,
-//! the pair [`PackResult`](crate::PackResult) reports — are **authoritative
+//! the pair [`State`](crate::State) reports — are **authoritative
 //! on the state after [`Stage::run`] returns**, where the context owns them
 //! as its own fields. [`StageOutcome`] carries no verdict: a stage reports
 //! only what it alone knows (whether it hit its own convergence criterion,

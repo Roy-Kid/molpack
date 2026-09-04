@@ -80,7 +80,7 @@ let target = Target::from_coords(&positions, &radii, 100)
 // `GenCanPack::new().run(...)` is a complete call; `200` is the outer-loop
 // budget.
 //
-// `run` returns a `PackResult`: the packed, topology-complete `molrs::Frame`
+// `run` returns a `State`: the packed, topology-complete `molrs::Frame`
 // in `.frame`, plus `fdist`, `frest`, `converged`, `softened`.
 let result = GenCanPack::new().run(&[target], 200)?;
 let frame = result.frame;

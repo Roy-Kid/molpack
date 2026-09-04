@@ -99,7 +99,7 @@ pub fn validate_from_targets(
 
 fn expand_targets(targets: &[Target]) -> Vec<ExpandedMol<'_>> {
     // Molecule order MUST match the assembled-frame coordinate layout that
-    // `PackResult::positions()` returns — which is **declared target order**
+    // `State::positions()` returns — which is **declared target order**
     // (a fixed target keeps its declared slot; e.g. a `fixed` protein declared
     // first stays first). Slicing the coordinates in a free-first order instead
     // would map a declared-first fixed solute's atoms onto the wrong molecules
@@ -281,7 +281,7 @@ mod tests {
     use super::*;
 
     /// A fixed solute declared **first** keeps its declared coordinate slot in
-    /// `PackResult::positions()`. Validation must map those leading coordinates
+    /// `State::positions()`. Validation must map those leading coordinates
     /// to the single fixed molecule — whose internal sub-tolerance bonds are
     /// skipped — not to the first *free* molecules. A free-first molecule map
     /// (the prior bug) slices the solute into the wrong molecules and flags its

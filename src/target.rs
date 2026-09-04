@@ -466,7 +466,7 @@ impl Target {
     /// The named chaining primitive of engine-entry-split: grow first, then
     /// pack the next stage around the grown matrix held fixed —
     /// `GenCanPack::new().run(&[Target::fixed_from(&grown), solvent], …)`.
-    pub fn fixed_from(result: &crate::entry::PackResult) -> Self {
+    pub fn fixed_from(result: &crate::entry::State) -> Self {
         Self::new(result.frame.clone(), 1)
             .with_centering(CenteringMode::Off)
             .fixed_at([0.0; 3])

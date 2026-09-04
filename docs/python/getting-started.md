@@ -85,7 +85,7 @@ print(frame["atoms"].nrows)
 `GenCanPack` is the rigid-body entry — you choose the packing algorithm
 by choosing the entry, and `CbmcGrow` is the chain-growth one. Both have
 the same builders and the same terminal verb, `run()`, which returns a
-`PackResult` with `.frame`, `.converged`, `.fdist`, `.frest`,
+`State` with `.frame`, `.converged`, `.fdist`, `.frest`,
 `.positions`, `.softened`, and `.intra`. An entry runs once: build a
 new one for each pack.
 
@@ -100,8 +100,9 @@ import molrs
 molrs.io.write_xyz("packed.xyz", frame)
 ```
 
-`result.frame` is the same object — keep the `PackResult` around when
-you also need the diagnostic fields.
+`result.frame` is the same object — keep the `State` around when you
+need the diagnostic fields, or to continue with
+`GenCanPack().with_restart(result)` / `Target.fixed_from(result)`.
 
 ## Full script
 

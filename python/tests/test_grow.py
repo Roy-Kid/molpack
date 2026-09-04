@@ -283,7 +283,7 @@ class TestLatticeGrow:
         if not grown.converged:
             pushed = (
                 GenCanPack()
-                .seeded_from(grown)
+                .with_restart(grown)
                 .with_seed(11)
                 .with_tolerance(2.0)
                 .run([target()], max_loops=120)

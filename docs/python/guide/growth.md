@@ -16,7 +16,7 @@ torsion at a time, inside the final box.
 `CbmcGrow` is that second algorithm, and it is a peer of the default,
 not a preprocessor for it: growth consumes the same radii, tolerance,
 and restraints, is judged by the same `fdist` / `frest` objective, and
-returns the same `PackResult`. You choose the algorithm by choosing the
+returns the same `State`. You choose the algorithm by choosing the
 entry — `GenCanPack` places rigid bodies, `CbmcGrow` grows chains — and
 every target in that call is handled by it. molpack never infers the
 algorithm from the molecule and never silently falls back from one to
@@ -81,7 +81,7 @@ result = (
 )
 ```
 
-`Target.fixed_from(result)` wraps a whole `PackResult` as one fixed
+`Target.fixed_from(result)` wraps a whole `State` as one fixed
 target whose coordinates are kept verbatim, so the second run places
 only the new species and never disturbs the grown chains.
 
@@ -172,7 +172,7 @@ successfully grown structure has `fdist == 0` by construction rather
 than by convergence. When a region of the box becomes so crowded that a
 chain dead-ends repeatedly even after retracting and regrowing, the
 solver's last resort is to shrink the hard core — and every one of those
-shrinks increments `PackResult.softened`. Each unit therefore records
+shrinks increments `State.softened`. Each unit therefore records
 one relaxation of the constructive guarantee; a grown structure only
 counts as converged when the count is zero at full tolerance, and on the
 rigid-body path it is always zero.
@@ -183,7 +183,7 @@ targets** to a seeded `GenCanPack`:
 
 ```python
 grown = CbmcGrow(prior).with_density(0.9).run([chain], max_loops=60)
-pushed = GenCanPack().seeded_from(grown).with_seed(7).run([chain], max_loops=60)
+pushed = GenCanPack().with_restart(grown).with_seed(7).run([chain], max_loops=60)
 ```
 
 The seeded run continues on the very same state — zero coordinate
@@ -195,7 +195,7 @@ tells you whether the push-off restored the full tolerance.
 
 ## Reading `intra`
 
-`PackResult.fdist` is intermolecular only. Same-copy contacts are
+`State.fdist` is intermolecular only. Same-copy contacts are
 classified into `result.intra.scored` and `result.intra.exempted` (Å,
 minimum image; an empty class is `+∞`). Exempted pairs are the ones the
 target's special-bonds table skipped (1-2/1-3/1-4 at the default);
@@ -235,9 +235,13 @@ grown = (
     .with_density(1.1)
     .run([Target(frame, 200)], max_loops=60)
 )
-pushed = GenCanPack().seeded_from(grown).with_seed(42).run([Target(frame, 200)], max_loops=200)
+pushed = GenCanPack().with_restart(grown).with_seed(42).run([Target(frame, 200)], max_loops=200)
 ```
 
 The lattice decides only the torsion sequence; bond lengths and angles are
 the template's, bit-exact. Residual contacts (hydrogens, decoration drift)
 are reported honestly in `fdist` and belong to the seeded push-off.
+
+This repository's polymer-melt benchmark claim cap is ρ = 1.2 g/cm³; the
+lattice sample above uses 1.1. `with_density` itself has no algorithm
+upper bound.

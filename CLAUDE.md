@@ -75,7 +75,7 @@ Project invariants (bodies in `law.md` § IX):
 - **Local gates are prek + tox.** Never a project `scripts/` wrapper; Python isolation is `uv run --directory python --group dev tox -e py`.
 - **Fork → PR.** Never push to `MolCrafts/molpack` master; `origin` = fork, `upstream` = MolCrafts.
 - **Solvers are pure geometry.** Never a force-field or chemistry-perception dependency on the solver seam; priors and chemistry are user data.
-- **Solvers are peers.** Never call another solver's driver; share lifecycle, context, objective, result — the shared objective is the one ruler.
+- **Solvers are peers.** Never call another solver's driver; share lifecycle, context, objective, frozen `State` — the shared objective is the one ruler.
 - **The user picks the method.** Never infer the algorithm from the molecule; never silently degrade; unsupported combinations are named errors.
 - **All-atom and CG alike.** Never hard-code an all-atom assumption; exclusion depth, angles, rotatable bonds are per-target data.
 - **molrs ABI line.** Never hard-code a capsule name; both wheels embed the same molrs major.minor.

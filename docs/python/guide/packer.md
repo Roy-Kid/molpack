@@ -113,7 +113,7 @@ Raises one of the typed `PackError` subclasses on failure
 one engine, one run. Calling `run()` twice on the same object raises
 `RuntimeError`; build a fresh `GenCanPack` for the next pack.
 
-## PackResult
+## State
 
 ```python
 result.positions   # (N, 3) float64 ndarray — packed coordinates
@@ -134,7 +134,7 @@ if not result.converged:
     print(f"not converged: fdist={result.fdist:.4f} frest={result.frest:.4f}")
 ```
 
-`PackResult.frame` is the packed frame. Pass it to a writer of your
+`State.frame` is the packed frame. Pass it to a writer of your
 choice (e.g. `molrs.io.write_pdb`). molpack does **not** provide
 writers.
 
@@ -161,9 +161,9 @@ result = (
 `.with_stage(x)` appends one more; both accept `GenCanPack`, `CbmcGrow`, and
 `LatticeGrow` instances. The pipeline runs every stage in one lifecycle,
 continuing from the previous stage's placements rather than starting over —
-the same continuation `.seeded_from` gives you across two separate runs (see
+the same continuation `.with_restart` gives you across two separate runs (see
 [Staging a mixed pack](growth.md#staging-a-mixed-pack)), but in one call and
-one `PackResult`.
+one `State`.
 
 ### Shared settings live on the pipeline, not the stages
 

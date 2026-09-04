@@ -47,7 +47,7 @@ pub enum PackError {
     /// competing definitions of the same volume.
     DensityConflictsWithBox,
     /// A seeded run's free targets do not match the seed's placement shape
-    /// (`GenCanPack::seeded_from` — total free atoms expected vs carried).
+    /// (`GenCanPack::with_restart` — total free atoms expected vs carried).
     SeedMismatch { expected: usize, got: usize },
     /// `with_density` needs every target's mass, and this target's elements
     /// cannot provide one (nor did `Target::with_mass`). Named error, not a

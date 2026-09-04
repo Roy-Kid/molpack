@@ -11,7 +11,7 @@
 //! every atom from the template's true internal coordinates
 //! (`decorate`), and the shared objective judges the decorated result at
 //! full tolerance — residual contacts are reported honestly and belong to
-//! the seeded GENCAN push-off (`GenCanPack::seeded_from`), never hidden.
+//! the seeded GENCAN push-off (`GenCanPack::with_restart`), never hidden.
 
 pub mod config;
 pub(crate) mod decorate;

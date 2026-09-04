@@ -37,7 +37,7 @@ let natoms = result.natoms();
 println!("packed {natoms} atoms");
 ```
 
-`run()` returns a `PackResult`. The packed `molrs::Frame` is its `frame`
+`run()` returns a `State`. The packed `molrs::Frame` is its `frame`
 field, alongside the convergence diagnostics:
 
 ```rust
@@ -92,7 +92,7 @@ let grown = CbmcGrow::new(prior)
 // run skips `initial()` and pushes remaining contacts apart by rigid-body
 // descent; the cell travels with the seed.
 let pushed = GenCanPack::new()
-    .seeded_from(&grown)
+    .with_restart(&grown)
     .with_seed(42)
     .run(&[chain], 60)?;
 
@@ -102,7 +102,7 @@ let result = GenCanPack::new()
     .run(&[Target::fixed_from(&pushed), solvent], 200)?;
 ```
 
-`GenCanPack::seeded_from(&result)` carries the placement solution over
+`GenCanPack::with_restart(&result)` carries the placement solution over
 verbatim (bitwise — no frame round-trip); `Target::fixed_from(&result)`
-wraps a whole `PackResult` as one fixed target with its coordinates kept
+wraps a whole `State` as one fixed target with its coordinates kept
 verbatim.

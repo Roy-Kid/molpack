@@ -263,14 +263,14 @@ fn restraints_satisfied_names_the_atoms_above_tolerance() {
 /// Provenance of `GOLDEN_FREST`: molpack's own box-free GENCAN fixture — 60
 /// waters held by `InsideBoxRestraint([0,0,0], [14,14,14])`, seed 42,
 /// tolerance 2.0, 20 outer loops — captured 2026-09-03 from the build at
-/// commit 77cba83 by printing `PackResult::frest` in its shortest
+/// commit 77cba83 by printing `State::frest` in its shortest
 /// round-tripping form. It is the same literal
 /// `tests/pipeline.rs::pipeline_regression_single_stage_gencan_golden` pins,
 /// copied by hand rather than shared, so neither file can silently move the
 /// other's answer. No third-party program was involved.
 ///
 /// **Why the state is hand-built and not the run's.** A `PackState` cannot be
-/// rebuilt from a `PackResult` — the result carries a frame and a placement
+/// rebuilt from a `State` — the result carries a frame and a placement
 /// solution, not a context — so the golden is replayed onto a context of the
 /// fixture's shape (60 molecules × 3 atoms) with the residual written into
 /// `frest` and three atoms carrying it. What is pinned is the invariant's

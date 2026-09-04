@@ -35,7 +35,7 @@
 //! 5. **Assemble.** The lab-frame coordinates are rebuilt from the rigid view
 //!    with [`RigidView::write_xcart`](crate::RigidView::write_xcart),
 //!    `on_finish` closes the bracket, and the frame plus the placement
-//!    solution become the [`PackResult`].
+//!    solution become the [`State`].
 //!
 //! # Handlers are adopted; settings are refused
 //!
@@ -79,7 +79,7 @@
 //!
 //! [`PackState::invalidate_geometry_cache`] is called before **every** stage.
 //! A pipeline reuses one context, so the previous stage's last evaluation
-//! leaves the geometry cache *hot*, while the hand-written `seeded_from`
+//! leaves the geometry cache *hot*, while the hand-written `with_restart`
 //! spelling starts from a fresh context and therefore a *cold* one. A hit
 //! changes the summation path in `objective.rs` (it skips the cell reset and
 //! the molecule expansion, accumulating the constraint values from `xcart`
@@ -96,7 +96,7 @@
 //! rigid-view slot with no branch on which algorithm produced it, which rests
 //! on the seam's writeback contract: **every stage leaves the state's rigid
 //! view valid** (GENCAN writes its `x`; both growth drivers capture from
-//! `xcart`). The bitwise continuity `seeded_from` promises therefore holds
+//! `xcart`). The bitwise continuity `with_restart` promises therefore holds
 //! for a run whose *last* stage maintained that view — which every stage in
 //! this crate does.
 
@@ -111,7 +111,7 @@ use ndarray::Array1;
 use crate::context::build::{ContextKnobs, build_context};
 use crate::context::{PackState, Placed};
 use crate::entry::setup::{ResolvedSpace, broadcast_global_restraints, resolve_pack_space};
-use crate::entry::{IntraResidual, PackResult, PackSettings, positions_in_target_order, result};
+use crate::entry::{IntraResidual, PackSettings, State, positions_in_target_order, result};
 use crate::error::PackError;
 use crate::handler::{Handler, StageInfo};
 use crate::invariant::Invariant;
@@ -350,7 +350,7 @@ impl Pipeline {
         space: &ResolvedSpace,
         outcome: (bool, usize),
         precision: F,
-    ) -> PackResult {
+    ) -> State {
         let (last_converged, softened) = outcome;
         {
             let ctx = state.ctx_mut();
@@ -403,7 +403,7 @@ impl Pipeline {
             frame.simbox = Some(cell.clone());
         }
 
-        PackResult {
+        State {
             frame,
             placements,
             fdist,
@@ -423,7 +423,7 @@ impl PackEngine for Pipeline {
         &mut self.handlers
     }
 
-    fn run(mut self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError> {
+    fn run(mut self, targets: &[Target], max_loops: usize) -> Result<State, PackError> {
         // ── 1. Validate ───────────────────────────────────────────────────
         self.validate(targets)?;
 

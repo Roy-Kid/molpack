@@ -255,7 +255,7 @@ impl PyTarget {
     /// coordinates kept verbatim — the named chaining primitive: grow first,
     /// then pack the next stage around the frozen matrix.
     #[staticmethod]
-    fn fixed_from(result: &crate::result::PyPackResult) -> Self {
+    fn fixed_from(result: &crate::result::PyState) -> Self {
         Self {
             inner: molpack::Target::fixed_from(&result.inner),
         }

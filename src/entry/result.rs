@@ -1,4 +1,4 @@
-//! The engine-run outcome: [`PackResult`], the placement solution it
+//! The engine-run outcome: [`State`], the placement solution it
 //! carries, the intra-molecular residual [`IntraResidual`], and the
 //! coordinate reordering that assembles the frame in target-declared order.
 
@@ -123,17 +123,28 @@ impl IntraResidual {
     }
 }
 
-/// The outcome of one engine run: the packed frame plus the shared
-/// objective's verdict and the intra-molecular residual.
+/// Frozen public outcome of one engine [`crate::PackEngine::run`].
+///
+/// This is **not** [`crate::PackState`] (the live run object a `Pipeline`
+/// carries between stages) and **not** [`crate::context::RuntimeState`] (a
+/// borrowed telemetry view over [`crate::PackContext`]). Those three types
+/// are one lifecycle, not aliases: a live [`crate::PackState`] is consumed
+/// by private `Pipeline::assemble`, which is the freeze point, and the
+/// caller then holds this `State`. There is no `type` alias either way.
+///
+/// Cross-entry continuation (`GenCanPack::with_restart`) reads the hidden
+/// [`Placements`] snapshot, not the public [`Self::frame`] — reconstructing
+/// COM from the assembled frame would lose bitwise continuity.
 ///
 /// The `frame` contains an "atoms" block with x, y, z, element, mol_id
 /// columns — moved from the packing context (zero-copy ownership transfer).
+/// Intra-molecular residual distances on [`Self::intra`] are in Å.
 #[derive(Debug, Clone)]
-pub struct PackResult {
+pub struct State {
     /// Atoms frame with x, y, z (f64), element (String), mol_id (i64).
     pub frame: molrs::Frame,
     /// The verbatim placement solution, for cross-entry seeding
-    /// (`GenCanPack::seeded_from`).
+    /// (`GenCanPack::with_restart`).
     pub(crate) placements: Placements,
     /// Maximum inter-molecular distance violation at termination.
     pub fdist: F,
@@ -151,7 +162,7 @@ pub struct PackResult {
     pub softened: usize,
 }
 
-impl PackResult {
+impl State {
     /// Extract atom positions as `Vec<[F; 3]>` (SoA→AoS conversion).
     pub fn positions(&self) -> Vec<[F; 3]> {
         let atoms = self.frame.get("atoms").expect("frame has no 'atoms' block");
@@ -421,5 +432,32 @@ mod tests {
             (1.5 as F).to_bits(),
             "must not report the 1-2 length 1.5 Å as scored"
         );
+    }
+
+    /// `State::natoms` reads the atoms-block row count, not a stored field.
+    #[test]
+    fn state_natoms_reads_frame() {
+        use super::{Placements, State};
+        use crate::context::RigidView;
+
+        let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+        let state = State {
+            frame: frame_from_parts(&positions, &[]),
+            placements: Placements {
+                rigid: RigidView::fresh(0),
+                coor: Vec::new(),
+                copy_atoms: Vec::new(),
+                cell: open_box(),
+            },
+            fdist: 0.0,
+            intra: IntraResidual {
+                scored: F::INFINITY,
+                exempted: F::INFINITY,
+            },
+            frest: 0.0,
+            converged: true,
+            softened: 0,
+        };
+        assert_eq!(state.natoms(), 2);
     }
 }

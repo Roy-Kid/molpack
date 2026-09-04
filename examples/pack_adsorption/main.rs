@@ -175,10 +175,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 // ── reporting ──────────────────────────────────────────────────────────────
 
-fn report(
-    result: &molpack::PackResult,
-    sticky: &[usize],
-) -> Result<(), Box<dyn std::error::Error>> {
+fn report(result: &molpack::State, sticky: &[usize]) -> Result<(), Box<dyn std::error::Error>> {
     let positions = result.positions();
     let n_sub = SUB_N * SUB_N;
     let n_chain_atoms = N_CHAINS * N_BEADS;
@@ -238,7 +235,7 @@ fn report(
 /// Minimal XYZ writer — keeps the example free of the `io` feature.
 fn write_xyz(
     path: &std::path::Path,
-    result: &molpack::PackResult,
+    result: &molpack::State,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
 

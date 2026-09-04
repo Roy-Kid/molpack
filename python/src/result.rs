@@ -1,12 +1,12 @@
 //! Python wrapper for the pack result.
 //!
-//! [`PyPackResult`] is returned by every engine entry's ``run()``
+//! [`PyState`] is returned by every engine entry's ``run()``
 //! (`GenCanPack`, `CbmcGrow`): the packed ``molrs.Frame`` plus structured
 //! diagnostics (`converged` / `fdist` / `frest` / `softened` / `intra`).
 
 use crate::helpers::NpF;
 use molpack::F;
-use molpack::PackResult;
+use molpack::State;
 use numpy::IntoPyArray;
 use numpy::PyArray2;
 use pyo3::prelude::*;
@@ -14,7 +14,7 @@ use pyo3::prelude::*;
 /// Intra-molecular residual of one configuration: same-copy **scored** vs
 /// **exempted** minima, in Å (minimum image). An empty class is ``+inf``.
 ///
-/// Nested on [`PyPackResult`] as ``result.intra.scored`` / ``.exempted``.
+/// Nested on [`PyState`] as ``result.intra.scored`` / ``.exempted``.
 /// Forwards the values assembled in Rust; does not recompute from positions.
 #[pyclass(name = "IntraResidual", frozen, skip_from_py_object)]
 #[derive(Clone)]
@@ -37,14 +37,14 @@ impl PyIntraResidual {
     }
 }
 
-#[pyclass(name = "PackResult", from_py_object)]
-pub struct PyPackResult {
-    pub(crate) inner: PackResult,
+#[pyclass(name = "State", from_py_object)]
+pub struct PyState {
+    pub(crate) inner: State,
     /// The Python ``molrs.Frame`` exported once at pack time.
     pub(crate) py_frame: Py<PyAny>,
 }
 
-impl Clone for PyPackResult {
+impl Clone for PyState {
     fn clone(&self) -> Self {
         Python::attach(|py| Self {
             inner: self.inner.clone(),
@@ -54,7 +54,7 @@ impl Clone for PyPackResult {
 }
 
 #[pymethods]
-impl PyPackResult {
+impl PyState {
     /// Packed atom positions as a numpy array of shape ``(N, 3)``.
     #[getter]
     fn positions<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<NpF>> {
@@ -110,7 +110,7 @@ impl PyPackResult {
 
     /// Same-copy scored vs exempted minima (Å, minimum image).
     ///
-    /// Forwards [`molpack::PackResult::intra`]; does not recompute from
+    /// Forwards [`molpack::State::intra`]; does not recompute from
     /// positions. An empty class is ``float('inf')``.
     #[getter]
     fn intra(&self) -> PyIntraResidual {
@@ -127,7 +127,7 @@ impl PyPackResult {
 
     fn __repr__(&self) -> String {
         format!(
-            "PackResult(converged={}, fdist={:.4}, frest={:.4}, natoms={})",
+            "State(converged={}, fdist={:.4}, frest={:.4}, natoms={})",
             self.inner.converged,
             self.inner.fdist,
             self.inner.frest,

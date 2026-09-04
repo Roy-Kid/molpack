@@ -3,14 +3,14 @@
 Public-API pin of the Python wheel after 05: the intramolecular skip
 table is `Target.with_special_bonds` / `Target.special_bonds`, the
 engine knob `CbmcGrow.with_exclusion_depth` is absent, and
-`PackResult.intra` forwards `{ scored, exempted }`. **hard-coded
+`State.intra` forwards `{ scored, exempted }`. **hard-coded
 golden** default table and the 2026-09-04 H-radius measurement; this
 file is not compiled. Runtime ownership stays in `python/src/target.rs`
 and `python/src/result.rs`.
 
 **Provenance.** Captured 2026-09-04 from the `special-bonds-06-mirror`
 spec implementation (`PyTarget.with_special_bonds`, `PyIntraResidual`,
-and `PackResult.intra` as written in that spec). No third-party
+and `State.intra` as written in that spec). No third-party
 runtime: no live literature code, no subprocess, no Packmol binary, no
 live molrs oracle. Domain convention: Cassandra tail-weight table
 `[0,0,0,1]` ≡ exclusion depth 3 (special-bonds-01 in molrs). The
@@ -26,7 +26,7 @@ The table and residual are visible only through these public names:
   Fractional 0.5 is stored. No `BondDistanceWeights` pyclass.
 - `Target.special_bonds` — `inner.special_bonds.as_slice()`. Default
   `[0, 0, 0, 1]`.
-- `PackResult.intra` — nested `IntraResidual { scored, exempted }` in
+- `State.intra` — nested `IntraResidual { scored, exempted }` in
   Å. Forwards the assembled residual; does not recompute from
   positions. No `min_intra_*`.
 - `CbmcGrow.with_exclusion_depth` — **absent** (unhooked in 05).
@@ -41,7 +41,7 @@ table is refused at `CbmcGrow.run` as `PackError::Grow`
 |---|---|
 | Default table | `[0, 0, 0, 1]` (`Target` constructor; depth 3) |
 | Engine knob | `hasattr(CbmcGrow(...), "with_exclusion_depth") is False` |
-| IntraResidual | `PackResult.intra.scored` / `.exempted` (Å; empty class `+∞`) |
+| IntraResidual | `State.intra.scored` / `.exempted` (Å; empty class `+∞`) |
 | H-radius (2026-09-04, dp5 PEO) | depth 3 + H = 0.85 Å → 142 rounds / 0.3 s |
 
 A public `Target` built from a frame carries

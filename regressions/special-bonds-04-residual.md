@@ -7,7 +7,7 @@ hexamer; this file is not compiled. Runtime ownership stays in
 `src/entry/result.rs`.
 
 **Provenance.** Captured 2026-09-04 from the `special-bonds-04-residual`
-spec implementation (`IntraResidual`, `PackResult.intra`, and
+spec implementation (`IntraResidual`, `State.intra`, and
 `IntraResidual::from_targets` as written in that spec). Assemble
 supplies `from_exclusion_depth(3)` at the call site
 (`vec![BondDistanceWeights::from_exclusion_depth(3); n]` in
@@ -26,7 +26,7 @@ The residual is visible only through these public names:
 - `IntraResidual` — `{ scored, exempted }` in Å (minimum image). An
   empty class is `+∞`. There is no `Default`. Re-exported at the crate
   root, not in the prelude.
-- `PackResult.intra` — filled at assemble. `fdist` still skips
+- `State.intra` — filled at assemble. `fdist` still skips
   same-molecule pairs.
 - `IntraResidual::from_targets` — the only public constructor. The skip
   table is the `tables: &[BondDistanceWeights]` argument (one per
@@ -53,7 +53,7 @@ NeighborList, AABB, or OverlapField walk.
 
 A linear hexamer at `(i, 0, 0)` Å, i = 0..5, classified with
 `from_exclusion_depth(3)`, must report `exempted = 1.0` and
-`scored = 4.0`. A public engine run fills `PackResult.intra` from that
+`scored = 4.0`. A public engine run fills `State.intra` from that
 same depth-3 table because assemble supplies `from_exclusion_depth(3)`
 at the call site.
 

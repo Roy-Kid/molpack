@@ -64,7 +64,7 @@
 //! | Category | Items |
 //! |---|---|
 //! | Engine entries | [`PackEngine`], [`GenCanPack`], [`CbmcGrow`], [`LatticeGrow`], [`LogLevel`] |
-//! | Run lifecycle | [`Pipeline`], [`StageFactory`], [`pipeline::EngineSetup`], [`PackResult`], [`IntraResidual`] |
+//! | Run lifecycle | [`Pipeline`], [`StageFactory`], [`pipeline::EngineSetup`], [`State`], [`IntraResidual`] |
 //! | Stage combinators (Rust-only) | [`Until`], [`OnViolation`], [`Invariant`], [`Layers`], [`Violation`], [`RestraintsSatisfied`] |
 //! | Shared settings + space | [`PackSettings`] (`entry`) |
 //! | Target  | [`Target`], [`CenteringMode`] |
@@ -135,8 +135,8 @@ pub mod validation;
 pub use cases::{ExampleCase, build_targets, example_dir_from_manifest, render_inp_script};
 pub use context::{PackContext, PackState, Placed, RigidView};
 pub use entry::IntraResidual;
-pub use entry::PackResult;
 pub use entry::PackSettings;
+pub use entry::State;
 pub use error::PackError;
 pub use frame::{compute_mol_ids, context_to_frame, finalize_frame, frame_to_coords};
 pub use gencan::entry::GenCanPack;
@@ -258,7 +258,6 @@ pub mod prelude {
         OutsideSphereRestraint,
         PackEngine,
         PackError,
-        PackResult,
         PhaseInfo,
         PhaseReport,
         Placement,
@@ -266,6 +265,7 @@ pub mod prelude {
         Region,
         RegionExt,
         RegionRestraint,
+        State,
         StepInfo,
         Target,
         XYZHandler,

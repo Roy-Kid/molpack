@@ -85,7 +85,7 @@ impl LogLevel {
 /// reports `fdist` and `frest` as a constructive `0.0` on every round, because
 /// it only ever commits a placement that already clears the hard core and the
 /// restraints; the measured end-of-run numbers live in
-/// [`PackResult`](crate::PackResult).
+/// [`State`](crate::State).
 ///
 /// `#[non_exhaustive]`: the crate builds this in exactly three places (the
 /// GENCAN iteration, the two growth drivers), and every stage that lands

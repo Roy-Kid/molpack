@@ -753,7 +753,7 @@ impl PackEngine for ShakePack {
         self,
         targets: &[molpack::Target],
         max_loops: usize,
-    ) -> Result<molpack::PackResult, PackError> {
+    ) -> Result<molpack::State, PackError> {
         Pipeline::single(self).run(targets, max_loops)
     }
 }
@@ -767,7 +767,7 @@ context shape) is the one thing `stages` reads to build its stage(s) from —
 there is no separate hook for pre-loading a placement vector before a stage
 runs. Instead, each stage's own `run` does that as its own prelude: the
 shipped GENCAN stage installs its grid, and — only if it inherited a seed via
-`seeded_from` — copies the seed's placements in, before deciding whether to
+`with_restart` — copies the seed's placements in, before deciding whether to
 skip `initial()` and continue from what is already there.
 
 ### Composing stages

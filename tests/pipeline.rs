@@ -14,8 +14,8 @@
 //!
 //! 1. **Two spellings, one answer.** A single-stage pipeline is bitwise the
 //!    preset run (ac-006); `[CbmcGrow, GenCanPack]` is bitwise
-//!    `GenCanPack::seeded_from(cbmc_result)` (ac-007); `[GenCanPack,
-//!    GenCanPack]` is bitwise `GenCanPack::seeded_from(first_result)`
+//!    `GenCanPack::with_restart(cbmc_result)` (ac-007); `[GenCanPack,
+//!    GenCanPack]` is bitwise `GenCanPack::with_restart(first_result)`
 //!    (ac-008) — the last of which is the observable form of "a second
 //!    GENCAN stage continues from the placements it was handed and never
 //!    re-runs `initial()`".
@@ -30,7 +30,7 @@
 //!    mid-run `should_stop` leaves `converged == false` with the growth
 //!    stage's bonded geometry intact (ac-009).
 //! 4. **A combinator is a stage.** `Repeat` runs its body `n` times and its
-//!    second pass CONTINUES the first (bitwise `seeded_from`, 06 ac-002);
+//!    second pass CONTINUES the first (bitwise `with_restart`, 06 ac-002);
 //!    `Guarded` reruns the same stage or fails by name and never switches
 //!    algorithm (06 ac-003); both report one stage identity however often
 //!    the body runs (06 ac-006), adopt the body's handlers and refuse its
@@ -53,8 +53,8 @@ use molpack::handler::StageInfo;
 use molpack::pipeline::EngineSetup;
 use molpack::{
     Budget, CbmcGrow, F, GenCanPack, Guarantees, Handler, InsideBoxRestraint, Invariant,
-    LatticeGrow, Layers, OnViolation, PackContext, PackEngine, PackError, PackResult, PackSettings,
-    PackState, Pipeline, Placed, Requires, RestraintsSatisfied, Stage, StageFactory, StageOutcome,
+    LatticeGrow, Layers, OnViolation, PackContext, PackEngine, PackError, PackSettings, PackState,
+    Pipeline, Placed, Requires, RestraintsSatisfied, Stage, StageFactory, StageOutcome, State,
     StepInfo, Target, Until, Violation,
 };
 use molrs::store::block::Block;
@@ -162,7 +162,7 @@ fn boxfree_settings<E: PackEngine>(engine: E) -> E {
 }
 
 /// The growth fixture, mirroring `tests/grow.rs::seeded_run_contract` so the
-/// `CbmcGrow` → `GenCanPack::seeded_from` comparison is known to be
+/// `CbmcGrow` → `GenCanPack::with_restart` comparison is known to be
 /// reachable: two 5-bead chains in a generous 20 Å periodic box.
 const CHAIN_BOX: F = 20.0;
 const CHAIN_SEED: u64 = 9;
@@ -226,7 +226,7 @@ fn lattice_settings<E: PackEngine>(engine: E) -> E {
 /// run take the same arithmetic path, and a tolerance would hide exactly the
 /// divergence (a re-`initial()`, a warm geometry cache, a second `radmax`
 /// derivation) these tests exist to catch.
-fn assert_bitwise_equal(pipeline: &PackResult, direct: &PackResult, what: &str) {
+fn assert_bitwise_equal(pipeline: &State, direct: &State, what: &str) {
     let (a, b) = (pipeline.positions(), direct.positions());
     assert_eq!(
         a.len(),
@@ -470,10 +470,10 @@ fn pipeline_single_stage_lattice_matches_preset_bitwise() {
     assert_eq!(piped.softened, direct.softened);
 }
 
-// ── 2. cross-algorithm hand-off ≡ seeded_from ─────────────────────────────
+// ── 2. cross-algorithm hand-off ≡ with_restart ─────────────────────────────
 
 /// `[CbmcGrow, GenCanPack]` in a pipeline is bitwise
-/// `GenCanPack::seeded_from(&cbmc_result)` (ac-007).
+/// `GenCanPack::with_restart(&cbmc_result)` (ac-007).
 ///
 /// The grown chains are the state the GENCAN stage inherits: it must
 /// continue from them (push-off), never call `initial()` and scatter the
@@ -482,7 +482,7 @@ fn pipeline_single_stage_lattice_matches_preset_bitwise() {
 /// if the pipeline invalidates the geometry cache at the stage boundary, so
 /// both spellings enter GENCAN cold.
 #[test]
-fn pipeline_cbmc_then_gencan_equals_seeded_from_bitwise() {
+fn pipeline_cbmc_then_gencan_equals_with_restart_bitwise() {
     let targets = chain_targets();
 
     let grown = chain_settings(CbmcGrow::new(TorsionPrior::Uniform))
@@ -504,23 +504,23 @@ fn pipeline_cbmc_then_gencan_equals_seeded_from_bitwise() {
 
     // The cell travels with the seed, so the seeded spelling declares no box.
     let seeded = GenCanPack::new()
-        .seeded_from(&grown)
+        .with_restart(&grown)
         .with_seed(CHAIN_SEED)
         .with_tolerance(CHAIN_TOL)
         .run(&targets, CHAIN_LOOPS)
         .expect("the hand-written seeded spelling runs");
 
-    assert_bitwise_equal(&piped, &seeded, "[CbmcGrow, GenCanPack] vs seeded_from");
+    assert_bitwise_equal(&piped, &seeded, "[CbmcGrow, GenCanPack] vs with_restart");
 }
 
 /// `[GenCanPack, GenCanPack]` on one small budget is bitwise
-/// `GenCanPack::seeded_from(&first_result)` (ac-008).
+/// `GenCanPack::with_restart(&first_result)` (ac-008).
 ///
 /// The first stage is guarded to be UNCONVERGED, which is what makes the
 /// claim observable: if the second GENCAN stage re-ran `initial()` it would
 /// throw away the first stage's placements and land somewhere else entirely.
 #[test]
-fn pipeline_gencan_then_gencan_equals_seeded_from_bitwise() {
+fn pipeline_gencan_then_gencan_equals_with_restart_bitwise() {
     let targets = dense_targets();
 
     let first = dense_settings(GenCanPack::new())
@@ -543,7 +543,7 @@ fn pipeline_gencan_then_gencan_equals_seeded_from_bitwise() {
     .expect("a GENCAN → GENCAN pipeline runs");
 
     let seeded = GenCanPack::new()
-        .seeded_from(&first)
+        .with_restart(&first)
         .with_seed(DENSE_SEED)
         .with_tolerance(DENSE_TOL)
         .run(&targets, DENSE_LOOPS)
@@ -552,7 +552,7 @@ fn pipeline_gencan_then_gencan_equals_seeded_from_bitwise() {
     assert_bitwise_equal(
         &piped,
         &seeded,
-        "[GenCanPack, GenCanPack] vs seeded_from(first)",
+        "[GenCanPack, GenCanPack] vs with_restart(first)",
     );
 }
 
@@ -750,7 +750,7 @@ fn pipeline_two_stages_sum_softened_and_count_hooks() {
         .run(&targets, CHAIN_LOOPS)
         .expect("the growth stage runs standalone");
     let seeded = GenCanPack::new()
-        .seeded_from(&grown)
+        .with_restart(&grown)
         .with_seed(CHAIN_SEED)
         .with_tolerance(CHAIN_TOL)
         .run(&targets, CHAIN_LOOPS)
@@ -941,7 +941,7 @@ fn pipeline_gencan_without_box_runs() {
 /// Provenance: captured 2026-09-03 from the build at commit 77cba83, before
 /// stage-pipeline-05. Tool: this repository's own `cargo test
 /// -p molcrafts-molpack` (debug profile, default features) running a scratch
-/// integration test that printed `PackResult::fdist` / `frest` and
+/// integration test that printed `State::fdist` / `frest` and
 /// `positions()` through `{:?}` (shortest round-trip form) for exactly the
 /// fixture below, spelled as `GenCanPack::new().with_seed(42)
 /// .with_tolerance(2.0).run(&boxfree_targets(), 20)`. That preset spelling
@@ -1179,8 +1179,8 @@ fn repeat_passes_runs_body_n_times_and_sums_softened() {
 /// The core of ac-002: the second pass **continues** from the first.
 ///
 /// `Repeat{Passes(2)}` around one GENCAN stage is bitwise
-/// `GenCanPack::seeded_from(&pass1)` — the same comparison
-/// `pipeline_gencan_then_gencan_equals_seeded_from_bitwise` makes for two
+/// `GenCanPack::with_restart(&pass1)` — the same comparison
+/// `pipeline_gencan_then_gencan_equals_with_restart_bitwise` makes for two
 /// explicit stages. Without it, "repeat" and "run the whole thing again from
 /// a fresh `initial()`" are indistinguishable in a test.
 ///
@@ -1189,7 +1189,7 @@ fn repeat_passes_runs_body_n_times_and_sums_softened() {
 /// `run_phase` restarts `radscale` at `discale` for every phase, so a
 /// continuation legitimately climbs before it descends again. Measured on
 /// this fixture, pass 1 ends at `fdist = 9.0308` and all three continuation
-/// spellings — `seeded_from`, `[GenCanPack, GenCanPack]` and this `Repeat` —
+/// spellings — `with_restart`, `[GenCanPack, GenCanPack]` and this `Repeat` —
 /// end at `9.7624`, bit for bit. Agreeing with the seeded spelling to the
 /// bit is therefore the assertion that separates "continued" from
 /// "re-`initial()`ed"; a `fdist` inequality would only be asserting the
@@ -1215,7 +1215,7 @@ fn repeat_second_pass_continues_from_the_first_bitwise() {
             .expect("a Repeat{Passes(2)} GENCAN pipeline runs");
 
     let seeded = GenCanPack::new()
-        .seeded_from(&pass1)
+        .with_restart(&pass1)
         .with_seed(DENSE_SEED)
         .with_tolerance(DENSE_TOL)
         .run(&targets, DENSE_LOOPS)
@@ -1224,7 +1224,7 @@ fn repeat_second_pass_continues_from_the_first_bitwise() {
     assert_bitwise_equal(
         &repeated,
         &seeded,
-        "Repeat{Passes(2)} vs seeded_from(pass1)",
+        "Repeat{Passes(2)} vs with_restart(pass1)",
     );
 }
 

@@ -1,4 +1,4 @@
-"""Unit tests for ``PackResult`` getters and invariants."""
+"""Unit tests for ``State`` getters and invariants."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import math
 
 import molrs
 import numpy as np
-import pytest
 
 import molpack
 
@@ -32,7 +31,7 @@ def _make_frame(
     )
 
 
-def _make_tiny_pack() -> molpack.PackResult:
+def _make_tiny_pack() -> molpack.State:
     positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float64)
     frame = _make_frame(positions, ["O", "H"])
     target = molpack.Target(frame, 3).with_restraint(
@@ -42,7 +41,7 @@ def _make_tiny_pack() -> molpack.PackResult:
     return packer.run([target], max_loops=50)
 
 
-class TestPackResultProperties:
+class TestState:
     def test_positions_dtype_is_float64(self):
         result = _make_tiny_pack()
         assert result.positions.dtype == np.float64
@@ -79,17 +78,19 @@ class TestPackResultProperties:
     def test_frame_is_molrs_frame_with_atoms(self):
         result = _make_tiny_pack()
         frame = result.frame
-        # `.frame` is a genuine molrs.Frame, not a dict.
         assert isinstance(frame, molrs.Frame)
         for col in ("x", "y", "z", "element", "id", "mol_id"):
             assert len(_col(frame, "atoms", col)) == result.natoms
 
+    def test_repr_starts_with_state(self):
+        result = _make_tiny_pack()
+        assert repr(result).startswith("State(")
+
 
 class TestIntraResidual:
-    """``PackResult.intra`` forwards nested scored/exempted (Å); never aliases."""
+    """``State.intra`` forwards nested scored/exempted (Å); never aliases."""
 
     def test_intra_is_intra_residual_with_scored_exempted_floats(self):
-        # Names and types only — do not recompute minima from positions.
         result = _make_tiny_pack()
         intra = result.intra
         assert type(intra).__name__ == "IntraResidual"
@@ -103,7 +104,6 @@ class TestIntraResidual:
         assert not hasattr(result, "min_intra_exempt")
 
     def test_bonded_diatomic_scored_is_infinite(self):
-        # Bonds block present: the only same-copy pair is 1-2, so scored is +∞.
         result = TestFrameTopology()._pack(1)
         assert result.intra.scored == math.inf
 
@@ -128,7 +128,7 @@ class TestFrameTopology:
             }
         )
 
-    def _pack(self, copies: int, box: bool = False) -> molpack.PackResult:
+    def _pack(self, copies: int, box: bool = False) -> molpack.State:
         target = molpack.Target(self._diatomic_with_bond(), copies).with_restraint(
             molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
         )
@@ -144,7 +144,6 @@ class TestFrameTopology:
         frame = result.frame
 
         assert isinstance(frame, molrs.Frame)
-        # All template columns survive, plus regenerated id / mol_id.
         assert np.array_equal(_col(frame, "atoms", "id"), np.arange(1, 7))
         assert np.array_equal(
             _col(frame, "atoms", "mol_id"), np.array([1, 1, 2, 2, 3, 3])
@@ -153,10 +152,8 @@ class TestFrameTopology:
 
     def test_bond_indices_offset_per_copy(self):
         frame = self._pack(3).frame
-        # One bond per copy, second atom of each diatomic: (0,1),(2,3),(4,5).
         assert np.array_equal(_col(frame, "bonds", "atomi"), np.array([0, 2, 4]))
         assert np.array_equal(_col(frame, "bonds", "atomj"), np.array([1, 3, 5]))
-        # Regenerated bond ids.
         assert np.array_equal(_col(frame, "bonds", "id"), np.array([1, 2, 3]))
 
     def test_atom_coords_match_packed_positions(self):
@@ -184,64 +181,3 @@ class TestFrameTopology:
         result.frame.box = molrs.Box.cube(20.0)
         assert result.frame.box is not None
         assert np.allclose(np.asarray(result.frame.box.lengths), [20.0, 20.0, 20.0])
-
-
-class TestEngineErrorPaths:
-    def test_empty_targets_list_raises(self):
-        packer = molpack.GenCanPack().with_progress(False).with_seed(1)
-        with pytest.raises(molpack.NoTargetsError):
-            packer.run([], max_loops=10)
-
-    def test_invalid_pbc_raises_typed_error(self):
-        # Zero-length axis on a periodic box is rejected at pack().
-        positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
-        frame = molrs.Frame(
-            {
-                "atoms": {
-                    "x": positions[:, 0],
-                    "y": positions[:, 1],
-                    "z": positions[:, 2],
-                    "element": ["X"],
-                }
-            }
-        )
-        target = molpack.Target(frame, 1).with_restraint(
-            molpack.InsideBoxRestraint(
-                [0.0, 0.0, 0.0], [0.0, 10.0, 10.0], periodic=(True, True, True)
-            )
-        )
-        packer = molpack.GenCanPack().with_progress(False).with_seed(1)
-        with pytest.raises(molpack.InvalidPBCBoxError):
-            packer.run([target], max_loops=10)
-
-    def test_pack_error_is_runtime_error_subclass(self):
-        assert issubclass(molpack.NoTargetsError, molpack.PackError)
-        assert issubclass(molpack.PackError, RuntimeError)
-
-
-class TestMultipleRestraints:
-    def test_stacked_restraints(self):
-        positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
-        frame = molrs.Frame(
-            {
-                "atoms": {
-                    "x": positions[:, 0],
-                    "y": positions[:, 1],
-                    "z": positions[:, 2],
-                    "element": ["X"],
-                }
-            }
-        )
-        target = (
-            molpack.Target(frame, 3)
-            .with_restraint(
-                molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
-            )
-            .with_restraint(molpack.OutsideSphereRestraint([10.0, 10.0, 10.0], 2.0))
-        )
-        packer = (
-            molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
-        )
-        result = packer.run([target], max_loops=100)
-
-        assert result.positions.shape == (3, 3)

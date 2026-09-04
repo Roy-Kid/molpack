@@ -1,6 +1,6 @@
 """End-to-end integration tests using real PDB fixtures.
 
-Exercises the full loader → Target → GenCanPack → PackResult pipeline at
+Exercises the full loader → Target → GenCanPack → State pipeline at
 small scale. For the full Packmol-equivalent workloads see the
 scripts under ``python/examples/``.
 """

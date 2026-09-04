@@ -6,7 +6,7 @@
 
 use molrs::types::F;
 
-use crate::entry::{PackResult, PackSettings};
+use crate::entry::{PackSettings, State};
 use crate::error::PackError;
 use crate::grow::prior::TorsionPrior;
 use crate::grow::{GrowError, validate_grow_cell};
@@ -26,7 +26,7 @@ use super::decorate::analyze_backbone;
 /// outcome honestly: decoration drift and hydrogen crowding leave real
 /// contacts at melt density, `fdist` says so, and the remedy is the
 /// explicit seeded push-off chain
-/// ([`GenCanPack::seeded_from`](crate::GenCanPack::seeded_from)).
+/// ([`GenCanPack::with_restart`](crate::GenCanPack::with_restart)).
 pub struct LatticeGrow {
     settings: PackSettings,
     handlers: Vec<Box<dyn Handler>>,
@@ -113,7 +113,7 @@ impl PackEngine for LatticeGrow {
         &mut self.handlers
     }
 
-    fn run(self, targets: &[Target], max_loops: usize) -> Result<PackResult, PackError> {
+    fn run(self, targets: &[Target], max_loops: usize) -> Result<State, PackError> {
         Pipeline::single(self).run(targets, max_loops)
     }
 }

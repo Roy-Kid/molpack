@@ -5,7 +5,7 @@ Import surface:
 ```python
 from molpack import (
     # Core
-    Target, PackResult, IntraResidual, StepInfo,
+    Target, State, IntraResidual, StepInfo,
     # Engine entries — one per packing algorithm
     GenCanPack, CbmcGrow, LatticeGrow,
     # Multi-stage composition
@@ -120,7 +120,7 @@ Target(frame, count: int)
 
 **Static constructor**
 
-- `Target.fixed_from(result: PackResult)` — wrap a previous run's whole
+- `Target.fixed_from(result: State)` — wrap a previous run's whole
   output as one fixed obstacle, coordinates kept verbatim. The chaining
   primitive for staged packs: grow with `CbmcGrow`, then pack the next
   species around the frozen matrix with `GenCanPack`. See
@@ -146,7 +146,7 @@ the entry. All three are immutable builders — every `with_*` returns a new
 instance — and all three expose the same terminal verb:
 
 ```python
-.run(targets: list[Target], max_loops: int) -> PackResult
+.run(targets: list[Target], max_loops: int) -> State
 ```
 
 `run()` consumes the entry (one engine, one run): a second call on the
@@ -187,7 +187,7 @@ GenCanPack()
 
 GENCAN-only builders, on top of the shared ones:
 
-- `.seeded_from(result: PackResult)` — continue on a previous run's
+- `.with_restart(result: State)` — continue on a previous run's
   placement solution (the explicit push-off chain): the free copies start
   exactly where `result` left them, `initial()` is skipped, and the
   stall-perturbation moves stay off — molecules are pushed apart by
@@ -257,7 +257,7 @@ templates are named rejections.
 
 Composes stage objects — `GenCanPack`, `CbmcGrow`, and `LatticeGrow`
 instances — into one multi-algorithm run: grow a chain, then hand it to
-rigid-body descent, in one lifecycle and one `PackResult` rather than two
+rigid-body descent, in one lifecycle and one `State` rather than two
 separate `run()` calls. See [Composing stages](guide/packer.md#composing-stages)
 for the full walkthrough.
 
@@ -280,7 +280,7 @@ Pipeline(stages: Sequence[GenCanPack | CbmcGrow | LatticeGrow] | None = None)
 **Running**
 
 ```python
-.run(targets: list[Target], max_loops: int) -> PackResult
+.run(targets: list[Target], max_loops: int) -> State
 ```
 
 Each stage's own `.with_handler(...)` callbacks are adopted into the
@@ -300,7 +300,7 @@ instead, in one of two shapes:
 ```python
 # Push-off: continue the SAME free targets on the grown state.
 grown = CbmcGrow(prior).with_density(0.9).run([chain], max_loops=60)
-pushed = GenCanPack().seeded_from(grown).with_seed(7).run([chain], max_loops=60)
+pushed = GenCanPack().with_restart(grown).with_seed(7).run([chain], max_loops=60)
 
 # Fixed matrix: freeze the first result, pack new species around it.
 full = GenCanPack().run([Target.fixed_from(grown), solvent], max_loops=200)
@@ -308,9 +308,11 @@ full = GenCanPack().run([Target.fixed_from(grown), solvent], max_loops=200)
 
 ---
 
-## `PackResult`
+## `State`
 
-Read-only output container returned by `run()`.
+Frozen outcome of one `run()`. Diagnostics (`frame`, `fdist`, `frest`,
+`converged`, `softened`, `intra`) live on this object; pass the same
+object to `GenCanPack.with_restart` or `Target.fixed_from` to continue.
 
 **Properties**
 
@@ -330,7 +332,7 @@ Read-only output container returned by `run()`.
 
 ### `IntraResidual`
 
-Nested diagnostic on [`PackResult`](#packresult). Empty class is `+∞`.
+Nested diagnostic on [`State`](#state). Empty class is `+∞`.
 
 - `.scored : float` — minimum same-copy pair distance among pairs the
   target's skip table scores (Å).

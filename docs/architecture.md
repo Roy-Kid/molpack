@@ -26,7 +26,7 @@ src/
 ├── entry/              settings + space + result — no lifecycle, never imports pipeline/
 │   ├── mod.rs          PackSettings + LogSpec
 │   ├── setup.rs        density / pbc / cell resolution + restraint broadcast
-│   └── result.rs       PackResult + the verbatim Placements a run hands the next one
+│   └── result.rs       State + the verbatim Placements a run hands the next one
 ├── target.rs           Target — molecule type + per-molecule restraints + fixed_from
 ├── template.rs         frame_positions — template coordinates in Å (crate-root
 │                       leaf: std + molrs Frame; bond graphs are molrs::Topology)
@@ -146,7 +146,7 @@ USER INPUTS                 ─→  Target / PackEngine builders
                                 b. snapshot every Target
                                 c. build PackContext, wrap into PackState
                                      ModelData (immutable topology)
-                                     RuntimeState (x, coor, radius)
+                                     RuntimeState (borrowed telemetry view over PackContext)
                                      WorkBuffers (xcart, gxcar, scratch)
                                 d. flatten restraints → CSR pool
                                 e. per stage: Stage::run(state, targets, …)
@@ -160,7 +160,7 @@ PER-ITERATION                ─→  evaluate(x, mode, &mut g)
   &mut dyn Objective                → project gradient back: gxcar → g
                                      returns f_total, fdist, frest
 
-OUTPUT                       ─→  PackResult
+OUTPUT                       ─→  State
                                   frame, plus converged, fdist,
                                   frest, softened
 ```
@@ -218,7 +218,7 @@ fn run(targets, max_loops):
         handlers.on_stage_end
         if handlers.should_stop(): break
     rebuild xcart from the final rigid view; handlers.on_finish
-    assemble Frame into PackResult (+ converged / fdist / frest / softened / intra)
+    assemble Frame into State (+ converged / fdist / frest / softened / intra)
 ```
 
 Every preset's `PackEngine::run` is one line —

@@ -13,7 +13,7 @@ Format per entry:
 ## 2026-08-28 — solver 设计四原则（用户裁定）
 
 1. **molpack 是纯几何的**：packing 算法（Solver 接缝上的一切）永不依赖力场；构象先验只收用户提供的几何数据（扭转态权重、C∞、持久长度、模板值）。`ff` 门控的 in-loop relaxer 是可选增强，不受此条约束也不得成为 solver 依赖。
-2. **packer(GENCAN) 与 grow 平级**：solver 不得调用 pack 内部代码（`pgencan` / `run_phase` / `run_iteration`），但共享同一套架构与生命周期——基础设施段 ①②⑤、`PackContext`、共享 objective、`PackResult`。
+2. **packer(GENCAN) 与 grow 平级**：solver 不得调用 pack 内部代码（`pgencan` / `run_phase` / `run_iteration`），但共享同一套架构与生命周期——基础设施段 ①②⑤、`PackContext`、共享 objective、冻结公开 `State`。
 3. **用户按 target 选择方法**（`Target::with_method`）：molpack 不替用户判断、不静默退化（小分子不自动降为刚体）；不支持的组合报具名错误。
 4. **算法须同时适配 all-atom 与 CG**：排除深度、角度处理、可旋转键感知等决策不得硬编码 AA 假设。
 
@@ -21,6 +21,7 @@ Format per entry:
 **How to apply:** 任何触及 `src/solver.rs` / `src/grow/` / `Target::with_method` / packer dispatch 的 spec 或实现改动，先对照四条再动手。待 chain-growth-solver 落地后本条是 CLAUDE.md Hard rules 的晋升候选。
 
 > 2026-09-02：上条的四原则已作为项目法则收进 `.claude/notes/law.md`（ids `pure-geometry-solvers` / `solvers-are-peers` / `user-picks-method` / `aa-and-cg`），CLAUDE.md 各保留一行索引；本条留作历史与理由。
+> 2026-09-04：P7 公开名随 `result-as-state` 更新为冻结 `State` 与 `with_restart`（不再写 `PackResult` / `seeded_from`）。`src/solver.rs` 已改名为 `src/stage.rs`。
 
 ## 2026-09-02 — packing = 初始构象构建；按不可修复度阶梯分族
 
@@ -105,3 +106,11 @@ tox 步骤在越过 uv 后失败。余下的债只剩 `uv run --directory python
 两次 6N 堆分配不在热路径。02 的 Files / Tasks 不含 `initial()` 的重构（law § 4）。
 **归属**：05——`GencanStage::run` 前奏接管 `prepare()` 后，`initial()` 或改收 `&mut RigidView`
 整段持有一个视图，或被前奏吸收；届时删除这两处过桥。
+
+<!-- mol:note:topic:result-as-state -->
+## 2026-09-04 — 公开冻结结果叫 State；接续只留 with_restart
+
+`PackResult` 就地改名为 `State`（Rust crate + Python pyclass）。直播 `PackState` 不改名、不与 `State` 合并。`GenCanPack::seeded_from` 删除；跨入口接续只留 `with_restart`。高分子熔体评测主张 ρ = 1.2 g/cm³，不是 `PackEngine::with_density` 的算法上限。
+**Why:** 用户裁定一套公开结果；P7 示例必须跟现行公开名，否则法则教已删 API。
+**How to apply:** 新代码与文档只写 `State` / `with_restart`。禁止 `PackResult` 别名、禁止公开 `GrowState`。
+**Supersedes:** law P7 正文里的 `PackResult` / `seeded_from` 拼写。

@@ -169,7 +169,7 @@ impl Stage for GencanStage {
     ///    owner. The box is the entry's resolved cell when there is one, else
     ///    the one the context already carries — which is how a GENCAN stage
     ///    that follows another stage in a chain lands on the same box, and the
-    ///    same `radmax`, as the hand-written `seeded_from` spelling.
+    ///    same `radmax`, as the hand-written `with_restart` spelling.
     /// 2. **The seed**, if this stage carries one, is injected verbatim
     ///    ([`RigidView::install_seed`](crate::RigidView::install_seed)) and the
     ///    state's marker advances to [`Placed::All`]. Order matters: the grid

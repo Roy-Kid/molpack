@@ -5,7 +5,7 @@
 //! ── Section: Task 1 — named rejections + result surface ───────────────────
 //!
 //! Covers the entry seam: the named `GrowError` rejections (no silent
-//! degradation, spec principle 3) and `PackResult::softened`. NO growth
+//! degradation, spec principle 3) and `State::softened`. NO growth
 //! algorithm is exercised here. The rigid-placement layout contract lives in
 //! `tests/context_rigid_view.rs` (`rigid_view_layout` /
 //! `rigid_view_set_com_out_of_range_panics`).
@@ -21,7 +21,7 @@ use molpack::grow::internal::InternalTree;
 use molpack::grow::{GrowConfig, GrowError, TorsionPrior};
 use molpack::{
     CbmcGrow, F, GenCanPack, Handler, InsideSphereRestraint, IntraResidual, PackContext,
-    PackEngine, PackError, PackResult, StepInfo, Target,
+    PackEngine, PackError, State, StepInfo, Target,
 };
 use molrs::BondDistanceWeights;
 use molrs::store::block::Block;
@@ -1202,12 +1202,7 @@ fn count_inter_pairs_below(pos: &[[F; 3]], mol_of: &[usize], l: F, d: F) -> usiz
 /// One all-`Grow` pack: `copies` copies of an `n_beads` zigzag chain
 /// (bond 1.53, bonds present, `TorsionPrior::Uniform`) in a cubic periodic
 /// box `[0, box_len]³`, tolerance 2.0, 50 loops.
-fn grow_pack(
-    seed: u64,
-    copies: usize,
-    n_beads: usize,
-    box_len: F,
-) -> Result<PackResult, PackError> {
+fn grow_pack(seed: u64, copies: usize, n_beads: usize, box_len: F) -> Result<State, PackError> {
     let target = Target::new(chain_frame(n_beads, 1.53, true), copies);
     CbmcGrow::new(TorsionPrior::Uniform)
         .with_seed(seed)
@@ -1788,7 +1783,7 @@ fn grow_abort_keeps_bonded_geometry() {
 ///
 /// Provenance: captured 2026-09-03 from the build at commit c8fb40e
 /// (`cargo test -p molcrafts-molpack`, default features, debug profile) with
-/// a scratch harness that printed `PackResult::positions()` through `{:?}`
+/// a scratch harness that printed `State::positions()` through `{:?}`
 /// (shortest round-trip form) for exactly this fixture. Deterministic by
 /// construction: fixed seed 7, fixed stop_after, no wall-clock, no threads.
 /// The run aborts after 2 rounds with 6 forced placements, so the abort
@@ -1875,7 +1870,7 @@ fn grow_abort_writeback_golden() {
 //
 // When growth ends unconverged (softened > 0), the entry says so and stops.
 // The rigid push-off is the user-explicit chain (placement-seeding spec):
-// the SAME free targets go to `GenCanPack::seeded_from(&grown)`, whose
+// the SAME free targets go to `GenCanPack::with_restart(&grown)`, whose
 // phases continue on the coor/x growth wrote (Auhl slow push-off /
 // Theodorou–Suter staged relaxation, spec §5.4/§5.7). The seeded run must
 // (i) NOT run `initial()` — that re-randomizes every COM/Euler and
@@ -1911,7 +1906,7 @@ fn infeasible_sphere_target() -> Target {
 }
 
 /// Grow the infeasible cell honestly (no hidden continuation).
-fn grow_infeasible(l: F, max_loops: usize) -> PackResult {
+fn grow_infeasible(l: F, max_loops: usize) -> State {
     CbmcGrow::new(TorsionPrior::Uniform)
         .with_seed(7)
         .with_tolerance(2.0)
@@ -1963,7 +1958,7 @@ fn free_chain_push_off_starts_from_grown_state() {
     let init_xcart = Arc::new(Mutex::new(None));
     let init_calls = Arc::new(Mutex::new(0usize));
     let pushed = GenCanPack::new()
-        .seeded_from(&grown)
+        .with_restart(&grown)
         .with_seed(7)
         .with_tolerance(2.0)
         .with_handler(Box::new(HandoffProbe {
@@ -2040,7 +2035,7 @@ fn free_chain_push_off_deterministic() {
         let grown = grow_infeasible(30.0, 3);
         assert!(grown.softened > 0, "the cell must exercise the push-off");
         GenCanPack::new()
-            .seeded_from(&grown)
+            .with_restart(&grown)
             .with_seed(7)
             .with_tolerance(2.0)
             .run(&[infeasible_sphere_target()], 3)
@@ -2781,7 +2776,7 @@ fn seeded_run_contract() {
 
     // Shape mismatch is a named rejection, not a scrambled pack.
     let err = GenCanPack::new()
-        .seeded_from(&grown)
+        .with_restart(&grown)
         .run(&[Target::new(chain_frame(5, 1.5, true), 3)], 10)
         .expect_err("a seed for 2 copies must refuse 3");
     assert!(
@@ -2792,7 +2787,7 @@ fn seeded_run_contract() {
     // The cell travels with the seed; a second box is the existing
     // mutual-exclusion error, never a silent precedence rule.
     let err = GenCanPack::new()
-        .seeded_from(&grown)
+        .with_restart(&grown)
         .with_periodic_box([0.0; 3], BOX_MAX, [true; 3])
         .run(&[Target::new(chain_frame(5, 1.5, true), 2)], 10)
         .expect_err("seed cell + declared box must be rejected");
@@ -2804,7 +2799,7 @@ fn seeded_run_contract() {
         .with_centering(molpack::CenteringMode::Off)
         .fixed_at([2.0, 2.0, 2.0]);
     let packed = GenCanPack::new()
-        .seeded_from(&grown)
+        .with_restart(&grown)
         .with_seed(3)
         .with_tolerance(1.0)
         .run(&[Target::new(chain_frame(5, 1.5, true), 2), dimer], 40)
@@ -2949,7 +2944,7 @@ fn lattice_grow_then_seeded_push_off_dense() {
         return; // constructive already — nothing to push off
     }
     let pushed = GenCanPack::new()
-        .seeded_from(&grown)
+        .with_restart(&grown)
         .with_seed(11)
         .with_tolerance(2.0)
         .run(&[target()], 120)
