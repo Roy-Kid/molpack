@@ -242,7 +242,7 @@ fn pair_term<const GRAD: bool, const VIOLATION: bool>(
     pbc: &PbcConstants,
 ) -> Option<PairContribution> {
     let props_j = sys.atom_props[jcart];
-    // Skip same molecule.
+    // Skip same molecule. PackResult.intra is the intramolecular residual reporter.
     if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
         return None;
     }

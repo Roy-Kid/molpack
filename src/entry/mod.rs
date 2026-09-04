@@ -23,8 +23,8 @@
 pub(crate) mod result;
 pub(crate) mod setup;
 
-pub use result::PackResult;
 pub(crate) use result::positions_in_target_order;
+pub use result::{IntraResidual, PackResult};
 
 use molrs::types::F;
 

@@ -104,6 +104,7 @@ mod bracket;
 pub mod combinators;
 pub mod engine;
 
+use molrs::BondDistanceWeights;
 use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use ndarray::Array1;
@@ -111,7 +112,7 @@ use ndarray::Array1;
 use crate::context::build::{ContextKnobs, build_context};
 use crate::context::{PackState, Placed};
 use crate::entry::setup::{ResolvedSpace, broadcast_global_restraints, resolve_pack_space};
-use crate::entry::{PackResult, PackSettings, positions_in_target_order, result};
+use crate::entry::{IntraResidual, PackResult, PackSettings, positions_in_target_order, result};
 use crate::error::PackError;
 use crate::handler::{Handler, StageInfo};
 use crate::invariant::Invariant;
@@ -385,6 +386,8 @@ impl Pipeline {
 
         let xcart = std::mem::take(&mut sys.xcart);
         let positions = positions_in_target_order(setup.targets, &xcart, setup.ntotat_free);
+        let tables = vec![BondDistanceWeights::from_exclusion_depth(3); setup.targets.len()];
+        let intra = IntraResidual::from_targets(setup.targets, &positions, &sys.simbox, &tables);
         let mut frame = crate::assemble::assemble_frame(setup.targets, &positions);
         if let Some((min, max, flags)) = space.pbc {
             let lengths = Array1::from_vec(vec![max[0] - min[0], max[1] - min[1], max[2] - min[2]]);
@@ -406,6 +409,7 @@ impl Pipeline {
             frame,
             placements,
             fdist,
+            intra,
             frest,
             converged,
             softened,

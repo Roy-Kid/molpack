@@ -64,7 +64,7 @@
 //! | Category | Items |
 //! |---|---|
 //! | Engine entries | [`PackEngine`], [`GenCanPack`], [`CbmcGrow`], [`LatticeGrow`], [`LogLevel`] |
-//! | Run lifecycle | [`Pipeline`], [`StageFactory`], [`pipeline::EngineSetup`], [`PackResult`] |
+//! | Run lifecycle | [`Pipeline`], [`StageFactory`], [`pipeline::EngineSetup`], [`PackResult`], [`IntraResidual`] |
 //! | Stage combinators (Rust-only) | [`Until`], [`OnViolation`], [`Invariant`], [`Layers`], [`Violation`], [`RestraintsSatisfied`] |
 //! | Shared settings + space | [`PackSettings`] (`entry`) |
 //! | Target  | [`Target`], [`CenteringMode`] |
@@ -134,6 +134,7 @@ pub mod validation;
 #[cfg(feature = "io")]
 pub use cases::{ExampleCase, build_targets, example_dir_from_manifest, render_inp_script};
 pub use context::{PackContext, PackState, Placed, RigidView};
+pub use entry::IntraResidual;
 pub use entry::PackResult;
 pub use entry::PackSettings;
 pub use error::PackError;
