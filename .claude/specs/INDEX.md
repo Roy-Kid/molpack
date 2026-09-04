@@ -4,14 +4,13 @@ Status legend: **DRAFT** (under review) → **APPROVED** (ready to implement) �
 
 Add via `/mol:spec <feature description>`. Implement via `/mol:impl <slug>` (chains: `/mol:impl-all <prefix>`). Close via `/mol:close <slug>`, which deletes the spec, its acceptance file, and this entry. Specs are active artifacts — finished ones do not stay here.
 
-## special-bonds (chain — 01 closed in molrs; 05–06 here)
+## special-bonds (chain — 01 closed in molrs; 06 here)
 
 来源：PEO 全原子生长卡住（2026-09-04）。根因是显式氢半径 1.0 Å，不是要把默认豁免加深到 1-6。表形 Cassandra `[s12,…,s1N]`，默认 ≡ 深度 3；生长只接受二值；`PackResult.intra` 在表可配置之前报告分子内残差。全原子一等建议是 `Target::with_atom_radius(H, ≈0.85)`。
 
-- [special-bonds-05-target](special-bonds-05-target.md) — Target::with_special_bonds；生长编译点具名拒绝分数权重；删除引擎 exclusion_depth [approved]
 - [special-bonds-06-mirror](special-bonds-06-mirror.md) — Python Target.with_special_bonds + IntraResidual 镜像；文档把氢半径写成全原子一等建议 [approved]
 
-01 在 molrs 已关闭（`BondDistanceWeights` + `Topology::from_frame` / `exclusions`）。02-ladder 已关闭（三时钟 + `BlockKind`）。03-sink 已关闭（molpack Topology 删除；`topology_for_growth` + `template.rs`）。04-residual 已关闭（PackResult.intra）。04-residual 已关闭（PackResult.intra）。
+01 在 molrs 已关闭（`BondDistanceWeights` + `Topology::from_frame` / `exclusions`）。02-ladder 已关闭（三时钟 + `BlockKind`）。03-sink 已关闭（molpack Topology 删除；`topology_for_growth` + `template.rs`）。04-residual 已关闭（PackResult.intra）。05-target 已关闭（Target.special_bonds）。04-residual 已关闭（PackResult.intra）。05-target 已关闭（Target.special_bonds）。
 
 ## packing-taxonomy (chain — `stage-pipeline` 01–07 landed 2026-09-03; next: `grow-axes` / `dg-refine`)
 
