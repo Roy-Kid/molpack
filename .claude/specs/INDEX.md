@@ -4,6 +4,17 @@ Status legend: **DRAFT** (under review) → **APPROVED** (ready to implement) �
 
 Add via `/mol:spec <feature description>`. Implement via `/mol:impl <slug>` (chains: `/mol:impl-all <prefix>`). Close via `/mol:close <slug>`, which deletes the spec, its acceptance file, and this entry. Specs are active artifacts — finished ones do not stay here.
 
+## special-bonds (chain — 01 closed in molrs; 03–06 here)
+
+来源：PEO 全原子生长卡住（2026-09-04）。根因是显式氢半径 1.0 Å，不是要把默认豁免加深到 1-6。表形 Cassandra `[s12,…,s1N]`，默认 ≡ 深度 3；生长只接受二值；`PackResult.intra` 在表可配置之前报告分子内残差。全原子一等建议是 `Target::with_atom_radius(H, ≈0.85)`。
+
+- [special-bonds-03-sink](special-bonds-03-sink.md) — 删除 molpack Topology；生长读 molrs::Topology；具名 GrowError；InternalTree 吃权重表 [approved]
+- [special-bonds-04-residual](special-bonds-04-residual.md) — PackResult.intra 报告计分/豁免同链最小距离（Å，MIC）；表是 from_targets 参数 [approved]
+- [special-bonds-05-target](special-bonds-05-target.md) — Target::with_special_bonds；生长编译点具名拒绝分数权重；删除引擎 exclusion_depth [approved]
+- [special-bonds-06-mirror](special-bonds-06-mirror.md) — Python Target.with_special_bonds + IntraResidual 镜像；文档把氢半径写成全原子一等建议 [approved]
+
+01 在 molrs 已关闭（`BondDistanceWeights` + `Topology::from_frame` / `exclusions`）。02-ladder 已关闭（三时钟 + `BlockKind`）。
+
 ## packing-taxonomy (chain — `stage-pipeline` 01–07 landed 2026-09-03; next: `grow-axes` / `dg-refine`)
 
 来源：grow 族算法评审 + packing 分类 rev 2（2026-09-02，用户裁定：所有 packer 共享 Stage/Pipeline trait 管理生命周期与 handler；全部化学、力场无关；键长不必精确，后接力场 minimize；生成族按六条正交轴组合）。顺序（architect 裁定）：`stage-pipeline`（含共享叶子 `src/topology.rs`）先落地；`grow-axes` 可在其前后独立落地（预设写在今天的 `PackEngine` 上）；`dg-refine` 前置 `src/objective.rs` 的行为保持拆分，该拆分与 DRAFT `pair-loop-context-split` 合并为一次 objective 重组。
