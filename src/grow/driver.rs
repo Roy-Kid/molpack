@@ -42,6 +42,7 @@
 //! force-completed exactly as on a handler abort, each forced placement counted
 //! in `softened`, and the outcome is `converged == false`.
 
+use molrs::BondDistanceWeights;
 use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 
@@ -93,8 +94,11 @@ impl GrowStage {
         let mut species = Vec::with_capacity(targets.len());
         for (i, t) in targets.iter().enumerate() {
             let frame = t.template.as_ref().ok_or((i, GrowError::MissingTemplate))?;
-            let tree = InternalTree::from_frame_with_depth(frame, config.exclusion_depth)
-                .map_err(|e| (i, e))?;
+            let tree = InternalTree::from_frame_with_weights(
+                frame,
+                &BondDistanceWeights::from_exclusion_depth(config.exclusion_depth),
+            )
+            .map_err(|e| (i, e))?;
             species.push(Species {
                 tree,
                 prior: config.torsion_prior.clone(),

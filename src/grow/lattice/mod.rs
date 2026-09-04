@@ -21,6 +21,7 @@ pub(crate) mod saw;
 pub use config::LatticeConfig;
 pub use entry::LatticeGrow;
 
+use molrs::BondDistanceWeights;
 use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use rand::SeedableRng;
@@ -67,6 +68,11 @@ impl LatticeStage {
 
     /// Build the per-species trees and backbones. The `usize` names the
     /// offending target.
+    ///
+    /// Lattice v1 is all-atom: trees are built with
+    /// `BondDistanceWeights::from_exclusion_depth(3)`. Spec 03's default-3
+    /// lives only on [`crate::grow::GrowConfig`]; this literal is lattice-v1's
+    /// until special-bonds-05 replaces it with `Target.special_bonds`.
     pub fn from_targets(
         targets: &[Target],
         cfg: &LatticeConfig,
@@ -75,7 +81,11 @@ impl LatticeStage {
         let mut species = Vec::with_capacity(targets.len());
         for (i, t) in targets.iter().enumerate() {
             let frame = t.template.as_ref().ok_or((i, GrowError::MissingTemplate))?;
-            let tree = InternalTree::from_frame(frame).map_err(|e| (i, e))?;
+            let tree = InternalTree::from_frame_with_weights(
+                frame,
+                &BondDistanceWeights::from_exclusion_depth(3),
+            )
+            .map_err(|e| (i, e))?;
             let backbone = analyze_backbone(frame, &tree).map_err(|e| (i, e))?;
             species.push(LatticeSpecies { tree, backbone });
         }

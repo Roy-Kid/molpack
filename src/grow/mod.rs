@@ -59,8 +59,58 @@ pub use driver::GrowStage;
 pub use prior::{AnglePrior, TorsionPrior};
 
 use molrs::store::frame::Frame;
+use molrs::types::F;
 
-use crate::topology::Topology;
+/// Read the template's bond graph and coordinates for growth.
+///
+/// Coordinates are in Å. This is the only grow-module caller of
+/// `crate::template`, and the unique implementer of the refusal order
+/// (including `RingTemplate`):
+/// `NoAtomsBlock → BondOutOfRange → NoBonds → TemplateTooSmall →
+/// Disconnected → RingTemplate`. Bond graphs come from
+/// `molrs::Topology::from_frame`; this function does not rebuild CSR.
+pub(crate) fn topology_for_growth(
+    frame: &Frame,
+) -> Result<(molrs::Topology, Vec<[F; 3]>), GrowError> {
+    let xyz = crate::template::frame_positions(frame)
+        .map_err(|crate::template::FramePositionsError::NoAtomsBlock| GrowError::NoAtomsBlock)?;
+    let n = xyz.len();
+    if let Some(err) = first_bond_out_of_range(frame, n) {
+        return Err(err);
+    }
+    // molrs treats a missing or empty bonds block as Ok with zero edges.
+    // A still-failing `from_frame` (non-empty bonds missing atomi/atomj)
+    // is named `NoBonds`; MolRsError is never wrapped.
+    let topo = molrs::Topology::from_frame(frame).map_err(|_| GrowError::NoBonds)?;
+    if topo.n_bonds() == 0 {
+        return Err(GrowError::NoBonds);
+    }
+    if n < 3 {
+        return Err(GrowError::TemplateTooSmall(n));
+    }
+    if topo.n_components() != 1 {
+        return Err(GrowError::Disconnected);
+    }
+    // A tree has n−1 edges; e ≥ n is a cycle.
+    if topo.n_bonds() >= n {
+        return Err(GrowError::RingTemplate);
+    }
+    Ok((topo, xyz))
+}
+
+fn first_bond_out_of_range(frame: &Frame, n: usize) -> Option<GrowError> {
+    let block = frame.get("bonds")?;
+    let atomi = block.get_uint("atomi")?;
+    let atomj = block.get_uint("atomj")?;
+    for (&a, &b) in atomi.iter().zip(atomj.iter()) {
+        let a = a as usize;
+        let b = b as usize;
+        if a >= n || b >= n {
+            return Some(GrowError::BondOutOfRange { a, b, n });
+        }
+    }
+    None
+}
 
 /// Validate that a template frame can seed growth.
 ///
@@ -69,16 +119,7 @@ use crate::topology::Topology;
 /// target, and molpack does not second-guess it).
 pub(crate) fn validate_template(frame: Option<&Frame>) -> Result<(), GrowError> {
     let frame = frame.ok_or(GrowError::MissingTemplate)?;
-    let topo = Topology::from_frame(frame).map_err(GrowError::Topology)?;
-    if topo.natoms() < 3 {
-        return Err(GrowError::TemplateTooSmall(topo.natoms()));
-    }
-    // A connected tree has exactly n-1 edges; e >= n implies a cycle. (An
-    // e == n-1 graph with a cycle is disconnected and named separately.)
-    if topo.bonds().len() >= topo.natoms() {
-        return Err(GrowError::RingTemplate);
-    }
-    Ok(())
+    topology_for_growth(frame).map(|_| ())
 }
 
 /// Growth needs a resolved, orthorhombic box: the v1 overlap field supports

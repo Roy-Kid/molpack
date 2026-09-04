@@ -21,8 +21,9 @@ use molpack::grow::internal::InternalTree;
 use molpack::grow::{GrowConfig, GrowError, TorsionPrior};
 use molpack::{
     CbmcGrow, F, GenCanPack, Handler, InsideSphereRestraint, PackContext, PackEngine, PackError,
-    PackResult, StepInfo, Target, TopologyError,
+    PackResult, StepInfo, Target,
 };
+use molrs::BondDistanceWeights;
 use molrs::store::block::Block;
 use molrs::store::frame::Frame;
 use ndarray::Array1;
@@ -151,16 +152,140 @@ fn grow_rejects_template_without_bonds() {
         .run(&[target], 20)
         .expect_err("Grow on a bond-less template must be rejected");
 
+    let PackError::Grow { source, .. } = err else {
+        panic!("expected PackError::Grow, got {err:?}");
+    };
     assert!(
-        matches!(
-            err,
-            PackError::Grow {
-                source: GrowError::Topology(TopologyError::NoBonds),
-                ..
-            }
-        ),
-        "expected PackError::Grow(NoBonds), got {err:?}"
+        matches!(source, GrowError::NoBonds),
+        "expected GrowError::NoBonds, got {source:?}"
     );
+    assert_eq!(
+        source.to_string(),
+        "the template frame carries no bonds; growth needs the bond graph — pack this \
+         target with GenCanPack or supply connectivity"
+    );
+}
+
+/// A 2-atom bondless frame is `NoBonds`, not `TemplateTooSmall` or
+/// `Disconnected` — refusal order is `NoBonds` before those variants.
+#[test]
+fn grow_rejects_two_atom_bondless_as_no_bonds() {
+    let err = InternalTree::from_frame_with_weights(
+        &chain_frame(2, 1.53, false),
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect_err("a 2-atom bondless template must be refused");
+    assert!(
+        matches!(err, GrowError::NoBonds),
+        "expected GrowError::NoBonds (not TemplateTooSmall or Disconnected), got {err:?}"
+    );
+}
+
+/// An isolated atom next to a bonded pair is `Disconnected`.
+#[test]
+fn grow_rejects_disconnected_isolated_atom() {
+    let frame = frame_from_parts(&zigzag_coords(3, 1.53), &[(0, 1)]);
+    let err = InternalTree::from_frame_with_weights(
+        &frame,
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect_err("an isolated atom must be refused");
+    assert!(
+        matches!(err, GrowError::Disconnected),
+        "expected GrowError::Disconnected, got {err:?}"
+    );
+}
+
+/// Two disjoint 3-atom chains: every atom has a bond, but `n_components > 1`.
+#[test]
+fn grow_rejects_two_disjoint_3atom_chains() {
+    let bonds = [(0, 1), (1, 2), (3, 4), (4, 5)];
+    let frame = frame_from_parts(&zigzag_coords(6, 1.53), &bonds);
+    let err = InternalTree::from_frame_with_weights(
+        &frame,
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect_err("two disjoint chains must be refused");
+    assert!(
+        matches!(err, GrowError::Disconnected),
+        "expected GrowError::Disconnected, got {err:?}"
+    );
+}
+
+/// No `atoms` block is `GrowError::NoAtomsBlock`.
+#[test]
+fn grow_rejects_no_atoms_block() {
+    let mut frame = Frame::new();
+    let mut bonds = Block::new();
+    bonds
+        .insert("atomi", Array1::from_vec(vec![0u32, 1]).into_dyn())
+        .expect("atomi column");
+    bonds
+        .insert("atomj", Array1::from_vec(vec![1u32, 2]).into_dyn())
+        .expect("atomj column");
+    frame.insert("bonds", bonds);
+
+    let err = InternalTree::from_frame_with_weights(
+        &frame,
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect_err("no atoms block must be refused");
+    assert!(
+        matches!(err, GrowError::NoAtomsBlock),
+        "expected GrowError::NoAtomsBlock, got {err:?}"
+    );
+}
+
+/// An atoms block missing `z` is the same `NoAtomsBlock` as a missing block.
+#[test]
+fn grow_rejects_atoms_block_missing_z() {
+    let coords = zigzag_coords(3, 1.53);
+    let mut atoms = Block::new();
+    for (name, k) in [("x", 0), ("y", 1)] {
+        let col: Vec<F> = coords.iter().map(|p| p[k]).collect();
+        atoms
+            .insert(name, Array1::from_vec(col).into_dyn())
+            .expect("coordinate column");
+    }
+    let mut frame = Frame::new();
+    frame.insert("atoms", atoms);
+    let mut bonds = Block::new();
+    bonds
+        .insert("atomi", Array1::from_vec(vec![0u32, 1]).into_dyn())
+        .expect("atomi column");
+    bonds
+        .insert("atomj", Array1::from_vec(vec![1u32, 2]).into_dyn())
+        .expect("atomj column");
+    frame.insert("bonds", bonds);
+
+    let err = InternalTree::from_frame_with_weights(
+        &frame,
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect_err("missing z column must be refused");
+    assert!(
+        matches!(err, GrowError::NoAtomsBlock),
+        "expected GrowError::NoAtomsBlock, got {err:?}"
+    );
+}
+
+/// Bond `(0, 99)` on a 3-atom frame reports structured `BondOutOfRange`.
+#[test]
+fn grow_rejects_bond_out_of_range() {
+    let frame = frame_from_parts(&zigzag_coords(3, 1.53), &[(0, 99)]);
+    let err = InternalTree::from_frame_with_weights(
+        &frame,
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect_err("out-of-range bond must be refused");
+    match err {
+        GrowError::BondOutOfRange { a, b, n } => {
+            assert_eq!(a, 0, "first endpoint from the frame");
+            assert_eq!(b, 99, "second endpoint from the frame");
+            assert_eq!(n, 3, "atom count from the frame");
+        }
+        other => panic!("expected GrowError::BondOutOfRange {{ a, b, n }}, got {other:?}"),
+    }
 }
 
 /// `Grow` on a bonded template with fewer than 3 atoms is a named
@@ -275,8 +400,11 @@ fn template_vars(tree: &InternalTree) -> Vec<F> {
 /// exact round-trip plus the step-partition consistency (seed + steps place
 /// every atom exactly once). Returns the tree for extra assertions.
 fn assert_roundtrip(coords: &[[F; 3]], bonds: &[(u32, u32)], what: &str) -> InternalTree {
-    let tree = InternalTree::from_frame(&frame_from_parts(coords, bonds))
-        .unwrap_or_else(|e| panic!("{what}: template must decompose, got {e}"));
+    let tree = InternalTree::from_frame_with_weights(
+        &frame_from_parts(coords, bonds),
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .unwrap_or_else(|e| panic!("{what}: template must decompose, got {e}"));
     assert_eq!(tree.n_atoms(), coords.len(), "{what}: n_atoms");
 
     let mut all: Vec<usize> = tree.seed_atoms().to_vec();
@@ -377,16 +505,20 @@ fn internal_roundtrip_branched() {
     assert_eq!(tree.n_vars(), 7, "branched: 7 free torsions");
 }
 
-/// Same round-trip for a molecule containing a ring: ring geometry (and the
-/// ring-closure bond) must come back exactly, and cyclic bonds must not add
-/// free variables.
+/// A ring template cannot build an internal-coordinate tree: it is
+/// `GrowError::RingTemplate`, not a silent open-ring decomposition.
 #[test]
 fn internal_roundtrip_ring() {
     let (coords, bonds) = ring_tail_parts();
-    let tree = assert_roundtrip(&coords, &bonds, "ring+tail");
-    // Only the tail bonds 0-6, 6-7 and 7-8 are free: the six ring bonds are
-    // cyclic and the tail's last bond is terminal.
-    assert_eq!(tree.n_vars(), 3, "ring+tail: 3 free torsions");
+    let err = InternalTree::from_frame_with_weights(
+        &frame_from_parts(&coords, &bonds),
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect_err("a ring template must not construct InternalTree");
+    assert!(
+        matches!(err, GrowError::RingTemplate),
+        "expected GrowError::RingTemplate, got {err:?}"
+    );
 }
 
 /// A molecule with no rotatable bonds (tetrahedral star: every bond is
@@ -402,21 +534,22 @@ fn internal_rigid_molecule_no_vars() {
     assert!(tree.n_steps() >= 1, "the rigid remainder is still a step");
 }
 
-/// THE ring-misclassification detector (spec ac-003(ii), Task 2 (ii)): under
-/// ARBITRARY free-variable values, every template bond length (including the
-/// ring-closure bond, which the round-trip test cannot see) and every bonded
-/// angle must still match the template, and all coordinates must be finite.
-/// Free torsions legitimately change and are not checked.
+/// Bonded-geometry detector on an acyclic template: under ARBITRARY
+/// free-variable values, every template bond length and every bonded angle
+/// must still match the template, and all coordinates must be finite. Free
+/// torsions legitimately change and are not checked. Ring-closure detection
+/// is the named `GrowError::RingTemplate` refusal (`internal_roundtrip_ring`,
+/// `ring_template_is_refused`); this test only randomizes acyclic templates.
 #[test]
 fn internal_random_vars_preserve_bonded_geometry() {
     let pi = std::f64::consts::PI as F;
     let mut rng = SmallRng::seed_from_u64(20260828);
-    for (what, (coords, bonds)) in [
-        ("branched", branched_parts()),
-        ("ring+tail", ring_tail_parts()),
-    ] {
-        let tree = InternalTree::from_frame(&frame_from_parts(&coords, &bonds))
-            .unwrap_or_else(|e| panic!("{what}: template must decompose, got {e}"));
+    for (what, (coords, bonds)) in [("branched", branched_parts())] {
+        let tree = InternalTree::from_frame_with_weights(
+            &frame_from_parts(&coords, &bonds),
+            &BondDistanceWeights::from_exclusion_depth(3),
+        )
+        .unwrap_or_else(|e| panic!("{what}: template must decompose, got {e}"));
         assert!(
             tree.n_vars() > 0,
             "{what}: needs free torsions to randomize"
@@ -460,8 +593,11 @@ fn internal_random_vars_preserve_bonded_geometry() {
 /// self included, 1-2/1-3/1-4 partners in, 1-5 partners out.
 #[test]
 fn internal_exclusions_depth() {
-    let tree =
-        InternalTree::from_frame(&chain_frame(12, 1.53, true)).expect("linear chain decomposes");
+    let tree = InternalTree::from_frame_with_weights(
+        &chain_frame(12, 1.53, true),
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect("linear chain decomposes");
     assert_eq!(
         tree.exclusions(0),
         &[0u32, 1, 2, 3][..],
@@ -470,6 +606,26 @@ fn internal_exclusions_depth() {
     assert!(
         !tree.exclusions(0).contains(&4),
         "1-5 partners must be scored, not excluded — the chain must not thread itself"
+    );
+}
+
+/// Same 5-bead chain as `(0,1)…(3,4)` with bonds written out of file order
+/// still decomposes; skip sets include the root.
+#[test]
+fn internal_tree_shuffled_bonds_still_decomposes() {
+    let coords = zigzag_coords(5, 1.53);
+    let bonds = [(3, 4), (1, 2), (0, 1), (2, 3)];
+    let frame = frame_from_parts(&coords, &bonds);
+    let tree = InternalTree::from_frame_with_weights(
+        &frame,
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect("shuffled linear-chain bonds must still decompose");
+    assert_eq!(tree.n_atoms(), 5, "5-bead chain");
+    let root = tree.seed_atoms()[0];
+    assert!(
+        tree.exclusions(root).contains(&(root as u32)),
+        "exclusions({root}) must include the root"
     );
 }
 
@@ -766,8 +922,11 @@ fn field_block_kind_self_vs_inter() {
 /// no PBC), every free torsion drawn independently from `prior`.
 fn sampled_c_n(prior: &TorsionPrior, n_beads: usize, bond: F, n_samples: usize, seed: u64) -> F {
     let template = zigzag_coords(n_beads, bond);
-    let tree = InternalTree::from_frame(&frame_from_parts(&template, &chain_bonds(n_beads)))
-        .expect("chain template decomposes");
+    let tree = InternalTree::from_frame_with_weights(
+        &frame_from_parts(&template, &chain_bonds(n_beads)),
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect("chain template decomposes");
     let mut rng = SmallRng::seed_from_u64(seed);
     let mut vars = vec![0.0 as F; tree.n_vars()];
     let mut sum_r2 = 0.0 as F;
@@ -858,8 +1017,11 @@ fn prior_uniform_freely_rotating_c_inf() {
 fn prior_states_trans_only_is_all_trans() {
     let pi = std::f64::consts::PI as F;
     let template = zigzag_coords(20, 1.53);
-    let tree = InternalTree::from_frame(&frame_from_parts(&template, &chain_bonds(20)))
-        .expect("chain template decomposes");
+    let tree = InternalTree::from_frame_with_weights(
+        &frame_from_parts(&template, &chain_bonds(20)),
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect("chain template decomposes");
     let prior = TorsionPrior::States(vec![(pi, 1.0)]);
     let mut rng = SmallRng::seed_from_u64(7);
     let mut vars = vec![0.0 as F; tree.n_vars()];
@@ -2561,10 +2723,29 @@ fn ring_template_is_refused() {
     let frame = frame_from_parts(&coords, &[(0, 1), (1, 2), (2, 0)]);
     let err = CbmcGrow::new(TorsionPrior::Uniform)
         .with_periodic_box([0.0; 3], BOX_MAX, [true; 3])
-        .run(&[Target::new(frame, 2)], 60)
+        .run(&[Target::new(frame.clone(), 2)], 60)
         .expect_err("a ring must be refused");
+    assert!(
+        matches!(
+            err,
+            PackError::Grow {
+                source: GrowError::RingTemplate,
+                ..
+            }
+        ),
+        "expected PackError::Grow(RingTemplate), got {err:?}"
+    );
     let msg = format!("{err}");
     assert!(msg.contains("ring"), "named rejection, got: {msg}");
+    let tree_err = InternalTree::from_frame_with_weights(
+        &frame,
+        &BondDistanceWeights::from_exclusion_depth(3),
+    )
+    .expect_err("a ring must not construct InternalTree");
+    assert!(
+        matches!(tree_err, GrowError::RingTemplate),
+        "expected GrowError::RingTemplate, got {tree_err:?}"
+    );
 }
 
 /// The seeded chain's named rejections and composability.

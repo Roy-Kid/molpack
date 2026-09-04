@@ -3,21 +3,22 @@
 //! The `CbmcGrow` entry carries a [`GrowConfig`], so this file must stay a
 //! **leaf**: importing `target` / `entry` / `context` from here would close
 //! a dependency cycle between the entry layer and the growth module. Only
-//! leaves (`prior`, and the crate-root [`topology`](crate::topology), which
-//! itself imports nothing from this crate) and `molrs` types are allowed.
+//! sibling leaves (`prior`) and `molrs` types are allowed.
 
 use std::fmt;
 
 use molrs::types::F;
 
 use crate::grow::prior::{AnglePrior, TorsionPrior};
-use crate::topology::TopologyError;
 
 /// Configuration for the chain-growth solver.
 ///
 /// The torsion prior has **no default** — it decides the grown chains'
 /// statistics (spec Domain basis §5.1), so the caller must state it, even if
-/// the statement is `TorsionPrior::Uniform`. Everything else defaults.
+/// the statement is `TorsionPrior::Uniform`. Everything else defaults,
+/// including intramolecular exclusion depth 3 (1-2/1-3/1-4). Spec 03's
+/// default 3 lives only on this type; lattice-v1 still writes a literal 3
+/// until special-bonds-05 replaces it with `Target.special_bonds`.
 #[derive(Debug, Clone)]
 pub struct GrowConfig {
     pub(crate) torsion_prior: TorsionPrior,
@@ -45,7 +46,9 @@ pub struct GrowConfig {
     /// starting point for a subsequent excluded-volume push-off.
     pub(crate) min_hard_scale: F,
     /// Intramolecular exclusion depth in bonds (3 = 1-2/1-3/1-4, the
-    /// all-atom convention; CG templates typically use 1 or 2).
+    /// all-atom convention; CG templates typically use 1 or 2). Spec 03's
+    /// default 3 lives only here; lattice-v1 still writes a literal 3 until
+    /// special-bonds-05 replaces it with `Target.special_bonds`.
     pub(crate) exclusion_depth: usize,
     /// Placement-angle prior (`Template` = all-atom default; `Wlc` for CG).
     pub(crate) angle_prior: AnglePrior,
@@ -64,7 +67,7 @@ pub struct GrowConfig {
 
 impl GrowConfig {
     /// A growth configuration with the mandatory torsion prior and defaults
-    /// for everything else.
+    /// for everything else, including exclusion depth 3.
     pub fn new(torsion_prior: TorsionPrior) -> Self {
         Self {
             torsion_prior,
@@ -173,7 +176,11 @@ impl GrowConfig {
         self
     }
 
-    /// Intramolecular exclusion depth in bonds.
+    /// Intramolecular exclusion depth in bonds (3 = 1-2/1-3/1-4).
+    ///
+    /// Spec 03's default 3 lives only on [`GrowConfig`]. Lattice-v1 still
+    /// writes a literal 3 until special-bonds-05 replaces it with
+    /// `Target.special_bonds`.
     pub fn with_exclusion_depth(mut self, depth: usize) -> Self {
         self.exclusion_depth = depth;
         self
@@ -193,6 +200,10 @@ impl GrowConfig {
 /// Growth consumes the template's *chemistry* (its bond graph), so a target
 /// that carries none is refused with a named error — never silently degraded
 /// to rigid-body packing. The caller chooses the method per target.
+///
+/// Template-graph refusals stop at the first match, in this order:
+/// `NoAtomsBlock → BondOutOfRange → NoBonds → TemplateTooSmall →
+/// Disconnected → RingTemplate`.
 #[derive(Debug, Clone)]
 pub enum GrowError {
     /// The target was built without a template frame
@@ -200,20 +211,22 @@ pub enum GrowError {
     /// bond graph to grow from.
     MissingTemplate,
     /// The template has fewer than 3 atoms; growth needs a rigid seed of 3.
-    ///
-    /// The bond graph is read first, so a template that is both bondless and
-    /// too small reports [`GrowError::Topology`] with `NoBonds`; the full order
-    /// is `NoAtomsBlock → NoBonds → BondOutOfRange → TemplateTooSmall →
-    /// Disconnected → RingTemplate`.
     TemplateTooSmall(usize),
-    /// The template's bond graph could not be read, or does not qualify for
-    /// growth. The bond graph is owned by [`crate::topology`]; growth wraps
-    /// its error rather than restating the variants.
-    ///
-    /// Its `Display` is passed through verbatim, so the user sees the leaf's
-    /// wording; match the variant to recover the [`TopologyError`] (there is no
-    /// `Error::source` chain).
-    Topology(TopologyError),
+    /// The template frame has no readable `atoms` block (`x` / `y` / `z` in Å).
+    NoAtomsBlock,
+    /// A bond names an endpoint outside the template.
+    BondOutOfRange {
+        /// First endpoint of the offending bond, as written in the frame.
+        a: usize,
+        /// Second endpoint of the offending bond, as written in the frame.
+        b: usize,
+        /// Atom count of the template (`xyz.len()`).
+        n: usize,
+    },
+    /// The template frame carries no bonds (missing/empty graph).
+    NoBonds,
+    /// The template's bond graph does not connect all atoms.
+    Disconnected,
     /// No placed reference atom could be found while decomposing atom `.0`.
     NoReference(usize),
     /// Rotatable-bond perception failed.
@@ -253,8 +266,21 @@ impl fmt::Display for GrowError {
                 "the template has {n} atom(s); growth needs at least 3 — pack this \
                  target with GenCanPack"
             ),
-            // Verbatim pass-through: the topology leaf owns this wording.
-            GrowError::Topology(e) => write!(f, "{e}"),
+            GrowError::NoAtomsBlock => {
+                write!(f, "the template frame has no readable atoms block")
+            }
+            GrowError::BondOutOfRange { a, b, n } => write!(
+                f,
+                "bond ({a}, {b}) references an atom outside the template (natoms = {n})"
+            ),
+            GrowError::NoBonds => write!(
+                f,
+                "the template frame carries no bonds; growth needs the bond graph — pack \
+                 this target with GenCanPack or supply connectivity"
+            ),
+            GrowError::Disconnected => {
+                write!(f, "the template's bond graph does not connect all atoms")
+            }
             GrowError::NoReference(i) => write!(
                 f,
                 "no placed reference atom found while decomposing atom {i}"

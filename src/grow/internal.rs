@@ -22,7 +22,6 @@ use molrs::system::bond::BondType;
 use molrs::types::F;
 
 use crate::grow::GrowError;
-use crate::topology::{Topology, TopologyError};
 
 /// One atom's placement recipe against three earlier atoms.
 #[derive(Debug, Clone)]
@@ -66,43 +65,24 @@ pub struct InternalTree {
     exclusions: Vec<Vec<u32>>,
 }
 
-/// Default bond-graph exclusion depth: 3 bonds, i.e. 1-2 / 1-3 / 1-4 — the
-/// all-atom convention. 1-2 and 1-3 distances are fixed by the template's
-/// bond lengths and angles. 1-4 distances are **not** fixed — they swing with
-/// the sampled torsion (butane: trans ≈ 3.9 Å vs cis ≈ 2.9 Å) — but they are
-/// governed by the torsion prior, and a hard-core check would wrongly reject
-/// legitimate gauche/cis conformers, so they are excluded too (the same
-/// division of labor as force-field 1-4 scaling). 1-5 and beyond are what a
-/// chain must not thread through itself, so they are scored.
-///
-/// Coarse-grained templates conventionally use a shallower depth (1-2 or
-/// 1-3); it is a per-target parameter (`GrowConfig::exclusion_depth`), not a
-/// constant — this default serves the all-atom case.
-const DEFAULT_EXCLUDE_BONDS: usize = 3;
-
 impl InternalTree {
-    /// Decompose a template frame with the all-atom default exclusion depth
-    /// (`DEFAULT_EXCLUDE_BONDS` = 3, i.e. 1-2/1-3/1-4). The frame must carry
-    /// an `atoms` block with `x`/`y`/`z` and a `bonds` block with
-    /// `atomi`/`atomj`.
-    pub fn from_frame(frame: &Frame) -> Result<Self, GrowError> {
-        Self::from_frame_with_depth(frame, DEFAULT_EXCLUDE_BONDS)
-    }
-
-    /// Decompose a template frame with an explicit intramolecular exclusion
-    /// depth in bonds (`3` = exclude 1-2/1-3/1-4; CG templates typically use
-    /// `1` or `2`).
-    pub fn from_frame_with_depth(frame: &Frame, exclude_bonds: usize) -> Result<Self, GrowError> {
-        let (topo, xyz) =
-            Topology::from_frame_with_positions(frame).map_err(GrowError::Topology)?;
-        let n = topo.natoms();
-        if n < 3 {
-            return Err(GrowError::TemplateTooSmall(n));
-        }
-        topo.require_connected().map_err(GrowError::Topology)?;
+    /// Decompose a template frame using `weights` as the intramolecular skip
+    /// table. Spec 03's default exclusion depth 3 lives only on
+    /// [`crate::grow::GrowConfig`]; this constructor takes the table the
+    /// caller built (`BondDistanceWeights::from_exclusion_depth(3)` is the
+    /// all-atom 1-2/1-3/1-4 convention).
+    ///
+    /// Coordinates are in Å. The frame must carry an `atoms` block with
+    /// `x`/`y`/`z` and a connected acyclic bond graph of at least 3 atoms.
+    pub fn from_frame_with_weights(
+        frame: &Frame,
+        weights: &molrs::BondDistanceWeights,
+    ) -> Result<Self, GrowError> {
+        let (topo, xyz) = super::topology_for_growth(frame)?;
+        let n = topo.n_atoms();
 
         let root = diameter_endpoint(&topo);
-        let (order, parent) = bfs_order(&topo, root, n)?;
+        let (order, parent) = bfs_order(&topo, root, n);
 
         // Rotatable bonds, as an unordered key set. PDB / GROMACS / XYZ
         // connectivity reads back as `BondType::Unknown`; for a conformer
@@ -208,7 +188,11 @@ impl InternalTree {
         steps.push((start, sites.len()));
         step_var.push(current);
 
-        let exclusions = topo.exclusions(exclude_bonds);
+        let exclusions = topo
+            .exclusions(weights)
+            .into_iter()
+            .map(|row| row.into_iter().map(|i| i as u32).collect())
+            .collect();
 
         Ok(Self {
             n_atoms: n,
@@ -241,7 +225,7 @@ impl InternalTree {
     /// Same-molecule partners of `atom` within this tree's exclusion depth,
     /// ascending and **including `atom` itself** — the skip set the overlap
     /// field expects, since an atom must not be scored against its own
-    /// position. Produced by [`Topology::exclusions`](crate::Topology::exclusions).
+    /// position. Produced by [`molrs::Topology::exclusions`].
     pub fn exclusions(&self, atom: usize) -> &[u32] {
         &self.exclusions[atom]
     }
@@ -383,9 +367,9 @@ pub(crate) fn rotatable_bond_keys(graph: &Atomistic) -> std::collections::HashSe
 /// One endpoint of a longest shortest-path in the graph — a chain end for a
 /// linear polymer, so growth runs along the backbone instead of starting in
 /// the middle and having to grow two ways at once.
-fn diameter_endpoint(topo: &Topology) -> usize {
+fn diameter_endpoint(topo: &molrs::Topology) -> usize {
     let far = |from: usize| -> usize {
-        let n = topo.natoms();
+        let n = topo.n_atoms();
         let mut dist = vec![usize::MAX; n];
         let mut queue = std::collections::VecDeque::new();
         dist[from] = 0;
@@ -395,8 +379,7 @@ fn diameter_endpoint(topo: &Topology) -> usize {
             if dist[a] > dist[best] {
                 best = a;
             }
-            for &b in topo.neighbors(a) {
-                let b = b as usize;
+            for b in topo.neighbors(a) {
                 if dist[b] == usize::MAX {
                     dist[b] = dist[a] + 1;
                     queue.push_back(b);
@@ -408,11 +391,7 @@ fn diameter_endpoint(topo: &Topology) -> usize {
     far(far(0))
 }
 
-fn bfs_order(
-    topo: &Topology,
-    root: usize,
-    n: usize,
-) -> Result<(Vec<usize>, Vec<Option<usize>>), GrowError> {
+fn bfs_order(topo: &molrs::Topology, root: usize, n: usize) -> (Vec<usize>, Vec<Option<usize>>) {
     let mut parent: Vec<Option<usize>> = vec![None; n];
     let mut seen = vec![false; n];
     let mut order = Vec::with_capacity(n);
@@ -421,8 +400,7 @@ fn bfs_order(
     queue.push_back(root);
     while let Some(a) = queue.pop_front() {
         order.push(a);
-        for &b in topo.neighbors(a) {
-            let b = b as usize;
+        for b in topo.neighbors(a) {
             if !seen[b] {
                 seen[b] = true;
                 parent[b] = Some(a);
@@ -430,15 +408,13 @@ fn bfs_order(
             }
         }
     }
-    if order.len() != n {
-        return Err(GrowError::Topology(TopologyError::Disconnected));
-    }
-    Ok((order, parent))
+    debug_assert_eq!(order.len(), n);
+    (order, parent)
 }
 
 /// A placed neighbour of `at`, preferring its BFS parent, never `exclude`.
 fn pick_ref(
-    topo: &Topology,
+    topo: &molrs::Topology,
     placed: &[bool],
     at: usize,
     exclude: usize,
@@ -451,8 +427,7 @@ fn pick_ref(
         return Some(p);
     }
     topo.neighbors(at)
-        .iter()
-        .map(|&c| c as usize)
+        .into_iter()
         .find(|&c| c != exclude && placed[c])
 }
 

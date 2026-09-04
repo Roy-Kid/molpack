@@ -16,7 +16,6 @@ use molrs::types::F;
 use crate::grow::GrowError;
 use crate::grow::internal::{InternalTree, dihedral, nerf};
 use crate::grow::lattice::saw::DiamondLattice;
-use crate::topology::Topology;
 
 const PI: F = std::f64::consts::PI as F;
 const TWO_PI: F = std::f64::consts::TAU as F;
@@ -56,8 +55,8 @@ fn is_hydrogen(el: &str) -> bool {
 /// Branched heavy atoms and non-rotatable interior backbone bonds are
 /// named rejections, never silent degradation.
 pub(crate) fn analyze_backbone(frame: &Frame, tree: &InternalTree) -> Result<Backbone, GrowError> {
-    let (topo, xyz) = Topology::from_frame_with_positions(frame).map_err(GrowError::Topology)?;
-    let n = topo.natoms();
+    let (topo, xyz) = crate::grow::topology_for_growth(frame)?;
+    let n = topo.n_atoms();
     let elements: Vec<String> = frame
         .get("atoms")
         .and_then(|b| b.get_string("element"))
@@ -66,8 +65,7 @@ pub(crate) fn analyze_backbone(frame: &Frame, tree: &InternalTree) -> Result<Bac
 
     let heavy: Vec<bool> = elements.iter().map(|e| !is_hydrogen(e)).collect();
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for &(i, j) in topo.bonds() {
-        let (i, j) = (i as usize, j as usize);
+    for [i, j] in topo.bonds() {
         if heavy[i] && heavy[j] {
             adj[i].push(j);
             adj[j].push(i);

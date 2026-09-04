@@ -70,7 +70,6 @@
 //! | Target  | [`Target`], [`CenteringMode`] |
 //! | Rigid placement vector | [`RigidView`] |
 //! | Stage seam (Rust-only) | [`Stage`], [`Requires`], [`Guarantees`], [`StageOutcome`], [`Budget`], [`PackState`], [`Placed`] |
-//! | Template bond graph + geometry reader | [`Topology`], [`TopologyError`], [`frame_positions`] |
 //! | AtomRestraint trait + 14 concrete structs | [`AtomRestraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…AtomRestraint` |
 //! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideCellRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
 //! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`handler::StageInfo`], [`PhaseInfo`], [`PhaseReport`] |
@@ -129,7 +128,7 @@ pub mod restraint;
 pub mod script;
 pub mod stage;
 pub mod target;
-pub mod topology;
+mod template;
 pub mod validation;
 
 #[cfg(feature = "io")]
@@ -170,7 +169,6 @@ pub use restraint::{
 };
 pub use stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 pub use target::{Angle, Axis, CenteringMode, Placement, Target};
-pub use topology::{Topology, TopologyError, frame_positions};
 pub use validation::{ValidationReport, ViolationMetrics, validate_from_targets};
 
 // Custom-objective extension surface. An engine run drives a `dyn Objective`
