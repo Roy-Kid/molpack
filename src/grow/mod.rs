@@ -61,6 +61,9 @@ pub use prior::{AnglePrior, TorsionPrior};
 use molrs::store::frame::Frame;
 use molrs::types::F;
 
+use crate::grow::internal::InternalTree;
+use crate::target::Target;
+
 /// Read the template's bond graph and coordinates for growth.
 ///
 /// Coordinates are in Å. This is the only grow-module caller of
@@ -120,6 +123,14 @@ fn first_bond_out_of_range(frame: &Frame, n: usize) -> Option<GrowError> {
 pub(crate) fn validate_template(frame: Option<&Frame>) -> Result<(), GrowError> {
     let frame = frame.ok_or(GrowError::MissingTemplate)?;
     topology_for_growth(frame).map(|_| ())
+}
+
+/// Compile the target's intramolecular skip table into an internal-coordinate
+/// tree. Missing template is [`GrowError::MissingTemplate`]; a non-binary
+/// table is [`GrowError::NonBinarySpecialBond`].
+pub(crate) fn tree_from_target(t: &Target) -> Result<InternalTree, GrowError> {
+    let frame = t.template.as_ref().ok_or(GrowError::MissingTemplate)?;
+    InternalTree::from_frame(frame, &t.special_bonds)
 }
 
 /// Growth needs a resolved, orthorhombic box: the v1 overlap field supports

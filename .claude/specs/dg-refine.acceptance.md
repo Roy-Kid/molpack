@@ -30,8 +30,8 @@ criteria:
     type: runtime
     pass_when: |
       8 × 12 珠链 / 26 Å 盒的人工重叠初态经 DgRefine 后 `fdist < precision`；
-      人工自穿链经 IntraOverlapTerm 精修后排除深度之外的同分子最小距离 ≥ tolerance − 1e-9
-      （exclusion_depth 1 与 3 各一次）；
+      两条人工自穿链经 IntraOverlapTerm 精修后，各自 `Target.special_bonds` 表外的同分子最小距离 ≥ tolerance − 1e-9
+      （两张 Target 各一张表：深度 1 与深度 3）；
       20 × 24 珠链 / 22 Å 盒（复用 lattice 测试的稠密算例）经 DgRefine 末级
       `fdist ≤ 0.1 × 初态 fdist` 且严格小于同 max_loops 下 `GenCanPack::seeded_from` 的 fdist；
       两者的 `fdist` 都来自管线末尾共享 objective 在 scale = 1.0 的评估。

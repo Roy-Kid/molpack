@@ -147,6 +147,7 @@ pub use handler::{
     ProgressHandler, StepInfo, XYZHandler,
 };
 pub use invariant::{Invariant, Layers, RestraintsSatisfied, Violation};
+pub use molrs::BondDistanceWeights;
 pub use molrs::Element;
 pub use molrs::types::F;
 pub use pipeline::combinators::{OnViolation, Until};

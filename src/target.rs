@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::frame::frame_to_coords_and_elements;
 use crate::restraint::{AtomRestraint, Restraint};
+use molrs::BondDistanceWeights;
 use molrs::types::F;
 
 /// Cartesian axis selector used in `Target::with_rotation_bound` and
@@ -131,6 +132,12 @@ pub struct Target {
     /// the packed coordinates. `None` for targets built from bare coordinates
     /// ([`Target::from_coords`]), whose result frame is coordinates-only.
     pub template: Option<molrs::Frame>,
+    /// Intramolecular skip table. This is not `ForceField::special_bonds`.
+    ///
+    /// Default is [`BondDistanceWeights::from_exclusion_depth`]`(3)`
+    /// (`[0, 0, 0, 1]`: 1-2/1-3/1-4 exempt, 1-5+ scored). Set via
+    /// [`with_special_bonds`](Self::with_special_bonds).
+    pub special_bonds: BondDistanceWeights,
     /// Per-copy total mass override in amu, for the entries'
     /// `with_density` when element symbols cannot provide it (coarse-grained beads, `from_coords`
     /// targets whose elements are `"X"`).
@@ -192,6 +199,7 @@ impl Target {
             rotation_bound: [None, None, None],
             fixed_at: None,
             template: None,
+            special_bonds: BondDistanceWeights::from_exclusion_depth(3),
             mass: None,
         }
     }
@@ -202,6 +210,21 @@ impl Target {
     /// targets).
     pub fn with_mass(mut self, amu: F) -> Self {
         self.mass = Some(amu);
+        self
+    }
+
+    /// This is not `ForceField::special_bonds`.
+    ///
+    /// Stores `table` as this target's intramolecular skip weights. Default is
+    /// [`BondDistanceWeights::from_exclusion_depth`]`(3)` (`[0, 0, 0, 1]`).
+    /// All-atom templates with explicit hydrogen keep that depth-3 table and
+    /// shrink hydrogen via [`with_atom_radius`](Self::with_atom_radius); do
+    /// not replace it with `[0, 0, 0, 0, 0, 1]`.
+    ///
+    /// Fractional weights are stored here and refused later when growth
+    /// compiles the skip set ([`crate::grow::GrowError::NonBinarySpecialBond`]).
+    pub fn with_special_bonds(mut self, table: BondDistanceWeights) -> Self {
+        self.special_bonds = table;
         self
     }
 

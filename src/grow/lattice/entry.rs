@@ -4,12 +4,10 @@
 //! its two peers (`gencan/entry.rs`, `grow/entry.rs`): the algorithm in one
 //! file, the entry that selects it in another.
 
-use molrs::BondDistanceWeights;
 use molrs::types::F;
 
 use crate::entry::{PackResult, PackSettings};
 use crate::error::PackError;
-use crate::grow::internal::InternalTree;
 use crate::grow::prior::TorsionPrior;
 use crate::grow::{GrowError, validate_grow_cell};
 use crate::handler::Handler;
@@ -68,10 +66,7 @@ impl StageFactory for LatticeGrow {
         &self.settings
     }
 
-    /// Lattice v1 is all-atom: trees are built with
-    /// `BondDistanceWeights::from_exclusion_depth(3)`. Spec 03's default-3
-    /// lives only on [`crate::grow::GrowConfig`]; this literal is lattice-v1's
-    /// until special-bonds-05 replaces it with `Target.special_bonds`.
+    /// Each tree is compiled from that target's [`Target::special_bonds`].
     fn validate_targets(&self, targets: &[Target]) -> Result<(), PackError> {
         for (i, t) in targets.iter().enumerate() {
             crate::grow::validate_template(t.template.as_ref())
@@ -85,11 +80,8 @@ impl StageFactory for LatticeGrow {
             // Backbone analyzability is part of validation: named rejection
             // before any context is built.
             let frame = t.template.as_ref().expect("validate_template checked");
-            let tree = InternalTree::from_frame_with_weights(
-                frame,
-                &BondDistanceWeights::from_exclusion_depth(3),
-            )
-            .map_err(|source| PackError::Grow { target: i, source })?;
+            let tree = crate::grow::tree_from_target(t)
+                .map_err(|source| PackError::Grow { target: i, source })?;
             analyze_backbone(frame, &tree)
                 .map_err(|source| PackError::Grow { target: i, source })?;
         }

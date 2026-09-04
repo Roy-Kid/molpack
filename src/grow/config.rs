@@ -7,6 +7,7 @@
 
 use std::fmt;
 
+use molrs::BondDistanceWeights;
 use molrs::types::F;
 
 use crate::grow::prior::{AnglePrior, TorsionPrior};
@@ -15,10 +16,8 @@ use crate::grow::prior::{AnglePrior, TorsionPrior};
 ///
 /// The torsion prior has **no default** — it decides the grown chains'
 /// statistics (spec Domain basis §5.1), so the caller must state it, even if
-/// the statement is `TorsionPrior::Uniform`. Everything else defaults,
-/// including intramolecular exclusion depth 3 (1-2/1-3/1-4). Spec 03's
-/// default 3 lives only on this type; lattice-v1 still writes a literal 3
-/// until special-bonds-05 replaces it with `Target.special_bonds`.
+/// the statement is `TorsionPrior::Uniform`. Everything else defaults.
+/// The intramolecular skip table lives on `Target.special_bonds`.
 #[derive(Debug, Clone)]
 pub struct GrowConfig {
     pub(crate) torsion_prior: TorsionPrior,
@@ -45,11 +44,6 @@ pub struct GrowConfig {
     /// (Auhl et al. 2003). Contacts tighter than that floor are a poor
     /// starting point for a subsequent excluded-volume push-off.
     pub(crate) min_hard_scale: F,
-    /// Intramolecular exclusion depth in bonds (3 = 1-2/1-3/1-4, the
-    /// all-atom convention; CG templates typically use 1 or 2). Spec 03's
-    /// default 3 lives only here; lattice-v1 still writes a literal 3 until
-    /// special-bonds-05 replaces it with `Target.special_bonds`.
-    pub(crate) exclusion_depth: usize,
     /// Placement-angle prior (`Template` = all-atom default; `Wlc` for CG).
     pub(crate) angle_prior: AnglePrior,
     /// Serial scheduling: grow one chain to completion before starting the
@@ -67,7 +61,7 @@ pub struct GrowConfig {
 
 impl GrowConfig {
     /// A growth configuration with the mandatory torsion prior and defaults
-    /// for everything else, including exclusion depth 3.
+    /// for everything else.
     pub fn new(torsion_prior: TorsionPrior) -> Self {
         Self {
             torsion_prior,
@@ -79,7 +73,6 @@ impl GrowConfig {
             relax_window: 6,
             soften_after: 50,
             min_hard_scale: 0.8,
-            exclusion_depth: 3,
             angle_prior: AnglePrior::Template,
             serial: false,
             void_bias: false,
@@ -176,16 +169,6 @@ impl GrowConfig {
         self
     }
 
-    /// Intramolecular exclusion depth in bonds (3 = 1-2/1-3/1-4).
-    ///
-    /// Spec 03's default 3 lives only on [`GrowConfig`]. Lattice-v1 still
-    /// writes a literal 3 until special-bonds-05 replaces it with
-    /// `Target.special_bonds`.
-    pub fn with_exclusion_depth(mut self, depth: usize) -> Self {
-        self.exclusion_depth = depth;
-        self
-    }
-
     /// Placement-angle prior. Defaults to [`AnglePrior::Template`] (angles
     /// copied verbatim — the all-atom behavior); CG templates use
     /// [`AnglePrior::Wlc`] to control persistence (spec §5.5).
@@ -193,6 +176,19 @@ impl GrowConfig {
         self.angle_prior = prior;
         self
     }
+}
+
+/// First table slot whose weight is neither `0.0` nor `1.0`.
+///
+/// Slot 0 is the 1-2 weight. `None` means the table is binary and growth
+/// may compile it as a skip set.
+pub(crate) fn binary_violation(weights: &BondDistanceWeights) -> Option<(usize, F)> {
+    weights
+        .as_slice()
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|&(_, w)| w != 0.0 && w != 1.0)
 }
 
 /// Why a target cannot be grown.
@@ -245,6 +241,14 @@ pub enum GrowError {
     /// silently dropped and the ring grown open — refused instead (lattice
     /// ring closure is its own future spec).
     RingTemplate,
+    /// A special-bonds weight is neither 0 nor 1. Growth compiles a binary
+    /// skip table; `index` is the 0-based slot (slot 0 is 1-2, slot 2 is 1-4).
+    NonBinarySpecialBond {
+        /// 0-based table slot.
+        index: usize,
+        /// The stored weight at `index`.
+        weight: F,
+    },
     /// The template's heavy-atom backbone does not fit the diamond lattice:
     /// branched or non-tetrahedral (the message names the offense). Lattice
     /// growth v1 maps a linear sp³ backbone; branched trees are staged
@@ -302,6 +306,15 @@ impl fmt::Display for GrowError {
                  into a tree, and a ring bond would be silently dropped; ring \
                  templates are refused"
             ),
+            GrowError::NonBinarySpecialBond { index, weight } => {
+                let pair = index + 2;
+                write!(
+                    f,
+                    "special-bonds 1-{pair} weight is {weight}; growth compiles a \
+                     binary skip table (0 or 1). For all-atom explicit hydrogen, \
+                     use Target::with_atom_radius rather than a fractional weight"
+                )
+            }
             GrowError::NonTetrahedralTemplate(msg) => write!(
                 f,
                 "the template's backbone does not fit the diamond lattice: {msg}"

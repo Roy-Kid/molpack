@@ -97,7 +97,6 @@ class TestTypedSurface:
             .with_relax(20, 4)
             .with_soften_after(30)
             .with_min_hard_scale(0.85)
-            .with_exclusion_depth(2)
             .with_angle_prior(AnglePrior.template())
         )
         assert isinstance(chained, CbmcGrow)

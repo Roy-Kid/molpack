@@ -36,10 +36,9 @@ pub(crate) struct Placements {
 /// placeholder. Distances are Euclidean lengths of
 /// [`SimBox::shortest_vector_impl`].
 ///
-/// Classification is driven by the caller-supplied
-/// [`molrs::BondDistanceWeights`] slice (one table per target). This type
-/// does not pick an exclusion depth. Analogous table-passing:
-/// [`crate::grow::internal::InternalTree::from_frame_with_weights`].
+/// Classification is driven by each target's
+/// [`Target::special_bonds`]. This type does not pick an exclusion depth.
+/// Analogous per-target table: [`crate::grow::internal::InternalTree::from_frame`].
 #[derive(Debug, Clone, Copy)]
 pub struct IntraResidual {
     /// Minimum same-copy pair distance among pairs the table scores (Å).
@@ -60,31 +59,22 @@ enum IntraSkip {
 }
 
 impl IntraResidual {
-    /// Classify every same-copy `i < j` pair of `targets` against `tables`
-    /// and return the two class minima (Å, minimum image).
+    /// Classify every same-copy `i < j` pair of `targets` against each
+    /// target's [`Target::special_bonds`] and return the two class minima
+    /// (Å, minimum image).
     ///
-    /// `tables.len()` must equal `targets.len()` (asserted in release as well
-    /// as debug). There is no table-less overload: the skip table is an
-    /// argument, the same shape as
-    /// [`crate::grow::internal::InternalTree::from_frame_with_weights`].
-    /// Spec 05 swaps assemble's list builder for `Target.special_bonds`; this
-    /// constructor stays table-in.
+    /// Spec 05 reads `Target.special_bonds` (no longer broadcasts depth 3).
     ///
     /// A missing template or a zero-edge bond graph is identity exemption
     /// only (`i == j` skipped; every `i != j` scored). [`molrs::Topology::from_frame`]
     /// errors `NotFound` and `Validation` omit that target — neither class is
     /// updated — so a broken 1-2 is not reported as scored.
-    pub fn from_targets(
-        targets: &[Target],
-        positions: &[[F; 3]],
-        simbox: &SimBox,
-        tables: &[molrs::BondDistanceWeights],
-    ) -> Self {
-        assert_eq!(targets.len(), tables.len());
+    pub fn from_targets(targets: &[Target], positions: &[[F; 3]], simbox: &SimBox) -> Self {
         let mut scored = F::INFINITY;
         let mut exempted = F::INFINITY;
         let mut offset = 0usize;
-        for (target, table) in targets.iter().zip(tables) {
+        for target in targets {
+            let table = &target.special_bonds;
             let n = target.natoms();
             let ncopy = if target.fixed_at.is_some() {
                 1
@@ -148,9 +138,8 @@ pub struct PackResult {
     /// Maximum inter-molecular distance violation at termination.
     pub fdist: F,
     /// Intra-molecular residual (Å, minimum image): scored vs exempted
-    /// same-copy minima. `Pipeline::assemble` broadcasts
-    /// [`molrs::BondDistanceWeights::from_exclusion_depth`]`(3)` onto every
-    /// target; spec 05 swaps that list builder for `Target.special_bonds`.
+    /// same-copy minima. `Pipeline::assemble` reads each target's
+    /// [`crate::target::Target::special_bonds`].
     pub intra: IntraResidual,
     /// Maximum constraint violation at termination.
     pub frest: F,
@@ -288,13 +277,9 @@ mod tests {
     #[test]
     fn intra_residual_linear_hexamer_depth3() {
         let positions = along_x(6);
-        let target = bonded_target(&positions, 1);
-        let intra = IntraResidual::from_targets(
-            &[target],
-            &positions,
-            &open_box(),
-            &[BondDistanceWeights::from_exclusion_depth(3)],
-        );
+        let target = bonded_target(&positions, 1)
+            .with_special_bonds(BondDistanceWeights::from_exclusion_depth(3));
+        let intra = IntraResidual::from_targets(&[target], &positions, &open_box());
         assert_angstrom(intra.exempted, 1.0, "exempted");
         assert_angstrom(intra.scored, 4.0, "scored");
     }
@@ -313,13 +298,9 @@ mod tests {
     #[test]
     fn intra_residual_folded_345_scored_16() {
         let positions = FOLDED_345;
-        let target = bonded_target(&positions, 1);
-        let intra = IntraResidual::from_targets(
-            &[target],
-            &positions,
-            &open_box(),
-            &[BondDistanceWeights::from_exclusion_depth(3)],
-        );
+        let target = bonded_target(&positions, 1)
+            .with_special_bonds(BondDistanceWeights::from_exclusion_depth(3));
+        let intra = IntraResidual::from_targets(&[target], &positions, &open_box());
         assert_angstrom(intra.scored, 3.0, "scored 1-6");
         assert_angstrom(intra.exempted, 3.0, "exempted min");
     }
@@ -330,19 +311,18 @@ mod tests {
     #[test]
     fn intra_residual_five_bead_depth1_vs_3() {
         let positions = along_x(5);
-        let target = bonded_target(&positions, 1);
         let cell = open_box();
         let d3 = IntraResidual::from_targets(
-            std::slice::from_ref(&target),
+            &[bonded_target(&positions, 1)
+                .with_special_bonds(BondDistanceWeights::from_exclusion_depth(3))],
             &positions,
             &cell,
-            &[BondDistanceWeights::from_exclusion_depth(3)],
         );
         let d1 = IntraResidual::from_targets(
-            &[target],
+            &[bonded_target(&positions, 1)
+                .with_special_bonds(BondDistanceWeights::from_exclusion_depth(1))],
             &positions,
             &cell,
-            &[BondDistanceWeights::from_exclusion_depth(1)],
         );
         assert_angstrom(d3.scored, 4.0, "depth-3 scored");
         assert_angstrom(d3.exempted, 1.0, "depth-3 exempted");
@@ -355,13 +335,9 @@ mod tests {
     #[test]
     fn intra_residual_bonded_dimer_scored_infinite() {
         let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
-        let target = bonded_target(&positions, 1);
-        let intra = IntraResidual::from_targets(
-            &[target],
-            &positions,
-            &open_box(),
-            &[BondDistanceWeights::from_exclusion_depth(3)],
-        );
+        let target = bonded_target(&positions, 1)
+            .with_special_bonds(BondDistanceWeights::from_exclusion_depth(3));
+        let intra = IntraResidual::from_targets(&[target], &positions, &open_box());
         assert!(intra.scored.is_infinite(), "empty scored class is +∞");
         assert_angstrom(intra.exempted, 1.0, "exempted");
     }
@@ -372,12 +348,7 @@ mod tests {
     fn intra_residual_coincident_unbonded_scored_zero() {
         let positions = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]];
         let target = Target::from_coords(&positions, &[1.0, 1.0], 1);
-        let intra = IntraResidual::from_targets(
-            &[target],
-            &positions,
-            &open_box(),
-            &[BondDistanceWeights::from_exclusion_depth(3)],
-        );
+        let intra = IntraResidual::from_targets(&[target], &positions, &open_box());
         assert_angstrom(intra.scored, 0.0, "scored coincident");
     }
 
@@ -386,15 +357,11 @@ mod tests {
     #[test]
     fn intra_residual_second_copy_ignored() {
         let copy0 = along_x(6);
-        let target = bonded_target(&copy0, 2);
+        let target = bonded_target(&copy0, 2)
+            .with_special_bonds(BondDistanceWeights::from_exclusion_depth(3));
         let mut positions = copy0.clone();
         positions.extend(copy0.iter().map(|&[x, y, z]| [x + 0.25, y, z]));
-        let intra = IntraResidual::from_targets(
-            &[target],
-            &positions,
-            &open_box(),
-            &[BondDistanceWeights::from_exclusion_depth(3)],
-        );
+        let intra = IntraResidual::from_targets(&[target], &positions, &open_box());
         assert_angstrom(intra.exempted, 1.0, "exempted");
         assert_angstrom(intra.scored, 4.0, "scored");
     }
@@ -411,19 +378,15 @@ mod tests {
             [4.0, 0.0, 0.0],
             [9.5, 0.0, 0.0],
         ];
-        let target = bonded_target(&positions, 1);
+        let target = bonded_target(&positions, 1)
+            .with_special_bonds(BondDistanceWeights::from_exclusion_depth(3));
         let cell = SimBox::ortho(
             array![10.0, 20.0, 20.0],
             array![0.0, 0.0, 0.0],
             [true, false, false],
         )
         .expect("orthorhombic box");
-        let intra = IntraResidual::from_targets(
-            &[target],
-            &positions,
-            &cell,
-            &[BondDistanceWeights::from_exclusion_depth(3)],
-        );
+        let intra = IntraResidual::from_targets(&[target], &positions, &cell);
         assert_angstrom(intra.scored, 0.5, "PBC scored");
     }
 
@@ -433,12 +396,7 @@ mod tests {
     fn intra_residual_bondless_dimer_scores_the_pair() {
         let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
         let target = Target::from_coords(&positions, &[1.0, 1.0], 1);
-        let intra = IntraResidual::from_targets(
-            &[target],
-            &positions,
-            &open_box(),
-            &[BondDistanceWeights::from_exclusion_depth(3)],
-        );
+        let intra = IntraResidual::from_targets(&[target], &positions, &open_box());
         assert_angstrom(intra.scored, 1.0, "scored");
         assert!(
             intra.exempted.is_infinite(),
@@ -452,12 +410,7 @@ mod tests {
     fn intra_residual_validation_omit_not_identity() {
         let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0], [3.0, 0.0, 0.0]];
         let target = Target::new(frame_from_parts(&positions, &[(0, 9)]), 1);
-        let intra = IntraResidual::from_targets(
-            &[target],
-            &positions,
-            &open_box(),
-            &[BondDistanceWeights::from_exclusion_depth(3)],
-        );
+        let intra = IntraResidual::from_targets(&[target], &positions, &open_box());
         assert!(
             intra.scored.is_infinite(),
             "Validation omit is +∞, not the 1-2 length"

@@ -42,7 +42,6 @@
 //! force-completed exactly as on a handler abort, each forced placement counted
 //! in `softened`, and the outcome is `converged == false`.
 
-use molrs::BondDistanceWeights;
 use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 
@@ -93,12 +92,7 @@ impl GrowStage {
     ) -> Result<Self, (usize, GrowError)> {
         let mut species = Vec::with_capacity(targets.len());
         for (i, t) in targets.iter().enumerate() {
-            let frame = t.template.as_ref().ok_or((i, GrowError::MissingTemplate))?;
-            let tree = InternalTree::from_frame_with_weights(
-                frame,
-                &BondDistanceWeights::from_exclusion_depth(config.exclusion_depth),
-            )
-            .map_err(|e| (i, e))?;
+            let tree = super::tree_from_target(t).map_err(|e| (i, e))?;
             species.push(Species {
                 tree,
                 prior: config.torsion_prior.clone(),
@@ -110,6 +104,12 @@ impl GrowStage {
             species,
             cell: None,
         })
+    }
+
+    /// The compiled internal-coordinate tree of species `i` (the `i`-th
+    /// target passed to [`from_targets`](Self::from_targets)).
+    pub fn tree(&self, i: usize) -> &InternalTree {
+        &self.species[i].tree
     }
 
     /// The box to grow into, with the `discale` its cell grid is sized from.

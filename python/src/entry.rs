@@ -466,7 +466,6 @@ pub struct PyCbmcGrow {
     selectivity: Option<F>,
     soften_after: Option<usize>,
     min_hard_scale: Option<F>,
-    exclusion_depth: Option<usize>,
     angle_prior: Option<molpack::grow::prior::AnglePrior>,
     soft_shell: Option<F>,
     serial: bool,
@@ -485,7 +484,6 @@ entry_pymethods!(PyCbmcGrow {
             selectivity: None,
             soften_after: None,
             min_hard_scale: None,
-            exclusion_depth: None,
             angle_prior: None,
             soft_shell: None,
             serial: false,
@@ -521,11 +519,6 @@ entry_pymethods!(PyCbmcGrow {
     fn with_min_hard_scale(&self, s: F) -> Self {
         let mut c = self.clone_fields();
         c.min_hard_scale = Some(s);
-        c
-    }
-    fn with_exclusion_depth(&self, d: usize) -> Self {
-        let mut c = self.clone_fields();
-        c.exclusion_depth = Some(d);
         c
     }
     fn with_angle_prior(&self, prior: &PyAnglePrior) -> Self {
@@ -662,9 +655,6 @@ impl PyCbmcGrow {
         if let Some(s) = self.min_hard_scale {
             engine = engine.with_min_hard_scale(s);
         }
-        if let Some(d) = self.exclusion_depth {
-            engine = engine.with_exclusion_depth(d);
-        }
         if let Some(ref ap) = self.angle_prior {
             engine = engine.with_angle_prior(ap.clone());
         }
@@ -686,7 +676,6 @@ impl PyCbmcGrow {
             selectivity: self.selectivity,
             soften_after: self.soften_after,
             min_hard_scale: self.min_hard_scale,
-            exclusion_depth: self.exclusion_depth,
             angle_prior: self.angle_prior.clone(),
             soft_shell: self.soft_shell,
             serial: self.serial,

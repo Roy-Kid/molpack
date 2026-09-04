@@ -106,11 +106,6 @@ impl CbmcGrow {
         self.config = self.config.with_min_hard_scale(scale);
         self
     }
-    /// Intramolecular exclusion depth in bonds.
-    pub fn with_exclusion_depth(mut self, depth: usize) -> Self {
-        self.config = self.config.with_exclusion_depth(depth);
-        self
-    }
     /// Placement-angle prior (all-atom template default; WLC for CG).
     pub fn with_angle_prior(mut self, prior: AnglePrior) -> Self {
         self.config = self.config.with_angle_prior(prior);

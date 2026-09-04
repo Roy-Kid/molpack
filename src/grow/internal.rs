@@ -67,17 +67,19 @@ pub struct InternalTree {
 
 impl InternalTree {
     /// Decompose a template frame using `weights` as the intramolecular skip
-    /// table. Spec 03's default exclusion depth 3 lives only on
-    /// [`crate::grow::GrowConfig`]; this constructor takes the table the
-    /// caller built (`BondDistanceWeights::from_exclusion_depth(3)` is the
-    /// all-atom 1-2/1-3/1-4 convention).
+    /// table. A non-0/1 weight is [`GrowError::NonBinarySpecialBond`] before
+    /// exclusions are compiled. The all-atom convention is
+    /// [`molrs::BondDistanceWeights::from_exclusion_depth`]`(3)`.
     ///
     /// Coordinates are in Å. The frame must carry an `atoms` block with
     /// `x`/`y`/`z` and a connected acyclic bond graph of at least 3 atoms.
-    pub fn from_frame_with_weights(
+    pub fn from_frame(
         frame: &Frame,
         weights: &molrs::BondDistanceWeights,
     ) -> Result<Self, GrowError> {
+        if let Some((index, weight)) = super::config::binary_violation(weights) {
+            return Err(GrowError::NonBinarySpecialBond { index, weight });
+        }
         let (topo, xyz) = super::topology_for_growth(frame)?;
         let n = topo.n_atoms();
 

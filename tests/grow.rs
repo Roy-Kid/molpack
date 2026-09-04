@@ -20,8 +20,8 @@ use molpack::grow::field::{BlockKind, OverlapField, Probe};
 use molpack::grow::internal::InternalTree;
 use molpack::grow::{GrowConfig, GrowError, TorsionPrior};
 use molpack::{
-    CbmcGrow, F, GenCanPack, Handler, InsideSphereRestraint, PackContext, PackEngine, PackError,
-    PackResult, StepInfo, Target,
+    CbmcGrow, F, GenCanPack, Handler, InsideSphereRestraint, IntraResidual, PackContext,
+    PackEngine, PackError, PackResult, StepInfo, Target,
 };
 use molrs::BondDistanceWeights;
 use molrs::store::block::Block;
@@ -170,7 +170,7 @@ fn grow_rejects_template_without_bonds() {
 /// `Disconnected` — refusal order is `NoBonds` before those variants.
 #[test]
 fn grow_rejects_two_atom_bondless_as_no_bonds() {
-    let err = InternalTree::from_frame_with_weights(
+    let err = InternalTree::from_frame(
         &chain_frame(2, 1.53, false),
         &BondDistanceWeights::from_exclusion_depth(3),
     )
@@ -185,11 +185,8 @@ fn grow_rejects_two_atom_bondless_as_no_bonds() {
 #[test]
 fn grow_rejects_disconnected_isolated_atom() {
     let frame = frame_from_parts(&zigzag_coords(3, 1.53), &[(0, 1)]);
-    let err = InternalTree::from_frame_with_weights(
-        &frame,
-        &BondDistanceWeights::from_exclusion_depth(3),
-    )
-    .expect_err("an isolated atom must be refused");
+    let err = InternalTree::from_frame(&frame, &BondDistanceWeights::from_exclusion_depth(3))
+        .expect_err("an isolated atom must be refused");
     assert!(
         matches!(err, GrowError::Disconnected),
         "expected GrowError::Disconnected, got {err:?}"
@@ -201,11 +198,8 @@ fn grow_rejects_disconnected_isolated_atom() {
 fn grow_rejects_two_disjoint_3atom_chains() {
     let bonds = [(0, 1), (1, 2), (3, 4), (4, 5)];
     let frame = frame_from_parts(&zigzag_coords(6, 1.53), &bonds);
-    let err = InternalTree::from_frame_with_weights(
-        &frame,
-        &BondDistanceWeights::from_exclusion_depth(3),
-    )
-    .expect_err("two disjoint chains must be refused");
+    let err = InternalTree::from_frame(&frame, &BondDistanceWeights::from_exclusion_depth(3))
+        .expect_err("two disjoint chains must be refused");
     assert!(
         matches!(err, GrowError::Disconnected),
         "expected GrowError::Disconnected, got {err:?}"
@@ -225,11 +219,8 @@ fn grow_rejects_no_atoms_block() {
         .expect("atomj column");
     frame.insert("bonds", bonds);
 
-    let err = InternalTree::from_frame_with_weights(
-        &frame,
-        &BondDistanceWeights::from_exclusion_depth(3),
-    )
-    .expect_err("no atoms block must be refused");
+    let err = InternalTree::from_frame(&frame, &BondDistanceWeights::from_exclusion_depth(3))
+        .expect_err("no atoms block must be refused");
     assert!(
         matches!(err, GrowError::NoAtomsBlock),
         "expected GrowError::NoAtomsBlock, got {err:?}"
@@ -258,11 +249,8 @@ fn grow_rejects_atoms_block_missing_z() {
         .expect("atomj column");
     frame.insert("bonds", bonds);
 
-    let err = InternalTree::from_frame_with_weights(
-        &frame,
-        &BondDistanceWeights::from_exclusion_depth(3),
-    )
-    .expect_err("missing z column must be refused");
+    let err = InternalTree::from_frame(&frame, &BondDistanceWeights::from_exclusion_depth(3))
+        .expect_err("missing z column must be refused");
     assert!(
         matches!(err, GrowError::NoAtomsBlock),
         "expected GrowError::NoAtomsBlock, got {err:?}"
@@ -273,11 +261,8 @@ fn grow_rejects_atoms_block_missing_z() {
 #[test]
 fn grow_rejects_bond_out_of_range() {
     let frame = frame_from_parts(&zigzag_coords(3, 1.53), &[(0, 99)]);
-    let err = InternalTree::from_frame_with_weights(
-        &frame,
-        &BondDistanceWeights::from_exclusion_depth(3),
-    )
-    .expect_err("out-of-range bond must be refused");
+    let err = InternalTree::from_frame(&frame, &BondDistanceWeights::from_exclusion_depth(3))
+        .expect_err("out-of-range bond must be refused");
     match err {
         GrowError::BondOutOfRange { a, b, n } => {
             assert_eq!(a, 0, "first endpoint from the frame");
@@ -400,7 +385,7 @@ fn template_vars(tree: &InternalTree) -> Vec<F> {
 /// exact round-trip plus the step-partition consistency (seed + steps place
 /// every atom exactly once). Returns the tree for extra assertions.
 fn assert_roundtrip(coords: &[[F; 3]], bonds: &[(u32, u32)], what: &str) -> InternalTree {
-    let tree = InternalTree::from_frame_with_weights(
+    let tree = InternalTree::from_frame(
         &frame_from_parts(coords, bonds),
         &BondDistanceWeights::from_exclusion_depth(3),
     )
@@ -510,7 +495,7 @@ fn internal_roundtrip_branched() {
 #[test]
 fn internal_roundtrip_ring() {
     let (coords, bonds) = ring_tail_parts();
-    let err = InternalTree::from_frame_with_weights(
+    let err = InternalTree::from_frame(
         &frame_from_parts(&coords, &bonds),
         &BondDistanceWeights::from_exclusion_depth(3),
     )
@@ -545,7 +530,7 @@ fn internal_random_vars_preserve_bonded_geometry() {
     let pi = std::f64::consts::PI as F;
     let mut rng = SmallRng::seed_from_u64(20260828);
     for (what, (coords, bonds)) in [("branched", branched_parts())] {
-        let tree = InternalTree::from_frame_with_weights(
+        let tree = InternalTree::from_frame(
             &frame_from_parts(&coords, &bonds),
             &BondDistanceWeights::from_exclusion_depth(3),
         )
@@ -593,7 +578,7 @@ fn internal_random_vars_preserve_bonded_geometry() {
 /// self included, 1-2/1-3/1-4 partners in, 1-5 partners out.
 #[test]
 fn internal_exclusions_depth() {
-    let tree = InternalTree::from_frame_with_weights(
+    let tree = InternalTree::from_frame(
         &chain_frame(12, 1.53, true),
         &BondDistanceWeights::from_exclusion_depth(3),
     )
@@ -609,6 +594,43 @@ fn internal_exclusions_depth() {
     );
 }
 
+/// Growth compiles a binary skip table. A fractional 1-4 weight is legal on
+/// `Target.special_bonds` but `InternalTree::from_frame` refuses it by name
+/// before building exclusions. Slot 2 is 1-4.
+#[test]
+fn internal_tree_rejects_non_binary_special_bond() {
+    let weights = BondDistanceWeights::new(vec![0.0, 0.0, 0.5, 1.0])
+        .expect("fractional 1-4 is a legal BondDistanceWeights table");
+    let err = InternalTree::from_frame(&chain_frame(5, 1.53, true), &weights)
+        .expect_err("a fractional special-bonds weight must not compile a growth tree");
+    match &err {
+        GrowError::NonBinarySpecialBond { index, weight } => {
+            assert_eq!(*index, 2, "slot 2 is the 1-4 weight");
+            assert_eq!(
+                weight.to_bits(),
+                (0.5 as F).to_bits(),
+                "reported weight must be the stored 0.5"
+            );
+        }
+        other => panic!(
+            "expected GrowError::NonBinarySpecialBond {{ index: 2, weight: 0.5 }}, got {other:?}"
+        ),
+    }
+    let msg = err.to_string();
+    assert!(
+        msg.contains("1-4"),
+        "Display must name the 1-4 pair, got: {msg}"
+    );
+    assert!(
+        msg.contains("0.5"),
+        "Display must include the offending weight, got: {msg}"
+    );
+    assert!(
+        msg.contains("with_atom_radius"),
+        "Display must point at with_atom_radius, got: {msg}"
+    );
+}
+
 /// Same 5-bead chain as `(0,1)…(3,4)` with bonds written out of file order
 /// still decomposes; skip sets include the root.
 #[test]
@@ -616,11 +638,8 @@ fn internal_tree_shuffled_bonds_still_decomposes() {
     let coords = zigzag_coords(5, 1.53);
     let bonds = [(3, 4), (1, 2), (0, 1), (2, 3)];
     let frame = frame_from_parts(&coords, &bonds);
-    let tree = InternalTree::from_frame_with_weights(
-        &frame,
-        &BondDistanceWeights::from_exclusion_depth(3),
-    )
-    .expect("shuffled linear-chain bonds must still decompose");
+    let tree = InternalTree::from_frame(&frame, &BondDistanceWeights::from_exclusion_depth(3))
+        .expect("shuffled linear-chain bonds must still decompose");
     assert_eq!(tree.n_atoms(), 5, "5-bead chain");
     let root = tree.seed_atoms()[0];
     assert!(
@@ -922,7 +941,7 @@ fn field_block_kind_self_vs_inter() {
 /// no PBC), every free torsion drawn independently from `prior`.
 fn sampled_c_n(prior: &TorsionPrior, n_beads: usize, bond: F, n_samples: usize, seed: u64) -> F {
     let template = zigzag_coords(n_beads, bond);
-    let tree = InternalTree::from_frame_with_weights(
+    let tree = InternalTree::from_frame(
         &frame_from_parts(&template, &chain_bonds(n_beads)),
         &BondDistanceWeights::from_exclusion_depth(3),
     )
@@ -1017,7 +1036,7 @@ fn prior_uniform_freely_rotating_c_inf() {
 fn prior_states_trans_only_is_all_trans() {
     let pi = std::f64::consts::PI as F;
     let template = zigzag_coords(20, 1.53);
-    let tree = InternalTree::from_frame_with_weights(
+    let tree = InternalTree::from_frame(
         &frame_from_parts(&template, &chain_bonds(20)),
         &BondDistanceWeights::from_exclusion_depth(3),
     )
@@ -1423,8 +1442,7 @@ fn grow_config_builder_chain() {
         .with_retract(6)
         .with_relax(20, 4)
         .with_soften_after(30)
-        .with_min_hard_scale(0.85)
-        .with_exclusion_depth(2);
+        .with_min_hard_scale(0.85);
     let dbg = format!("{cfg:?}");
     assert!(!dbg.is_empty(), "GrowConfig must keep a useful Debug impl");
 }
@@ -2288,10 +2306,10 @@ fn grow_cg_kremer_grest_c_inf() {
     // N = 15000 beads.
     let l = ((n_beads * copies) as F / 0.85).cbrt();
     let events: StepEvents = Arc::new(Mutex::new(Vec::new()));
-    let cfg = GrowConfig::new(TorsionPrior::Uniform)
-        .with_angle_prior(AnglePrior::wlc_from_c_inf(1.76))
-        .with_exclusion_depth(2);
-    let target = Target::new(chain_frame(n_beads, bond, true), copies);
+    let cfg =
+        GrowConfig::new(TorsionPrior::Uniform).with_angle_prior(AnglePrior::wlc_from_c_inf(1.76));
+    let target = Target::new(chain_frame(n_beads, bond, true), copies)
+        .with_special_bonds(BondDistanceWeights::from_exclusion_depth(2));
     let result = CbmcGrow::from_config(cfg)
         .with_seed(5)
         .with_tolerance(tolerance)
@@ -2516,10 +2534,10 @@ fn grow_softening_needs_repeated_dead_ends() {
     let (soften_after, min_hard_scale) = (50usize, 0.8 as F);
     let l = ((n_beads * copies) as F / 0.85).cbrt();
     let events: StepEvents = Arc::new(Mutex::new(Vec::new()));
-    let cfg = GrowConfig::new(TorsionPrior::Uniform)
-        .with_angle_prior(AnglePrior::wlc_from_c_inf(1.76))
-        .with_exclusion_depth(2);
-    let target = Target::new(chain_frame(n_beads, bond, true), copies);
+    let cfg =
+        GrowConfig::new(TorsionPrior::Uniform).with_angle_prior(AnglePrior::wlc_from_c_inf(1.76));
+    let target = Target::new(chain_frame(n_beads, bond, true), copies)
+        .with_special_bonds(BondDistanceWeights::from_exclusion_depth(2));
     let result = CbmcGrow::from_config(cfg)
         .with_seed(5)
         .with_tolerance(0.85)
@@ -2737,11 +2755,8 @@ fn ring_template_is_refused() {
     );
     let msg = format!("{err}");
     assert!(msg.contains("ring"), "named rejection, got: {msg}");
-    let tree_err = InternalTree::from_frame_with_weights(
-        &frame,
-        &BondDistanceWeights::from_exclusion_depth(3),
-    )
-    .expect_err("a ring must not construct InternalTree");
+    let tree_err = InternalTree::from_frame(&frame, &BondDistanceWeights::from_exclusion_depth(3))
+        .expect_err("a ring must not construct InternalTree");
     assert!(
         matches!(tree_err, GrowError::RingTemplate),
         "expected GrowError::RingTemplate, got {tree_err:?}"
@@ -2963,6 +2978,66 @@ fn lattice_grow_then_seeded_push_off_dense() {
 // boots no real algorithm. Both stages build their placements from nothing
 // and return with every free molecule placed, so both read
 // `Placed::None -> Placed::All`.
+
+/// Two templates keep two tables: GrowStage must not min-fold them into
+/// one skip set (law P8). Depth 1 excludes self+1-2; depth 3 excludes
+/// self+1-2/1-3/1-4. Residual classes on the same 5-bead stick differ
+/// the same way (scored 2.0 Å vs 4.0 Å).
+#[test]
+fn grow_stage_two_targets_keep_distinct_tables() {
+    use molpack::grow::driver::GrowStage;
+    use molrs::spatial::simbox::SimBox;
+    use ndarray::array;
+
+    let coords: Vec<[F; 3]> = (0..5).map(|i| [i as F, 0.0, 0.0]).collect();
+    let frame = frame_from_parts(&coords, &chain_bonds(5));
+    let shallow = Target::new(frame.clone(), 1)
+        .with_special_bonds(BondDistanceWeights::from_exclusion_depth(1));
+    let deep =
+        Target::new(frame, 1).with_special_bonds(BondDistanceWeights::from_exclusion_depth(3));
+
+    let stage = GrowStage::from_targets(
+        &[shallow.clone(), deep.clone()],
+        &GrowConfig::new(TorsionPrior::Uniform),
+        7,
+    )
+    .expect("two templates with distinct special-bonds tables must both compile");
+
+    assert_eq!(
+        stage.tree(0).exclusions(0),
+        &[0u32, 1][..],
+        "depth-1 species excludes self + 1-2 only"
+    );
+    assert_eq!(
+        stage.tree(1).exclusions(0),
+        &[0u32, 1, 2, 3][..],
+        "depth-3 species excludes self + 1-2/1-3/1-4"
+    );
+    assert_ne!(
+        stage.tree(0).exclusions(0),
+        stage.tree(1).exclusions(0),
+        "GrowStage must not min-fold two tables into one skip set"
+    );
+
+    let cell = SimBox::ortho(
+        array![100.0, 100.0, 100.0],
+        array![0.0, 0.0, 0.0],
+        [false; 3],
+    )
+    .expect("orthorhombic box");
+    let r1 = IntraResidual::from_targets(std::slice::from_ref(&shallow), &coords, &cell);
+    let r3 = IntraResidual::from_targets(std::slice::from_ref(&deep), &coords, &cell);
+    assert_eq!(
+        r1.scored.to_bits(),
+        (2.0 as F).to_bits(),
+        "depth-1 scored 1-3 at 2.0 Å"
+    );
+    assert_eq!(
+        r3.scored.to_bits(),
+        (4.0 as F).to_bits(),
+        "depth-3 scored 1-5 at 4.0 Å"
+    );
+}
 
 /// The continuum growth stage requires nothing placed and guarantees
 /// everything placed.

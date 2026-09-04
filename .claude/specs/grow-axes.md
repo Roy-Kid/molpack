@@ -104,8 +104,8 @@ chain: packing-taxonomy（03 of 3；依赖 stage-pipeline 的 PackState / Stage�
 - 预设入口拆到 `src/grow/entry/{cbmc,lattice,walk}.rs`（`CbmcGrow` / `LatticeGrow` / `WalkGrow`，
   各 `PackEngine + StageFactory`）；`space/`、`exclusion/`、`driver.rs`、`commit.rs`、`escape.rs`
   **永不** import `crate::entry`（今天 `lattice/mod.rs:28,312` 把 solver 与入口装在一个文件里，
-  本 spec 拆开）。`WalkGrow`：`new(prior)`、`with_angle_prior`、`with_exclusion_depth`
-  （只影响后续精修的排除语义，生长期无排除）。`WalkGrow` 的产物按构造有重叠：
+  本 spec 拆开）。`WalkGrow`：`new(prior)`、`with_angle_prior`。
+  排除表在 `Target.special_bonds`（只影响后续精修的排除语义，生长期无排除）。`WalkGrow` 的产物按构造有重叠：
   `StageOutcome.converged == false`、`fdist > 0` 是诚实报告，**不**特判。
 - `src/grow/config.rs`：`GrowConfig` 增加 `selector / escape / schedule / initial_hard_scale`，
   删除 `relax_every / relax_window / serial / void_bias`（后者进 `Escape::Reseed`）。

@@ -104,7 +104,6 @@ mod bracket;
 pub mod combinators;
 pub mod engine;
 
-use molrs::BondDistanceWeights;
 use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use ndarray::Array1;
@@ -386,8 +385,7 @@ impl Pipeline {
 
         let xcart = std::mem::take(&mut sys.xcart);
         let positions = positions_in_target_order(setup.targets, &xcart, setup.ntotat_free);
-        let tables = vec![BondDistanceWeights::from_exclusion_depth(3); setup.targets.len()];
-        let intra = IntraResidual::from_targets(setup.targets, &positions, &sys.simbox, &tables);
+        let intra = IntraResidual::from_targets(setup.targets, &positions, &sys.simbox);
         let mut frame = crate::assemble::assemble_frame(setup.targets, &positions);
         if let Some((min, max, flags)) = space.pbc {
             let lengths = Array1::from_vec(vec![max[0] - min[0], max[1] - min[1], max[2] - min[2]]);

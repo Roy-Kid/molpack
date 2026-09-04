@@ -326,7 +326,7 @@ per-target 选择冲突，且诱导"solver 替用户判断"的形态。`Solver` 
 `molrs::perceive::rotatable` 感知（未定级键先当单键，与 `torsion_mc.rs` 同策略）。
 原子按**步**分组：一步 = 一个自由变量 + 其后所有已确定原子。
 
-排除表深度 per-target 可配（`exclusion_depth`，AA 默认 3 即 1-2/1-3/1-4，
+排除表在 `Target.special_bonds`（AA 默认深度 3 即 1-2/1-3/1-4，
 CG 惯例 1 或 2，见 §5.5）。**注**：1-4 距离跨自由扭转时由 φ 决定（丁烷 trans
 3.9 Å vs cis 2.9 Å），排除 1-4 的理由是"1-4 归扭转先验管辖，硬核会错杀
 gauche/cis"，不是"由模板固定"——`internal.rs:66-69` 的注释按此修正。

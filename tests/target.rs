@@ -1,7 +1,10 @@
 //! Tests for Target builder: construction, natoms/count, fixed_at,
 //! centering modes, restraint attachment, and hook validation.
 
-use molpack::{F, GenCanPack, InsideBoxRestraint, InsideSphereRestraint, PackEngine, Target};
+use molpack::{
+    BondDistanceWeights, F, GenCanPack, InsideBoxRestraint, InsideSphereRestraint, PackEngine,
+    Target,
+};
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -241,6 +244,56 @@ fn with_perturb_budget() {
 fn default_elements_are_x() {
     let t = Target::from_coords(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], &[1.0, 1.0], 1);
     assert_eq!(t.elements, vec!["X", "X"]);
+}
+
+// ── special bonds ──────────────────────────────────────────────────────────
+
+/// Default skip table is depth 3: Cassandra `[0, 0, 0, 1]` (1-2/1-3/1-4
+/// exempt, 1-5+ scored). Written once in `from_parts`, so both constructors
+/// carry it.
+#[test]
+fn target_default_special_bonds_is_depth_3() {
+    use molrs::store::block::Block;
+    use ndarray::Array1;
+
+    let from_coords = Target::from_coords(&water_positions(), &water_radii(), 5);
+    assert_eq!(from_coords.special_bonds.as_slice(), &[0.0, 0.0, 0.0, 1.0]);
+
+    let mut atoms = Block::new();
+    atoms
+        .insert("x", Array1::from_vec(vec![0.0, 1.0]).into_dyn())
+        .expect("insert x");
+    atoms
+        .insert("y", Array1::from_vec(vec![0.0, 0.0]).into_dyn())
+        .expect("insert y");
+    atoms
+        .insert("z", Array1::from_vec(vec![0.0, 0.0]).into_dyn())
+        .expect("insert z");
+    let mut frame = molrs::Frame::new();
+    frame.insert("atoms", atoms);
+
+    let from_frame = Target::new(frame, 1);
+    assert_eq!(from_frame.special_bonds.as_slice(), &[0.0, 0.0, 0.0, 1.0]);
+}
+
+/// Depth 2 is `[0, 0, 1]`. The builder returns `Self` (chainable), not
+/// `Result` — fractional tables are stored here and refused later at
+/// `InternalTree::from_frame`.
+#[test]
+fn target_with_special_bonds_stores_depth_2() {
+    let t = Target::from_coords(&water_positions(), &water_radii(), 1)
+        .with_special_bonds(BondDistanceWeights::from_exclusion_depth(2))
+        .with_name("kg");
+    assert_eq!(t.special_bonds.as_slice(), &[0.0, 0.0, 1.0]);
+    assert_eq!(t.name.as_deref(), Some("kg"));
+}
+
+#[test]
+fn target_with_special_bonds_stores_fractional() {
+    let table = BondDistanceWeights::new(vec![0.0, 0.0, 0.5, 1.0])
+        .expect("fractional 1-4 is a legal BondDistanceWeights table");
+    let t = Target::from_coords(&water_positions(), &water_radii(), 1).with_special_bonds(table);
+    assert_eq!(t.special_bonds.as_slice(), &[0.0, 0.0, 0.5, 1.0]);
 }
 
 // ── panics ─────────────────────────────────────────────────────────────────

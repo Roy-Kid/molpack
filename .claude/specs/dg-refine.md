@@ -56,13 +56,13 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
 
 - `src/refine/config.rs`（**叶子**，同 `grow/config.rs` 纪律：只 import molrs）：
   `pub struct RefineConfig { ladder: (s0, rungs), loops_per_rung, k_bond, k_angle, k_dihedral,
-  k_intra, intra_exclusion_depth, chiral: Vec<([usize; 4], Sign)>, anneal }` 与 builders。
+  k_intra, chiral: Vec<([usize; 4], Sign)>, anneal }` 与 builders。
 - `src/refine/mod.rs`：`pub struct DgRefine`（`PackEngine` + `StageFactory` 预设）与
   builders：`with_ladder(s0: F, rungs: usize)`（默认 `(0.5, 10)`）、
   `with_loops_per_rung(n)`（默认 = `max_loops / rungs`，至少 1）、
   `with_bond_stiffness(k_b: F)`（默认 1.0）、`with_angle_stiffness(k_a: F)`（1-3，默认 0.5）、
   `with_dihedral_stiffness(k_d: F)`（1-4，默认 0.0 = 关）、
-  `with_intra_overlap(k_i: F, exclusion_depth: usize)`（默认 `(1.0, 3)`；CG 用 1 或 2——原则 4）、
+  `with_intra_overlap(k_i: F)`（默认 `1.0`；排除表读 `Target.special_bonds`）、
   `with_chiral(quads: Vec<([usize; 4], Sign)>)`（按模板原子索引，逐拷贝广播）、
   `with_anneal(amplitude: F)`（每级开始的哈希流随机扰动，默认 0.0 = 关）。
 - `src/refine/terms.rs`：`pub trait Term: Send + Sync { fn name(&self) -> &'static str;
@@ -160,8 +160,9 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
   6. 约束项：`InsideSphereRestraint` 下精修不把原子推出球（`frest == 0`）；
   7. 手性：给定四元组符号，精修后签名体积符号不变；
   8. 确定性与 `should_stop` 中途终止；
-  9. 分子内：一条人工折叠到自穿的链（1-6 对 0.5 Å）经 `IntraOverlapTerm` 精修后排除深度
-     之外的同分子最小距离 ≥ tolerance；`exclusion_depth = 1` 与 `3` 各测一次（原则 4）。
+  9. 分子内：两条人工折叠到自穿的链（1-6 对 0.5 Å）经 `IntraOverlapTerm` 精修后，各自
+     `Target.special_bonds` 表外的同分子最小距离 ≥ tolerance（两张 Target 各一张表：
+     深度 1 与深度 3；原则 4）。
 - `examples/pack_peo`（io）增加 `refine` 模式：`CbmcGrow(s₀=0.5) → DgRefine` 在
   ρ = 1.06、dp = 100 × 25 上报告每级 fdist、末级最近对、R_g 变化、耗时——scientific
   验收的数据来源；不进 fast tier。
