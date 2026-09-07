@@ -255,8 +255,8 @@ Past ρ ≈ 0.5 the continuum grower grinds: its candidates are proposed in
 continuous space and die by retraction. `LatticeGrow` maps the box onto a
 diamond lattice where the same trans/gauche± RIS states are *exact* lattice
 moves and excluded volume is an O(1) site check — a melt-density system
-generates in milliseconds, then every atom is rebuilt from the template's
-exact internal coordinates:
+generates in milliseconds, and the backbone is then seated on the sites the
+walk chose:
 
 ```python
 grown = (
@@ -268,8 +268,14 @@ grown = (
 pushed = GenCanPack().with_restart(grown).with_seed(42).run([Target(frame, 200)], max_loops=200)
 ```
 
-The lattice decides only the torsion sequence; bond lengths and angles are
-the template's, bit-exact. Residual contacts (hydrogens, decoration drift)
+A template supplies its topology, not its geometry. The backbone's torsions
+are exactly the trans/gauche± the walk drew, its angles and its one bond
+length are the lattice's — `DiamondLattice::fit` sizes that step from the
+template's own mean backbone bond, and the cell's commensurability moves it a
+percent or two — and only hydrogens and side atoms keep the template's local
+geometry. The force field downstream sets bonded geometry in its first steps;
+it cannot as cheaply undo a chain threaded through a wall, which is what
+rebuilding from template internal coordinates used to cost. Residual contacts
 are reported honestly in `fdist` and belong to the seeded push-off.
 
 This repository's polymer-melt benchmark claim cap is ρ = 1.2 g/cm³; the

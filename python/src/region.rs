@@ -39,11 +39,9 @@ impl PyStlRegion {
         path: PathBuf,
         scale: f64,
     ) -> PyResult<Self> {
-        if !scale.is_finite() || scale <= 0.0 {
-            return Err(PyValueError::new_err(format!(
-                "STL scale must be finite and > 0, got {scale}"
-            )));
-        }
+        // `from_file` gates `scale` itself and `InvalidScale` already maps to
+        // exactly this `ValueError`; re-checking here would be a second home
+        // for one rule.
         let inner = StlRegion::from_file(&path, scale).map_err(stl_error_to_pyerr)?;
         Ok(Self { inner })
     }

@@ -40,7 +40,7 @@ struct FakeStage {
     name: &'static str,
     requires: Placed,
     guarantees: Placed,
-    softened_per_run: usize,
+    degraded_per_run: usize,
     /// How many times `run` has been called on this instance.
     runs: usize,
     /// Stand-in for construction-time configuration; `run` must not drain it.
@@ -49,19 +49,19 @@ struct FakeStage {
 
 impl FakeStage {
     /// A fake declaring `requires` → `guarantees` and reporting
-    /// `softened_per_run` relaxations on every run, with a three-element
+    /// `degraded_per_run` relaxations on every run, with a three-element
     /// configuration it is expected to keep.
     fn new(
         name: &'static str,
         requires: Placed,
         guarantees: Placed,
-        softened_per_run: usize,
+        degraded_per_run: usize,
     ) -> Self {
         Self {
             name,
             requires,
             guarantees,
-            softened_per_run,
+            degraded_per_run,
             runs: 0,
             config: vec![11, 22, 33],
         }
@@ -93,7 +93,7 @@ impl Stage for FakeStage {
         // stage's own configuration must survive every run it is given.
         let _configured: u32 = self.config.iter().sum();
         state.set_placed(self.guarantees);
-        Ok(StageOutcome::new(true, self.softened_per_run))
+        Ok(StageOutcome::new(true, self.degraded_per_run))
     }
 }
 
@@ -332,7 +332,7 @@ fn a_stage_keeps_its_configuration_across_runs() {
 const GOLDEN_PLACED_SEQUENCE: [Placed; 3] = [Placed::None, Placed::All, Placed::All];
 /// Hard-coded golden: `alpha` softens twice per run, `beta` three times, and
 /// a chain's relaxation count is their sum. `2 + 3 == 5`, written out.
-const GOLDEN_SOFTENED_TOTAL: usize = 5;
+const GOLDEN_DEGRADED_TOTAL: usize = 5;
 /// Hard-coded golden: both fakes converge, so a two-stage chain reports two
 /// `true`s in order.
 const GOLDEN_CONVERGED: [bool; 2] = [true, true];
@@ -354,12 +354,12 @@ fn stage_regression_fake_chain_outcome_golden() {
 
     let mut observed_placed = vec![state.placed()];
     let mut observed_converged = Vec::with_capacity(chain.len());
-    let mut softened_total = 0usize;
+    let mut degraded_total = 0usize;
     for stage in chain.iter_mut() {
         let outcome = stage
             .run(&mut state, &targets, &budget, &mut handlers)
             .expect("the fake stage runs");
-        softened_total += outcome.degraded;
+        degraded_total += outcome.degraded;
         observed_converged.push(outcome.converged);
         observed_placed.push(state.placed());
     }
@@ -370,7 +370,7 @@ fn stage_regression_fake_chain_outcome_golden() {
         "the marker transition of a two-stage chain drifted from the golden"
     );
     assert_eq!(
-        softened_total, GOLDEN_SOFTENED_TOTAL,
+        degraded_total, GOLDEN_DEGRADED_TOTAL,
         "a chain's relaxation count is the sum over its stages"
     );
     assert_eq!(

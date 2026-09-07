@@ -225,7 +225,7 @@ class TestGrowPack:
 class TestGencanPath:
     """The rigid-body entry through the same result type."""
 
-    def test_gencan_softened_is_zero_and_deterministic(self):
+    def test_gencan_degraded_is_zero_and_deterministic(self):
         # A GENCAN pack reports degraded == 0, and the same seed reproduces
         # the same positions bitwise — one entry per run, one verdict.
         def pack():

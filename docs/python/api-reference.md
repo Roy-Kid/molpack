@@ -243,8 +243,13 @@ Growth-only builders, on top of the shared ones:
 
 Diamond-lattice growth for melt density and above (see the
 [Chain growth guide](guide/growth.md)): the backbone grows as an on-lattice
-self-avoiding walk with RIS weights, then decorates back to the template's
-exact bonded geometry. Same mandatory torsion-prior constructor and shared
+self-avoiding walk with RIS weights, and each backbone atom is then seated on
+the site the walk chose. **A template supplies its topology, not its
+geometry**: the backbone's bond lengths and angles are the lattice's — one
+step throughout, sized from the template's own mean backbone bond and moved a
+percent or two by how the cell divides — and its torsions are exactly the
+trans/gauche± the prior drew. Only hydrogens and side atoms keep the
+template's local geometry. Same mandatory torsion-prior constructor and shared
 builders; one extra knob:
 
 - `.with_occupancy_guard(on: bool = True)` — nearest-neighbour site

@@ -57,7 +57,7 @@ src/
 │   ├── entry.rs        CbmcGrow — the chain-growth engine entry (honest verdicts)
 │   ├── lattice/        LatticeStage — diamond-lattice SAW for melt density
 │   │                   (entry.rs LatticeGrow entry, saw.rs walk,
-│   │                   decorate.rs template rebuild, config.rs leaf)
+│   │                   decorate.rs backbone on sites, config.rs leaf)
 │   ├── config.rs       GrowConfig / GrowError (leaf — no target/entry imports)
 │   ├── prior.rs        TorsionPrior / AnglePrior + C∞ calibration
 │   ├── internal.rs     template bond graph → internal-coordinate tree

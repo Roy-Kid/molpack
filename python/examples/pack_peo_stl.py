@@ -23,8 +23,10 @@ not merely the walk's. Only hydrogens and side atoms hang off with the
 template's local geometry, so a mesh that has to hold a wall is authored
 with about a bond length of clearance in it.
 
-Drop the mesh into a viewer next to the packed frame to see the cavity:
-both paths are printed at the end.
+The mesh path is printed at the start and the frame lands in
+``python/examples/out/`` — drop both into a viewer to see the chains inside
+the cavity. Passing your own mesh keeps ``scale = 1``, so author it for the
+``edge`` you intend to pass.
 
 ::
 

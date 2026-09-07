@@ -436,15 +436,15 @@ fn pick_ref(
 // ── geometry ───────────────────────────────────────────────────────────────
 
 #[inline]
-fn sub(a: [F; 3], b: [F; 3]) -> [F; 3] {
+pub(crate) fn sub(a: [F; 3], b: [F; 3]) -> [F; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 #[inline]
-fn dot(a: [F; 3], b: [F; 3]) -> F {
+pub(crate) fn dot(a: [F; 3], b: [F; 3]) -> F {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 #[inline]
-fn cross(a: [F; 3], b: [F; 3]) -> [F; 3] {
+pub(crate) fn cross(a: [F; 3], b: [F; 3]) -> [F; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -452,7 +452,7 @@ fn cross(a: [F; 3], b: [F; 3]) -> [F; 3] {
     ]
 }
 #[inline]
-fn norm(a: [F; 3]) -> F {
+pub(crate) fn norm(a: [F; 3]) -> F {
     dot(a, a).sqrt()
 }
 #[inline]

@@ -1457,7 +1457,7 @@ fn grow_config_builder_chain() {
 //
 // Task 7 contract (spec Design §4g): one `StepInfo` per growth round with
 // `loop_idx` = round number (1-based, strictly increasing), `radscale` =
-// current hard-core scale (1.0 while unsoftened), and fdist/frest = 0.0
+// current hard-core scale (1.0 while undegraded), and fdist/frest = 0.0
 // while the hard-rejection regime holds. `Handler::should_stop() == true`
 // aborts growth: `pack` still returns Ok, with `converged == false`.
 
@@ -1654,7 +1654,7 @@ fn grow_emits_step_events() {
     for &(round, radscale, fdist, frest) in events.iter() {
         assert_eq!(
             radscale, 1.0,
-            "round {round}: unsoftened growth must report radscale == 1.0 \
+            "round {round}: undegraded growth must report radscale == 1.0 \
              (radscale = current hard-core scale, spec §4g), got {radscale}"
         );
         assert_eq!(

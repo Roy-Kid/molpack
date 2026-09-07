@@ -150,6 +150,12 @@ impl StlRegion {
         (d2.sqrt(), c)
     }
 
+    /// Whether `x` is outside the mesh's own bounding box, which for a
+    /// watertight mesh settles the sign on its own.
+    fn outside_aabb(&self, x: &[F; 3]) -> bool {
+        (0..3).any(|k| x[k] < self.aabb.min[k] || x[k] > self.aabb.max[k])
+    }
+
     fn even_odd_inside(&self, x: &[F; 3]) -> bool {
         // `RAY` has no zero component by construction, so the slab test's
         // reciprocal is finite and the tree never has to special-case an axis.
@@ -173,14 +179,30 @@ fn check_scale(scale: F) -> Result<(), StlError> {
 }
 
 impl Region for StlRegion {
+    /// `signed_distance(x) <= 0` without paying for the distance: membership
+    /// is the parity, and the closest point only ever contributes the boundary
+    /// tolerance — which is a radius query, not a nearest one.
     fn contains(&self, x: &[F; 3]) -> bool {
-        self.signed_distance(x) <= 0.0
+        // `signed_distance <= 0` term by term: on the surface within EPS, or
+        // inside by parity. The AABB only short-circuits the parity — a point
+        // a hair outside the box can still be within EPS of the surface, and
+        // `signed_distance` calls that one inside.
+        (!self.outside_aabb(x) && self.even_odd_inside(x))
+            || self.bvh.any_within(x, EPS, |i| {
+                let t = &self.triangles[i as usize];
+                closest_point_triangle(*x, t[0], t[1], t[2])
+            })
     }
 
     fn signed_distance(&self, x: &[F; 3]) -> F {
         let (d, _) = self.unsigned_and_closest(x);
         if d < EPS {
             0.0
+        } else if self.outside_aabb(x) {
+            // The mesh is watertight and its box is already stored: outside
+            // the box is outside the surface, for six comparisons instead of
+            // a ray walk.
+            d
         } else if self.even_odd_inside(x) {
             -d
         } else {
@@ -193,7 +215,11 @@ impl Region for StlRegion {
         if d < EPS {
             return [0.0; 3];
         }
-        let s = if self.even_odd_inside(x) { -1.0 } else { 1.0 };
+        let s = if !self.outside_aabb(x) && self.even_odd_inside(x) {
+            -1.0
+        } else {
+            1.0
+        };
         [
             s * (x[0] - c[0]) / d,
             s * (x[1] - c[1]) / d,
@@ -214,7 +240,7 @@ impl Region for StlRegion {
     }
 }
 
-fn sub(a: [F; 3], b: [F; 3]) -> [F; 3] {
+pub(super) fn sub(a: [F; 3], b: [F; 3]) -> [F; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 fn add(a: [F; 3], b: [F; 3]) -> [F; 3] {
@@ -223,7 +249,7 @@ fn add(a: [F; 3], b: [F; 3]) -> [F; 3] {
 fn mul(a: [F; 3], s: F) -> [F; 3] {
     [a[0] * s, a[1] * s, a[2] * s]
 }
-fn dot(a: [F; 3], b: [F; 3]) -> F {
+pub(super) fn dot(a: [F; 3], b: [F; 3]) -> F {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 fn cross(a: [F; 3], b: [F; 3]) -> [F; 3] {
@@ -335,6 +361,40 @@ mod tests {
 
     fn unit_cube() -> StlRegion {
         StlRegion::from_triangles(&cube_tris([0.0; 3], [1.0; 3])).expect("cube")
+    }
+
+    /// `contains` is a shortcut past the distance, so it has to keep agreeing
+    /// with the distance — including on the surface, where the boundary
+    /// tolerance decides, and just outside the box, where the AABB
+    /// short-circuit must not overrule that tolerance.
+    #[test]
+    fn contains_agrees_with_signed_distance() {
+        let r = unit_cube();
+        let mut probes = vec![
+            [0.5, 0.5, 0.5],
+            [0.0, 0.5, 0.5],
+            [1.0, 0.5, 0.5],
+            [1.0 + 1e-12, 0.5, 0.5],
+            [-1e-12, 0.5, 0.5],
+            [1.0 + 1e-6, 0.5, 0.5],
+            [2.0, 0.5, 0.5],
+            [0.0, 0.0, 0.0],
+            [1.0, 1.0, 1.0],
+        ];
+        // A deterministic sweep across the faces and well outside them.
+        for i in 0..12 {
+            let t = i as F / 11.0;
+            probes.push([t * 1.4 - 0.2, t * 0.7, 0.5]);
+            probes.push([0.5, t * 1.4 - 0.2, t * 0.3]);
+        }
+        for p in probes {
+            assert_eq!(
+                r.contains(&p),
+                r.signed_distance(&p) <= 0.0,
+                "contains disagrees with signed_distance at {p:?} (d = {})",
+                r.signed_distance(&p)
+            );
+        }
     }
 
     #[test]

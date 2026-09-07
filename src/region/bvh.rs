@@ -14,6 +14,8 @@
 
 use molrs::types::F;
 
+use super::stl::{dot, sub};
+
 /// Triangles per leaf. A leaf scan is a handful of closest-point evaluations,
 /// cheaper than the box tests that would separate them further.
 const LEAF_SIZE: usize = 4;
@@ -95,6 +97,38 @@ impl Bvh {
         if dfar < best.0 {
             self.nearest_in(far, p, closest_on, best);
         }
+    }
+
+    /// Whether any triangle comes within `radius` of `p`.
+    ///
+    /// The same descent as [`nearest`](Self::nearest) without the bookkeeping:
+    /// a membership test only needs to know whether the surface is within the
+    /// boundary tolerance, and answering that as a radius query stops at the
+    /// first hit instead of finding the closest one.
+    pub(super) fn any_within<G>(&self, p: &[F; 3], radius: F, mut closest_on: G) -> bool
+    where
+        G: FnMut(u32) -> [F; 3],
+    {
+        !self.order.is_empty() && self.any_within_in(0, p, radius * radius, &mut closest_on)
+    }
+
+    fn any_within_in<G>(&self, n: usize, p: &[F; 3], r2: F, closest_on: &mut G) -> bool
+    where
+        G: FnMut(u32) -> [F; 3],
+    {
+        let node = &self.nodes[n];
+        if box_dist2(node, p) > r2 {
+            return false;
+        }
+        if node.count > 0 {
+            let end = (node.first + node.count) as usize;
+            return self.order[node.first as usize..end]
+                .iter()
+                .any(|&t| dist2(*p, closest_on(t)) < r2);
+        }
+        let left = node.first as usize;
+        self.any_within_in(left, p, r2, closest_on)
+            || self.any_within_in(left + 1, p, r2, closest_on)
     }
 
     /// How many triangles `hit` reports along the ray from `origin`.
@@ -252,8 +286,8 @@ fn ray_hits_box(node: &Node, origin: &[F; 3], inv: &[F; 3]) -> bool {
 }
 
 fn dist2(a: [F; 3], b: [F; 3]) -> F {
-    let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-    d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+    let d = sub(a, b);
+    dot(d, d)
 }
 
 #[cfg(test)]

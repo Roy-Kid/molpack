@@ -67,7 +67,7 @@ _Generated 2026-09-04 by /mol:map._
 ### Public surface
 
 - **Engine entries** (`src/lib.rs:142-144,154`): `PackEngine`, `GenCanPack`, `CbmcGrow`, `LatticeGrow`, `LatticeConfig`, `LogLevel`
-- **Run lifecycle** (`src/lib.rs:137-139,153-154`): `Pipeline` (`new`/`single`/`with_stage`/`with_repeat`/`with_guarded`), `StageFactory` (`validate_targets`/`settings`/`take_handlers`/`stages`), `pipeline::EngineSetup`, frozen public `State` (`frame`, `fdist`, `intra`, `frest`, `converged`, `softened`; `positions`/`natoms`), `IntraResidual` (`scored`/`exempted`). Live run object is `PackState` (not a `State` alias). Continuation of a previous run’s free placements is `GenCanPack::with_restart(&State)` only.
+- **Run lifecycle** (`src/lib.rs:137-139,153-154`): `Pipeline` (`new`/`single`/`with_stage`/`with_repeat`/`with_guarded`), `StageFactory` (`validate_targets`/`settings`/`take_handlers`/`stages`), `pipeline::EngineSetup`, frozen public `State` (`frame`, `fdist`, `intra`, `frest`, `converged`, `degraded`; `positions`/`natoms`), `IntraResidual` (`scored`/`exempted`). Live run object is `PackState` (not a `State` alias). Continuation of a previous run’s free placements is `GenCanPack::with_restart(&State)` only.
 - **Stage seam** (`src/lib.rs:136,172`, Rust-only): `Stage` (`name`/`requires`/`guarantees`/`run`), `Requires`, `Guarantees`, `StageOutcome`, `Budget`, `PackState`, `Placed`
 - **Invariants / combinators** (`src/lib.rs:149,153`): `Invariant`, `Layers` (L0–L5), `Violation`, `RestraintsSatisfied`, `Until`, `OnViolation`
 - **Shared settings + space** (`src/lib.rs:138`): `PackSettings` (`tolerance`/`precision`/`discale`/`seed`/`first_non_default_knob`); `entry::setup` is entirely `pub(crate)`

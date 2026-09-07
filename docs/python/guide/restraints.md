@@ -41,10 +41,13 @@ cavity = StlRegion.from_file("cavity.stl")  # Å
 target = Target(frame, n).with_restraint(cavity)
 ```
 
-A full growth run is `python/examples/pack_peo_stl.py`: it writes a
-watertight cube, attaches `StlRegion`, and grows linear PEO with
-`CbmcGrow.with_periodic_box` (Auhl 0.6 Å) then `GenCanPack.with_restart`
-at 2.0 Å.
+A full growth run is `python/examples/pack_peo_stl.py`: it loads the shipped
+watertight dendrite `examples/pack_peo/dendrite.stl`, attaches it as an
+`StlRegion`, and grows 200 × EO25 with `LatticeGrow` at 2.0 Å — the mask
+blocks every site outside the mesh and the backbone is seated on the sites,
+so confinement is the molecule's. It stops after the grow: at melt density
+inside a cavity a rigid-body push-off can only resolve overlap through the
+wall.
 
 All other arguments are standard Python floats / lists.
 

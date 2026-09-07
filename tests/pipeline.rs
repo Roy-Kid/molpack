@@ -741,7 +741,7 @@ fn pipeline_empty_is_a_named_error() {
 /// `stage.total == 2` on every step with a non-decreasing `stage.index`, and
 /// sums `degraded` across the stages (ac-009).
 #[test]
-fn pipeline_two_stages_sum_softened_and_count_hooks() {
+fn pipeline_two_stages_sum_degraded_and_count_hooks() {
     let targets = chain_targets();
 
     // The two standalone spellings, same seed and settings, provide the
@@ -1075,7 +1075,7 @@ impl CountingFactory {
     }
 
     /// The produced stage reports `n` relaxations per run.
-    fn with_softened(mut self, n: usize) -> Self {
+    fn with_degraded(mut self, n: usize) -> Self {
         self.degraded = n;
         self
     }
@@ -1152,12 +1152,12 @@ impl Handler for StopOnFirstSignal {
 /// relaxed — the same honest accumulation a linear chain performs, so a
 /// repeated stage cannot under-report by reusing the last pass's count.
 #[test]
-fn repeat_passes_runs_body_n_times_and_sums_softened() {
-    const SOFTENED_PER_RUN: usize = 3;
+fn repeat_passes_runs_body_n_times_and_sums_degraded() {
+    const DEGRADED_PER_RUN: usize = 3;
     let runs = Arc::new(AtomicUsize::new(0));
 
     let result = boxfree_settings(Pipeline::new().with_repeat(
-        body(CountingFactory::new(&runs).with_softened(SOFTENED_PER_RUN)),
+        body(CountingFactory::new(&runs).with_degraded(DEGRADED_PER_RUN)),
         Until::Passes(2),
     ))
     .run(&boxfree_targets(), FREE_LOOPS)
@@ -1170,9 +1170,9 @@ fn repeat_passes_runs_body_n_times_and_sums_softened() {
     );
     assert_eq!(
         result.degraded,
-        2 * SOFTENED_PER_RUN,
+        2 * DEGRADED_PER_RUN,
         "the repeated stage's degraded count is the SUM over its passes \
-         (2 × {SOFTENED_PER_RUN}), not one pass's own count"
+         (2 × {DEGRADED_PER_RUN}), not one pass's own count"
     );
 }
 

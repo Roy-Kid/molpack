@@ -32,8 +32,15 @@ pub(crate) struct DiamondLattice {
 impl DiamondLattice {
     /// Fit the lattice to the box: the lattice constant is taken from the
     /// mean backbone bond length (`a = 4·b/√3`) and then per-axis adjusted
-    /// to the nearest commensurate multiple of 4 units (the on-lattice bond
-    /// length enters only the topology, never the decorated geometry).
+    /// to the nearest commensurate multiple of 4 units.
+    ///
+    /// Decoration seats backbone atoms on the sites, so **this is where the
+    /// molecule's backbone bond length and angles come from**. The per-axis
+    /// commensurability moves the step off the template's mean bond by
+    /// however much the box rounds — a percent when the cell divides kindly,
+    /// a few when it does not — and stretches it anisotropically in a
+    /// non-cubic cell, so the angles are exactly tetrahedral only when the
+    /// three axes round the same way.
     pub(crate) fn fit(origin: [F; 3], lengths: [F; 3], mean_bond: F) -> Self {
         let unit = mean_bond * 4.0 / (3.0 as F).sqrt() / 4.0; // a/4 in Å
         let mut m = [0i64; 3];

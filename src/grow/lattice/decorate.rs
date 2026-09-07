@@ -12,7 +12,9 @@
 //! - self-avoidance and the occupancy guard — the sites' own property;
 //! - confinement — the mask blocked every site outside the region;
 //! - the torsion sequence — exactly the trans/gauche± the RIS weights drew;
-//! - bond angles — exactly the lattice's 109.471°, tetrahedral by construction;
+//! - bond angles — the lattice's, which is exactly tetrahedral (109.4712°)
+//!   when the cell rounds the same way on all three axes and stretched by the
+//!   per-axis fit when it does not;
 //! - bond lengths — the lattice step, which [`DiamondLattice::fit`] sizes from
 //!   the template's own mean backbone bond (within a percent when the box
 //!   divides kindly, a few percent when it does not).
@@ -32,7 +34,7 @@ use molrs::store::frame::Frame;
 use molrs::types::F;
 
 use crate::grow::GrowError;
-use crate::grow::internal::{InternalTree, dihedral, nerf};
+use crate::grow::internal::{InternalTree, cross, dihedral, dot, norm, sub};
 use crate::grow::lattice::saw::DiamondLattice;
 
 const PI: F = std::f64::consts::PI as F;
@@ -73,11 +75,6 @@ pub(crate) struct Backbone {
 
 fn is_hydrogen(el: &str) -> bool {
     el.eq_ignore_ascii_case("h")
-}
-
-fn dist(a: [F; 3], b: [F; 3]) -> F {
-    let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
 }
 
 /// Extract the heavy-atom tree of `frame` against `tree`.
@@ -240,19 +237,12 @@ pub(crate) fn analyze_backbone(frame: &Frame, tree: &InternalTree) -> Result<Bac
             }
             let Some(p) = parent[j] else { continue };
             let Some(g) = parent[p] else { continue };
-            let Some((k, li)) = site_of[atoms[j]] else {
-                continue;
-            };
+            // `on_var` was built from `site_of` and `Site::follows`, so both
+            // are present and the variable is this one.
+            let (k, li) = site_of[atoms[j]].expect("on_var atom has a site");
             let site = &tree.step_sites(k)[li];
-            let Some((vv, offset)) = site.follows else {
-                continue;
-            };
-            if vv != v {
-                continue;
-            }
             if site.refs[0] == atoms[p] && site.refs[1] == atoms[g] {
                 eligible.push(j);
-                let _ = offset;
             }
         }
         if eligible.is_empty() {
@@ -309,7 +299,7 @@ pub(crate) fn analyze_backbone(frame: &Frame, tree: &InternalTree) -> Result<Bac
     let mut bond_n = 0usize;
     for j in 1..n_bb {
         let p = parent[j].expect("non-root");
-        bond_sum += dist(xyz[atoms[j]], xyz[atoms[p]]);
+        bond_sum += norm(sub(xyz[atoms[j]], xyz[atoms[p]]));
         bond_n += 1;
     }
     let mean_bond = if bond_n > 0 {
@@ -342,9 +332,6 @@ pub(crate) fn decorate_chain(
 ) {
     debug_assert_eq!(walk.len(), bb.atoms.len());
     let n_bb = bb.atoms.len();
-    let sub = |a: [F; 3], b: [F; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-    let dot = |a: [F; 3], b: [F; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    let norm = |v: [F; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
 
     // The backbone is the route. No reconstruction, so no drift, and the
     // walk's guarantees carry through untouched.
@@ -373,12 +360,7 @@ pub(crate) fn decorate_chain(
         let uo = [u[0] - d * e1[0], u[1] - d * e1[1], u[2] - d * e1[2]];
         let n2 = norm(uo);
         let e2 = [uo[0] / n2, uo[1] / n2, uo[2] / n2];
-        let e3 = [
-            e1[1] * e2[2] - e1[2] * e2[1],
-            e1[2] * e2[0] - e1[0] * e2[2],
-            e1[0] * e2[1] - e1[1] * e2[0],
-        ];
-        [e1, e2, e3]
+        [e1, e2, cross(e1, e2)]
     };
     let rot = |p: [F; 3], r: &[[F; 3]; 3]| {
         [
@@ -423,57 +405,22 @@ pub(crate) fn decorate_chain(
     for j in [a0, a1, a2] {
         coords[bb.atoms[j]] = wb[j];
     }
-    let k0 = bb_of_step
-        .iter()
-        .position(|h| h.is_some())
-        .unwrap_or(tree.n_steps());
-    for k in 0..k0 {
-        tree.place_step(k, &vars, coords);
-    }
 
-    for (k, hooked) in bb_of_step.iter().enumerate().skip(k0) {
+    for (k, hooked) in bb_of_step.iter().enumerate() {
         if let Some(j) = *hooked {
             let (_, li, var, offset) = bb.hooks[j].expect("hooked step");
             let site = &tree.step_sites(k)[li];
-            let pos0 = nerf(
+            // `nerf` is the exact inverse of `dihedral`, so the torsion that
+            // aims this step at the site is just the site's own dihedral in
+            // the frame the step is placed from: measuring the zero-torsion
+            // placement first would only ever return zero.
+            let want = dihedral(
                 coords[site.refs[2]],
                 coords[site.refs[1]],
                 coords[site.refs[0]],
-                site.bond,
-                site.angle,
-                0.0,
+                wb[j],
             );
-            let (beta, want) = {
-                let p = bb.parent[j].expect("hooked atom has parent");
-                let g = bb.parent[p];
-                let ggp = g.and_then(|gg| bb.parent[gg]);
-                if let (Some(g), Some(ggp)) = (g, ggp) {
-                    let beta = dihedral(
-                        coords[bb.atoms[ggp]],
-                        coords[bb.atoms[g]],
-                        coords[bb.atoms[p]],
-                        pos0,
-                    );
-                    let want = dihedral(wb[ggp], wb[g], wb[p], wb[j]);
-                    (beta, want)
-                } else {
-                    let beta = dihedral(
-                        coords[site.refs[2]],
-                        coords[site.refs[1]],
-                        coords[site.refs[0]],
-                        pos0,
-                    );
-                    let want = dihedral(
-                        coords[site.refs[2]],
-                        coords[site.refs[1]],
-                        coords[site.refs[0]],
-                        wb[j],
-                    );
-                    (beta, want)
-                }
-            };
-            let phi = want - beta;
-            vars[var] = wrap_pi(phi - offset);
+            vars[var] = wrap_pi(want - offset);
         }
         tree.place_step(k, &vars, coords);
         // Pendant atoms of this step keep the template's local geometry off

@@ -7,11 +7,20 @@
 //! are EXACT lattice moves — trans/gauche± are the three non-backtracking
 //! continuations — and excluded volume is an O(1) site-occupancy check, so
 //! a melt-density walk completes in milliseconds where continuum growth
-//! grinds. The walk decides only the torsion sequence; decoration rebuilds
-//! every atom from the template's true internal coordinates
-//! (`decorate`), and the shared objective judges the decorated result at
-//! full tolerance — residual contacts are reported honestly and belong to
-//! the seeded GENCAN push-off (`GenCanPack::with_restart`), never hidden.
+//! grinds.
+//!
+//! **A template supplies its topology, not its geometry.** The walk chooses
+//! the route and `decorate` seats each backbone atom on the site the walk
+//! chose, so the route's guarantees — self-avoidance, the occupancy guard,
+//! and any attached region — are the molecule's rather than merely the
+//! walk's, and the backbone's bond lengths and angles are the lattice's.
+//! Only hydrogens and side atoms keep the template's local geometry. See
+//! `decorate` for why, and `saw::DiamondLattice::fit` for what the bond
+//! length ends up being.
+//!
+//! The shared objective judges the decorated result at full tolerance —
+//! residual contacts are reported honestly and belong to the seeded GENCAN
+//! push-off (`GenCanPack::with_restart`), never hidden.
 
 pub mod config;
 pub(crate) mod decorate;
