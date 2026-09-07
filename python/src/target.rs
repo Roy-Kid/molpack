@@ -84,7 +84,8 @@ impl PyTarget {
     ///
     /// * a built-in **geometric** restraint (:class:`InsideBoxRestraint`,
     ///   :class:`InsideSphereRestraint`, :class:`OutsideSphereRestraint`,
-    ///   :class:`AbovePlaneRestraint`, :class:`BelowPlaneRestraint`) — its
+    ///   :class:`AbovePlaneRestraint`, :class:`BelowPlaneRestraint`) or a
+    ///   :class:`StlRegion` (lifted through ``RegionRestraint``) — its
     ///   ``f`` / ``fg`` see **one atom** at a time;
     /// * a built-in **distribution** restraint (:class:`GaussianPlane`,
     ///   :class:`GaussianPoint`, :class:`ExponentialPlane`,

@@ -21,12 +21,24 @@ use super::decorate::analyze_backbone;
 
 /// Diamond-lattice growth as its own entry (lattice-growth-phase spec).
 ///
+/// A tetrahedral heavy-atom tree of degree ≤ 4 is grown as a diamond-lattice
+/// self-avoiding walk; a linear chain is the `d = 2` degeneracy of that
+/// walk, not a second algorithm. Degree `> 4` is
+/// [`GrowError::NonTetrahedralTemplate`]. Rings stay
+/// [`GrowError::RingTemplate`].
+///
 /// The torsion prior is mandatory — it decides the walk's trans/gauche±
 /// weights — so it is the one constructor argument. The entry reports its
 /// outcome honestly: decoration drift and hydrogen crowding leave real
 /// contacts at melt density, `fdist` says so, and the remedy is the
 /// explicit seeded push-off chain
 /// ([`GenCanPack::with_restart`](crate::GenCanPack::with_restart)).
+///
+/// A molecule-level geometric restraint (including
+/// [`StlRegion`](crate::StlRegion)) masks the diamond lattice: sites whose
+/// continuum position lies outside the region are blocked, and the SAW
+/// only walks Region ∩ lattice. An empty intersection is
+/// [`GrowError::LatticeRegionEmpty`].
 pub struct LatticeGrow {
     settings: PackSettings,
     handlers: Vec<Box<dyn Handler>>,

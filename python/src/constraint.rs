@@ -9,7 +9,9 @@
 use std::sync::Arc;
 
 use crate::helpers::{NpF, stash_err};
+use crate::region::PyStlRegion;
 use molpack::F;
+use molpack::RegionRestraint;
 use molpack::restraint::{
     AbovePlaneRestraint, AtomRestraint, BelowPlaneRestraint, ExponentialPlane, ExponentialPoint,
     GaussianPlane, GaussianPoint, InsideBoxRestraint, InsideSphereRestraint,
@@ -53,6 +55,10 @@ impl AtomRestraint for SharedAtomRestraint {
     fn periodic_box(&self) -> Option<([F; 3], [F; 3], [bool; 3])> {
         self.0.periodic_box()
     }
+    #[inline]
+    fn is_closed_mesh(&self) -> bool {
+        self.0.is_closed_mesh()
+    }
 }
 
 // ============================================================================
@@ -77,6 +83,9 @@ pub(crate) fn extract_restraint(
     if let Ok(c) = obj.extract::<PyBelowPlaneRestraint>() {
         return Ok(SharedAtomRestraint(Arc::new(c.inner)));
     }
+    if let Ok(c) = obj.extract::<PyStlRegion>() {
+        return Ok(SharedAtomRestraint(Arc::new(RegionRestraint(c.inner))));
+    }
 
     // Duck-typed Python restraint: object with callable `f` and `fg`
     // methods. Bound methods are resolved once here so the hot path
@@ -90,16 +99,16 @@ pub(crate) fn extract_restraint(
 
     Err(PyTypeError::new_err(
         "expected a restraint: one of InsideBoxRestraint / InsideSphereRestraint / \
-         OutsideSphereRestraint / AbovePlaneRestraint / BelowPlaneRestraint, or an \
-         object with callable `f(x, scale, scale2)` and `fg(x, scale, scale2)` methods",
+         OutsideSphereRestraint / AbovePlaneRestraint / BelowPlaneRestraint / StlRegion, \
+         or an object with callable `f(x, scale, scale2)` and `fg(x, scale, scale2)` methods",
     ))
 }
 
 /// Try ONLY the built-in geometric per-atom pyclasses (no duck-typing).
 ///
-/// Returns `Some(..)` if `obj` is one of the five geometric built-ins
+/// Returns `Some(..)` if `obj` is one of the geometric built-ins
 /// (`InsideBoxRestraint`, `InsideSphereRestraint`, `OutsideSphereRestraint`,
-/// `AbovePlaneRestraint`, `BelowPlaneRestraint`); otherwise `None`. The unified
+/// `AbovePlaneRestraint`, `BelowPlaneRestraint`, `StlRegion`); otherwise `None`. The unified
 /// [`crate::target::PyTarget::with_restraint`] entry point uses this to route a
 /// geometric built-in to the per-atom path and everything else (built-in
 /// distribution restraints + duck-typed objects) to the group path.
@@ -118,6 +127,9 @@ pub(crate) fn try_atom_builtin(obj: &Bound<'_, pyo3::types::PyAny>) -> Option<Sh
     }
     if let Ok(c) = obj.extract::<PyBelowPlaneRestraint>() {
         return Some(SharedAtomRestraint(Arc::new(c.inner)));
+    }
+    if let Ok(c) = obj.extract::<PyStlRegion>() {
+        return Some(SharedAtomRestraint(Arc::new(RegionRestraint(c.inner))));
     }
     None
 }

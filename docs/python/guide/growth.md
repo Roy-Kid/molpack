@@ -85,6 +85,36 @@ result = (
 target whose coordinates are kept verbatim, so the second run places
 only the new species and never disturbs the grown chains.
 
+## Branched trees and rings
+
+Build the chemistry with molrs (SMILES + conformer) and molpy
+`PolymerBuilder` — do not invent coordinates. A 4-arm star is a
+tetrafunctional core plus EO arms (`build_star`); a macrocycle is
+`build_ring`. Both `CbmcGrow` and `LatticeGrow` consume the **bond
+graph**: a tree is legal for either grower; a cycle raises
+`RingTemplate` on both, so `pack_ring` then picks rigid `GenCanPack`.
+
+`python/examples/pack_peo_topo.py` `pack_star` is one explicit pick:
+`LatticeGrow` @ 2.0 Å (occupancy guard on) then caller-side
+`GenCanPack.with_restart` @ 2.0 Å — the same lattice-then-push-off
+shape as the melt sample below. `CbmcGrow` remains a peer tree grower;
+its reduced-EV (0.6 Å) then 2.0 Å push-off recipe stays on the
+`CbmcGrow` path and is not copied onto `LatticeGrow`.
+
+```bash
+python python/examples/pack_peo_linear.py 8 8 0.5 42
+python python/examples/pack_peo_mix.py 4 2 4 4 0.5 42
+python python/examples/pack_peo_topo.py star 4 8 0.5 42
+python python/examples/pack_peo_topo.py ring 6 8 0.4 42
+python python/examples/pack_peo_stl.py 4 4 30 42
+```
+
+`pack_peo_mix.py` puts two topologies in **one** `LatticeGrow.run` (linear
+`Target` + 4-arm star `Target`, density-sized box). `pack_peo_stl.py` is
+the mesh-cavity scene: attach `StlRegion.from_file` and grow with
+`LatticeGrow` — diamond sites outside the mesh are blocked
+(Region ∩ lattice), then `GenCanPack.with_restart`.
+
 ## The torsion prior is load-bearing
 
 `CbmcGrow` has exactly one mandatory argument, and it is the one that

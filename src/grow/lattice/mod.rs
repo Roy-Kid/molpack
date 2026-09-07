@@ -1,5 +1,5 @@
 //! Lattice growth: diamond-lattice SAW pre-generation for dense melts
-//! (lattice-growth-phase spec).
+//! (lattice-growth-phase spec; tetrahedral trees in lattice-branch-saw).
 //!
 //! The continuum growth solver hits a density ceiling long before melt
 //! density: its torsion candidates are proposed in continuous space and
@@ -21,6 +21,9 @@ pub(crate) mod saw;
 pub use config::LatticeConfig;
 pub use entry::LatticeGrow;
 
+use std::collections::HashSet;
+use std::sync::Arc;
+
 use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use rand::SeedableRng;
@@ -33,6 +36,7 @@ use crate::grow::GrowError;
 use crate::grow::internal::InternalTree;
 use crate::grow::prior::TorsionPrior;
 use crate::handler::{Handler, PhaseInfo, StageInfo, StepInfo};
+use crate::restraint::AtomRestraint;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 use crate::target::Target;
 
@@ -42,6 +46,20 @@ use saw::{DiamondLattice, RisWeights, SawField, forced_zigzag, grow_walk};
 struct LatticeSpecies {
     tree: InternalTree,
     backbone: Backbone,
+}
+
+/// Sites whose continuum position violates any molecule-level restraint
+/// (`f(x, 1, 0.01) > 0`, same scale as CBMC). Empty input → empty mask.
+fn blocked_sites(lat: &DiamondLattice, restraints: &[Arc<dyn AtomRestraint>]) -> HashSet<[i64; 3]> {
+    if restraints.is_empty() {
+        return HashSet::new();
+    }
+    lat.iter_sites()
+        .filter(|&p| {
+            let x = lat.to_continuum(p);
+            restraints.iter().any(|r| r.f(&x, 1.0, 0.01) > 0.0)
+        })
+        .collect()
 }
 
 /// The diamond-lattice growth algorithm on the [`Stage`] seam.
@@ -147,10 +165,11 @@ impl Stage for LatticeStage {
         Guarantees::new(Placed::All)
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn run(
         &mut self,
         state: &mut PackState,
-        _targets: &[Target],
+        targets: &[Target],
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
     ) -> Result<StageOutcome, PackError> {
@@ -201,18 +220,28 @@ impl Stage for LatticeStage {
         'outer: for itype in 0..sys.ntype {
             let sp = &self.species[itype];
             let na = sys.natoms[itype];
-            let n_bb = sp.backbone.atoms.len();
+            let mask = blocked_sites(&lat, &targets[itype].molecule_restraints);
+            if !lat.has_allowed_a_site(&mask) {
+                return Err(PackError::Grow {
+                    target: itype,
+                    source: GrowError::LatticeRegionEmpty,
+                });
+            }
+            field.set_blocked(mask);
             for imol in 0..sys.nmols[itype] {
                 let base = sys.idfirst[itype] + imol * na;
                 // Escape ladder: guarded walk → unguarded walk (site
                 // self-avoidance only) → forced zigzag. Every escape below
                 // the guard is a relaxation of the constructive guarantee
                 // and is counted.
+                let mut relaxed = 0usize;
                 let walk = if let Some(w) = grow_walk(
                     &lat,
                     &mut field,
                     mol as u32,
-                    n_bb,
+                    &sp.backbone.parent,
+                    &sp.backbone.children,
+                    &sp.backbone.follows,
                     &weights,
                     self.cfg.occupancy_guard,
                     self.cfg.max_backtrack,
@@ -224,19 +253,34 @@ impl Stage for LatticeStage {
                     &lat,
                     &mut field,
                     mol as u32,
-                    n_bb,
+                    &sp.backbone.parent,
+                    &sp.backbone.children,
+                    &sp.backbone.follows,
                     &weights,
                     false,
                     self.cfg.max_backtrack,
                     self.cfg.max_reseed,
                     &mut rng,
                 ) {
-                    softened += 1;
+                    relaxed = 1;
                     w
                 } else {
-                    softened += 1;
-                    forced_zigzag(&lat, &mut field, mol as u32, n_bb, &mut rng)
+                    relaxed = 1;
+                    forced_zigzag(
+                        &lat,
+                        &mut field,
+                        mol as u32,
+                        &sp.backbone.parent,
+                        &sp.backbone.children,
+                        &sp.backbone.follows,
+                        &mut rng,
+                    )
+                    .ok_or(PackError::Grow {
+                        target: itype,
+                        source: GrowError::LatticeRegionEmpty,
+                    })?
                 };
+                softened += relaxed;
 
                 let mut coords = vec![[0.0 as F; 3]; na];
                 decorate_chain(
@@ -294,13 +338,25 @@ impl Stage for LatticeStage {
             for itype in 0..sys.ntype {
                 let sp = &self.species[itype];
                 let na = sys.natoms[itype];
-                let n_bb = sp.backbone.atoms.len();
+                field.set_blocked(blocked_sites(&lat, &targets[itype].molecule_restraints));
                 for imol in 0..sys.nmols[itype] {
                     let base = sys.idfirst[itype] + imol * na;
                     if done.contains(&base) {
                         continue;
                     }
-                    let walk = forced_zigzag(&lat, &mut field, m as u32, n_bb, &mut rng);
+                    let walk = forced_zigzag(
+                        &lat,
+                        &mut field,
+                        m as u32,
+                        &sp.backbone.parent,
+                        &sp.backbone.children,
+                        &sp.backbone.follows,
+                        &mut rng,
+                    )
+                    .ok_or(PackError::Grow {
+                        target: itype,
+                        source: GrowError::LatticeRegionEmpty,
+                    })?;
                     let mut coords = vec![[0.0 as F; 3]; na];
                     decorate_chain(
                         &sp.tree,

@@ -249,11 +249,15 @@ pub enum GrowError {
         /// The stored weight at `index`.
         weight: F,
     },
-    /// The template's heavy-atom backbone does not fit the diamond lattice:
-    /// branched or non-tetrahedral (the message names the offense). Lattice
-    /// growth v1 maps a linear sp³ backbone; branched trees are staged
-    /// (lattice-growth-phase spec, 拓扑范围).
+    /// The template's heavy-atom backbone does not fit the diamond lattice
+    /// (the message names the offense). Tetrahedral heavy degree `1..=4` is
+    /// accepted (linear is the `d = 2` degeneracy); degree `> 4`, a
+    /// detached heavy, or a non-sp³ interior bond is named here.
     NonTetrahedralTemplate(String),
+    /// The attached region contains no usable diamond site for this chain
+    /// (empty Region ∩ lattice, or the tree cannot embed in the allowed
+    /// subgraph).
+    LatticeRegionEmpty,
 }
 
 impl fmt::Display for GrowError {
@@ -323,6 +327,11 @@ impl fmt::Display for GrowError {
                 f,
                 "a fixed target cannot be grown: drop fixed_at or pack this \
                  target with GenCanPack"
+            ),
+            GrowError::LatticeRegionEmpty => write!(
+                f,
+                "LatticeGrow: the attached region contains no usable diamond \
+                 site for this chain; enlarge the mesh or reduce the template"
             ),
         }
     }

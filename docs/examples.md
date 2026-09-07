@@ -7,6 +7,13 @@ target counts, and all five are covered by the regression suite
 measurement harness rather than a Packmol workload: it evaluates the
 chain-growth solver against the rigid-body path on a PEO melt
 (`cargo run --release --example pack_peo --features io -- grow 200 25 1.0 42`).
+Polymer PEO scenes are Python-only (`python/examples/pack_peo_*.py`):
+monomers from molrs SMILES + conformer, architecture from molpy
+`PolymerBuilder`, then molpack packing. Linear melt and mixed
+linear+star share `LatticeGrow` @ 2.0 Å then `GenCanPack.with_restart`;
+the ring path is `pack_peo_topo.py ring` (named grower reject, rigid
+`GenCanPack`); STL-confined linear PEO is `pack_peo_stl.py` (`StlRegion`
+masks lattice sites outside the mesh, then `GenCanPack.with_restart`).
 
 | Workload | Rust example | Python example | Molecules | Restraints | Demonstrates |
 |---|---|---|---|---|---|
@@ -59,6 +66,10 @@ python examples/pack_bilayer.py
 python examples/pack_interface.py
 python examples/pack_spherical.py
 python examples/pack_solvprotein.py
+python examples/pack_peo_linear.py 8 8 0.5 42
+python examples/pack_peo_mix.py 4 2 4 4 0.5 42
+python examples/pack_peo_topo.py star 4 8 0.5 42
+python examples/pack_peo_stl.py 4 4 30 42
 ```
 
 `python/examples/pack_water_cube.py` is a minimal standalone starter

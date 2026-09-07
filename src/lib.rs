@@ -71,7 +71,7 @@
 //! | Rigid placement vector | [`RigidView`] |
 //! | Stage seam (Rust-only) | [`Stage`], [`Requires`], [`Guarantees`], [`StageOutcome`], [`Budget`], [`PackState`], [`Placed`] |
 //! | AtomRestraint trait + 14 concrete structs | [`AtomRestraint`] + `InsideBox` / `InsideCube` / `InsideSphere` / `InsideEllipsoid` / `InsideCylinder` / `Outside*` variants / `AbovePlane` / `BelowPlane` / `AboveGaussian` / `BelowGaussian` — each suffixed `…AtomRestraint` |
-//! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideCellRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`Aabb`] |
+//! | Region trait + combinators + lift | [`Region`], [`RegionExt`], [`And`], [`Or`], [`Not`], [`RegionRestraint`], [`InsideBoxRegion`], [`InsideCellRegion`], [`InsideSphereRegion`], [`OutsideSphereRegion`], [`StlRegion`], [`Aabb`] |
 //! | Handler trait + built-ins | [`Handler`], [`NullHandler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`handler::StageInfo`], [`PhaseInfo`], [`PhaseReport`] |
 //! | In-loop optimizer (feature `ff`) | `OptimizeSelect`, `GenCanPack::with_optimizer`, `TorsionMcOptimizer`, and molrs's `Optimizer` trait |
 //! | Errors | [`PackError`] |
@@ -154,7 +154,7 @@ pub use pipeline::combinators::{OnViolation, Until};
 pub use pipeline::{PackEngine, Pipeline, StageFactory};
 pub use region::{
     Aabb, And, InsideBoxRegion, InsideCellRegion, InsideSphereRegion, Not, Or, OutsideSphereRegion,
-    Region, RegionExt, RegionRestraint,
+    Region, RegionExt, RegionRestraint, StlError, StlRegion,
 };
 // In-loop optimizers require molrs `ff` (Optimizer trait + Potential).
 #[cfg(feature = "ff")]
@@ -267,6 +267,8 @@ pub mod prelude {
         RegionRestraint,
         State,
         StepInfo,
+        StlError,
+        StlRegion,
         Target,
         XYZHandler,
     };

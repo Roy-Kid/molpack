@@ -1,5 +1,7 @@
 //! Geometric `Region` trait and composition combinators.
 //!
+//! Mesh volumes: [`StlRegion`].
+//!
 //! A `Region` is a **geometric predicate** with a signed-distance function:
 //! - `contains(x) == true`  ⇔ x is inside the region
 //! - `signed_distance(x) < 0` inside, `> 0` outside, `== 0` on the boundary
@@ -35,6 +37,9 @@ use molrs::types::F;
 use ndarray::array;
 
 use crate::restraint::AtomRestraint;
+
+mod stl;
+pub use stl::{StlError, StlRegion};
 
 // ============================================================================
 // Core trait
@@ -97,6 +102,12 @@ pub trait Region: Send + Sync + std::fmt::Debug {
     fn bounding_box(&self) -> Option<Aabb> {
         None
     }
+
+    /// True when this region is (or composes) a closed triangle mesh.
+    /// Default `false`.
+    fn is_closed_mesh(&self) -> bool {
+        false
+    }
 }
 
 // ============================================================================
@@ -123,6 +134,9 @@ impl<A: Region, B: Region> Region for And<A, B> {
             self.1.signed_distance_grad(x)
         }
     }
+    fn is_closed_mesh(&self) -> bool {
+        self.0.is_closed_mesh() || self.1.is_closed_mesh()
+    }
 }
 
 /// Union of two regions: inside iff EITHER is inside.
@@ -144,6 +158,9 @@ impl<A: Region, B: Region> Region for Or<A, B> {
             self.1.signed_distance_grad(x)
         }
     }
+    fn is_closed_mesh(&self) -> bool {
+        self.0.is_closed_mesh() || self.1.is_closed_mesh()
+    }
 }
 
 /// Complement: inside iff the inner region is NOT inside.
@@ -161,6 +178,9 @@ impl<A: Region> Region for Not<A> {
     fn signed_distance_grad(&self, x: &[F; 3]) -> [F; 3] {
         let g = self.0.signed_distance_grad(x);
         [-g[0], -g[1], -g[2]]
+    }
+    fn is_closed_mesh(&self) -> bool {
+        self.0.is_closed_mesh()
     }
 }
 
@@ -249,6 +269,10 @@ impl<R: Region + 'static> AtomRestraint for RegionRestraint<R> {
 
     fn declared_cell(&self) -> Option<CellDeclaration> {
         self.0.declared_cell()
+    }
+
+    fn is_closed_mesh(&self) -> bool {
+        self.0.is_closed_mesh()
     }
 }
 

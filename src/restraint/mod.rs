@@ -80,6 +80,12 @@ pub trait AtomRestraint: Send + Sync + std::fmt::Debug {
     fn declared_cell(&self) -> Option<crate::region::CellDeclaration> {
         None
     }
+
+    /// True when this restraint is (or wraps) a closed triangle mesh.
+    /// Default `false`.
+    fn is_closed_mesh(&self) -> bool {
+        false
+    }
 }
 
 /// Blanket impl so `Box<dyn AtomRestraint>` itself implements the trait.
@@ -111,6 +117,10 @@ impl AtomRestraint for Box<dyn AtomRestraint> {
 
     fn plane_normal(&self) -> Option<[F; 3]> {
         (**self).plane_normal()
+    }
+
+    fn is_closed_mesh(&self) -> bool {
+        (**self).is_closed_mesh()
     }
 }
 

@@ -122,8 +122,8 @@ molcrafts-molpy = { path = "../../molpy" }
 [tool.ty]
 [tool.ty.environment]
 python-version = "3.12"
-# tests import _common via sys.path.insert at runtime; ty cannot follow dynamic
-# path manipulation, so we declare the examples dir as an extra source root.
+# tests import example scripts via sys.path.insert at runtime; ty cannot follow
+# dynamic path manipulation, so we declare the examples dir as an extra source root.
 extra-paths = ["examples"]
 
 # Isolated binding tests — prek pre-push + CI call: `tox -c python -e py`

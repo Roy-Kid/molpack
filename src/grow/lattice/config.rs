@@ -51,13 +51,9 @@ impl LatticeConfig {
         self
     }
 
-    /// Path-tracking torsion tweak (radians, default 0.35 ≈ 20°): each
-    /// backbone torsion may deviate this far from its exact lattice RIS
-    /// state to pull the decorated backbone atom back onto its lattice
-    /// site. Without it, template-vs-lattice bond/angle mismatch
-    /// accumulates as unbounded drift and the lattice's excluded-volume
-    /// guarantee dies with chain length (spec risk 3). Real chains carry
-    /// ±15-20° thermal torsion spread, so the statistics stay RIS-governed.
+    /// Parent-chain torsion tracking (radians, default 0.35 ≈ 20°): each
+    /// hooked backbone torsion may deviate this far from its exact lattice
+    /// RIS state to pull the decorated atom toward its lattice site.
     /// `0.0` disables tracking (pure lattice states).
     pub fn with_track_tweak(mut self, radians: F) -> Self {
         self.track_tweak = radians.max(0.0);

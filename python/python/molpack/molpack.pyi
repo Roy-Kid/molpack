@@ -63,6 +63,19 @@ class BelowPlaneRestraint:
     def __init__(self, normal: Sequence[float], distance: float) -> None: ...
     def __repr__(self) -> str: ...
 
+class StlRegion:
+    @classmethod
+    def from_file(
+        cls, path: str | os.PathLike[str], scale: float = 1.0
+    ) -> StlRegion: ...
+    def contains(self, points: NDArray[np.float64]) -> NDArray[np.bool_]:
+        """Membership of each row of an ``(n, 3)`` array."""
+
+    def signed_distance(self, points: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Distance to the surface per point, Å; negative inside."""
+
+    def __repr__(self) -> str: ...
+
 # Collective (distribution-matching) restraints — drive a species' aggregate
 # spatial distribution toward a target profile rather than confining each atom.
 class GaussianPlane:
@@ -146,7 +159,7 @@ class _RestraintLike(Protocol):
         scale2: float,
     ) -> tuple[float, tuple[float, float, float]]: ...
 
-type AnyRestraint = BuiltinRestraint | _RestraintLike
+type AnyRestraint = BuiltinRestraint | StlRegion | _RestraintLike
 
 # ---------------------------------------------------------------------------
 # Method selection / growth

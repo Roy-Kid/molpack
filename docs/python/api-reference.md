@@ -14,7 +14,7 @@ from molpack import (
     Angle, Axis, CenteringMode,
     # Geometric (per-atom) restraints
     InsideBoxRestraint, InsideSphereRestraint, OutsideSphereRestraint,
-    AbovePlaneRestraint, BelowPlaneRestraint,
+    AbovePlaneRestraint, BelowPlaneRestraint, StlRegion,
     # Collective (distribution-matching) restraints
     GaussianPlane, GaussianPoint,
     ExponentialPlane, ExponentialPoint,
@@ -250,8 +250,9 @@ builders; one extra knob:
 - `.with_occupancy_guard(on: bool = True)` — nearest-neighbour site
   exclusion (keeps non-bonded pairs at ≥ the 2nd-neighbour distance).
 
-Linear sp³ heavy-atom backbones only in v1 — branched and non-tetrahedral
-templates are named rejections.
+Trees (including branched) are accepted; a cycle raises named
+`RingTemplate` `ValueError`; non-tetrahedral templates stay named
+rejections.
 
 ### `Pipeline`
 
@@ -443,6 +444,39 @@ Half-space $\{\mathbf{x} : \mathbf{n}\cdot\mathbf{x} \ge d\}$.
 ### `BelowPlaneRestraint(normal, distance)`
 
 Half-space $\{\mathbf{x} : \mathbf{n}\cdot\mathbf{x} \le d\}$.
+
+### `StlRegion.from_file(path, scale=1.0)`
+
+Watertight triangle mesh. `scale` is Å per file unit (`1.0` = file already
+Å). Attaches like the geometric restraints above (`target.with_restraint`).
+The predicate is the **atom centre**. Solver split (same as any geometric
+restraint, not STL-specific):
+
+- `GenCanPack` — soft exterior penalty.
+- `CbmcGrow` — hard reject on propose; `force_place` may sit outside.
+- `LatticeGrow` — sites outside the mesh are blocked (Region ∩ lattice). The
+  guarantee is about the **walk**: decoration rebuilds the molecule from its
+  own bond lengths and angles along that track and drifts off it, so pendant
+  and side atoms can sit outside the mesh — by more the longer the backbone.
+  Author the mesh with the clearance already in it if the wall has to hold.
+
+### `StlRegion.contains(points)` / `StlRegion.signed_distance(points)`
+
+The region's two questions for an `(n, 3)` array. `contains` returns `(n,)`
+bool; `signed_distance` returns `(n,)` Å, negative inside. Together they say
+what the packer was told to enforce, without re-deriving mesh geometry:
+
+```python
+cavity = molpack.StlRegion.from_file("dendrite.stl")
+depth = cavity.signed_distance(state.positions)
+print(f"{(depth > 0).sum()} atoms outside, worst {depth.max():.2f} Å")
+```
+
+A restraint is satisfied to the run's `precision`, not exactly. `frest` is the
+largest per-atom penalty `0.01 · d²`, so `frest < precision` means
+`d < 10·√precision`: the default `precision=1e-2` calls a run converged with an
+atom 1 Å outside, `1e-4` with 0.1 Å. Tighten `with_precision` when the wall is
+the point — and remember the mesh, not the solver, is where clearance belongs.
 
 ### Collective (distribution-matching) restraints
 

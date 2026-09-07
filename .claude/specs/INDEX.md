@@ -27,7 +27,11 @@ Add via `/mol:spec <feature description>`. Implement via `/mol:impl <slug>` (cha
 
 - [pair-loop-context-split](./pair-loop-context-split.md) — move the pair kernel's read set into a `PairInputs` sub-struct so the accumulators stay borrowable, then share the five duplicated traversals. Architecture first; perf recorded per step on a dedicated node, not gated. Now paired with the `objective.rs` split that `dg-refine` needs. **DRAFT**
 - [chain-growth-solver](./chain-growth-solver.md) — a `Solver` seam in `pack_with_report`, and a configurational-bias chain-growth solver ranked alongside `gencan` on it: per-target method selection (`Target::with_method`), the box at final volume from step 0, chains grown a torsion at a time under a mandatory geometric torsion prior (RIS/C∞-calibrated — uniform sampling is quantitatively wrong per litrev), recoil-ready retraction, AA + CG. No `ff` dependency. **APPROVED** (revised 2026-08-28: litrev + four design principles; Tasks 1–11, 13 landed — Task 12 measurement and final acceptance ledger outstanding)
-- [lattice-growth-phase](./lattice-growth-phase.md) — 金刚石格相生长:格上 SAW 构造 + RIS-MC 修复 + 装饰回连续,melt+ 密度秒级 — v1 LANDED(线性全管线);分支/MC修复/统计验收仍 DRAFT（MC 修复现归精修族 R3，见 grow-axes / packing-taxonomy）
+- [lattice-growth-phase](./lattice-growth-phase.md) — 金刚石格相生长:格上 SAW 构造 + RIS-MC 修复 + 装饰回连续,melt+ 密度秒级 — v1 LANDED(线性全管线);分支行走现由 `lattice-branch-saw` 链落地;MC修复/统计验收仍 DRAFT（MC 修复现归精修族 R3，见 grow-axes / packing-taxonomy）
+- [lattice-branch-saw-01-walk](./lattice-branch-saw-01-walk.md) — 把线性金刚石 SAW 推广为四面体树行走（InternalTree 投影、每变量一次 C3、子树 recoil）— **CODE-COMPLETE**
+- [lattice-branch-saw-02-docs](./lattice-branch-saw-02-docs.md) — Python `pack_peo_topo` 星形路径改为 LatticeGrow @ 2.0 Å 再 `with_restart`；文档删 v1 仅线性 — **CODE-COMPLETE**
+- [stl-region-01-region](./stl-region-01-region.md) — 封闭 STL 三角网格作为 `StlRegion`（偶奇 SDF + Eberly），经既有 `RegionRestraint` 接到 packing/CBMC — **CODE-COMPLETE**
+- [stl-region-02-bind](./stl-region-02-bind.md) — Python `StlRegion.from_file` + 逐原子抬升；文档写清三入口合同 — **CODE-COMPLETE**
 - [collective-com-restraints](./collective-com-restraints.md) — packing to collective targets (COM-level distribution restraints) — **DRAFT**
 - [triclinic-cell-downshift](./triclinic-cell-downshift.md) — pack into arbitrary lattices (true triclinic minimum image; lifts the growth entries' orthorhombic-only restriction) — **DRAFT**
 

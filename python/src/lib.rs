@@ -37,6 +37,9 @@ use helpers::register_errors;
 mod types;
 use types::{PyAngle, PyAxis, PyCenteringMode};
 
+mod region;
+use region::PyStlRegion;
+
 mod constraint;
 use constraint::{
     PyAbovePlaneRestraint, PyBelowPlaneRestraint, PyExponentialPlane, PyExponentialPoint,
@@ -80,6 +83,7 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyOutsideSphereRestraint>()?;
     m.add_class::<PyAbovePlaneRestraint>()?;
     m.add_class::<PyBelowPlaneRestraint>()?;
+    m.add_class::<PyStlRegion>()?;
     m.add_class::<PyGaussianPlane>()?;
     m.add_class::<PyGaussianPoint>()?;
     m.add_class::<PyExponentialPlane>()?;

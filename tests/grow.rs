@@ -21,7 +21,7 @@ use molpack::grow::internal::InternalTree;
 use molpack::grow::{GrowConfig, GrowError, TorsionPrior};
 use molpack::{
     CbmcGrow, F, GenCanPack, Handler, InsideSphereRestraint, IntraResidual, PackContext,
-    PackEngine, PackError, State, StepInfo, Target,
+    PackEngine, PackError, RegionRestraint, State, StepInfo, StlRegion, Target,
 };
 use molrs::BondDistanceWeights;
 use molrs::store::block::Block;
@@ -2900,26 +2900,147 @@ fn lattice_grow_bead_chain_constructive() {
     }
 }
 
-/// Branched heavy-atom templates are staged: named rejection, no silent
-/// degradation (lattice-growth-phase spec, 拓扑范围).
-#[test]
-fn lattice_grow_rejects_branched() {
-    use molpack::LatticeGrow;
-    // A 5-atom star: center bonded to 3 arms + one arm extended.
-    let coords = [
-        [0.0, 0.0, 0.0],
-        [1.5, 0.0, 0.0],
-        [-1.5, 0.0, 0.0],
-        [0.0, 1.5, 0.0],
-        [3.0, 0.0, 0.0],
+/// Tetrahedral 4-leaf star (centre + 4 leaves on diamond T_STEPS).
+fn tetrahedral_star_frame() -> Frame {
+    let s = 1.53 / (3.0 as F).sqrt();
+    let t = [
+        [1.0, 1.0, 1.0],
+        [1.0, -1.0, -1.0],
+        [-1.0, 1.0, -1.0],
+        [-1.0, -1.0, 1.0],
     ];
-    let frame = frame_from_parts(&coords, &[(0, 1), (0, 2), (0, 3), (1, 4)]);
+    let mut coords = vec![[0.0; 3]];
+    let mut bonds = Vec::new();
+    for (k, d) in t.iter().enumerate() {
+        coords.push([d[0] * s, d[1] * s, d[2] * s]);
+        bonds.push((0u32, (k + 1) as u32));
+    }
+    frame_from_parts(&coords, &bonds)
+}
+
+/// A tetrahedral heavy star grows (lattice-branch-saw-01-walk). Completion
+/// is `Ok` + `natoms`, not `fdist == 0` (decoration residual is honest).
+#[test]
+fn lattice_grow_tetrahedral_star_completes() {
+    use molpack::LatticeGrow;
+    let grown = LatticeGrow::new(TorsionPrior::Uniform)
+        .with_seed(7)
+        .with_tolerance(2.0)
+        .with_periodic_box([0.0; 3], BOX_MAX, [true; 3])
+        .run(&[Target::new(tetrahedral_star_frame(), 2)], 60)
+        .expect("tetrahedral star grows");
+    assert_eq!(grown.natoms(), 10);
+}
+
+/// Comb from `branched_parts` grows on LatticeGrow.
+#[test]
+fn lattice_grow_tetrahedral_comb_completes() {
+    use molpack::LatticeGrow;
+    let (coords, bonds) = branched_parts();
+    let grown = LatticeGrow::new(TorsionPrior::Uniform)
+        .with_seed(7)
+        .with_tolerance(2.0)
+        .with_periodic_box([0.0; 3], [30.0, 30.0, 30.0], [true; 3])
+        .run(&[Target::new(frame_from_parts(&coords, &bonds), 2)], 60)
+        .expect("tetrahedral comb grows");
+    assert_eq!(grown.natoms(), 24);
+}
+
+/// Degree > 4 is still a named tetrahedral refusal, not "branched staged".
+#[test]
+fn lattice_grow_rejects_degree_gt_4() {
+    use molpack::LatticeGrow;
+    let mut coords = vec![[0.0; 3]];
+    let mut bonds = Vec::new();
+    for k in 0..5u32 {
+        coords.push([(k as F + 1.0) * 1.5, 0.0, 0.0]);
+        bonds.push((0, k + 1));
+    }
     let err = LatticeGrow::new(TorsionPrior::Uniform)
         .with_periodic_box([0.0; 3], BOX_MAX, [true; 3])
-        .run(&[Target::new(frame, 2)], 60)
-        .expect_err("a branched backbone must be refused by name");
+        .run(&[Target::new(frame_from_parts(&coords, &bonds), 1)], 60)
+        .expect_err("degree 5 must be named");
     let msg = format!("{err}");
-    assert!(msg.contains("branched"), "named rejection, got: {msg}");
+    assert!(
+        msg.contains("5") || msg.contains("tetrahedral") || msg.contains("degree"),
+        "named degree>4, got: {msg}"
+    );
+    assert!(
+        !msg.contains("staged for the lattice branch phase"),
+        "{msg}"
+    );
+}
+
+/// LatticeGrow walks only Region ∩ lattice: bead centres stay inside an
+/// inset cube (sites outside the mesh are blocked).
+#[test]
+fn lattice_grow_stays_inside_stl_region() {
+    use molpack::LatticeGrow;
+    let lo = 2.0 as F;
+    let hi = 18.0 as F;
+    let cube = StlRegion::from_triangles(&cube_tris([lo; 3], [hi; 3])).expect("cube");
+    let grown = LatticeGrow::new(TorsionPrior::Uniform)
+        .with_seed(7)
+        .with_tolerance(2.0)
+        .with_periodic_box([0.0; 3], BOX_MAX, [true; 3])
+        .run(
+            &[Target::new(chain_frame(6, 1.53, true), 1).with_restraint(RegionRestraint(cube))],
+            40,
+        )
+        .expect("lattice walk inside StlRegion");
+    assert_eq!(grown.natoms(), 6);
+    for p in grown.positions() {
+        for xk in p {
+            assert!(
+                xk >= lo - 1e-6 && xk <= hi + 1e-6,
+                "bead at {p:?} left the inset cube [{lo}, {hi}]"
+            );
+        }
+    }
+}
+
+/// A mesh that does not overlap the cell leaves no diamond site.
+#[test]
+fn lattice_grow_empty_region_is_named() {
+    use molpack::LatticeGrow;
+    let cube = StlRegion::from_triangles(&cube_tris([100.0; 3], [101.0; 3])).expect("far cube");
+    let err = LatticeGrow::new(TorsionPrior::Uniform)
+        .with_periodic_box([0.0; 3], BOX_MAX, [true; 3])
+        .run(
+            &[Target::new(chain_frame(6, 1.53, true), 1).with_restraint(RegionRestraint(cube))],
+            4,
+        )
+        .expect_err("empty Region ∩ lattice must be named");
+    assert!(
+        matches!(
+            err,
+            PackError::Grow {
+                source: GrowError::LatticeRegionEmpty,
+                ..
+            }
+        ),
+        "expected PackError::Grow(LatticeRegionEmpty), got {err:?}"
+    );
+}
+
+fn cube_tris(lo: [F; 3], hi: [F; 3]) -> Vec<[[F; 3]; 3]> {
+    let p = |x, y, z| [x, y, z];
+    let [x0, y0, z0] = lo;
+    let [x1, y1, z1] = hi;
+    vec![
+        [p(x0, y0, z0), p(x0, y0, z1), p(x0, y1, z1)],
+        [p(x0, y0, z0), p(x0, y1, z1), p(x0, y1, z0)],
+        [p(x1, y0, z0), p(x1, y1, z0), p(x1, y1, z1)],
+        [p(x1, y0, z0), p(x1, y1, z1), p(x1, y0, z1)],
+        [p(x0, y0, z0), p(x1, y0, z0), p(x1, y0, z1)],
+        [p(x0, y0, z0), p(x1, y0, z1), p(x0, y0, z1)],
+        [p(x0, y1, z0), p(x0, y1, z1), p(x1, y1, z1)],
+        [p(x0, y1, z0), p(x1, y1, z1), p(x1, y1, z0)],
+        [p(x0, y0, z0), p(x0, y1, z0), p(x1, y1, z0)],
+        [p(x0, y0, z0), p(x1, y1, z0), p(x1, y0, z0)],
+        [p(x0, y0, z1), p(x1, y0, z1), p(x1, y1, z1)],
+        [p(x0, y0, z1), p(x1, y1, z1), p(x0, y1, z1)],
+    ]
 }
 
 /// The melt-density pipeline: lattice growth at an occupancy where the

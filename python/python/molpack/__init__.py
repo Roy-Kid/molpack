@@ -32,6 +32,7 @@ from .molpack import (
     State,
     StepContext,
     StepInfo,
+    StlRegion,
     TabulatedPlane,
     TabulatedPoint,
     Target,
@@ -57,6 +58,7 @@ __all__ = [
     "OutsideSphereRestraint",
     "AbovePlaneRestraint",
     "BelowPlaneRestraint",
+    "StlRegion",
     # Group-level distribution-matching restraints
     "GaussianPlane",
     "GaussianPoint",

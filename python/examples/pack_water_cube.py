@@ -6,10 +6,14 @@ file), so it needs ``molcrafts-molrs`` but no structure files on disk.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import molrs
 import numpy as np
 
 import molpack
+
+OUT = Path(__file__).resolve().parent / "out"
 
 
 def main() -> None:
@@ -39,6 +43,22 @@ def main() -> None:
     print(f"fdist     = {result.fdist:.4f}")
     print(f"frest     = {result.frest:.4f}")
     print(f"positions shape = {result.positions.shape}")
+    packed = result.frame
+    if packed.box is None:
+        a = packed["atoms"]
+        packed.box = molrs.Box.from_bounds(
+            np.column_stack(
+                [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
+            ),
+            padding=np.ones(3),
+        )
+    OUT.mkdir(parents=True, exist_ok=True)
+    molrs.io.mrec.write_frame(str(OUT / "pack_water_cube.mrec"), packed)
+    molrs.io.write_lammps_traj(str(OUT / "pack_water_cube.lammpstrj"), [packed])
+    if "bonds" in packed and packed["bonds"].nrows:
+        molrs.io.write_lammps_dump_local(
+            str(OUT / "pack_water_cube.dump.local"), [packed]
+        )
 
 
 if __name__ == "__main__":

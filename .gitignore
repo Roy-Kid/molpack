@@ -69,3 +69,4 @@ Cargo.lock
 
 # example outputs
 examples/pack_peo/out/
+python/examples/out/

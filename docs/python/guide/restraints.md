@@ -16,8 +16,37 @@ attach the same way, via `.with_restraint()`.
 | `OutsideSphereRestraint` | `center: [x,y,z]`, `radius: float`             | complement of closed ball |
 | `AbovePlaneRestraint`    | `normal: [nx,ny,nz]`, `distance: float`        | half-space $\mathbf{n}\cdot\mathbf{x} \ge d$ |
 | `BelowPlaneRestraint`    | `normal: [nx,ny,nz]`, `distance: float`        | half-space $\mathbf{n}\cdot\mathbf{x} \le d$ |
+| `StlRegion`              | `from_file(path, scale=1.0)`                   | closed triangle mesh (watertight STL) |
 
-All arguments are standard Python floats / lists.
+`StlRegion.from_file(path, scale=1.0)` reads an ASCII or binary STL.
+`scale` is Å per file unit; the default `1.0` means the file is already
+in Å. The test is the **atom centre**, not the van der Waals ball and
+not the molecule COM — the same centre-only rule as the box and sphere
+restraints.
+
+How each packing entry uses a geometric restraint (including
+`StlRegion`) is **not** inferred from the mesh:
+
+- `GenCanPack` — soft quadratic wall on atom centres (`frest`).
+- `CbmcGrow` — hard reject on `propose`; `force_place` may leave atoms
+  outside and counts `softened`.
+- `LatticeGrow` — diamond sites outside the region are blocked
+  (Region ∩ lattice). An empty intersection is a named error. Decorated
+  hydrogens may still sit slightly outside; chain `GenCanPack.with_restart`.
+
+```python
+from molpack import StlRegion, Target
+
+cavity = StlRegion.from_file("cavity.stl")  # Å
+target = Target(frame, n).with_restraint(cavity)
+```
+
+A full growth run is `python/examples/pack_peo_stl.py`: it writes a
+watertight cube, attaches `StlRegion`, and grows linear PEO with
+`CbmcGrow.with_periodic_box` (Auhl 0.6 Å) then `GenCanPack.with_restart`
+at 2.0 Å.
+
+All other arguments are standard Python floats / lists.
 
 ```python
 from molpack import (
