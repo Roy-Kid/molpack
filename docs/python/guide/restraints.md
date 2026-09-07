@@ -29,7 +29,7 @@ How each packing entry uses a geometric restraint (including
 
 - `GenCanPack` — soft quadratic wall on atom centres (`frest`).
 - `CbmcGrow` — hard reject on `propose`; `force_place` may leave atoms
-  outside and counts `softened`.
+  outside and counts `degraded`.
 - `LatticeGrow` — diamond sites outside the region are blocked
   (Region ∩ lattice). An empty intersection is a named error. Decorated
   hydrogens may still sit slightly outside; chain `GenCanPack.with_restart`.

@@ -25,9 +25,9 @@ use molrs::types::F;
 /// costs one round per stage, so the driver's round loop is capped at
 /// `max_loops × (the longest chain's number of steps + 1)` rounds. Hitting that
 /// cap force-completes the unfinished chains instead of spinning forever, which
-/// grows `softened` and leaves `converged == false`.
+/// grows `degraded` and leaves `converged == false`.
 ///
-/// The entry reports its outcome honestly: on non-convergence `softened`
+/// The entry reports its outcome honestly: on non-convergence `degraded`
 /// and `converged` say so and nothing else runs — no hidden second
 /// algorithm (engine-entry-split 门槛 2). For the rigid push-off, chain
 /// explicitly: feed the same free targets to

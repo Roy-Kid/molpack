@@ -4,8 +4,6 @@
 //! its two peers (`gencan/entry.rs`, `grow/entry.rs`): the algorithm in one
 //! file, the entry that selects it in another.
 
-use molrs::types::F;
-
 use crate::entry::{PackSettings, State};
 use crate::error::PackError;
 use crate::grow::prior::TorsionPrior;
@@ -62,13 +60,6 @@ impl LatticeGrow {
     /// Nearest-neighbour site exclusion (default on).
     pub fn with_occupancy_guard(mut self, on: bool) -> Self {
         self.config = self.config.with_occupancy_guard(on);
-        self
-    }
-
-    /// Path-tracking torsion tweak in radians (default 0.35 ≈ 20°); `0.0`
-    /// disables tracking. See [`LatticeConfig::with_track_tweak`].
-    pub fn with_track_tweak(mut self, radians: F) -> Self {
-        self.config = self.config.with_track_tweak(radians);
         self
     }
 }

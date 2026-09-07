@@ -211,7 +211,7 @@ A run driven by one engine entry has one stage, so it reports `index = 0` and
 no-ops, and a single-stage run calls neither; they are the seam a caller that
 chains stages itself brackets each stage with. `on_stage_end`'s
 [`StageOutcome`](crate::StageOutcome) deliberately carries no verdict, only
-`converged` and `softened` (how many times the stage had to relax a
+`converged` and `degraded` (how many times the stage had to relax a
 constructive guarantee). The violation maxima are read off `sys`, the
 post-stage `PackContext` — the same place `on_finish` reads them — so the
 shared objective stays the only ruler.
@@ -416,7 +416,7 @@ let full  = GenCanPack::new().run(&[Target::fixed_from(&grown), solvent], 200)?;
 ```
 
 Both entries return the same [`State`](crate::State) —
-`frame`, `fdist`, `frest`, `converged`, `softened`, `intra`.
+`frame`, `fdist`, `frest`, `converged`, `degraded`, `intra`.
 
 ## PackContext
 

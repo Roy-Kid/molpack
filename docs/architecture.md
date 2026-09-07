@@ -162,7 +162,7 @@ PER-ITERATION                ─→  evaluate(x, mode, &mut g)
 
 OUTPUT                       ─→  State
                                   frame, plus converged, fdist,
-                                  frest, softened
+                                  frest, degraded
 ```
 
 Three rules govern this flow:
@@ -218,7 +218,7 @@ fn run(targets, max_loops):
         handlers.on_stage_end
         if handlers.should_stop(): break
     rebuild xcart from the final rigid view; handlers.on_finish
-    assemble Frame into State (+ converged / fdist / frest / softened / intra)
+    assemble Frame into State (+ converged / fdist / frest / degraded / intra)
 ```
 
 Every preset's `PackEngine::run` is one line —

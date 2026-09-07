@@ -312,7 +312,7 @@ full = GenCanPack().run([Target.fixed_from(grown), solvent], max_loops=200)
 ## `State`
 
 Frozen outcome of one `run()`. Diagnostics (`frame`, `fdist`, `frest`,
-`converged`, `softened`, `intra`) live on this object; pass the same
+`converged`, `degraded`, `intra`) live on this object; pass the same
 object to `GenCanPack.with_restart` or `Target.fixed_from` to continue.
 
 **Properties**
@@ -324,9 +324,15 @@ object to `GenCanPack.with_restart` or `Target.fixed_from` to continue.
 - `.converged : bool`
 - `.fdist : float`
 - `.frest : float`
-- `.softened : int` — how many times the growth solver had to relax its
-  constructive hard-core guarantee (always 0 on the GENCAN path). See
-  [`CbmcGrow`](#cbmcgrow).
+- `.degraded : int` — how many molecules were placed below the growth
+  solver's own guarantee, one count per demotion. `LatticeGrow` demotes a chain
+  when the walk cannot keep the occupancy guard (no two non-bonded atoms closer
+  than the 2nd lattice neighbour): the chain goes in with site self-avoidance
+  only, or as a forced zigzag. `CbmcGrow` counts each hard-core softening rung
+  the same way. `0` on the GENCAN path, which promises nothing constructively.
+  A non-zero count is the honest reading of a crowded box — those molecules
+  carry the close contacts `fdist` reports, and `converged` is false while it
+  stands.
 - `.intra : IntraResidual` — same-copy scored vs exempted minima (Å,
   minimum image). Forwards the assembled residual; does not recompute
   from positions.
@@ -454,12 +460,11 @@ restraint, not STL-specific):
 
 - `GenCanPack` — soft exterior penalty.
 - `CbmcGrow` — hard reject on propose; `force_place` may sit outside.
-- `LatticeGrow` — sites outside the mesh are blocked (Region ∩ lattice). The
-  guarantee is about the **walk**: decoration rebuilds the molecule from its
-  own bond lengths and angles along that track and drifts off it, so pendant
-  and side atoms can sit outside the mesh — by more the longer the backbone.
-  `with_track_tweak` bounds that drift (see below). Author the mesh with the
-  clearance already in it if the wall has to hold.
+- `LatticeGrow` — sites outside the mesh are blocked (Region ∩ lattice), and
+  the backbone atoms **are** those sites, so the mask's guarantee is the
+  molecule's. Hydrogens and side atoms hang off the backbone with the
+  template's local geometry and can reach about a bond length past the
+  surface; author the mesh with that clearance in it if the wall has to hold.
 
 Queries are served by a BVH built once when the region is constructed, so cost
 grows with the log of the triangle count, not the count. On an 8 700-triangle
@@ -483,24 +488,6 @@ largest per-atom penalty `0.01 · d²`, so `frest < precision` means
 `d < 10·√precision`: the default `precision=1e-2` calls a run converged with an
 atom 1 Å outside, `1e-4` with 0.1 Å. Tighten `with_precision` when the wall is
 the point — and remember the mesh, not the solver, is where clearance belongs.
-
-### `LatticeGrow.with_track_tweak(radians)`
-
-How far a hooked backbone torsion may leave its exact lattice RIS state to pull
-the decorated atom back onto its site. Default `0.35` (≈20°); `0.0` is pure
-lattice states.
-
-This is the lever on decoration drift. Measured on a 25-mer PEO in a mesh
-cavity, worst excursion after the walk:
-
-| `track_tweak` | 0.0 | 0.35 | 0.8 | 1.5 | 2.0 |
-|---|---|---|---|---|---|
-| worst excursion | 36 Å | 16 Å | 6.4 Å | 3.4 Å | 2.9 Å |
-
-The curve is flat past ≈1.5. The price is statistical: at a bound that wide a
-torsion can leave its RIS state entirely, so the realized conformer statistics
-are the lattice's rather than the `TorsionPrior`'s. Short chains do not need
-it; a long chain that has to stay inside a region does.
 
 ### Collective (distribution-matching) restraints
 

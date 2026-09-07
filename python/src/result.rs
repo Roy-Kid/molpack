@@ -2,7 +2,7 @@
 //!
 //! [`PyState`] is returned by every engine entry's ``run()``
 //! (`GenCanPack`, `CbmcGrow`): the packed ``molrs.Frame`` plus structured
-//! diagnostics (`converged` / `fdist` / `frest` / `softened` / `intra`).
+//! diagnostics (`converged` / `fdist` / `frest` / `degraded` / `intra`).
 
 use crate::helpers::NpF;
 use molpack::F;
@@ -104,8 +104,8 @@ impl PyState {
     /// How many times the growth solver had to relax its constructive
     /// hard-core guarantee (always 0 on the GENCAN path).
     #[getter]
-    fn softened(&self) -> usize {
-        self.inner.softened
+    fn degraded(&self) -> usize {
+        self.inner.degraded
     }
 
     /// Same-copy scored vs exempted minima (Å, minimum image).

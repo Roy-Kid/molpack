@@ -2,7 +2,7 @@
 //!
 //! Produces the quantified report backing the chain-growth spec's scientific
 //! and performance acceptance criteria (ac-006 / ac-010): timing, convergence,
-//! `softened`, chain Rg statistics vs the Flory unperturbed value, chain-order
+//! `degraded`, chain Rg statistics vs the Flory unperturbed value, chain-order
 //! bias, the internal-distance curve ⟨R²(s)⟩/s, density homogeneity E(d), and
 //! the minimum inter-molecular distance.
 //!
@@ -597,8 +597,8 @@ fn report(
     let pos = result.positions();
     println!("── result ─────────────────────────────────────");
     println!(
-        "  elapsed      : {elapsed:.3} s   converged={}  fdist={:.4e}  frest={:.4e}  softened={}",
-        result.converged, result.fdist, result.frest, result.softened
+        "  elapsed      : {elapsed:.3} s   converged={}  fdist={:.4e}  frest={:.4e}  degraded={}",
+        result.converged, result.fdist, result.frest, result.degraded
     );
     println!(
         "  intra        : scored {:.4} Å   exempted {:.4} Å",
@@ -867,11 +867,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .with_density(density)
                 .run(&[target], max_loops)?;
             println!(
-                "  grow         : {:.3} s  converged={}  fdist={:.4e}  softened={}  intra scored {:.4} Å",
+                "  grow         : {:.3} s  converged={}  fdist={:.4e}  degraded={}  intra scored {:.4} Å",
                 g0.elapsed().as_secs_f64(),
                 grown.converged,
                 grown.fdist,
-                grown.softened,
+                grown.degraded,
                 grown.intra.scored
             );
             let gp = grown.positions();
@@ -898,11 +898,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let pp = pushed.positions();
                 let d0 = vnorm(vsub(pp[0], gp[0]));
                 println!(
-                    "  push-off     : {:.3} s  converged={}  fdist={:.4e}  softened={}  atom0 moved {:.3} Å",
+                    "  push-off     : {:.3} s  converged={}  fdist={:.4e}  degraded={}  atom0 moved {:.3} Å",
                     p0.elapsed().as_secs_f64(),
                     pushed.converged,
                     pushed.fdist,
-                    pushed.softened,
+                    pushed.degraded,
                     d0
                 );
                 pushed
@@ -922,11 +922,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .with_density(density)
                 .run(&[target], max_loops)?;
             println!(
-                "  grow         : {:.3} s  converged={}  fdist={:.4e}  softened={}  intra scored {:.4} Å",
+                "  grow         : {:.3} s  converged={}  fdist={:.4e}  degraded={}  intra scored {:.4} Å",
                 g0.elapsed().as_secs_f64(),
                 grown.converged,
                 grown.fdist,
-                grown.softened,
+                grown.degraded,
                 grown.intra.scored
             );
             let mut t_push = Target::new(synthesize_peo(dp), n_chains).with_name("peo");
@@ -946,11 +946,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .with_tolerance(push_tol)
                     .run(&[t_push], 30)?;
                 println!(
-                    "  push-off     : {:.3} s  converged={}  fdist={:.4e}  softened={}",
+                    "  push-off     : {:.3} s  converged={}  fdist={:.4e}  degraded={}",
                     p0.elapsed().as_secs_f64(),
                     pushed.converged,
                     pushed.fdist,
-                    pushed.softened
+                    pushed.degraded
                 );
                 pushed
             }

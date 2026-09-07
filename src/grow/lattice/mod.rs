@@ -209,7 +209,7 @@ impl Stage for LatticeStage {
         let mut field = SawField::new();
         let mut rng = SmallRng::seed_from_u64(self.seed);
 
-        let mut softened = 0usize;
+        let mut degraded = 0usize;
         let mut aborted = false;
 
         // Bases of the chains already walked + decorated, in xcart order:
@@ -280,17 +280,10 @@ impl Stage for LatticeStage {
                         source: GrowError::LatticeRegionEmpty,
                     })?
                 };
-                softened += relaxed;
+                degraded += relaxed;
 
                 let mut coords = vec![[0.0 as F; 3]; na];
-                decorate_chain(
-                    &sp.tree,
-                    &sp.backbone,
-                    &lat,
-                    &walk.sites,
-                    self.cfg.track_tweak,
-                    &mut coords,
-                );
+                decorate_chain(&sp.tree, &sp.backbone, &lat, &walk.sites, &mut coords);
                 for (a, p) in coords.iter().enumerate() {
                     sys.xcart[base + a] = *p;
                 }
@@ -358,14 +351,7 @@ impl Stage for LatticeStage {
                         source: GrowError::LatticeRegionEmpty,
                     })?;
                     let mut coords = vec![[0.0 as F; 3]; na];
-                    decorate_chain(
-                        &sp.tree,
-                        &sp.backbone,
-                        &lat,
-                        &walk.sites,
-                        self.cfg.track_tweak,
-                        &mut coords,
-                    );
+                    decorate_chain(&sp.tree, &sp.backbone, &lat, &walk.sites, &mut coords);
                     for (a, p) in coords.iter().enumerate() {
                         sys.xcart[base + a] = *p;
                     }
@@ -385,7 +371,7 @@ impl Stage for LatticeStage {
         // same unscaled primitive the continuum driver calls, which also owns
         // the `scale` / `scale2` handling this site used to spell out.
         let (_, fdist, frest) = evaluate_unscaled(sys, x.as_slice());
-        let converged = !aborted && softened == 0 && fdist == 0.0 && frest < budget.precision;
-        Ok(StageOutcome::new(converged, softened))
+        let converged = !aborted && degraded == 0 && fdist == 0.0 && frest < budget.precision;
+        Ok(StageOutcome::new(converged, degraded))
     }
 }

@@ -337,7 +337,7 @@ def test_pipeline_regression_single_stage_golden() -> None:
     )
 
     assert result.converged
-    assert result.softened == 0
+    assert result.degraded == 0
     assert abs(result.fdist - golden_fdist) < GOLDEN_TOL
     assert abs(result.frest - golden_frest) < GOLDEN_TOL
     assert result.positions.shape == (180, 3)  # 60 waters × 3 atoms
@@ -374,7 +374,7 @@ def test_pipeline_regression_two_stage_golden() -> None:
     )
 
     assert result.converged
-    assert result.softened == 0
+    assert result.degraded == 0
     assert abs(result.fdist - golden_fdist) < GOLDEN_TOL
     assert abs(result.frest - golden_frest) < GOLDEN_TOL
     assert result.positions.shape == (10, 3)  # 2 chains × 5 beads

@@ -123,7 +123,7 @@ result.natoms      # int
 result.converged   # bool — True iff both fdist and frest < precision
 result.fdist       # float — final distance-violation sum
 result.frest       # float — final restraint-violation sum
-result.softened    # int — growth-only; always 0 on the GenCanPack path
+result.degraded    # int — growth-only; always 0 on the GenCanPack path
 result.intra       # IntraResidual — same-copy scored / exempted minima (Å)
 ```
 

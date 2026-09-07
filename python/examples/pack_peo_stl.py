@@ -17,13 +17,11 @@ move ``fdist`` 3.99 → 3.28 while ``frest`` went 0.42 → 6.43, i.e. the
 worst excursion grew from 6.5 Å to 25 Å. Residual contacts at melt
 density are honest, and the force field downstream is what removes them.
 
-The mask confines the *walk*, not the decorated atoms: decoration
-rebuilds the molecule from its own bonds and angles along that track and
-drifts off it, by more the longer the backbone. ``with_track_tweak``
-bounds how far a torsion may bend to follow the track and is the lever on
-that drift — at EO25 the worst excursion after the walk is ≈36 Å at 0.0,
-≈16 Å at the 0.35 default, ≈3 Å at 1.5, and flat beyond. A mesh that has
-to hold a wall is still authored with the clearance already in it.
+A template owes the grower its topology, not its geometry: the backbone
+atoms *are* the masked lattice sites, so confinement is the molecule's and
+not merely the walk's. Only hydrogens and side atoms hang off with the
+template's local geometry, so a mesh that has to hold a wall is authored
+with about a bond length of clearance in it.
 
 Drop the mesh into a viewer next to the packed frame to see the cavity:
 both paths are printed at the end.
@@ -94,20 +92,12 @@ def pack_stl(
                 for i, e in enumerate(frame["atoms"].view("element"))
                 if str(e).strip() == "H"
             ],
-            0.85,
+            0.2,
         )
     )
     prior = molpack.TorsionPrior.three_state_from_c_inf(PEO_C_INF, TET)
     grown = (
         molpack.LatticeGrow(prior)
-        # A 25-mer backbone is 75 atoms long, and decoration rebuilds it from
-        # the template's own bonds and angles along the walk: at the 0.35 rad
-        # default the error compounds to ~16 Å by the last residue. 1.5 rad
-        # keeps it near 3 Å. The price is that a hooked torsion can then leave
-        # its RIS state entirely, so the realized statistics are the lattice's
-        # rather than the prior's — drop back to the default when the
-        # conformer matters more than the wall.
-        .with_track_tweak(1.5)
         .with_seed(seed)
         .with_tolerance(2.0)
         .with_periodic_box([0.0, 0.0, 0.0], [edge, edge, edge])
@@ -116,7 +106,7 @@ def pack_stl(
     print(
         f"  grow         : converged={grown.converged}  "
         f"fdist={grown.fdist:.4e}  frest={grown.frest:.4e}  "
-        f"softened={grown.softened}"
+        f"degraded={grown.degraded}"
     )
     return grown
 

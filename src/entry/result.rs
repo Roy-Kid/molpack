@@ -159,7 +159,7 @@ pub struct State {
     /// How many times the growth solver had to relax its constructive
     /// hard-core guarantee. Always `0` on the GENCAN path; a grown structure
     /// is only `converged` when it is `0` there too.
-    pub softened: usize,
+    pub degraded: usize,
 }
 
 impl State {
@@ -456,7 +456,7 @@ mod tests {
             },
             frest: 0.0,
             converged: true,
-            softened: 0,
+            degraded: 0,
         };
         assert_eq!(state.natoms(), 2);
     }

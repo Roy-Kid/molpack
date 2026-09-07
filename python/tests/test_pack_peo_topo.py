@@ -104,7 +104,7 @@ class TestTinyPack:
         )
         assert grown.natoms == star.n_atoms
         assert grown.converged
-        assert grown.softened == 0
+        assert grown.degraded == 0
         assert grown.fdist == 0.0
 
     def test_auhl_two_stars_push_off_converges(self):

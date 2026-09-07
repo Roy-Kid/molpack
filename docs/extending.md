@@ -616,7 +616,7 @@ Borrow your configuration, do not take it.
 
 ### `StageOutcome` carries no verdict
 
-`run` returns `Ok(StageOutcome::new(converged, softened))` on a successful
+`run` returns `Ok(StageOutcome::new(converged, degraded))` on a successful
 run, and those two numbers are all a stage reports: whether it met its own
 convergence criterion, and how
 many times it had to relax a constructive guarantee (growth's hard-core

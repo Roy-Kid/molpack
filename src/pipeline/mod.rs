@@ -26,7 +26,7 @@
 //!    whole run; then, per stage: the geometry cache is invalidated,
 //!    `on_stage_start` fires, the stage runs, the placement marker advances
 //!    by the stage's [`Guarantees`](crate::Guarantees) (declared, never
-//!    inspected), `on_stage_end` fires, `softened` accumulates. A handler
+//!    inspected), `on_stage_end` fires, `degraded` accumulates. A handler
 //!    asking to stop ends the run there: later stages never start, and the
 //!    verdict is honestly `converged == false`. A stage that *fails* returns
 //!    a named [`PackError`] instead, which propagates on the same path as
@@ -296,7 +296,7 @@ impl Pipeline {
     /// stage emits. Per stage: invalidate the geometry cache, fire
     /// `on_stage_start`/`on_stage_end`, `set_placed` by the stage's declared
     /// guarantee, and stop early the moment a handler asks for one. Returns
-    /// `(last_converged, softened)`, or the error a stage failed with —
+    /// `(last_converged, degraded)`, or the error a stage failed with —
     /// which skips its `on_stage_end` and the run's `on_finish`. This loop,
     /// not the bracket around it, is the heart of the lifecycle.
     fn run_stages(
@@ -313,7 +313,7 @@ impl Pipeline {
         state.ctx_mut().ntotmol = setup.ntotmol_free;
 
         let total = stages.len();
-        let mut softened = 0usize;
+        let mut degraded = 0usize;
         let mut last_converged = false;
         for (index, stage) in stages.iter_mut().enumerate() {
             state.invalidate_geometry_cache();
@@ -334,14 +334,14 @@ impl Pipeline {
             for h in handlers.iter_mut() {
                 h.on_stage_end(&info, &outcome, state.ctx());
             }
-            softened += outcome.softened;
+            degraded += outcome.degraded;
             last_converged = outcome.converged;
             if handlers.iter().any(|h| h.should_stop()) {
                 last_converged = false;
                 break;
             }
         }
-        Ok((last_converged, softened))
+        Ok((last_converged, degraded))
     }
     fn assemble(
         mut state: PackState,
@@ -351,7 +351,7 @@ impl Pipeline {
         outcome: (bool, usize),
         precision: F,
     ) -> State {
-        let (last_converged, softened) = outcome;
+        let (last_converged, degraded) = outcome;
         {
             let ctx = state.ctx_mut();
             for itype in 0..setup.ntype_with_fixed {
@@ -410,7 +410,7 @@ impl Pipeline {
             intra,
             frest,
             converged,
-            softened,
+            degraded,
         }
     }
 }

@@ -177,7 +177,7 @@ class TestGrowPack:
             .run([target], max_loops=50)
         )
         assert result.converged
-        assert result.softened == 0
+        assert result.degraded == 0
         # Strict zero: hard-core violation is rejected during growth, never
         # penalized afterwards (ac-004).
         assert result.fdist == 0.0
@@ -207,7 +207,7 @@ class TestGrowPack:
             .with_density(rho)
             .run([target], max_loops=50)
         )
-        assert result.softened == 0
+        assert result.degraded == 0
         assert result.fdist == 0.0
 
         expected_edge = (mass_per_copy * copies / (AVOGADRO * rho) * 1e24) ** (
@@ -226,7 +226,7 @@ class TestGencanPath:
     """The rigid-body entry through the same result type."""
 
     def test_gencan_softened_is_zero_and_deterministic(self):
-        # A GENCAN pack reports softened == 0, and the same seed reproduces
+        # A GENCAN pack reports degraded == 0, and the same seed reproduces
         # the same positions bitwise — one entry per run, one verdict.
         def pack():
             return (
@@ -239,9 +239,9 @@ class TestGencanPath:
             )
 
         a = pack()
-        assert a.softened == 0
+        assert a.degraded == 0
         b = pack()
-        assert b.softened == 0
+        assert b.degraded == 0
         np.testing.assert_array_equal(a.positions, b.positions)
 
 
@@ -258,7 +258,7 @@ class TestLatticeGrow:
             .run([Target(_chain_frame(n), copies)], max_loops=60)
         )
         assert result.converged
-        assert result.softened == 0
+        assert result.degraded == 0
         assert result.fdist == 0.0
         assert result.positions.shape == (copies * n, 3)
         assert "LatticeGrow" in repr(LatticeGrow(TorsionPrior.uniform()))

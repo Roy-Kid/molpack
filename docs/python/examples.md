@@ -52,7 +52,9 @@ Open-space PEO defaults `LatticeGrow` then `GenCanPack.with_restart` at 2.0 Å.
 `examples/pack_peo/dendrite.stl` — a watertight dendrite, a trunk that forks
 three times into 29 branches, 8 732 triangles, authored for a 130 Å cell with a
 ≈362 000 Å³ cavity — loaded with `scale` so one mesh serves any cell size. The
-default 200 × EO25 (35 600 atoms) fills it at 1.026 g/cm³ in 2.2 s.
+default 200 × EO25 (35 600 atoms) fills it at 1.026 g/cm³ in 6 s, with 3% of
+atoms — hydrogens and end groups on backbone atoms next to the wall — up to
+1.3 Å outside the surface.
 
 Three things that scene makes concrete:
 
@@ -61,12 +63,15 @@ Three things that scene makes concrete:
   `GenCanPack.with_restart` spent 1 h 45 min moving `fdist` 3.99 → 3.28 while
   `frest` went 0.42 → 6.43 — worst excursion 6.5 Å → 25 Å. Residual contacts at
   melt density are honest, and the force field downstream removes them.
-- **The mask confines the walk, not the decorated atoms.** Decoration rebuilds
-  the molecule from its own bonds and angles along the track and drifts off it;
-  `with_track_tweak` is the lever. At EO25 the worst excursion after the walk is
-  ≈36 Å at `0.0`, ≈16 Å at the `0.35` default and ≈3 Å at `1.5`, which is what
-  the example asks for. 10% of atoms still end up to 6.5 Å outside, so a mesh
-  that has to hold a wall is authored with the clearance already in it.
+- **A template owes the grower its topology, not its geometry.** Bond lengths,
+  angles and torsions are one conformer of that topology, and the force field
+  downstream sets them in its first steps. So the backbone atoms *are* the
+  lattice sites: the mask's confinement and the guard's self-avoidance are the
+  molecule's, torsions are exactly the trans/gauche± the prior drew, angles are
+  the lattice's 109.471°, and bond lengths are the lattice step, which is sized
+  from the template's own mean backbone bond. Only hydrogens and side atoms
+  hang off with template geometry, so a mesh that has to hold a wall is
+  authored with about a bond length of clearance in it.
 - **`precision` is a distance in disguise.** `frest` is the largest per-atom
   `0.01 · d²`, so `frest < precision` means `d < 10·√precision`: the default
   `1e-2` calls a run converged with an atom 1 Å outside a region.

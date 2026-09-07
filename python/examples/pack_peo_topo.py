@@ -14,7 +14,9 @@ reaction sites, so ``#[EO](#[EO]:n):4`` cannot branch; the graph is
 
 Star packing is an explicit pick: ``LatticeGrow`` at 2.0 Å then
 ``GenCanPack.with_restart`` at 2.0 Å. Hydrogen packing radius defaults
-to 0.85 Å (``PEO_H_RADIUS=off`` restores ``tolerance/2``).
+to 0.2 Å (``PEO_H_RADIUS=off`` restores ``tolerance/2``):
+hydrogens relax away in the first picoseconds of MD, so making them
+fight for space here only costs the heavy-atom packing.
 """
 
 from __future__ import annotations
@@ -102,7 +104,7 @@ def _h_indices(frame) -> list[int]:
 def _target(polymer: Atomistic, n_mol: int, name: str) -> molpack.Target:
     frame = polymer.to_frame()
     target = molpack.Target(frame, n_mol).with_name(name)
-    raw = os.environ.get("PEO_H_RADIUS", "0.85")
+    raw = os.environ.get("PEO_H_RADIUS", "0.2")
     if raw not in ("", "off", "none"):
         h_idx = _h_indices(frame)
         if h_idx:
@@ -151,7 +153,7 @@ def lattice_then_push(
     )
     print(
         f"  grow         : converged={grown.converged}  "
-        f"fdist={grown.fdist:.4e}  softened={grown.softened}  "
+        f"fdist={grown.fdist:.4e}  degraded={grown.degraded}  "
         f"intra scored {grown.intra.scored:.3f} Å"
     )
     pushed = (

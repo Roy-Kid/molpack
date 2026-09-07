@@ -24,7 +24,7 @@
 //! Growth delivers **geometry**: no contact below the declared tolerance
 //! (constructive — a placement violating the hard core or a restraint is
 //! rejected, never penalized; every relaxation of that guarantee is counted
-//! in `softened`), chain statistics governed by the priors, and homogeneous
+//! in `degraded`), chain statistics governed by the priors, and homogeneous
 //! density. It does **not** deliver an equilibrium Boltzmann ensemble: greedy
 //! Rosenbluth selection has a known, characterizable bias (Consta et al.
 //! 1999), and equilibration is the downstream MD's job — the classic

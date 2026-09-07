@@ -321,7 +321,7 @@ class State:
     @property
     def positions(self) -> NDArray[np.float64]: ...
     @property
-    def softened(self) -> int:
+    def degraded(self) -> int:
         """Times the growth solver relaxed its constructive hard-core
         guarantee (always 0 on the GENCAN path)."""
     @property
@@ -509,9 +509,6 @@ class LatticeGrow:
     def with_global_restraint(self, restraint: AnyRestraint | object) -> Self: ...
     def with_handler(self, handler: object) -> Self: ...
     def with_occupancy_guard(self, on: bool = True) -> Self: ...
-    def with_track_tweak(self, radians: float) -> Self:
-        """Radians a hooked torsion may leave its lattice state (default 0.35)."""
-
     def run(self, targets: Sequence[Target], max_loops: int) -> State: ...
 
 StageEntry = GenCanPack | CbmcGrow | LatticeGrow

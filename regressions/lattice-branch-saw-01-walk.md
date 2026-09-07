@@ -22,4 +22,4 @@ Owning tests in `tests/grow.rs`:
 - `lattice_grow_tetrahedral_star_completes` — `Ok`, `natoms == 10`
 - `lattice_grow_tetrahedral_comb_completes` — `Ok`, `natoms == 24`
 - `lattice_grow_rejects_degree_gt_4` — `NonTetrahedralTemplate`, no “branched staged”
-- `lattice_grow_bead_chain_constructive` — linear `k = 1`: `fdist` bitwise 0, `softened == 0`, bonds 1.53 Å, same-seed bitwise
+- `lattice_grow_bead_chain_constructive` — linear `k = 1`: `fdist` bitwise 0, `degraded == 0`, one lattice bond length throughout and tetrahedral angles (the template supplies topology, not geometry), same-seed bitwise

@@ -46,7 +46,7 @@ result = (
     .with_seed(42)
     .run([peo], max_loops=60)
 )
-print(result.converged, result.softened)
+print(result.converged, result.degraded)
 ```
 
 The torsion prior is `CbmcGrow`'s one mandatory constructor argument;
@@ -194,7 +194,7 @@ cg = Target(beads, count=40).with_special_bonds([0, 0, 1])  # depth 2
 result = CbmcGrow(prior).with_density(0.5).run([aa, cg], max_loops=60)
 ```
 
-## Reading `softened`
+## Reading `degraded`
 
 Growth's guarantee is constructive: a candidate placement that violates
 the hard core or a restraint is rejected, never penalized, so a
@@ -202,7 +202,7 @@ successfully grown structure has `fdist == 0` by construction rather
 than by convergence. When a region of the box becomes so crowded that a
 chain dead-ends repeatedly even after retracting and regrowing, the
 solver's last resort is to shrink the hard core — and every one of those
-shrinks increments `State.softened`. Each unit therefore records
+shrinks increments `State.degraded`. Each unit therefore records
 one relaxation of the constructive guarantee; a grown structure only
 counts as converged when the count is zero at full tolerance, and on the
 rigid-body path it is always zero.
@@ -219,7 +219,7 @@ pushed = GenCanPack().with_restart(grown).with_seed(7).run([chain], max_loops=60
 The seeded run continues on the very same state — zero coordinate
 conversion — through the GENCAN phases, driving the remaining contact
 violations out by rigid-body descent (the classic slow push-off). Each
-link reports honestly: the grow result keeps its `softened` count so you
+link reports honestly: the grow result keeps its `degraded` count so you
 can see the guarantee was relaxed, and the seeded run's `converged`
 tells you whether the push-off restored the full tolerance.
 

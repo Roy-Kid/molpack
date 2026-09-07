@@ -5,7 +5,7 @@
 //! ── Section: Task 1 — named rejections + result surface ───────────────────
 //!
 //! Covers the entry seam: the named `GrowError` rejections (no silent
-//! degradation, spec principle 3) and `State::softened`. NO growth
+//! degradation, spec principle 3) and `State::degraded`. NO growth
 //! algorithm is exercised here. The rigid-placement layout contract lives in
 //! `tests/context_rigid_view.rs` (`rigid_view_layout` /
 //! `rigid_view_set_com_out_of_range_panics`).
@@ -841,7 +841,7 @@ fn field_hard_scale_softens() {
     match field.probe(1, p, &[], 0.8, 0.4, 1e9) {
         Probe::Room(penalty) => assert!(
             penalty > 0.0,
-            "d = 1.8 sits inside the softened soft shell (1.6..2.0): allowed \
+            "d = 1.8 sits inside the degraded soft shell (1.6..2.0): allowed \
              but charged, got penalty {penalty}"
         ),
         Probe::Blocked => panic!("hard_scale 0.8 must admit d = 1.8 > 1.6"),
@@ -1229,10 +1229,10 @@ fn grow_packs_small_melt_constructively() {
         result.fdist
     );
     assert_eq!(
-        result.softened, 0,
+        result.degraded, 0,
         "moderate fill must not need the softening fallback"
     );
-    assert!(result.converged, "softened == 0 growth must be converged");
+    assert!(result.converged, "degraded == 0 growth must be converged");
 
     let pos = result.positions();
     assert_eq!(pos.len(), copies * n_beads, "8 copies × 12 beads");
@@ -1348,7 +1348,7 @@ fn grow_two_species() {
         "constructive fdist == 0.0 across species, got {}",
         result.fdist
     );
-    assert_eq!(result.softened, 0, "no softening at moderate fill");
+    assert_eq!(result.degraded, 0, "no softening at moderate fill");
     assert_eq!(
         result.positions().len(),
         4 * 12 + 6 * 6,
@@ -1576,7 +1576,7 @@ fn grow_restraint_hard_rejects() {
         result.fdist
     );
     assert_eq!(
-        result.softened, 0,
+        result.degraded, 0,
         "24 beads in a radius-10 sphere is generous — no softening fallback"
     );
 }
@@ -1585,7 +1585,7 @@ fn grow_restraint_hard_rejects() {
 /// success: a radius-1.0 sphere cannot hold a 6-bead chain (the 1-3 distance
 /// alone is ~2.5 Å > the sphere's 2.0 Å diameter, at any torsion). The
 /// driver's forced-placement escape must surface through the result:
-/// Ok, `converged == false`, `softened > 0`.
+/// Ok, `converged == false`, `degraded > 0`.
 #[test]
 fn grow_restraint_infeasible_is_not_silent() {
     let target = Target::new(chain_frame(6, 1.53, true), 2)
@@ -1597,15 +1597,15 @@ fn grow_restraint_infeasible_is_not_silent() {
         .run(&[target], 3)
         .expect(
             "an infeasible restraint is not an Err — the budgeted escape \
-             reports through converged/softened",
+             reports through converged/degraded",
         );
     assert!(
         !result.converged,
         "a pack that could not satisfy its restraint must not report converged"
     );
     assert!(
-        result.softened > 0,
-        "softened = 0 on an unsatisfiable restraint — the constructive \
+        result.degraded > 0,
+        "degraded = 0 on an unsatisfiable restraint — the constructive \
          guarantee was silently broken instead of counted (spec §4f)"
     );
 }
@@ -1630,7 +1630,7 @@ fn grow_emits_step_events() {
         .run(&[target], 50)
         .expect("the Task 5 small-melt baseline must still succeed");
     // Guards the radscale claim below: this box needs no softening.
-    assert_eq!(result.softened, 0, "easy box must not soften");
+    assert_eq!(result.degraded, 0, "easy box must not soften");
 
     let events = events.lock().expect("recorder mutex");
     assert!(
@@ -1832,10 +1832,10 @@ fn grow_abort_writeback_golden() {
         "an aborted grow pack must not be reported as converged"
     );
     assert!(
-        result.softened > 0,
+        result.degraded > 0,
         "the golden is only meaningful when the abort completion path ran \
-         (force_place counts as softening); got softened = {}",
-        result.softened
+         (force_place counts as softening); got degraded = {}",
+        result.degraded
     );
     let rounds = events.lock().expect("recorder mutex").len();
     assert!(
@@ -1868,7 +1868,7 @@ fn grow_abort_writeback_golden() {
 
 // ── Section: push-off — the explicit free-target chain (门槛 2) ────────────
 //
-// When growth ends unconverged (softened > 0), the entry says so and stops.
+// When growth ends unconverged (degraded > 0), the entry says so and stops.
 // The rigid push-off is the user-explicit chain (placement-seeding spec):
 // the SAME free targets go to `GenCanPack::with_restart(&grown)`, whose
 // phases continue on the coor/x growth wrote (Auhl slow push-off /
@@ -1898,7 +1898,7 @@ impl Handler for HandoffProbe {
 
 /// The `grow_restraint_infeasible_is_not_silent` setup, reused as THE
 /// push-off trigger: a radius-1.0 sphere cannot hold a 6-bead chain, so
-/// growth force-places and ends with softened > 0 — the state the seeded
+/// growth force-places and ends with degraded > 0 — the state the seeded
 /// chain continues from.
 fn infeasible_sphere_target() -> Target {
     Target::new(chain_frame(6, 1.53, true), 2)
@@ -1912,7 +1912,7 @@ fn grow_infeasible(l: F, max_loops: usize) -> State {
         .with_tolerance(2.0)
         .with_periodic_box([0.0; 3], [l; 3], [true; 3])
         .run(&[infeasible_sphere_target()], max_loops)
-        .expect("the infeasible-restraint grow reports through converged/softened, not Err")
+        .expect("the infeasible-restraint grow reports through converged/degraded, not Err")
 }
 
 /// THE push-off no-teleport test (numerics-review regression guard), on the
@@ -1932,8 +1932,8 @@ fn grow_infeasible(l: F, max_loops: usize) -> State {
 ///    motion is the ONLY move the seeded stage may make on the grown
 ///    conformers.
 /// 3. Honest verdicts on BOTH links: the grow result keeps
-///    `converged == false` / `softened > 0`; the seeded GENCAN stage
-///    reports its own outcome (`softened == 0` always on the rigid path).
+///    `converged == false` / `degraded > 0`; the seeded GENCAN stage
+///    reports its own outcome (`degraded == 0` always on the rigid path).
 ///
 /// Deliberately NOT asserted: a bound on how far molecules travel during
 /// the push-off. In this setup the travel is legitimately large (~19 Å:
@@ -1951,8 +1951,8 @@ fn free_chain_push_off_starts_from_grown_state() {
         "an unsatisfiable restraint must not report converged"
     );
     assert!(
-        grown.softened > 0,
-        "softened = 0 — without softening this test has no trigger"
+        grown.degraded > 0,
+        "degraded = 0 — without softening this test has no trigger"
     );
 
     let init_xcart = Arc::new(Mutex::new(None));
@@ -1969,7 +1969,7 @@ fn free_chain_push_off_starts_from_grown_state() {
         .expect("the seeded push-off returns Ok");
 
     // Detector 3: honest verdicts on both links.
-    assert_eq!(pushed.softened, 0, "GENCAN reports its own softened count");
+    assert_eq!(pushed.degraded, 0, "GENCAN reports its own degraded count");
     let pos = pushed.positions();
     assert_eq!(pos.len(), copies * n_beads, "2 copies × 6 beads");
     let max_center_dist = pos.iter().map(|&p| vdist(p, center)).fold(0.0, F::max);
@@ -2033,7 +2033,7 @@ fn free_chain_push_off_starts_from_grown_state() {
 fn free_chain_push_off_deterministic() {
     let chain = || {
         let grown = grow_infeasible(30.0, 3);
-        assert!(grown.softened > 0, "the cell must exercise the push-off");
+        assert!(grown.degraded > 0, "the cell must exercise the push-off");
         GenCanPack::new()
             .with_restart(&grown)
             .with_seed(7)
@@ -2267,7 +2267,7 @@ fn density_works_for_gencan() {
 /// Why tolerance 0.85σ and not the full bead diameter 1.0σ: a strict 1.0σ
 /// hard core at ρ* = 0.85 is hard-sphere packing fraction η ≈ 0.445 — KG
 /// melts only exist there because WCA is soft, and an instrumented run at
-/// tolerance 1.0 degraded accordingly (softened = 1372, final fdist ≈ 1.0:
+/// tolerance 1.0 degraded accordingly (degraded = 1372, final fdist ≈ 1.0:
 /// forced-placement leftovers). The packer's tolerance is a
 /// PRE-RELAXATION contact criterion, not the interaction diameter —
 /// Packmol's canonical 2.0 Å is ~0.6-0.7 of the heavy-atom σ. The KG
@@ -2275,7 +2275,7 @@ fn density_works_for_gencan() {
 /// that `min_hard_scale`'s default cites (spec §4f / §5.4, the same
 /// physics) and brings η to 0.445 × 0.85³ ≈ 0.27, comfortably feasible.
 /// The constructive guarantee stays strict — min separation ≥ the declared
-/// tolerance, bitwise fdist == 0, softened == 0 — it is the declared
+/// tolerance, bitwise fdist == 0, degraded == 0 — it is the declared
 /// contact that changes to the physically meaningful one.
 ///
 /// Why depth 2 and not 1: ac-011's claim is that the angle-prior
@@ -2325,11 +2325,11 @@ fn grow_cg_kremer_grest_c_inf() {
     // TODO(grow-axes ac-004): restore the strict fdist == 0 assertion once
     // softening is per-chain and recoverable.
     let floor = min_hard_scale * tolerance;
-    if result.softened == 0 {
+    if result.degraded == 0 {
         assert_eq!(
             result.fdist.to_bits(),
             (0.0 as F).to_bits(),
-            "fdist = {} with softened == 0 — an UNSOFTENED growth run keeps \
+            "fdist = {} with degraded == 0 — an UNSOFTENED growth run keeps \
              the strict constructive hard-core guarantee (ac-004): candidates \
              are rejected, never penalized",
             result.fdist
@@ -2343,11 +2343,11 @@ fn grow_cg_kremer_grest_c_inf() {
         let dmin = min_inter_distance(&pos, &mol_of, l);
         assert!(
             dmin >= floor - 1e-9,
-            "softened = {} and the closest inter-molecular pair is {dmin} — \
+            "degraded = {} and the closest inter-molecular pair is {dmin} — \
              below the softening floor {floor} (= min_hard_scale {min_hard_scale} \
              × tolerance {tolerance}). Softening lowers the declared contact; \
              it must never abandon hard rejection",
-            result.softened
+            result.degraded
         );
         assert_eq!(
             count_inter_pairs_below(&pos, &mol_of, l, floor - 1e-9),
@@ -2407,7 +2407,7 @@ fn grow_cg_kremer_grest_c_inf() {
 /// milliseconds.
 ///
 /// Contract on the way out: `Ok`, `converged == false` (nothing was proved),
-/// `softened > 0` (the forced completions are counted like every other
+/// `degraded > 0` (the forced completions are counted like every other
 /// break of the constructive guarantee), finite coordinates, and — as in
 /// [`grow_abort_keeps_bonded_geometry`] — bonded geometry still chemical,
 /// because forced placement builds from the template's internal coordinates
@@ -2457,8 +2457,8 @@ fn grow_dense_strict_core_terminates_unconverged() {
          must report converged == false — the cap is a surrender, not a proof"
     );
     assert!(
-        result.softened > 0,
-        "softened = 0 after a capped run — every forced completion breaks the \
+        result.degraded > 0,
+        "degraded = 0 after a capped run — every forced completion breaks the \
          constructive guarantee and must be counted, or the caller cannot \
          tell a capped result from a clean one"
     );
@@ -2564,7 +2564,7 @@ fn grow_softening_needs_repeated_dead_ends() {
     if let Some(&(round, radscale, _, _)) = first_rung {
         assert!(
             round >= soften_after,
-            "the hard core first softened to {radscale} at round {round}, \
+            "the hard core first degraded to {radscale} at round {round}, \
              before any chain could have reached {soften_after} dead ends (a \
              chain dead-ends at most once per round). Every rung must be \
              earned on the per-chain soften_after ladder; the now-removed \
@@ -2652,7 +2652,7 @@ fn angle_prior_template_is_default() {
              angle-prior seam",
             result.fdist
         );
-        assert_eq!(result.softened, 0, "roomy box: no softening");
+        assert_eq!(result.degraded, 0, "roomy box: no softening");
     }
 
     let (pa, pb) = (default_result.positions(), explicit_result.positions());
@@ -2845,9 +2845,12 @@ fn grow_then_gencan_chaining_over_fixed_matrix() {
 
 // ── Section: lattice growth (lattice-growth-phase spec) ────────────────────
 
-/// A CG bead chain decorates essentially onto the lattice (uniform template
-/// bond = lattice bond), so the occupancy guard's 2nd-neighbour distance
-/// becomes a real constructive guarantee: fdist == 0.0 strict at easy fill.
+/// The backbone *is* the lattice, so the occupancy guard's 2nd-neighbour
+/// distance is a constructive guarantee — `fdist == 0.0` strict at easy fill —
+/// and the bonded geometry is the lattice's: every backbone bond the same
+/// length, every angle tetrahedral. A template supplies topology; its own bond
+/// lengths only size the lattice, and the box's commensurability moves that by
+/// a few percent.
 #[test]
 fn lattice_grow_bead_chain_constructive() {
     use molpack::LatticeGrow;
@@ -2860,10 +2863,10 @@ fn lattice_grow_bead_chain_constructive() {
         .expect("a lattice grow at easy fill runs");
     assert!(
         result.converged,
-        "easy fill must converge (fdist = {}, softened = {})",
-        result.fdist, result.softened
+        "easy fill must converge (fdist = {}, degraded = {})",
+        result.fdist, result.degraded
     );
-    assert_eq!(result.softened, 0, "no escapes at easy fill");
+    assert_eq!(result.degraded, 0, "no escapes at easy fill");
     assert_eq!(
         result.fdist.to_bits(),
         (0.0 as F).to_bits(),
@@ -2873,17 +2876,41 @@ fn lattice_grow_bead_chain_constructive() {
 
     let pos = result.positions();
     assert_eq!(pos.len(), copies * n_beads);
-    // Decoration keeps the template's bonded geometry exactly.
+    // One bond length for the whole system — the lattice step — sized from the
+    // template's mean bond and then snapped to a cell the box divides.
+    let mut bonds = Vec::new();
+    let mut angles = Vec::new();
     for c in 0..copies {
         let chain = &pos[c * n_beads..(c + 1) * n_beads];
-        for i in 0..n_beads - 1 {
-            let d = min_image_cubic(vsub(chain[i + 1], chain[i]), l);
-            let got = vdot(d, d).sqrt();
-            assert!(
-                (got - 1.53).abs() < 1e-6,
-                "copy {c} bond {i}: {got} vs template 1.53"
-            );
+        let steps: Vec<[F; 3]> = (0..n_beads - 1)
+            .map(|i| min_image_cubic(vsub(chain[i + 1], chain[i]), l))
+            .collect();
+        for d in &steps {
+            bonds.push(vdot(*d, *d).sqrt());
         }
+        for w in steps.windows(2) {
+            let (u, v) = (w[0], w[1]);
+            let cos = -vdot(u, v) / (vdot(u, u).sqrt() * vdot(v, v).sqrt());
+            angles.push(cos.clamp(-1.0, 1.0).acos().to_degrees());
+        }
+    }
+    let b0 = bonds[0];
+    for (i, b) in bonds.iter().enumerate() {
+        assert!(
+            (b - b0).abs() < 1e-9,
+            "bond {i} is {b}, but every backbone bond is the same lattice step {b0}"
+        );
+    }
+    assert!(
+        (b0 / 1.53 - 1.0).abs() < 0.10,
+        "lattice step {b0} is not within 10% of the template's 1.53 it was sized from"
+    );
+    let tetrahedral = (-1.0 as F / 3.0).acos().to_degrees();
+    for (i, a) in angles.iter().enumerate() {
+        assert!(
+            (a - tetrahedral).abs() < 1e-9,
+            "backbone angle {i} is {a}°, not the lattice's tetrahedral {tetrahedral}°"
+        );
     }
 
     // Same seed, bitwise reproducible.

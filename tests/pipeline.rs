@@ -429,7 +429,7 @@ fn pipeline_single_stage_gencan_matches_preset_bitwise() {
         "the two spellings must also agree on the verdict"
     );
     assert_eq!(
-        piped.softened, direct.softened,
+        piped.degraded, direct.degraded,
         "a one-stage pipeline sums exactly one stage's softening"
     );
 }
@@ -448,8 +448,8 @@ fn pipeline_single_stage_cbmc_matches_preset_bitwise() {
     assert_bitwise_equal(&piped, &direct, "single-stage CBMC growth");
     assert_eq!(piped.converged, direct.converged);
     assert_eq!(
-        piped.softened, direct.softened,
-        "the pipeline's softened total is the growth stage's own count"
+        piped.degraded, direct.degraded,
+        "the pipeline's degraded total is the growth stage's own count"
     );
 }
 
@@ -467,7 +467,7 @@ fn pipeline_single_stage_lattice_matches_preset_bitwise() {
 
     assert_bitwise_equal(&piped, &direct, "single-stage lattice growth");
     assert_eq!(piped.converged, direct.converged);
-    assert_eq!(piped.softened, direct.softened);
+    assert_eq!(piped.degraded, direct.degraded);
 }
 
 // ── 2. cross-algorithm hand-off ≡ with_restart ─────────────────────────────
@@ -739,7 +739,7 @@ fn pipeline_empty_is_a_named_error() {
 
 /// A two-stage run brackets the RUN once and each STAGE once, reports
 /// `stage.total == 2` on every step with a non-decreasing `stage.index`, and
-/// sums `softened` across the stages (ac-009).
+/// sums `degraded` across the stages (ac-009).
 #[test]
 fn pipeline_two_stages_sum_softened_and_count_hooks() {
     let targets = chain_targets();
@@ -768,12 +768,12 @@ fn pipeline_two_stages_sum_softened_and_count_hooks() {
     .expect("a growth → GENCAN pipeline runs");
 
     assert_eq!(
-        piped.softened,
-        grown.softened + seeded.softened,
-        "the pipeline's softened count is the SUM over its stages \
+        piped.degraded,
+        grown.degraded + seeded.degraded,
+        "the pipeline's degraded count is the SUM over its stages \
          ({} + {}), not the last stage's own count",
-        grown.softened,
-        seeded.softened
+        grown.degraded,
+        seeded.degraded
     );
 
     for (label, tally) in [("attached", &attached), ("adopted", &carried)] {
@@ -997,7 +997,7 @@ fn pipeline_regression_single_stage_gencan_golden() {
 // `Repeat` and `Guarded` are stages, so everything above still applies to
 // them: they are resolved by the same chain check, bracketed by the same
 // handlers, and report ONE stage identity no matter how often their body
-// runs. What is new here is the body's run count, the honest `softened` sum,
+// runs. What is new here is the body's run count, the honest `degraded` sum,
 // the continuation of a repeated GENCAN pass, and the named refusal a broken
 // invariant produces.
 
@@ -1013,7 +1013,7 @@ fn pipeline_regression_single_stage_gencan_golden() {
 struct CountingStage {
     runs: Arc<AtomicUsize>,
     converged: bool,
-    softened: usize,
+    degraded: usize,
     signal: bool,
 }
 
@@ -1043,7 +1043,7 @@ impl Stage for CountingStage {
                 h.on_inner_iter(0, 0.0, state.ctx());
             }
         }
-        Ok(StageOutcome::new(self.converged, self.softened))
+        Ok(StageOutcome::new(self.converged, self.degraded))
     }
 }
 
@@ -1053,7 +1053,7 @@ struct CountingFactory {
     settings: PackSettings,
     runs: Arc<AtomicUsize>,
     converged: bool,
-    softened: usize,
+    degraded: usize,
     signal: bool,
 }
 
@@ -1063,7 +1063,7 @@ impl CountingFactory {
             settings: PackSettings::default(),
             runs: Arc::clone(runs),
             converged: false,
-            softened: 0,
+            degraded: 0,
             signal: false,
         }
     }
@@ -1076,7 +1076,7 @@ impl CountingFactory {
 
     /// The produced stage reports `n` relaxations per run.
     fn with_softened(mut self, n: usize) -> Self {
-        self.softened = n;
+        self.degraded = n;
         self
     }
 
@@ -1096,7 +1096,7 @@ impl StageFactory for CountingFactory {
         Ok(vec![Box::new(CountingStage {
             runs: Arc::clone(&self.runs),
             converged: self.converged,
-            softened: self.softened,
+            degraded: self.degraded,
             signal: self.signal,
         })])
     }
@@ -1169,9 +1169,9 @@ fn repeat_passes_runs_body_n_times_and_sums_softened() {
         "Until::Passes(2) must run the body exactly twice"
     );
     assert_eq!(
-        result.softened,
+        result.degraded,
         2 * SOFTENED_PER_RUN,
-        "the repeated stage's softened count is the SUM over its passes \
+        "the repeated stage's degraded count is the SUM over its passes \
          (2 × {SOFTENED_PER_RUN}), not one pass's own count"
     );
 }

@@ -75,8 +75,8 @@ impl Handler for WatchStages {
 
     fn on_stage_end(&mut self, info: &StageInfo, outcome: &StageOutcome, sys: &PackContext) {
         eprintln!(
-            "stage {} converged={} softened={} fdist={} frest={}",
-            info.name, outcome.converged, outcome.softened, sys.fdist, sys.frest,
+            "stage {} converged={} degraded={} fdist={} frest={}",
+            info.name, outcome.converged, outcome.degraded, sys.fdist, sys.frest,
         );
     }
 }
@@ -86,7 +86,7 @@ Both have default no-op bodies, and a run driven by a single engine entry calls
 neither; they are the seam a caller that chains stages itself brackets each
 stage with. Note where the numbers come from:
 `StageOutcome` reports only what the stage alone knows (`converged`,
-`softened`), while the violation maxima `fdist` and `frest` are read off the
+`degraded`), while the violation maxima `fdist` and `frest` are read off the
 post-stage `PackContext`, so every algorithm is judged by the same objective.
 
 See [Extending](../extending.md) for a full custom-handler walkthrough and for

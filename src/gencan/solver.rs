@@ -373,7 +373,7 @@ mod tests {
 
         assert_eq!(stage.name(), "gencan");
         assert!(outcome.converged, "6 dimers in a 20 Å box must converge");
-        assert_eq!(outcome.softened, 0, "GENCAN never softens");
+        assert_eq!(outcome.degraded, 0, "GENCAN never softens");
         assert!(
             state.ctx().fdist <= 0.01,
             "verdict comes from the shared objective: fdist = {}",

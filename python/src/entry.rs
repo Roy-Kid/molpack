@@ -573,7 +573,6 @@ pub struct PyLatticeGrow {
     shared: SharedKnobs,
     prior: molpack::grow::prior::TorsionPrior,
     occupancy_guard: Option<bool>,
-    track_tweak: Option<f64>,
 }
 
 entry_pymethods!(PyLatticeGrow {
@@ -583,7 +582,6 @@ entry_pymethods!(PyLatticeGrow {
             shared: SharedKnobs::default(),
             prior: torsion_prior.inner.clone(),
             occupancy_guard: None,
-            track_tweak: None,
         }
     }
 
@@ -593,23 +591,6 @@ entry_pymethods!(PyLatticeGrow {
         let mut c = self.clone_fields();
         c.occupancy_guard = Some(on);
         c
-    }
-
-    /// How far a hooked backbone torsion may leave its exact lattice state to
-    /// pull the decorated atom back onto its site, in radians (default 0.35).
-    ///
-    /// Decoration rebuilds the molecule from its own bond lengths and angles
-    /// along the walk, and those differ from the lattice's, so without this
-    /// the error compounds down the backbone. `0.0` is pure lattice states.
-    fn with_track_tweak(&self, radians: f64) -> PyResult<Self> {
-        if !radians.is_finite() || radians < 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "track_tweak must be finite and >= 0, got {radians}"
-            )));
-        }
-        let mut c = self.clone_fields();
-        c.track_tweak = Some(radians);
-        Ok(c)
     }
 
     /// Run the lattice growth. One engine, one run.
@@ -639,9 +620,6 @@ impl PyLatticeGrow {
         if let Some(on) = self.occupancy_guard {
             engine = engine.with_occupancy_guard(on);
         }
-        if let Some(radians) = self.track_tweak {
-            engine = engine.with_track_tweak(radians);
-        }
         Ok(engine)
     }
 
@@ -650,7 +628,6 @@ impl PyLatticeGrow {
             shared: self.shared.clone_ref(py),
             prior: self.prior.clone(),
             occupancy_guard: self.occupancy_guard,
-            track_tweak: self.track_tweak,
         })
     }
 }

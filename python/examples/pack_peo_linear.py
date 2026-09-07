@@ -3,7 +3,9 @@
 Chemistry is molrs (SMILES + conformer). Architecture is molpy
 ``PolymerBuilder.build_linear``. Packing is molpack: ``LatticeGrow`` at
 2.0 Å then ``GenCanPack.with_restart`` at 2.0 Å. Hydrogen packing radius
-defaults to 0.85 Å (``PEO_H_RADIUS=off`` restores ``tolerance/2``).
+defaults to 0.2 Å (``PEO_H_RADIUS=off`` restores ``tolerance/2``):
+hydrogens relax away in the first picoseconds of MD, so making them
+fight for space here only costs the heavy-atom packing.
 
 ::
 
@@ -54,7 +56,7 @@ def make_linear(n: int, *, seed: int = 42) -> Atomistic:
 def _target(polymer: Atomistic, n_mol: int, name: str) -> molpack.Target:
     frame = polymer.to_frame()
     target = molpack.Target(frame, n_mol).with_name(name)
-    raw = os.environ.get("PEO_H_RADIUS", "0.85")
+    raw = os.environ.get("PEO_H_RADIUS", "0.2")
     if raw not in ("", "off", "none"):
         elems = list(frame["atoms"].view("element"))
         h_idx = [i for i, e in enumerate(elems) if str(e).strip() == "H"]
@@ -90,7 +92,7 @@ def pack_linear(n: int, n_mol: int, density: float, seed: int):
     )
     print(
         f"  grow         : converged={grown.converged}  "
-        f"fdist={grown.fdist:.4e}  softened={grown.softened}  "
+        f"fdist={grown.fdist:.4e}  degraded={grown.degraded}  "
         f"intra scored {grown.intra.scored:.3f} Å"
     )
     pushed = (

@@ -1,10 +1,32 @@
 //! Decoration: an on-lattice walk becomes a continuous all-atom chain.
 //!
-//! The lattice decides only the TORSION SEQUENCE; every bond length, bond
-//! angle and rigid torsion is rebuilt verbatim from the template through the
-//! existing [`InternalTree`] recipes. The heavy-atom tree is the InternalTree
-//! BFS projected onto not-H atoms (linear is the `d = 2` degeneracy).
-//! Hydrogens stay off-lattice.
+//! What a template owes this stage is its TOPOLOGY — which atoms are bonded to
+//! which. Its bond lengths, angles and torsions are one conformer of that
+//! topology, not a constraint: the force field downstream sets them, and it
+//! sets them in its first steps. So the backbone is not rebuilt from them at
+//! all. Each backbone atom **is** its lattice site.
+//!
+//! Everything the walk paid for then survives intact, because nothing moves
+//! after it:
+//!
+//! - self-avoidance and the occupancy guard — the sites' own property;
+//! - confinement — the mask blocked every site outside the region;
+//! - the torsion sequence — exactly the trans/gauche± the RIS weights drew;
+//! - bond angles — exactly the lattice's 109.471°, tetrahedral by construction;
+//! - bond lengths — the lattice step, which [`DiamondLattice::fit`] sizes from
+//!   the template's own mean backbone bond (within a percent when the box
+//!   divides kindly, a few percent when it does not).
+//!
+//! The alternative — rebuild from the template's internal coordinates and
+//! steer the result toward the sites — drifts, because the template's angles
+//! are not the lattice's and the error compounds down the backbone. It spends
+//! tens of degrees of torsion to chase a couple of degrees of angle, and still
+//! loses the confinement and the self-avoidance that were already paid for.
+//!
+//! Hydrogens and side atoms keep the template's local geometry off their
+//! backbone references and stay off-lattice. The heavy-atom tree is the
+//! InternalTree BFS projected onto not-H atoms (linear is the `d = 2`
+//! degeneracy).
 
 use molrs::store::frame::Frame;
 use molrs::types::F;
@@ -36,8 +58,6 @@ pub(crate) struct Backbone {
     pub(crate) parent: Vec<Option<usize>>,
     /// Children in `atoms` indices, increasing.
     pub(crate) children: Vec<Vec<usize>>,
-    /// `|xyz[atoms[j]] − xyz[atoms[parent[j]]]|` (Å); root slot unused.
-    pub(crate) parent_bond: Vec<F>,
     /// Mean of the parent edges (Å) — sets the lattice constant.
     pub(crate) mean_bond: F,
     /// Rigid alignment triple; these atoms have no hooks. Leaf-root BFS
@@ -283,14 +303,13 @@ pub(crate) fn analyze_backbone(frame: &Frame, tree: &InternalTree) -> Result<Bac
         }
     }
 
-    let mut parent_bond = vec![0.0 as F; n_bb];
+    // Only the mean survives: it sizes the lattice, and the lattice is what
+    // the backbone bond length becomes.
     let mut bond_sum = 0.0 as F;
     let mut bond_n = 0usize;
     for j in 1..n_bb {
         let p = parent[j].expect("non-root");
-        let b = dist(xyz[atoms[j]], xyz[atoms[p]]);
-        parent_bond[j] = b;
-        bond_sum += b;
+        bond_sum += dist(xyz[atoms[j]], xyz[atoms[p]]);
         bond_n += 1;
     }
     let mean_bond = if bond_n > 0 {
@@ -303,7 +322,6 @@ pub(crate) fn analyze_backbone(frame: &Frame, tree: &InternalTree) -> Result<Bac
         atoms,
         parent,
         children,
-        parent_bond,
         mean_bond,
         align,
         follows,
@@ -320,7 +338,6 @@ pub(crate) fn decorate_chain(
     bb: &Backbone,
     lat: &DiamondLattice,
     walk: &[[i64; 3]],
-    track_tweak: F,
     coords: &mut [[F; 3]],
 ) {
     debug_assert_eq!(walk.len(), bb.atoms.len());
@@ -329,18 +346,9 @@ pub(crate) fn decorate_chain(
     let dot = |a: [F; 3], b: [F; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     let norm = |v: [F; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
 
-    let mut w = vec![[0.0 as F; 3]; n_bb];
-    w[0] = lat.to_continuum(walk[0]);
-    for j in 1..n_bb {
-        let p = bb.parent[j].expect("non-root");
-        let raw_j = lat.to_continuum(walk[j]);
-        let raw_p = lat.to_continuum(walk[p]);
-        let d = sub(raw_j, raw_p);
-        let len = norm(d);
-        let b = bb.parent_bond[j] / len;
-        let prev = w[p];
-        w[j] = [prev[0] + b * d[0], prev[1] + b * d[1], prev[2] + b * d[2]];
-    }
+    // The backbone is the route. No reconstruction, so no drift, and the
+    // walk's guarantees carry through untouched.
+    let w: Vec<[F; 3]> = (0..n_bb).map(|j| lat.to_continuum(walk[j])).collect();
 
     let mut bb_of_step: Vec<Option<usize>> = vec![None; tree.n_steps()];
     for (j, hook) in bb.hooks.iter().enumerate() {
@@ -382,13 +390,6 @@ pub(crate) fn decorate_chain(
 
     let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     tree.place_seed([0.0; 3], &identity, coords);
-    let k0 = bb_of_step
-        .iter()
-        .position(|h| h.is_some())
-        .unwrap_or(tree.n_steps());
-    for k in 0..k0 {
-        tree.place_step(k, &vars, coords);
-    }
 
     let (a0, a1, a2) = (bb.align[0], bb.align[1], bb.align[2]);
     let (b0, b1, b2) = (bb.atoms[a0], bb.atoms[a1], bb.atoms[a2]);
@@ -414,6 +415,21 @@ pub(crate) fn decorate_chain(
             [c0[0] + rd[0], c0[1] + rd[1], c0[2] + rd[2]]
         })
         .collect();
+
+    // The seed triple is backbone too, so it is its sites like every other
+    // backbone atom. Putting it there *before* the rigid steps run means the
+    // atoms those steps hang off it — the seed's own hydrogens — are built
+    // against the lattice geometry and not against the template's.
+    for j in [a0, a1, a2] {
+        coords[bb.atoms[j]] = wb[j];
+    }
+    let k0 = bb_of_step
+        .iter()
+        .position(|h| h.is_some())
+        .unwrap_or(tree.n_steps());
+    for k in 0..k0 {
+        tree.place_step(k, &vars, coords);
+    }
 
     for (k, hooked) in bb_of_step.iter().enumerate().skip(k0) {
         if let Some(j) = *hooked {
@@ -456,39 +472,17 @@ pub(crate) fn decorate_chain(
                     (beta, want)
                 }
             };
-            let phi_lat = want - beta;
-            let mut phi = phi_lat;
-            if track_tweak > 0.0 {
-                let p = coords[site.refs[0]];
-                let g = coords[site.refs[1]];
-                let q1 = nerf(
-                    coords[site.refs[2]],
-                    g,
-                    p,
-                    site.bond,
-                    site.angle,
-                    std::f64::consts::FRAC_PI_2 as F,
-                );
-                let axis = sub(p, g);
-                let alen = dot(axis, axis).sqrt();
-                let u = [axis[0] / alen, axis[1] / alen, axis[2] / alen];
-                let d0 = sub(pos0, p);
-                let along = dot(d0, u);
-                let o = [
-                    p[0] + along * u[0],
-                    p[1] + along * u[1],
-                    p[2] + along * u[2],
-                ];
-                let a_vec = sub(pos0, o);
-                let b_vec = sub(q1, o);
-                let tgt = sub(wb[j], o);
-                let phi_best = (dot(tgt, b_vec)).atan2(dot(tgt, a_vec));
-                let delta = wrap_pi(phi_best - phi_lat).clamp(-track_tweak, track_tweak);
-                phi = phi_lat + delta;
-            }
+            let phi = want - beta;
             vars[var] = wrap_pi(phi - offset);
         }
         tree.place_step(k, &vars, coords);
+        // Pendant atoms of this step keep the template's local geometry off
+        // their references; the backbone atom itself is the route point. The
+        // torsion above still decides where the pendants sit, so it is chosen
+        // the same way — it just no longer has to carry the backbone.
+        if let Some(j) = *hooked {
+            coords[bb.atoms[j]] = wb[j];
+        }
     }
 
     for p in coords.iter_mut() {

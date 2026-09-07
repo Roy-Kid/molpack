@@ -80,7 +80,7 @@ class TestCbmcGrowEntry:
         )
         assert res.natoms == 10
         assert res.converged is True
-        assert res.softened == 0
+        assert res.degraded == 0
 
     def test_seeded_push_off_chain(self):
         # The explicit push-off chain: grow, then continue the SAME free
@@ -101,7 +101,7 @@ class TestCbmcGrowEntry:
             .run([target()], max_loops=60)
         )
         assert pushed.natoms == grown.natoms
-        assert pushed.softened == 0
+        assert pushed.degraded == 0
         assert pushed.converged is True
 
     def test_seeded_shape_mismatch_is_named(self):

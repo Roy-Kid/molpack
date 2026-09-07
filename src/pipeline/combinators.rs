@@ -15,7 +15,7 @@
 //! up: the re-entrancy contract on [`Stage::run`], and `Placed::All`
 //! continuation. `requires()` is the body's first stage's, `Repeat`'s
 //! `guarantees()` the union of the body's, `Guarded`'s the last stage's;
-//! `softened` sums over every pass and every attempt. Why the crate pays
+//! `degraded` sums over every pass and every attempt. Why the crate pays
 //! for any of it, and how to roll it back: the ledger in [`mod`](super)'s
 //! docs. What a guard may never do: [`OnViolation`].
 
@@ -94,18 +94,18 @@ fn run_body(
     budget: &Budget,
     handlers: &mut [Box<dyn Handler>],
 ) -> Result<(StageOutcome, bool), PackError> {
-    let (mut converged, mut softened) = (false, 0usize);
+    let (mut converged, mut degraded) = (false, 0usize);
     for stage in stages.iter_mut() {
         state.invalidate_geometry_cache();
         let outcome = stage.run(state, targets, budget, handlers)?;
         state.set_placed(stage.guarantees().placed);
-        softened += outcome.softened;
+        degraded += outcome.degraded;
         converged = outcome.converged;
         if handlers.iter().any(|h| h.should_stop()) {
-            return Ok((StageOutcome::new(false, softened), true));
+            return Ok((StageOutcome::new(false, degraded), true));
         }
     }
-    Ok((StageOutcome::new(converged, softened), false))
+    Ok((StageOutcome::new(converged, degraded), false))
 }
 
 const REPEAT: &str = "repeat";
@@ -179,15 +179,15 @@ impl Stage for Repeat {
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
     ) -> Result<StageOutcome, PackError> {
-        let (mut softened, mut passes) = (0usize, 0usize);
+        let (mut degraded, mut passes) = (0usize, 0usize);
         let mut converged;
         loop {
             let (outcome, stopped) = run_body(&mut self.stages, state, targets, budget, handlers)?;
-            softened += outcome.softened;
+            degraded += outcome.degraded;
             converged = outcome.converged;
             passes += 1;
             if stopped {
-                return Ok(StageOutcome::new(false, softened));
+                return Ok(StageOutcome::new(false, degraded));
             }
             match self.until {
                 Until::Converged if converged => break,
@@ -195,7 +195,7 @@ impl Stage for Repeat {
                 _ => {}
             }
         }
-        Ok(StageOutcome::new(converged, softened))
+        Ok(StageOutcome::new(converged, degraded))
     }
 }
 
@@ -263,20 +263,20 @@ impl Stage for Guarded {
         budget: &Budget,
         handlers: &mut [Box<dyn Handler>],
     ) -> Result<StageOutcome, PackError> {
-        let (mut softened, mut attempt) = (0usize, 0usize);
+        let (mut degraded, mut attempt) = (0usize, 0usize);
         let stage = self.stages[0].name();
         loop {
             let (outcome, stopped) = run_body(&mut self.stages, state, targets, budget, handlers)?;
-            softened += outcome.softened;
+            degraded += outcome.degraded;
             if stopped {
-                return Ok(StageOutcome::new(false, softened));
+                return Ok(StageOutcome::new(false, degraded));
             }
             let broken = self.invariants.iter().find_map(|inv| {
                 let violation = inv.check(state).into_iter().next()?;
                 Some((inv.name(), inv.layer().name(), violation.atoms))
             });
             let Some((invariant, layer, atoms)) = broken else {
-                return Ok(StageOutcome::new(outcome.converged, softened));
+                return Ok(StageOutcome::new(outcome.converged, degraded));
             };
             match self.on_violation {
                 OnViolation::Rerun { max } if attempt < max => {
@@ -296,7 +296,7 @@ impl Stage for Guarded {
                         "  `{stage}` still breaks `{invariant}` ({layer}) after {max} rerun(s) \
                          — reporting converged = false; molpack does not switch algorithm"
                     );
-                    return Ok(StageOutcome::new(false, softened));
+                    return Ok(StageOutcome::new(false, degraded));
                 }
             }
         }

@@ -29,7 +29,7 @@
 //! dimensionless hard-core scale by 0.97). The driver takes at most one
 //! rung per round even when two chains earn one in the same round, because
 //! the rung is the driver's global step, not a per-chain one.
-//! [`StageOutcome::softened`](crate::StageOutcome::softened) counts
+//! [`StageOutcome::degraded`](crate::StageOutcome::degraded) counts
 //! each such shrink *and* each forced
 //! placement, and a structure is only `converged` when that counter is zero, so
 //! the constructive no-overlap guarantee is asserted, never hoped for.
@@ -40,7 +40,7 @@
 //! `max(max_loops, 1) × (max n_steps + 1)` rounds — a zero budget still buys
 //! one pass. Reaching it is a surrender, not a result: the pending chains are
 //! force-completed exactly as on a handler abort, each forced placement counted
-//! in `softened`, and the outcome is `converged == false`.
+//! in `degraded`, and the outcome is `converged == false`.
 
 use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
@@ -216,7 +216,7 @@ impl Stage for GrowStage {
 
         // ── Round loop ─────────────────────────────────────────────────────
         let mut hard_scale: F = 1.0;
-        let mut softened = 0usize;
+        let mut degraded = 0usize;
         // Upper bound on the round loop: `max_loops` passes over the longest
         // chain, one round per stage (module docs). Without it a density the
         // hard core cannot satisfy spins forever instead of returning an
@@ -378,7 +378,7 @@ impl Stage for GrowStage {
                         lengths,
                         self.seed,
                     );
-                    softened += 1;
+                    degraded += 1;
                     continue;
                 }
                 chains[c].record_dead_end();
@@ -397,7 +397,7 @@ impl Stage for GrowStage {
                     hard_scale = (hard_scale * 0.97).max(min_hard_scale);
                     rung_this_round = true;
                     chains[c].rungs_earned += 1;
-                    softened += 1;
+                    degraded += 1;
                 }
                 let depth = retract_depth(cfg.retract, chains[c].deadend_streak);
                 retract(&mut chains[c], &self.species[sp_idx], &mut field, depth);
@@ -487,7 +487,7 @@ impl Stage for GrowStage {
                 let sp = &self.species[chain.itype];
                 while chain.stage <= sp.tree.n_steps() {
                     force_place(chain, sp, &mut field, origin, lengths, self.seed);
-                    softened += 1;
+                    degraded += 1;
                 }
                 // `sys.xcart` is the single lab-frame home of the placed
                 // atoms; the round loop syncs it at every round end, so the
@@ -512,8 +512,8 @@ impl Stage for GrowStage {
         // sets the unscaled `scale` / `scale2` pair this site used to write
         // inline and gives the caller's values back afterwards.
         let (_, fdist, frest) = evaluate_unscaled(sys, x.as_slice());
-        let converged = !aborted && softened == 0 && fdist == 0.0 && frest < budget.precision;
-        Ok(StageOutcome::new(converged, softened))
+        let converged = !aborted && degraded == 0 && fdist == 0.0 && frest < budget.precision;
+        Ok(StageOutcome::new(converged, degraded))
     }
 }
 

@@ -81,7 +81,7 @@ let target = Target::from_coords(&positions, &radii, 100)
 // budget.
 //
 // `run` returns a `State`: the packed, topology-complete `molrs::Frame`
-// in `.frame`, plus `fdist`, `frest`, `converged`, `softened`.
+// in `.frame`, plus `fdist`, `frest`, `converged`, `degraded`.
 let result = GenCanPack::new().run(&[target], 200)?;
 let frame = result.frame;
 ```

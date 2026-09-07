@@ -218,8 +218,8 @@ fn the_three_constructors_fill_the_non_exhaustive_structs() {
     let outcome = StageOutcome::new(true, 7);
     assert!(outcome.converged, "StageOutcome::new takes converged first");
     assert_eq!(
-        outcome.softened, 7,
-        "StageOutcome::new takes softened second"
+        outcome.degraded, 7,
+        "StageOutcome::new takes degraded second"
     );
 }
 
@@ -359,7 +359,7 @@ fn stage_regression_fake_chain_outcome_golden() {
         let outcome = stage
             .run(&mut state, &targets, &budget, &mut handlers)
             .expect("the fake stage runs");
-        softened_total += outcome.softened;
+        softened_total += outcome.degraded;
         observed_converged.push(outcome.converged);
         observed_placed.push(state.placed());
     }
