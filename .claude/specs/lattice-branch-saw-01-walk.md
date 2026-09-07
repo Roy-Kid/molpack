@@ -189,3 +189,20 @@ not-H 掩码 **只**在本函数：`element.eq_ignore_ascii_case("h")` 是全原
 - `WalkTree`、Target 氢 API、新 `GrowError` 变体
 - 熔体 \(C_n\) / \(P_2\) / Auhl \(n>100\) 统计
 - 按物种拟合格常数
+
+---
+
+## 已被取代（2026-09-07，`dad53fe` / `7d69e8a`）
+
+本 spec 写就时，装饰按模板内坐标重建骨架，`track_tweak` 是把重建结果拉回格点的旋钮。之后确立的原则是 **模板只提供拓扑，不提供几何**：骨架重原子直接就是走法选中的格点，不再重建。
+
+因此本文以下条目已不再描述代码：
+
+- §单位 的 `track_tweak` rad，与 §`decorate_chain` 的「`track_tweak` 仍只作用在挂钩代表子上」——
+  `LatticeConfig::track_tweak` / `LatticeGrow::with_track_tweak` 已删除（重建不存在了，旋钮没有指涉对象）。
+- §公开文档 的「`LatticeConfig::with_track_tweak` 改为 parent-chain tracking（rad）」——同上。
+- 骨架键长/键角不再是模板的：键长是格点步长（`DiamondLattice::fit` 按模板平均骨架键长定，
+  再被盒子的整除条件推开百分之几），键角是格点的四面体角（仅当三轴取整方式相同时精确）。
+
+仍然成立：分叉 SAW 的走法、`Backbone` 的 InternalTree 投影、按变量挂钩、对齐三点不挂钩、
+一盒一格、`GrowError::NonTetrahedralTemplate` 的公开合同。

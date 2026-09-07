@@ -23,3 +23,11 @@ Owning tests in `tests/grow.rs`:
 - `lattice_grow_tetrahedral_comb_completes` — `Ok`, `natoms == 24`
 - `lattice_grow_rejects_degree_gt_4` — `NonTetrahedralTemplate`, no “branched staged”
 - `lattice_grow_bead_chain_constructive` — linear `k = 1`: `fdist` bitwise 0, `degraded == 0`, one lattice bond length throughout and tetrahedral angles (the template supplies topology, not geometry), same-seed bitwise
+
+## 已被取代（2026-09-07，`dad53fe`）
+
+「centre–leaf bonds 1.53 ± 1e-6 (template InternalTree geometry)」这一条不再成立：
+模板只提供拓扑，骨架重原子（含叶）落在格点上，中心–叶键长是格点步长而非模板的 1.53 Å。
+当前的构造性断言见 `tests/grow.rs::lattice_grow_bead_chain_constructive`：
+全部骨架键长彼此相等（1e-9）、该步长在模板平均键长的 10% 以内、全部骨架键角为
+arccos(−1/3)（1e-9）。其余条目（`Ok`、`natoms == 10`、seed 7 可复现）不受影响。
