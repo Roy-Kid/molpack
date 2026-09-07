@@ -6,10 +6,16 @@ forking three times into 29 branches, 8732 triangles, authored for a
 at ≈1.03 g/cm³, PEO melt density.
 ``StlRegion.from_file`` loads it (``scale`` maps the file to whatever
 ``edge`` you ask for), ``Target.with_restraint`` confines the chains to
-it, and ``LatticeGrow`` at 2.0 Å walks Region ∩ lattice (diamond sites
-outside the mesh are blocked) before ``GenCanPack.with_restart`` pushes
-the contacts open at ``precision=1e-4`` — the default 1e-2 lets an atom
-sit ~1 Å outside and still call the run converged.
+it, and ``LatticeGrow`` at 2.0 Å walks Region ∩ lattice — diamond sites
+outside the mesh are blocked.
+
+Growth is the whole pipeline here. A seeded push-off
+(``GenCanPack().with_restart(grown)``) is the right follow-up for a dilute
+box, but at melt density in a cavity it has nowhere to put the overlap it
+resolves except through the wall: on this scene it spent 1 h 45 min to
+move ``fdist`` 3.99 → 3.28 while ``frest`` went 0.42 → 6.43, i.e. the
+worst excursion grew from 6.5 Å to 25 Å. Residual contacts at melt
+density are honest, and the force field downstream is what removes them.
 
 The mask confines the *walk*, not the decorated atoms: decoration
 rebuilds the molecule from its own bonds and angles along that track and
@@ -112,19 +118,7 @@ def pack_stl(
         f"fdist={grown.fdist:.4e}  frest={grown.frest:.4e}  "
         f"softened={grown.softened}"
     )
-    pushed = (
-        molpack.GenCanPack()
-        .with_restart(grown)
-        .with_seed(seed)
-        .with_tolerance(2.0)
-        .with_precision(1e-4)
-        .run([target], max_loops=80)
-    )
-    print(
-        f"  push-off     : converged={pushed.converged}  "
-        f"fdist={pushed.fdist:.4e}  frest={pushed.frest:.4e}"
-    )
-    return pushed
+    return grown
 
 
 def main(argv: list[str] | None = None) -> None:

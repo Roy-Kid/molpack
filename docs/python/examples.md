@@ -46,21 +46,30 @@ python examples/pack_peo_stl.py 25 200 130 42
 ```
 
 Set `MOLPACK_EXAMPLE_PROGRESS=0` to suppress the per-iteration progress log.
-Open-space PEO defaults `LatticeGrow` then `GenCanPack.with_restart` at
-2.0 Å; `pack_peo_stl.py` uses the same pipeline with `StlRegion` masking
-diamond sites outside the mesh. Its cavity is the shipped
-`examples/pack_peo/dendrite.stl` — a watertight dendrite, a trunk that
-forks three times into 29 branches, 8 732 triangles, authored for a 130 Å
-cell with a ≈362 000 Å³ cavity — loaded with `scale` so one mesh serves
-any cell size. The default 200 × EO25 fills it at ≈1.03 g/cm³, PEO melt
-density. It pushes off at `precision=1e-4`: the default
-1e-2 leaves an atom ~1 Å outside a region and still reports `converged`,
-because `frest` is the largest per-atom `0.01 · d²`. The lattice mask
-confines the *walk*, not the decorated atoms — a mesh that has to hold a
-wall should be authored with the clearance already in it. The drift grows
-with the backbone, and `with_track_tweak` is the lever on it: at EO25 the
-worst excursion after the walk is ≈36 Å at `0.0`, ≈16 Å at the `0.35`
-default and ≈3 Å at `1.5`, which is what the example asks for.
+Open-space PEO defaults `LatticeGrow` then `GenCanPack.with_restart` at 2.0 Å.
+
+`pack_peo_stl.py` runs `LatticeGrow` alone. Its cavity is the shipped
+`examples/pack_peo/dendrite.stl` — a watertight dendrite, a trunk that forks
+three times into 29 branches, 8 732 triangles, authored for a 130 Å cell with a
+≈362 000 Å³ cavity — loaded with `scale` so one mesh serves any cell size. The
+default 200 × EO25 (35 600 atoms) fills it at 1.026 g/cm³ in 2.2 s.
+
+Three things that scene makes concrete:
+
+- **The push-off is the wrong follow-up at melt density in a cavity.** It has
+  nowhere to put the overlap it resolves except through the wall: on this scene
+  `GenCanPack.with_restart` spent 1 h 45 min moving `fdist` 3.99 → 3.28 while
+  `frest` went 0.42 → 6.43 — worst excursion 6.5 Å → 25 Å. Residual contacts at
+  melt density are honest, and the force field downstream removes them.
+- **The mask confines the walk, not the decorated atoms.** Decoration rebuilds
+  the molecule from its own bonds and angles along the track and drifts off it;
+  `with_track_tweak` is the lever. At EO25 the worst excursion after the walk is
+  ≈36 Å at `0.0`, ≈16 Å at the `0.35` default and ≈3 Å at `1.5`, which is what
+  the example asks for. 10% of atoms still end up to 6.5 Å outside, so a mesh
+  that has to hold a wall is authored with the clearance already in it.
+- **`precision` is a distance in disguise.** `frest` is the largest per-atom
+  `0.01 · d²`, so `frest < precision` means `d < 10·√precision`: the default
+  `1e-2` calls a run converged with an atom 1 Å outside a region.
 
 Each example writes its outputs to `python/examples/out/` (created on
 demand, git-ignored) — the path is script-relative, so the working
