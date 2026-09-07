@@ -42,7 +42,7 @@ python examples/pack_mixture.py          # requires molrs
 python examples/pack_peo_linear.py 8 8 0.5 42
 python examples/pack_peo_mix.py 4 2 4 4 0.5 42
 python examples/pack_peo_topo.py star 4 8 0.5 42
-python examples/pack_peo_stl.py 4 4 48 42
+python examples/pack_peo_stl.py 25 200 130 42
 ```
 
 Set `MOLPACK_EXAMPLE_PROGRESS=0` to suppress the per-iteration progress log.
@@ -50,14 +50,17 @@ Open-space PEO defaults `LatticeGrow` then `GenCanPack.with_restart` at
 2.0 Å; `pack_peo_stl.py` uses the same pipeline with `StlRegion` masking
 diamond sites outside the mesh. Its cavity is the shipped
 `examples/pack_peo/dendrite.stl` — a watertight dendrite, a trunk that
-forks three times into 29 branches — loaded with `scale` so one mesh
-serves any cell size. It pushes off at `precision=1e-4`: the default
+forks three times into 29 branches, 8 732 triangles, authored for a 130 Å
+cell with a ≈362 000 Å³ cavity — loaded with `scale` so one mesh serves
+any cell size. The default 200 × EO25 fills it at ≈1.03 g/cm³, PEO melt
+density. It pushes off at `precision=1e-4`: the default
 1e-2 leaves an atom ~1 Å outside a region and still reports `converged`,
 because `frest` is the largest per-atom `0.01 · d²`. The lattice mask
 confines the *walk*, not the decorated atoms — a mesh that has to hold a
 wall should be authored with the clearance already in it. The drift grows
-with the backbone (≈1 Å at EO3, ≈4 Å at EO4, ≈8 Å at EO5); the push-off
-still recovers EO4, and from EO5 up it reports `converged=False`.
+with the backbone, and `with_track_tweak` is the lever on it: at EO25 the
+worst excursion after the walk is ≈36 Å at `0.0`, ≈16 Å at the `0.35`
+default and ≈3 Å at `1.5`, which is what the example asks for.
 
 Each example writes its outputs to `python/examples/out/` (created on
 demand, git-ignored) — the path is script-relative, so the working

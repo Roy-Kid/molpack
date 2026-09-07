@@ -9,6 +9,10 @@
 //! ([`molrs::io::mesh::parse_stl`] into a [`TriMesh`], which also answers the
 //! two questions this region gates on). What is left here is the part that is
 //! actually molpack's: turning a closed surface into a signed distance.
+//!
+//! Both queries go through a [`Bvh`](super::bvh::Bvh) built once at
+//! construction. It changes only which triangles are visited, so the answers
+//! — and the goldens below — are the same ones the linear scan gave.
 
 use std::path::Path;
 
@@ -16,6 +20,7 @@ use molrs::io::mesh::{parse_stl, read_stl};
 use molrs::spatial::{TriMesh, mesh::DEGENERATE_AREA2};
 use molrs::types::F;
 
+use super::bvh::Bvh;
 use super::{Aabb, CellDeclaration, Region};
 
 const EPS: F = 1e-9;
@@ -69,6 +74,8 @@ impl std::error::Error for StlError {}
 #[derive(Debug, Clone)]
 pub struct StlRegion {
     triangles: Vec<[[F; 3]; 3]>,
+    /// Spatial index over `triangles`, in the same indexing.
+    bvh: Bvh,
     aabb: Aabb,
 }
 
@@ -94,8 +101,11 @@ impl StlRegion {
             return Err(StlError::NotWatertight { unpaired });
         }
         let (min, max) = mesh.aabb().ok_or(StlError::Empty)?;
+        let triangles = mesh.to_triangles();
+        let bvh = Bvh::build(&triangles);
         Ok(Self {
-            triangles: mesh.to_triangles(),
+            triangles,
+            bvh,
             aabb: Aabb { min, max },
         })
     }
@@ -133,28 +143,23 @@ impl StlRegion {
     }
 
     fn unsigned_and_closest(&self, x: &[F; 3]) -> (F, [F; 3]) {
-        let mut best_d2 = F::INFINITY;
-        let mut best = *x;
-        for t in &self.triangles {
-            let c = closest_point_triangle(*x, t[0], t[1], t[2]);
-            let d2 = dist2(*x, c);
-            if d2 < best_d2 {
-                best_d2 = d2;
-                best = c;
-            }
-        }
-        (best_d2.sqrt(), best)
+        let (d2, c) = self.bvh.nearest(x, |i| {
+            let t = &self.triangles[i as usize];
+            closest_point_triangle(*x, t[0], t[1], t[2])
+        });
+        (d2.sqrt(), c)
     }
 
     fn even_odd_inside(&self, x: &[F; 3]) -> bool {
+        // `RAY` has no zero component by construction, so the slab test's
+        // reciprocal is finite and the tree never has to special-case an axis.
         let rn = (RAY[0] * RAY[0] + RAY[1] * RAY[1] + RAY[2] * RAY[2]).sqrt();
         let dir = [RAY[0] / rn, RAY[1] / rn, RAY[2] / rn];
-        let mut hits = 0u32;
-        for t in &self.triangles {
-            if ray_hits_triangle(*x, dir, t[0], t[1], t[2]) {
-                hits += 1;
-            }
-        }
+        let inv = [1.0 / dir[0], 1.0 / dir[1], 1.0 / dir[2]];
+        let hits = self.bvh.count_hits(x, &inv, |i| {
+            let t = &self.triangles[i as usize];
+            ray_hits_triangle(*x, dir, t[0], t[1], t[2])
+        });
         hits % 2 == 1
     }
 }
@@ -227,10 +232,6 @@ fn cross(a: [F; 3], b: [F; 3]) -> [F; 3] {
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     ]
-}
-fn dist2(a: [F; 3], b: [F; 3]) -> F {
-    let d = sub(a, b);
-    dot(d, d)
 }
 
 /// Ericson, Real-Time Collision Detection, §5.1.5.

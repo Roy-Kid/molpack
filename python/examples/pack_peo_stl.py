@@ -1,7 +1,9 @@
 """Linear PEO grown inside a branched STL cavity.
 
 ``examples/pack_peo/dendrite.stl`` is a watertight dendrite — a trunk
-forking three times into 29 branches, authored for a 48 Å cell.
+forking three times into 29 branches, 8732 triangles, authored for a
+130 Å cell whose cavity is ≈362 000 Å³. The default 200 × EO25 fills that
+at ≈1.03 g/cm³, PEO melt density.
 ``StlRegion.from_file`` loads it (``scale`` maps the file to whatever
 ``edge`` you ask for), ``Target.with_restraint`` confines the chains to
 it, and ``LatticeGrow`` at 2.0 Å walks Region ∩ lattice (diamond sites
@@ -9,21 +11,21 @@ outside the mesh are blocked) before ``GenCanPack.with_restart`` pushes
 the contacts open at ``precision=1e-4`` — the default 1e-2 lets an atom
 sit ~1 Å outside and still call the run converged.
 
-The mask confines the *walk*. Decoration rebuilds the molecule from its
-own bond lengths and angles along that track, so hydrogens and side atoms
-can end up outside the surface, and the drift grows with the backbone:
-worst excursion after the walk is ≈1 Å at EO3, ≈4 Å at EO4, ≈8 Å at EO5.
-The push-off still pulls EO4 back to the wall; from EO5 up it cannot, and
-says so with ``converged=False``. A mesh that has to hold a wall is
-authored with the clearance already in it.
+The mask confines the *walk*, not the decorated atoms: decoration
+rebuilds the molecule from its own bonds and angles along that track and
+drifts off it, by more the longer the backbone. ``with_track_tweak``
+bounds how far a torsion may bend to follow the track and is the lever on
+that drift — at EO25 the worst excursion after the walk is ≈36 Å at 0.0,
+≈16 Å at the 0.35 default, ≈3 Å at 1.5, and flat beyond. A mesh that has
+to hold a wall is still authored with the clearance already in it.
 
 Drop the mesh into a viewer next to the packed frame to see the cavity:
 both paths are printed at the end.
 
 ::
 
-    python python/examples/pack_peo_stl.py 4 4 48 42
-    python python/examples/pack_peo_stl.py 4 4 48 42 cavity.stl
+    python python/examples/pack_peo_stl.py 25 200 130 42
+    python python/examples/pack_peo_stl.py 25 200 130 42 cavity.stl
 """
 
 from __future__ import annotations
@@ -50,7 +52,7 @@ HERE = Path(__file__).resolve().parent
 OUT = HERE / "out"
 MESH = HERE.parent.parent / "examples" / "pack_peo" / "dendrite.stl"
 #: Cell the shipped mesh is authored for, in Å.
-MESH_EDGE = 48.0
+MESH_EDGE = 130.0
 ETHER = "[O;%a:1][H].[C:2][O;%b][H]>>[O:1][C:2]"
 PEO_C_INF = 5.5
 TET = 1.9106332
@@ -92,6 +94,14 @@ def pack_stl(
     prior = molpack.TorsionPrior.three_state_from_c_inf(PEO_C_INF, TET)
     grown = (
         molpack.LatticeGrow(prior)
+        # A 25-mer backbone is 75 atoms long, and decoration rebuilds it from
+        # the template's own bonds and angles along the walk: at the 0.35 rad
+        # default the error compounds to ~16 Å by the last residue. 1.5 rad
+        # keeps it near 3 Å. The price is that a hooked torsion can then leave
+        # its RIS state entirely, so the realized statistics are the lattice's
+        # rather than the prior's — drop back to the default when the
+        # conformer matters more than the wall.
+        .with_track_tweak(1.5)
         .with_seed(seed)
         .with_tolerance(2.0)
         .with_periodic_box([0.0, 0.0, 0.0], [edge, edge, edge])
@@ -119,8 +129,8 @@ def pack_stl(
 
 def main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
-    n = int(args[0]) if args else 4
-    n_mol = int(args[1]) if len(args) > 1 else 4
+    n = int(args[0]) if args else 25
+    n_mol = int(args[1]) if len(args) > 1 else 200
     edge = float(args[2]) if len(args) > 2 else MESH_EDGE
     seed = int(args[3]) if len(args) > 3 else 42
     mesh = Path(args[4]) if len(args) > 4 else MESH

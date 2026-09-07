@@ -38,6 +38,7 @@ use ndarray::array;
 
 use crate::restraint::AtomRestraint;
 
+mod bvh;
 mod stl;
 pub use stl::{StlError, StlRegion};
 

@@ -458,7 +458,13 @@ restraint, not STL-specific):
   guarantee is about the **walk**: decoration rebuilds the molecule from its
   own bond lengths and angles along that track and drifts off it, so pendant
   and side atoms can sit outside the mesh — by more the longer the backbone.
-  Author the mesh with the clearance already in it if the wall has to hold.
+  `with_track_tweak` bounds that drift (see below). Author the mesh with the
+  clearance already in it if the wall has to hold.
+
+Queries are served by a BVH built once when the region is constructed, so cost
+grows with the log of the triangle count, not the count. On an 8 700-triangle
+mesh a `signed_distance` call is 2.8 µs against 90 µs for the linear scan it
+replaced — the same answers, 32× less time.
 
 ### `StlRegion.contains(points)` / `StlRegion.signed_distance(points)`
 
@@ -477,6 +483,24 @@ largest per-atom penalty `0.01 · d²`, so `frest < precision` means
 `d < 10·√precision`: the default `precision=1e-2` calls a run converged with an
 atom 1 Å outside, `1e-4` with 0.1 Å. Tighten `with_precision` when the wall is
 the point — and remember the mesh, not the solver, is where clearance belongs.
+
+### `LatticeGrow.with_track_tweak(radians)`
+
+How far a hooked backbone torsion may leave its exact lattice RIS state to pull
+the decorated atom back onto its site. Default `0.35` (≈20°); `0.0` is pure
+lattice states.
+
+This is the lever on decoration drift. Measured on a 25-mer PEO in a mesh
+cavity, worst excursion after the walk:
+
+| `track_tweak` | 0.0 | 0.35 | 0.8 | 1.5 | 2.0 |
+|---|---|---|---|---|---|
+| worst excursion | 36 Å | 16 Å | 6.4 Å | 3.4 Å | 2.9 Å |
+
+The curve is flat past ≈1.5. The price is statistical: at a bound that wide a
+torsion can leave its RIS state entirely, so the realized conformer statistics
+are the lattice's rather than the `TorsionPrior`'s. Short chains do not need
+it; a long chain that has to stay inside a region does.
 
 ### Collective (distribution-matching) restraints
 
