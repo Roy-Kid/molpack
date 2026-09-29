@@ -25,6 +25,30 @@ Together these make the polymer community's "prepacking" step a first-class
 constraint inside the packer, and generalise it from *uniform density* to *any
 target profile* plus orientation.
 
+> **Partly unblocked (2026-09-08).** Two prerequisites this spec assumed it would
+> have to build have landed with `SelfSeparation` (see *Relation to
+> `SelfSeparation`* below):
+>
+> - **The collective seam now carries a context.** `Restraint::f`/`fg` take a
+>   `GroupCtx { scale, scale2, natoms_per_copy, mic }` instead of the two bare
+>   scales. Task 2's wavevector enumeration needs the cell and Task 1's
+>   reduction needs the per-copy width; both now arrive at evaluation time
+>   rather than being cached at construction — which matters, because the cell
+>   is resolved *after* the targets are lowered, so a restraint that stored a
+>   box at construction could store the wrong one. The `Mic` on `GroupCtx` is
+>   the pair loop's own; a reciprocal lattice for `StructureFactor` should be
+>   added to `GroupCtx` the same way rather than re-derived.
+> - **The forward/backward COM math exists**, in
+>   `src/restraint/collective/com.rs` (`centroids` / `scatter`, geometric
+>   weights, unit-tested). Task 1's `SiteReduction` should **wrap** it, not
+>   restate it — `ComWeights::Mass` is the part still to build.
+> - **`GroupCtx` carries the cell**, not just the minimum image, precisely so a
+>   group-level term can *partition* space. `SelfSeparation` bins its centres
+>   into a `molrs` `CellGrid` at `d_min` and sweeps the forward stencil, the
+>   same primitive the pair loop uses. `StructureFactor` needs the same box for
+>   its reciprocal lattice and should take it from there rather than adding a
+>   second channel.
+
 ## Domain basis
 
 - In a melt, excluded volume is screened (Flory ideality), so single-chain
@@ -149,7 +173,8 @@ and `AxisGeometry` alongside the existing collective restraints. Script: a
 - `molpack/src/target.rs` — reduction attached to a collective binding
 - `molpack/src/script/…` — `structure_factor` / `orient` keywords
 - `molpack-python` bindings
-- `molpack/tests/collective.rs`, `molpack/tests/gradient.rs` — new cases
+- in-module `#[cfg(test)]` cases in the owning `src/restraint/collective/*.rs` files, plus
+  through-the-objective parity in `src/restraint/geometric/tests/gradient.rs` (the former integration files were deleted 2026-09-20)
 
 ## Tasks
 
@@ -164,7 +189,9 @@ and `AxisGeometry` alongside the existing collective restraints. Script: a
 ## Testing
 
 **Gradients.** Every new term gets a central finite-difference check in
-`tests/gradient.rs` at the existing tolerance, on both an orthorhombic and a
+the owning collective module's tests (pattern: `gaussian.rs::plane_gradient_matches_finite_difference`)
+and through the objective in `src/restraint/geometric/tests/gradient.rs`
+(pattern: `collective_restraint_gradient_matches_finite_difference_through_the_objective`) at the existing tolerance, on both an orthorhombic and a
 triclinic cell (the reciprocal lattice of a tilted cell is the case most likely
 to be wrong).
 
@@ -172,8 +199,8 @@ to be wrong).
 same density and tolerance twice — once with the pairwise objective alone, once
 with `StructureFactor` added — and compare `S(q)` on the lowest shells. The
 collective run must suppress the small-|q| plateau by at least an order of
-magnitude while still satisfying the packing tolerance (validation report clean
-in both runs). *Identical conformer pool in both arms* — the single-variable
+magnitude while still satisfying the packing tolerance (`State::frest == 0` and
+`State::fdist <= precision` in both runs; the validation report no longer exists). *Identical conformer pool in both arms* — the single-variable
 comparison is the whole point, and it is also how the paper figure is built
 against Packmol.
 
@@ -201,6 +228,26 @@ run with no collective restraint is byte-identical to before.
   scope.
 - Force fields. Nothing here requires the `ff` feature.
 - Any performance claim.
+
+## Relation to `SelfSeparation`
+
+`SelfSeparation` (landed 2026-09-08, `src/restraint/collective/separation.rs`)
+is the real-space, pairwise member of the collective family: a lower bound on
+the centre-to-centre distance between two copies of one species. It is **not**
+this spec's `StructureFactor` in another basis, and the two are not parallel
+abstractions for one concept — they measure different quantities and compose:
+
+| | `SelfSeparation` | `StructureFactor` (this spec) |
+|---|---|---|
+| space | real, pairwise | reciprocal, collective |
+| constraint | **local**: no two copies closer than `d_min` | **global**: suppress the small-\|q\| density-fluctuation plateau |
+| satisfied when | a lower bound holds | the empirical `S(q)` approaches `S*(q)` |
+| says nothing about | how copies are distributed above `d_min` | how close any particular pair may come |
+| dependencies | none | `triclinic-cell-downshift` |
+
+A melt run may want both: the separation bound keeps chains off each other
+locally, `S(q)` removes the Rg-scale density correlations. Neither subsumes the
+other, and neither should be reimplemented in the other's terms.
 
 ## Dependencies
 

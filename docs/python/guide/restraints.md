@@ -1,31 +1,54 @@
 # Restraints
 
-Restraints are geometric regions (or half-spaces) that every atom of a
-target — or a chosen subset — must lie inside. molpack ships two
-families of built-in restraints: five **geometric** region restraints
-(below), and six **collective** distribution-matching restraints
-([further down](#collective-distribution-matching-restraints)). Both
+A restraint is a soft penalty every atom of a target — or a chosen subset —
+pays when it leaves where it should be. molpack knows two families: the
+**region lift**, one geometric restraint that says "stay inside this molrs
+region", and seven **collective** restraints — six distribution-matching
+([further down](#collective-distribution-matching-restraints)) plus
+`SelfSeparation` ([after those](#collective-separation-restraint)). All
 attach the same way, via `.with_restraint()`.
 
-## Geometric built-ins
+## Regions are molrs objects
 
-| Class                    | Constructor arguments                          | Meaning |
-|--------------------------|------------------------------------------------|---------|
-| `InsideBoxRestraint`     | `min: [x,y,z]`, `max: [x,y,z]`, `periodic=(False, False, False)` | axis-aligned box |
-| `InsideSphereRestraint`  | `center: [x,y,z]`, `radius: float`             | closed ball |
-| `OutsideSphereRestraint` | `center: [x,y,z]`, `radius: float`             | complement of closed ball |
-| `AbovePlaneRestraint`    | `normal: [nx,ny,nz]`, `distance: float`        | half-space $\mathbf{n}\cdot\mathbf{x} \ge d$ |
-| `BelowPlaneRestraint`    | `normal: [nx,ny,nz]`, `distance: float`        | half-space $\mathbf{n}\cdot\mathbf{x} \le d$ |
-| `StlRegion`              | `from_file(path, scale=1.0)`                   | closed triangle mesh (watertight STL) |
+Geometry is not molpack's. A region is a molrs solid with a signed distance
+to its boundary — `distance(points)` is negative inside, positive outside —
+and every shape describes its *inside*. Outside, shells and voids are
+compositions: `~`, `&`, `|`. There is no "outside sphere" class; it is
+`~molrs.Sphere(...)`.
 
-`StlRegion.from_file(path, scale=1.0)` reads an ASCII or binary STL.
-`scale` is Å per file unit; the default `1.0` means the file is already
-in Å. The test is the **atom centre**, not the van der Waals ball and
-not the molecule COM — the same centre-only rule as the box and sphere
-restraints.
+| molrs class     | Constructor                                   | Meaning |
+|-----------------|-----------------------------------------------|---------|
+| `Sphere`        | `(center, radius)`                            | solid sphere |
+| `Cuboid`        | `(origin, lengths)`                           | axis-aligned box from its minimum corner |
+| `Parallelepiped`| `(h, origin)`, `.cube(a, origin)`, `.ortho(lengths, origin)` | triclinic cell volume |
+| `HalfSpace`     | `(normal, point)`                             | the side of the plane the normal points *away* from |
+| `Cylinder`      | `(base, axis, radius, length)`                | finite capped cylinder |
+| `Ellipsoid`     | `(center, semi_axes)`                         | axis-aligned ellipsoid |
+| `Polyhedron`    | `(mesh: TriMesh)`                             | solid bounded by a watertight triangle mesh |
+| `SphereUnion`   | `(centers, radii, box=None)`                  | union of spheres, minimum image on the box's periodic axes |
 
-How each packing entry uses a geometric restraint (including
-`StlRegion`) is **not** inferred from the mesh:
+Length-3 arguments accept plain lists. Lengths are in the same unit as the
+coordinates (Å for a molpack run).
+
+```python
+import molrs
+from molpack import Target
+
+box    = molrs.Cuboid([0, 0, 0], [40, 40, 40])          # origin, lengths
+ball   = molrs.Sphere([0, 0, 0], 20.0)
+shell  = ball & ~molrs.Sphere([0, 0, 0], 10.0)
+above  = ~molrs.HalfSpace([0, 0, 1], [0, 0, 5.0])        # z >= 5
+below  = molrs.HalfSpace([0, 0, 1], [0, 0, 20.0])        # z <= 20
+water  = Target(frame, count=500).with_restraint(box)
+```
+
+molpack lifts the region to a quadratic exterior penalty,
+`scale · max(0, distance)²`, which is zero inside and on the boundary. The
+test is the **atom centre**, not the van der Waals ball and not the molecule
+COM. A region reaches this wheel as a `molrs.RegionRef` capsule — no data is
+marshalled, and both wheels must share one molrs minor line.
+
+How each packing entry uses a region is **not** inferred from the shape:
 
 - `GenCanPack` — soft quadratic wall on atom centres (`frest`).
 - `CbmcGrow` — hard reject on `propose`; `force_place` may leave atoms
@@ -34,59 +57,55 @@ How each packing entry uses a geometric restraint (including
   (Region ∩ lattice). An empty intersection is a named error. Decorated
   hydrogens may still sit slightly outside; chain `GenCanPack.with_restart`.
 
-```python
-from molpack import StlRegion, Target
+### A cavity from a mesh
 
-cavity = StlRegion.from_file("cavity.stl")  # Å
+`molrs.io.read_stl` reads an ASCII or binary STL into a `TriMesh`;
+`TriMesh.scaled` converts the file's unit; `molrs.Polyhedron` is the solid
+the mesh bounds. The mesh must be watertight (every edge shared by exactly
+two faces) — an open or self-touching mesh is a `ValueError`, because
+parity cannot decide inside from outside on it.
+
+```python
+cavity = molrs.Polyhedron(molrs.io.read_stl("cavity.stl").scaled(4.18))
 target = Target(frame, n).with_restraint(cavity)
 ```
 
-A full growth run is `python/examples/pack_peo_stl.py`: it loads the shipped
-watertight dendrite `examples/pack_peo/dendrite.stl`, attaches it as an
-`StlRegion`, and grows 200 × EO25 with `LatticeGrow` at 2.0 Å — the mask
-blocks every site outside the mesh and the backbone is seated on the sites,
-so confinement is the molecule's. It stops after the grow: at melt density
-inside a cavity a rigid-body push-off can only resolve overlap through the
-wall.
+`python/examples/pack_peo_mesh.py` grows 200 × EO25 with `LatticeGrow`
+inside the shipped dendrite `examples/pack_peo/dendrite.stl` and stops
+after the grow: at melt density inside a cavity a rigid-body push-off can
+only resolve overlap through the wall.
 
-All other arguments are standard Python floats / lists.
+### A void from atoms
+
+The solvent-accessible void of a bead cloud needs no mesh. One sphere per
+bead of radius `bead radius + probe radius` is the solvent-accessible
+volume; its complement is where a probe centre may go:
 
 ```python
-from molpack import (
-    AbovePlaneRestraint,
-    BelowPlaneRestraint,
-    InsideBoxRestraint,
-    InsideSphereRestraint,
-    OutsideSphereRestraint,
-)
-
-box   = InsideBoxRestraint([0, 0, 0], [40, 40, 40])
-ball  = InsideSphereRestraint([0, 0, 0], 20.0)
-shell = OutsideSphereRestraint([0, 0, 0], 10.0)
-above = AbovePlaneRestraint(normal=[0, 0, 1], distance=5.0)
-below = BelowPlaneRestraint(normal=[0, 0, 1], distance=20.0)
+polymer = molrs.SphereUnion(centers, 0.5 * sigma + 1.0, box=frame.box)
+void = ~polymer
+target = Target(peo, n).with_restraint(void)
 ```
+
+`python/examples/pack_peo_void.py` does this for a LAMMPS data file: the
+bonded atoms are the polymer, the rest is solvent and is dropped, and PEO
+threads the channels the solvent left.
 
 ## Periodic boxes
 
-`InsideBoxRestraint` doubles as the PBC declaration. Passing a
-`periodic` tuple turns any subset of axes periodic:
-
-```python
-InsideBoxRestraint([0, 0, 0], [30, 30, 30], periodic=(True, True, True))
-```
-
-See [Periodic boundaries](periodic-boundaries.md) for the full
-semantics and validation rules.
+The periodic box is the entry's declaration, `with_periodic_box(min, max)`;
+a region only confines. See
+[Periodic boundaries](periodic-boundaries.md) for the full semantics and
+validation rules.
 
 ## Collective (distribution-matching) restraints
 
-Where a geometric restraint penalises **each atom** against a region,
-a collective restraint sees **every copy of the target at once** and
-drives the species' spatial *distribution* toward a target profile
-(via a squared 1-D Wasserstein penalty). Six built-ins cover Gaussian,
-exponential, and arbitrary-tabulated priors along either a plane or a
-radius — e.g. a Gaussian slab centred at `z = 20`:
+Where a region penalises **each atom** against a solid, a collective
+restraint sees **every copy of the target at once** and drives the
+species' spatial *distribution* toward a target profile (via a squared 1-D
+Wasserstein penalty). Six built-ins cover Gaussian, exponential, and
+arbitrary-tabulated priors along either a plane or a radius — e.g. a
+Gaussian slab centred at `z = 20`:
 
 ```python
 from molpack import GaussianPlane
@@ -98,16 +117,39 @@ target = Target(frame, count=200).with_restraint(slab)
 The full list and constructor signatures are in the
 [API reference](../api-reference.md#collective-distribution-matching-restraints).
 
+## Collective (separation) restraint
+
+The pair term keeps atoms from overlapping, but nothing in it stops a
+species from piling all its copies into one corner — it cannot tell two
+copies of one species from a copy of each of two. `SelfSeparation` is the
+missing bound: no two copies closer than `d_min`, centre to centre.
+
+```python
+import molrs
+from molpack import SelfSeparation, Target
+
+ions = (
+    Target(frame, count=27)
+    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(SelfSeparation(10.0))  # ions stay 10 Å apart
+)
+```
+
+Distances use the minimum image, so copies on opposite sides of a periodic
+boundary are pushed apart like any other neighbours. Nothing checks that
+the request fits: if it cannot, the run does not converge and says so
+through `frest`.
+
 ## Stacking multiple restraints
 
-Apply several restraints to the same target by chaining `.with_restraint()`:
+Apply several restraints to the same target by chaining `.with_restraint()`,
+or compose the regions first — the two are equivalent for regions:
 
 ```python
 target = (
     Target(frame, count=500)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
-    .with_restraint(OutsideSphereRestraint([20, 20, 20], 5.0))
+    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]) & ~molrs.Sphere([20, 20, 20], 5.0))
 )
 ```
 
@@ -128,9 +170,9 @@ Example — a bilayer: pin heads above z=12, tails below z=2:
 lipid = (
     Target(frame, count=20)
     .with_name("lipid")
-    .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 14]))
-    .with_atom_restraint([0, 1],   AbovePlaneRestraint([0, 0, 1], 12.0))
-    .with_atom_restraint([30, 31], BelowPlaneRestraint([0, 0, 1], 2.0))
+    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 14]))
+    .with_atom_restraint([0, 1],   ~molrs.HalfSpace([0, 0, 1], [0, 0, 12.0]))
+    .with_atom_restraint([30, 31],  molrs.HalfSpace([0, 0, 1], [0, 0, 2.0]))
 )
 ```
 
@@ -142,7 +184,7 @@ engine entry:
 ```python
 packer = (
     GenCanPack()
-    .with_global_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
+    .with_global_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
 )
 ```
 
@@ -153,7 +195,9 @@ target, but avoids the duplication.
 
 Pass any object implementing `f(x, scale, scale2) -> float` and
 `fg(x, scale, scale2) -> (float, (gx, gy, gz))`. See the
-`Restraint` Protocol in `molpack` for the full contract.
+`Restraint` Protocol in `molpack` for the full contract. Reach for this
+when the penalty is not "stay inside a region"; a new *shape* is a molrs
+region, not a custom restraint.
 
 ```python
 class SphereRestraint:

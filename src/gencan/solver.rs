@@ -1,9 +1,7 @@
 //! GENCAN on the [`Stage`] seam.
 //!
-//! Until engine-entry-split, the rigid-body path was a 12-argument inherent
-//! method on the `Molpack` builder (`run_gencan_stages`) — the peer claim in
-//! [`stage`](crate::stage) existed only in prose. [`GencanStage`] makes it
-//! true in code: the same lifecycle the growth stages implement, judged by
+//! [`GencanStage`] is the rigid-body path behind the stage seam: the same
+//! lifecycle the growth stages implement, judged by
 //! the same shared-objective ruler, selected by the same seam.
 
 use molrs::spatial::simbox::SimBox;
@@ -19,7 +17,6 @@ use crate::gencan::{GencanParams, GencanWorkspace};
 use crate::handler::Handler;
 use crate::initial::{SwapState, initial};
 use crate::movebad::MoveBadConfig;
-#[cfg(feature = "ff")]
 use crate::optimizer::{OptimizerBinding, ResolvedBinding, resolve_bindings};
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 use crate::target::Target;
@@ -84,7 +81,6 @@ pub struct GencanStage {
     ntype: usize,
     ntype_with_fixed: usize,
     seed_placements: Option<Placements>,
-    #[cfg(feature = "ff")]
     optimizers: Vec<OptimizerBinding>,
     rng: SmallRng,
 }
@@ -110,7 +106,6 @@ impl GencanStage {
             ntype,
             ntype_with_fixed,
             seed_placements: None,
-            #[cfg(feature = "ff")]
             optimizers: Vec::new(),
             rng,
         }
@@ -128,10 +123,8 @@ impl GencanStage {
         self
     }
 
-    /// Bind in-loop optimizers (feature `ff`). Kept off the constructor so
-    /// non-`gencan` callers never spell the `ff` cfg (acceptance gate:
-    /// `src/grow/` stays free of `cfg(feature = "ff")`).
-    #[cfg(feature = "ff")]
+    /// Bind in-loop optimizers. Kept off the constructor like the placement
+    /// seed: an option of the optimizer-bound spelling only.
     pub fn with_optimizers(mut self, optimizers: Vec<OptimizerBinding>) -> Self {
         self.optimizers = optimizers;
         self
@@ -192,8 +185,8 @@ impl Stage for GencanStage {
         if state.placed() == Placed::All || self.seed_placements.is_some() {
             let sys = state.ctx_mut();
             let simbox = self.cell.clone().unwrap_or_else(|| sys.simbox.clone());
-            // See `install_resolved_cell` for why `radmax` reads `radius_ini`
-            // (Debt D-02 is recorded there too).
+            // One derivation of the grid's coverage scale, in
+            // `initial::coverage_radmax`.
             crate::initial::install_resolved_cell(sys, &simbox, self.settings.discale);
         }
         // ② The seed's conformers and placements, verbatim.
@@ -215,7 +208,7 @@ impl Stage for GencanStage {
         };
         if !push_off {
             initial(
-                x.as_mut_slice(),
+                x,
                 sys,
                 budget.precision,
                 self.settings.discale,
@@ -239,7 +232,6 @@ impl Stage for GencanStage {
             h.on_initialized(sys);
         }
 
-        #[cfg(feature = "ff")]
         let mut optimizer_bindings: Vec<ResolvedBinding<'_>> = {
             let type_names: Vec<Option<String>> = targets
                 .iter()
@@ -250,8 +242,6 @@ impl Stage for GencanStage {
             // configuration and the next run must find them intact.
             resolve_bindings(&mut self.optimizers, &type_names)
         };
-        #[cfg(not(feature = "ff"))]
-        let _ = targets;
 
         // max_loops controls the outer loop count, matching Packmol's `nloop`.
         let gencan_params = GencanParams {
@@ -293,7 +283,6 @@ impl Stage for GencanStage {
                 sys,
                 x.as_mut_slice(),
                 &mut swap,
-                #[cfg(feature = "ff")]
                 &mut optimizer_bindings,
                 handlers,
                 &mut gencan_workspace,
@@ -330,7 +319,7 @@ mod tests {
 
     /// RED-1 (engine-entry-split): the rigid-body path must run behind the
     /// `Stage` seam — same context plumbing as any other stage, verdict
-    /// from the shared objective, no `Molpack` internals.
+    /// from the shared objective, no entry internals.
     #[test]
     fn gencan_solves_a_small_pack_on_the_seam() {
         let coords = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
@@ -389,7 +378,7 @@ mod tests {
     /// **RED for the right reason.** Before this spec, `solve` resolved its
     /// bindings with `resolve_bindings(std::mem::take(&mut self.optimizers),
     /// ..)` (`src/gencan/solver.rs:176`), which *moves* the bindings off the
-    /// stage. From the second run on, `self.optimizers` is empty, the `ff`
+    /// stage. From the second run on, `self.optimizers` is empty, the
     /// optimizer block is silently a no-op, and the counter below stops
     /// advancing — a degraded result with no name (law § 10). The fix is to
     /// borrow the bindings rather than take them, after which the second run
@@ -397,20 +386,18 @@ mod tests {
     ///
     /// **Why it lives in the crate.** `build_context` is `pub(crate)`, so an
     /// integration test in `tests/` cannot build a context and run the same
-    /// stage twice on it; `tests/optimizer.rs` only reaches the entry, which
+    /// stage twice on it; `optimizer::torsion_mc`'s tests only reaches the entry, which
     /// runs a stage once. Named with `optimizer` so the acceptance filter
-    /// `cargo test -p molcrafts-molpack --lib --tests --features ff --
-    /// optimizer` selects it.
+    /// `cargo test -p molcrafts-molpack --lib -- optimizer` selects it.
     ///
     /// **Why the fixture is unsatisfiable.** The in-loop optimizer block runs
     /// only inside the all-type phase's iteration loop
-    /// (`src/gencan/phases.rs:88-91`), and a phase that is already a solution
+    /// (`run_iteration` in `src/gencan/phases.rs`), and a phase that is already a solution
     /// short-circuits past that loop. Twelve unit-radius dimers restrained
     /// into a 4 Å cube cannot be solved, so the loop is entered on both runs.
     /// The `after_first > 0` assertion guards exactly that: if the fixture
     /// ever stops reaching the optimizer, this test says so instead of
     /// certifying nothing.
-    #[cfg(feature = "ff")]
     #[test]
     fn optimizer_bindings_survive_a_second_run() {
         use std::sync::Arc;
@@ -418,7 +405,7 @@ mod tests {
 
         use crate::PackState;
         use crate::optimizer::OptimizeSelect;
-        use crate::restraint::InsideBoxRestraint;
+        use crate::restraint::geometric::InsideBoxRestraint;
 
         /// An optimizer that only counts its calls and leaves the frame
         /// alone: the conformer is unchanged, so the non-harm gate is a
@@ -446,7 +433,7 @@ mod tests {
         let targets = vec![
             Target::from_coords(&coords, &[1.0, 1.0], 12)
                 .with_name("dimer")
-                .with_restraint(InsideBoxRestraint::new([0.0; 3], [4.0; 3], [false; 3])),
+                .with_restraint(InsideBoxRestraint::new([0.0; 3], [4.0; 3])),
         ];
 
         let built = build_context(

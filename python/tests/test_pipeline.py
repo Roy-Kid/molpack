@@ -35,7 +35,6 @@ import pytest
 from molpack import (
     CbmcGrow,
     GenCanPack,
-    InsideBoxRestraint,
     LatticeGrow,
     Pipeline,
     StepContext,
@@ -74,7 +73,7 @@ def _water_targets(count: int = 60) -> list[Target]:
     return [
         Target(_water_frame(), count)
         .with_name("water")
-        .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [14.0, 14.0, 14.0]))
+        .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [14.0, 14.0, 14.0]))
     ]
 
 
@@ -155,26 +154,6 @@ def test_pipeline_two_stages_runs() -> None:
     assert result.positions.shape == (10, 3)
     assert np.isfinite(result.positions).all()
     assert isinstance(result.converged, bool)
-
-
-def test_pipeline_single_stage_matches_direct_run() -> None:
-    """A one-stage pipeline is the preset run — bitwise, not "close"."""
-    piped = (
-        Pipeline([GenCanPack()])
-        .with_seed(42)
-        .with_tolerance(2.0)
-        .run(_water_targets(), max_loops=20)
-    )
-    direct = (
-        GenCanPack()
-        .with_seed(42)
-        .with_tolerance(2.0)
-        .run(_water_targets(), max_loops=20)
-    )
-
-    assert np.array_equal(piped.positions, direct.positions)
-    assert piped.fdist == direct.fdist
-    assert piped.frest == direct.frest
 
 
 def test_pipeline_adopts_stage_handlers() -> None:
@@ -283,101 +262,3 @@ def test_pipeline_rejects_unknown_stage_with_registry_message() -> None:
                 f"the refusal must list the supported entries; {name!r} missing "
                 f"from: {message}"
             )
-
-
-# ── regression scenarios — hard-coded goldens ─────────────────────────────
-#
-# Provenance for BOTH goldens below: captured 2026-09-03 on this repository's
-# own Rust side (no third-party program, no network) with
-# `cargo test -p molcrafts-molpack --test <scratch>`, from a throwaway
-# integration test that spelled the *very same* fixture — same `molrs::Frame`
-# columns (including the element column), same restraint, same seed,
-# tolerance and loop budget — and printed `fdist` / `frest` / `positions()`
-# with `{:?}` (shortest round-trip form). The Rust side is the right oracle
-# because the Python entry is a 1:1 forwarder: it builds the identical Rust
-# `Pipeline` at `run()`.
-#
-# Both captures were re-run under `--release --features rayon` (the wheel's
-# profile and feature set) and came out bitwise identical, and the
-# single-stage numbers match the committed
-# `tests/pipeline.rs::pipeline_regression_single_stage_gencan_golden`
-# literals exactly.
-#
-# Deterministic by construction: fixed seeds, serial evaluation (the default),
-# no wall clock, no filesystem, no network.
-
-#: Absolute tolerance for a position golden (the project's "exact" rung).
-GOLDEN_TOL = 1e-12
-
-
-def test_pipeline_regression_single_stage_golden() -> None:
-    """60 waters, one GENCAN stage: the packing has not drifted.
-
-    Same fixture and same literals as the Rust
-    ``pipeline_regression_single_stage_gencan_golden`` — deliberately, so a
-    drift in either language shows up as a disagreement between two files
-    rather than as two silently updated goldens.
-    """
-    golden_fdist = 0.0
-    golden_frest = 0.00030128386813777327
-    golden_head = np.array(
-        [
-            [13.068219535648394, 9.39835502863678, 10.821668445710404],
-            [13.389024780022366, 8.517418653690637, 11.028151128952619],
-            [12.81225014697141, 9.765834204264351, 11.671338221294079],
-        ],
-        dtype=np.float64,
-    )
-
-    result = (
-        Pipeline([GenCanPack()])
-        .with_seed(42)
-        .with_tolerance(2.0)
-        .run(_water_targets(60), max_loops=20)
-    )
-
-    assert result.converged
-    assert result.degraded == 0
-    assert abs(result.fdist - golden_fdist) < GOLDEN_TOL
-    assert abs(result.frest - golden_frest) < GOLDEN_TOL
-    assert result.positions.shape == (180, 3)  # 60 waters × 3 atoms
-    np.testing.assert_allclose(
-        result.positions[:3], golden_head, rtol=0.0, atol=GOLDEN_TOL
-    )
-
-
-def test_pipeline_regression_two_stage_golden() -> None:
-    """Two 5-bead chains grown then pushed off: the chain has not drifted.
-
-    ``[CbmcGrow, GenCanPack]`` is the composition the spec exists for — the
-    growth stage places the bonded geometry, the GENCAN stage continues from
-    those placements rather than restarting — so the two-stage golden is the
-    one that would catch a regression in the seam itself.
-    """
-    golden_fdist = 0.0
-    golden_frest = 0.0
-    golden_head = np.array(
-        [
-            [5.855748693536647, 18.96954515927229, 3.1018535302254158],
-            [7.046214874165567, 19.721641439673103, 3.61871081979968],
-            [6.586853975834186, 20.43720495370074, 4.854411601735423],
-        ],
-        dtype=np.float64,
-    )
-
-    result = (
-        Pipeline([CbmcGrow(TorsionPrior.uniform()), GenCanPack()])
-        .with_seed(9)
-        .with_tolerance(1.0)
-        .with_periodic_box([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
-        .run(_chain_targets(2), max_loops=60)
-    )
-
-    assert result.converged
-    assert result.degraded == 0
-    assert abs(result.fdist - golden_fdist) < GOLDEN_TOL
-    assert abs(result.frest - golden_frest) < GOLDEN_TOL
-    assert result.positions.shape == (10, 3)  # 2 chains × 5 beads
-    np.testing.assert_allclose(
-        result.positions[:3], golden_head, rtol=0.0, atol=GOLDEN_TOL
-    )

@@ -16,17 +16,18 @@ criteria:
       `grep -rn 'use crate::entry' src/grow/space/ src/grow/exclusion/ src/grow/driver.rs src/grow/commit.rs src/grow/escape_ops.rs` 无命中；
       `grep -rn 'PackContext' src/grow/space/diamond/` 无命中（格几何上下文无关）。
       新文件 ≤ 400 行（`exclusion/field.rs` 377、`space/diamond/decorate.rs` 393 原样搬入）；
-      `grep -rn 'cfg(feature = "ff")' src/grow/` 无命中。
+      `grep -rn 'molrs::ff\|molrs::optimize' src/grow/` 无命中（`ff` 已是纯透传 `molrs/ff`，crate 内无 `cfg(feature = "ff")`，原 cfg 判据改为依赖判据）。
     status: pending
 
   - id: ac-002
     summary: CbmcGrow 逐位不变
     type: runtime
     pass_when: |
-      tests/grow_axes.rs 在重构前记录的四个 fixture（8 × 12 珠、双物种、KG 熔体
-      ρ* = 0.85、InsideSphere 约束，均 `with_relax(0, _)` 语义）坐标哈希在重构后逐位相同；
-      tests/grow.rs 现有确定性测试全绿。若某 fixture 因 RNG 消费顺序改变而失败，
-      spec 落地记录必须写明同分布检验结果与更新理由。
+      （2026-09-29 改写：原判据的四个集成 fixture 坐标哈希已随集成层于 2026-09-20 删除，
+      且 conventions 禁止 golden / 逐位连续性测试。）
+      `src/grow/tests/` 全部单测（`internal` / `field` / `prior` / `entry` / `driver`）在重构后全绿；
+      新增一条 CbmcGrow 同种子确定性单测（同 seed 两次运行位置与裁决逐位相同，
+      形式同 `gencan/entry.rs::gencan_entry_is_deterministic`）通过。
     status: pending
 
   - id: ac-003

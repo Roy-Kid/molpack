@@ -716,17 +716,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|a| a.get_string("element"))
         .map(|e| e.iter().map(|s| s.to_string()).collect())
         .unwrap_or_default();
-    let tmpl_pos: Vec<[F; 3]> = {
-        let a = frame.get("atoms").expect("atoms");
-        let x = a.get_float("x").expect("x");
-        let y = a.get_float("y").expect("y");
-        let z = a.get_float("z").expect("z");
-        x.iter()
-            .zip(y.iter())
-            .zip(z.iter())
-            .map(|((&xi, &yi), &zi)| [xi as F, yi as F, zi as F])
-            .collect()
-    };
+    let tmpl_pos: Vec<[F; 3]> = frame
+        .coords()
+        .expect("template has x / y / z")
+        .rows()
+        .into_iter()
+        .map(|r| [r[0], r[1], r[2]])
+        .collect();
 
     println!("── system ─────────────────────────────────────");
     println!(

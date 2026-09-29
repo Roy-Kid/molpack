@@ -111,7 +111,7 @@ not-H 掩码 **只**在本函数：`element.eq_ignore_ascii_case("h")` 是全原
 - 禁止 `offset == 0` 才挂钩。
 - 禁止对齐三点挂钩。
 - 禁止 `Target` 装饰集 API。
-- 禁止把星形 / recoil / parent 抽取只放在 `tests/grow.rs`。
+- 禁止把星形 / recoil / parent 抽取只放在入口层测试（现 `src/grow/tests/entry.rs`）。
 - 禁止本段改 `python/` 或 `docs/python/`。
 
 ### Reuse decision
@@ -121,7 +121,7 @@ not-H 掩码 **只**在本函数：`element.eq_ignore_ascii_case("h")` 是全原
 - reuse `topology_for_growth` / `tree_from_target` / `RingTemplate`
 - reuse `GrowError::NonTetrahedralTemplate` — 同一变体，改文案
 - reuse `LatticeGrow` / `LatticeStage` / `LatticeConfig`
-- reuse `tests/grow.rs` `branched_parts`；翻转 `lattice_grow_rejects_branched`
+- reuse `src/grow/tests/mod.rs` `branched_parts`；翻转 `lattice_grow_rejects_branched`
 - generalize `Backbone` / `analyze_backbone` / `decorate_chain` — InternalTree 投影 + 按变量挂钩 + 父边重建 `w`
 - generalize `grow_walk` / `forced_zigzag` — 借 parent/children/follows；每变量一次决策；子树 recoil
 - pattern `src/grow/moves.rs` `retract` — 不调用
@@ -135,24 +135,24 @@ not-H 掩码 **只**在本函数：`element.eq_ignore_ascii_case("h")` 是全原
 - `src/grow/lattice/entry.rs`
 - `src/grow/lattice/config.rs`
 - `src/grow/config.rs`
-- `tests/grow.rs`
-- `regressions/lattice-branch-saw-01-walk.md` (new)
+- `src/grow/tests/entry.rs`（当时为集成测试文件；`tests/` 已于 2026-09-20 删除，入口层测试迁入此处）
+- ~~`regressions/lattice-branch-saw-01-walk.md` (new)~~（`regressions/` 已于 2026-09-20 删除，无替代：golden 钉值不再是测试形式）
 
 ## Tasks
 
 - [x] Write failing unit tests for `analyze_backbone` / hooks / alignment / degrees (`src/grow/lattice/decorate.rs` `#[cfg(test)] mod tests`)
 - [x] Write failing unit tests for `grow_walk` / `forced_zigzag` / one-decision-per-var / k=1 (`src/grow/lattice/saw.rs` `#[cfg(test)] mod tests`)
-- [x] Write failing public tests in `tests/grow.rs` (replace `lattice_grow_rejects_branched`; keep `lattice_stage_requires_none_guarantees_all` and `lattice_grow_bead_chain_constructive`)
+- [x] Write failing public tests in the entry-level test file (then the integration layer, now `src/grow/tests/entry.rs`) (replace `lattice_grow_rejects_branched`; keep `lattice_stage_requires_none_guarantees_all` and `lattice_grow_bead_chain_constructive`)
 - [x] Generalize `Backbone`, `analyze_backbone`, and `decorate_chain` in `src/grow/lattice/decorate.rs`
 - [x] Generalize `grow_walk` and `forced_zigzag` in `src/grow/lattice/saw.rs` (borrowed parent/children/follows; star-decision stack; drop `tried` Vec)
 - [x] Wire slices through `LatticeStage` in `src/grow/lattice/mod.rs`; update rustdoc in `entry.rs`, `mod.rs`, `config.rs`, and `GrowError::NonTetrahedralTemplate` in `src/grow/config.rs`
-- [x] Add regression example `regressions/lattice-branch-saw-01-walk.md` (public API only; hard-coded goldens, no third-party runtime)
+- [x] ~~Add regression example `regressions/lattice-branch-saw-01-walk.md` (public API only; hard-coded goldens, no third-party runtime)~~（`regressions/` 已于 2026-09-20 删除，无替代：golden 钉值不再是测试形式）
 - [x] Verify tetrahedral star/comb complete, `d>4` named reject without "branched staged", AA nonzero-offset hook, linear bead chain still constructive
 - [x] Run full check + test suite
 
 ## Testing strategy
 
-单元测试在所有者模块内（`conventions.md`）。`tests/grow.rs` 只钉公开 `LatticeGrow::run` / `LatticeStage` 声明。绿条：`cargo test -p molcrafts-molpack --lib --tests -- grow::lattice` 以及 `-- lattice_grow`。
+单元测试在所有者模块内（`conventions.md`）。`src/grow/tests/entry.rs` 只钉公开 `LatticeGrow::run` / `LatticeStage` 声明。绿条：`cargo test -p molcrafts-molpack --lib -- grow::lattice` 以及 `-- lattice_grow`。
 
 **`decorate.rs` in-module**
 
@@ -171,7 +171,12 @@ not-H 掩码 **只**在本函数：`element.eq_ignore_ascii_case("h")` 是全原
 - `forced_zigzag` 永不 `None`，`sites[j]` 邻接 `sites[parent[j]]`。
 - 源码无 `tried: Vec<Vec<_>>`。
 
-**`tests/grow.rs`**
+**入口层（现 `src/grow/tests/entry.rs`）**
+
+> 2026-09-29 现状：`lattice_grow_rejects_degree_gt_4` 与 `lattice_stage_requires_none_guarantees_all` 在 `src/grow/tests/entry.rs`；
+> star / comb 两条完成测试与 `lattice_grow_bead_chain_constructive` 已随 `tests/` 于 2026-09-20 删除，
+> 星 / 梳几何改由属主单测覆盖（`src/grow/lattice/decorate.rs::{analyze_backbone_tetrahedral_star, analyze_backbone_comb_has_branch_children}`、
+> `src/grow/lattice/saw.rs::forced_zigzag_embeds_a_star`）。以下为落地时的清单。
 
 - `lattice_grow_tetrahedral_star_completes`：中心 + 4 叶，2 拷贝，盒 20 Å → `Ok`，`natoms() == 10`。
 - `lattice_grow_tetrahedral_comb_completes`：`branched_parts`，2 拷贝 → `Ok`，`natoms() == 24`。不要求 `converged`。
@@ -179,7 +184,7 @@ not-H 掩码 **只**在本函数：`element.eq_ignore_ascii_case("h")` 是全原
 - 删除 `lattice_grow_rejects_branched`。
 - 保留 `lattice_grow_bead_chain_constructive`、`lattice_stage_requires_none_guarantees_all`。
 
-**Regression** `regressions/lattice-branch-saw-01-walk.md`：5 原子四面体星，键长字面量 1.53，2 拷贝，seed 7，盒 20 Å，`Ok`，`natoms == 10`，中心–叶 1.53 ± 1e-6。日期 2026-09-05；无第三方运行时。
+~~**Regression** `regressions/lattice-branch-saw-01-walk.md`：5 原子四面体星，键长字面量 1.53，2 拷贝，seed 7，盒 20 Å，`Ok`，`natoms == 10`，中心–叶 1.53 ± 1e-6。日期 2026-09-05；无第三方运行时。~~（`regressions/` 已于 2026-09-20 删除，无替代：golden 钉值不再是测试形式）
 
 ## Out of scope
 

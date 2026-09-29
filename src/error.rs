@@ -20,20 +20,20 @@ pub enum PackError {
     },
     /// A molecule has no atoms.
     EmptyMolecule(usize),
-    /// A restraint declared a periodic box whose `max - min` is
-    /// non-positive on at least one axis.
+    /// The targets' template frames cannot share one output frame: two of
+    /// them carry the same column under different dtypes.
+    TemplateColumns { detail: String },
+    /// The declared periodic box has a non-positive `max - min` on at least
+    /// one axis.
     InvalidPBCBox { min: [F; 3], max: [F; 3] },
     /// A declared packing cell is unusable, or contradicts a periodic box.
     InvalidCell { detail: String },
-    /// A half-space restraint was declared across a periodic lattice direction,
-    /// where it has no well-defined meaning.
-    PlaneAcrossPeriodicAxis { axis: usize, normal: [F; 3] },
-    /// Two or more restraints declared periodic boxes with different
-    /// bounds or different per-axis periodicity flags. Only one periodic
-    /// box is allowed per packing run.
-    ConflictingPeriodicBoxes {
-        first: ([F; 3], [F; 3], [bool; 3]),
-        second: ([F; 3], [F; 3], [bool; 3]),
+    /// A restraint was declared open along a periodic lattice direction,
+    /// where it has no well-defined meaning: which side of it an atom falls
+    /// on would depend on which image the atom drifted into.
+    RestraintAcrossPeriodicAxis {
+        axis: usize,
+        restraint: &'static str,
     },
     /// A target was handed to a growth entry (`CbmcGrow`) but cannot be
     /// grown. Growth consumes the template's bond graph; molpack neither
@@ -121,23 +121,24 @@ impl fmt::Display for PackError {
                  smaller than the packing radius {radius}"
             ),
             PackError::EmptyMolecule(i) => write!(f, "Target {i} has no atoms"),
-            PackError::InvalidCell { detail } => write!(f, "invalid packing cell: {detail}"),
-            PackError::PlaneAcrossPeriodicAxis { axis, normal } => write!(
+            PackError::TemplateColumns { detail } => write!(
                 f,
-                "plane restraint with normal {normal:?} crosses periodic lattice \
-                 direction {axis}: a half-space has no meaning along a periodic axis, \
-                 since translating by that lattice vector moves a point across the \
-                 plane. Make axis {axis} non-periodic, or drop the plane."
+                "target templates cannot be assembled into one frame: {detail}"
+            ),
+            PackError::InvalidCell { detail } => write!(f, "invalid packing cell: {detail}"),
+            PackError::RestraintAcrossPeriodicAxis { axis, restraint } => write!(
+                f,
+                "{restraint} is open along periodic lattice direction {axis}: it \
+                 neither confines atoms to one image nor repeats with the lattice, \
+                 so translating an atom by that lattice vector can move it across \
+                 the restraint's boundary and whether it is satisfied depends on \
+                 which image the atom is in. Make axis {axis} non-periodic, bound \
+                 the restraint along it, or drop it."
             ),
             PackError::InvalidPBCBox { min, max } => write!(
                 f,
                 "Invalid PBC box: min={:?}, max={:?} (all max-min components must be > 0)",
                 min, max
-            ),
-            PackError::ConflictingPeriodicBoxes { first, second } => write!(
-                f,
-                "Conflicting periodic boxes declared by restraints: {first:?} vs {second:?}. \
-                 At most one periodic InsideBoxRestraint is allowed per packing run."
             ),
             PackError::Grow { target, source } => {
                 write!(f, "target {target} cannot be grown: {source}")

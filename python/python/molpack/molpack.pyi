@@ -36,45 +36,12 @@ class CenteringMode:
 
 # ---------------------------------------------------------------------------
 # Restraints
+#
+# Geometry is a molrs region (``molrs.Sphere``, ``Cuboid``, ``Parallelepiped``,
+# ``HalfSpace``, ``Cylinder``, ``Ellipsoid``, ``Polyhedron``, ``SphereUnion``,
+# or a ``&`` / ``|`` / ``~`` composition); molpack lifts it to "stay inside".
+# There is no molpack geometric restraint class.
 # ---------------------------------------------------------------------------
-
-class InsideBoxRestraint:
-    def __init__(
-        self,
-        min: Sequence[float],
-        max: Sequence[float],
-        periodic: tuple[bool, bool, bool] = (False, False, False),
-    ) -> None: ...
-    def __repr__(self) -> str: ...
-
-class InsideSphereRestraint:
-    def __init__(self, center: Sequence[float], radius: float) -> None: ...
-    def __repr__(self) -> str: ...
-
-class OutsideSphereRestraint:
-    def __init__(self, center: Sequence[float], radius: float) -> None: ...
-    def __repr__(self) -> str: ...
-
-class AbovePlaneRestraint:
-    def __init__(self, normal: Sequence[float], distance: float) -> None: ...
-    def __repr__(self) -> str: ...
-
-class BelowPlaneRestraint:
-    def __init__(self, normal: Sequence[float], distance: float) -> None: ...
-    def __repr__(self) -> str: ...
-
-class StlRegion:
-    @classmethod
-    def from_file(
-        cls, path: str | os.PathLike[str], scale: float = 1.0
-    ) -> StlRegion: ...
-    def contains(self, points: NDArray[np.float64]) -> NDArray[np.bool_]:
-        """Membership of each row of an ``(n, 3)`` array."""
-
-    def signed_distance(self, points: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Distance to the surface per point, Å; negative inside."""
-
-    def __repr__(self) -> str: ...
 
 # Collective (distribution-matching) restraints — drive a species' aggregate
 # spatial distribution toward a target profile rather than confining each atom.
@@ -128,22 +95,32 @@ class TabulatedPoint:
         rho: Sequence[float],
     ) -> None: ...
 
+class SelfSeparation:
+    """Keep every pair of copies of one species at least ``d_min`` apart,
+    centre to centre — the anti-clustering restraint."""
+
+    def __init__(self, d_min: float, strength: float = 1.0) -> None: ...
+    @property
+    def d_min(self) -> float: ...
+    def __repr__(self) -> str: ...
+
 # Built-in restraint union — accepted wherever a native `*Restraint` is
 # expected. Custom duck-typed objects (see `Restraint` Protocol in the
 # package root) are also accepted.
 type BuiltinRestraint = (
-    InsideBoxRestraint
-    | InsideSphereRestraint
-    | OutsideSphereRestraint
-    | AbovePlaneRestraint
-    | BelowPlaneRestraint
-    | GaussianPlane
+    GaussianPlane
     | GaussianPoint
     | ExponentialPlane
     | ExponentialPoint
     | TabulatedPlane
     | TabulatedPoint
+    | SelfSeparation
 )
+
+class _RegionLike(Protocol):
+    """Any molrs region object: it exports the ``molrs.RegionRef`` capsule."""
+
+    def _ffi_regionref_capsule(self) -> object: ...
 
 class _RestraintLike(Protocol):
     def f(
@@ -159,7 +136,7 @@ class _RestraintLike(Protocol):
         scale2: float,
     ) -> tuple[float, tuple[float, float, float]]: ...
 
-type AnyRestraint = BuiltinRestraint | StlRegion | _RestraintLike
+type AnyRestraint = BuiltinRestraint | _RegionLike | _RestraintLike
 
 # ---------------------------------------------------------------------------
 # Method selection / growth
@@ -216,6 +193,7 @@ class Target:
         self, indices: Sequence[int], scale: float
     ) -> Self: ...
     def with_special_bonds(self, table: Sequence[float]) -> Self: ...
+    def with_hydrogens(self, indices: Sequence[int]) -> Self: ...
     def with_perturb_budget(self, budget: int) -> Self: ...
     def with_centering(self, mode: CenteringMode) -> Self: ...
     def with_rotation_bound(
@@ -273,13 +251,14 @@ class StepInfo:
     @property
     def frest(self) -> float: ...
     @property
+    def f(self) -> float:
+        """GENCAN objective at the user's radii (Packmol's ``fx``)."""
+    @property
     def improvement_pct(self) -> float: ...
     @property
     def radscale(self) -> float: ...
     @property
     def precision(self) -> float: ...
-    @property
-    def relaxer_acceptance(self) -> list[tuple[int, float]]: ...
     def __repr__(self) -> str: ...
 
 class StepContext:
@@ -336,8 +315,8 @@ class State:
         impropers, with indices offset per copy) onto the packed coordinates,
         regenerates ``id`` / ``mol_id``, and stamps ``frame.box`` from the
         periodic box (if one was declared via ``with_periodic_box``). Returns a
-        genuine ``molrs.Frame`` (built via the user's installed ``molrs``);
-        adopt it into molpy with ``molpy.Frame(result.frame)``. Falls
+        genuine ``molrs.Frame`` (built via the user's installed ``molrs``),
+        which is ``molpy.Frame`` too — there is one Frame class. Falls
         back to a coordinates-only ``atoms`` block for ``.inp`` script packing.
         Force fields are out of scope — merge them separately.
         """
@@ -422,7 +401,6 @@ class MaxIterationsError(PackError): ...
 class NoTargetsError(PackError): ...
 class EmptyMoleculeError(PackError): ...
 class InvalidPBCBoxError(PackError): ...
-class ConflictingPeriodicBoxesError(PackError): ...
 
 class GenCanPack:
     """Rigid-body GENCAN packing entry (engine-entry-split). One engine, one run."""
@@ -455,7 +433,21 @@ class GenCanPack:
         self, fraction: float, random: bool = False, enabled: bool = True
     ) -> Self: ...
     def with_avoid_overlap(self, on: bool = True) -> Self: ...
-    def run(self, targets: Sequence[Target], max_loops: int) -> State: ...
+    def with_early_stop(
+        self,
+        enabled: bool = True,
+        *,
+        threshold_pct: float = 10.0,
+        patience: int = 10,
+    ) -> Self:
+        """End a GENCAN phase once, at the user's radii (``radscale == 1``),
+        Packmol's ``bestf`` has improved by less than ``threshold_pct``
+        percent over ``patience`` loops. On by default (10 % is Packmol's
+        movebad threshold); ``enabled=False`` runs every phase to
+        ``max_loops`` as Packmol does. A stopped final phase leaves
+        ``State.converged`` false."""
+    def run(self, targets: Sequence[Target], max_loops: int | None = None) -> State:
+        """``max_loops`` defaults to Packmol's ``nloop``: ``200 * len(targets)``."""
 
 class CbmcGrow:
     """Configurational-bias chain-growth entry. The torsion prior is

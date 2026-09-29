@@ -10,12 +10,6 @@
 //! context has no home for: the placement shape marker [`Placed`] and the
 //! rigid placement slot [`RigidView`].
 //!
-//! The module is `pack_state` and not `state` because `context::state` is
-//! already taken by [`RuntimeState`](crate::context::RuntimeState), a
-//! *borrowed*, read-only telemetry view. This type *owns* its context: a
-//! different lifetime story and a different responsibility, not a second name
-//! for one concept.
-//!
 //! # What the state deliberately does not carry
 //!
 //! * **No `topology` field.** Nothing here produces or consumes one; a

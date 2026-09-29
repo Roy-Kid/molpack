@@ -66,17 +66,19 @@ order, and turn the first result into a single fixed obstacle for the
 second:
 
 ```python
-from molpack import CbmcGrow, GenCanPack, InsideBoxRestraint, Target
+import molrs
+from molpack import CbmcGrow, GenCanPack, Target
 
 grown = CbmcGrow(prior).with_density(0.5).with_seed(42).run([peo], max_loops=60)
 
 # Same cell for stage two — read it off the grown frame, or declare the
 # lengths you sized the melt to.
-cell = InsideBoxRestraint([0.0, 0.0, 0.0], [l, l, l], periodic=(True, True, True))
+cell = molrs.Cuboid([0.0, 0.0, 0.0], [l, l, l])
 
 result = (
     GenCanPack()
     .with_seed(42)
+    .with_periodic_box([0.0, 0.0, 0.0], [l, l, l])
     .run([Target.fixed_from(grown), salt.with_restraint(cell)], max_loops=200)
 )
 ```
@@ -106,14 +108,16 @@ python python/examples/pack_peo_linear.py 8 8 0.5 42
 python python/examples/pack_peo_mix.py 4 2 4 4 0.5 42
 python python/examples/pack_peo_topo.py star 4 8 0.5 42
 python python/examples/pack_peo_topo.py ring 6 8 0.4 42
-python python/examples/pack_peo_stl.py 4 4 30 42
+python python/examples/pack_peo_mesh.py 4 4 30 42
+python python/examples/pack_peo_void.py frame.data 4 4 42
 ```
 
 `pack_peo_mix.py` puts two topologies in **one** `LatticeGrow.run` (linear
-`Target` + 4-arm star `Target`, density-sized box). `pack_peo_stl.py` is
-the mesh-cavity scene: attach `StlRegion.from_file` and grow with
-`LatticeGrow` — diamond sites outside the mesh are blocked
-(Region ∩ lattice), then `GenCanPack.with_restart`.
+`Target` + 4-arm star `Target`, density-sized box). `pack_peo_mesh.py` is
+the mesh-cavity scene: attach a `molrs.Polyhedron` read from STL and grow
+with `LatticeGrow` — diamond sites outside the mesh are blocked
+(Region ∩ lattice). `pack_peo_void.py` is the same grow through
+`~molrs.SphereUnion`, the solvent-accessible void of a bead-spring frame.
 
 ## The torsion prior is load-bearing
 
@@ -273,7 +277,9 @@ are exactly the trans/gauche± the walk drew, its angles and its one bond
 length are the lattice's — `DiamondLattice::fit` sizes that step from the
 template's own mean backbone bond, and the cell's commensurability moves it a
 percent or two — and only hydrogens and side atoms keep the template's local
-geometry. The force field downstream sets bonded geometry in its first steps;
+geometry. Which atoms are hydrogens is per-target data: element symbol `H` by
+default, or `Target.with_hydrogens(indices)` for a model that names them
+differently (`[]` puts every atom of a coarse-grained chain on the lattice). The force field downstream sets bonded geometry in its first steps;
 it cannot as cheaply undo a chain threaded through a wall, which is what
 rebuilding from template internal coordinates used to cost. Residual contacts
 are reported honestly in `fdist` and belong to the seeded push-off.

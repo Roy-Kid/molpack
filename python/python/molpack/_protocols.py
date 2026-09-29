@@ -47,7 +47,9 @@ class Restraint(Protocol):
     """Custom-restraint contract — the group-level extension point.
 
     A duck-typed restraint sees **every copy** of a species at once: ``coords``
-    is a sequence of ``(x, y, z)`` tuples (Å), one per copy. This lets the
+    is a sequence of ``(x, y, z)`` tuples (Å), one per **atom** of the group,
+    ordered copy-major — so for a species of ``m`` atoms per molecule,
+    ``coords[c*m:(c+1)*m]`` is copy ``c``. This lets the
     penalty depend on the *joint* configuration — e.g. matching the empirical
     density of the group to a target distribution — so its gradient may couple
     the copies together. ``scale`` is the linear scaling factor (≈ distance

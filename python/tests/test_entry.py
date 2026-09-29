@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import molrs
 import numpy as np
 import pytest
 
@@ -9,7 +10,6 @@ import molpack
 
 
 def _dimer():
-    import molrs
 
     fr = molrs.Frame()
     fr["atoms"] = {
@@ -22,7 +22,6 @@ def _dimer():
 
 
 def _chain5():
-    import molrs
 
     n = 5
     fr = molrs.Frame()
@@ -149,7 +148,6 @@ class TestEngineErrorPaths:
             packer.run([], max_loops=10)
 
     def test_invalid_pbc_raises_typed_error(self):
-        import molrs
 
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
         frame = molrs.Frame(
@@ -162,12 +160,13 @@ class TestEngineErrorPaths:
                 }
             }
         )
-        target = molpack.Target(frame, 1).with_restraint(
-            molpack.InsideBoxRestraint(
-                [0.0, 0.0, 0.0], [0.0, 10.0, 10.0], periodic=(True, True, True)
-            )
+        target = molpack.Target(frame, 1)
+        packer = (
+            molpack.GenCanPack()
+            .with_progress(False)
+            .with_seed(1)
+            .with_periodic_box((0.0, 0.0, 0.0), (0.0, 10.0, 10.0))
         )
-        packer = molpack.GenCanPack().with_progress(False).with_seed(1)
         with pytest.raises(molpack.InvalidPBCBoxError):
             packer.run([target], max_loops=10)
 

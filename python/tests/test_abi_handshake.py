@@ -46,3 +46,46 @@ class TestVersionedCapsuleGate:
         block.insert("id", np.array([1, 2], dtype=np.uint32))
         frame["atoms"] = block
         assert molpack.Target(frame, 1) is not None
+
+
+class _LegacyRegion:
+    """Quacks like a molrs region but exports an unversioned capsule."""
+
+    def _ffi_regionref_capsule(self):  # noqa: ANN202 — mirrors the duck-typed contract
+        new_capsule = ctypes.pythonapi.PyCapsule_New
+        new_capsule.restype = ctypes.py_object
+        new_capsule.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p]
+        return new_capsule(ctypes.c_void_p(0xDEAD), b"molrs.RegionRef", None)
+
+
+class _NotACapsule:
+    def _ffi_regionref_capsule(self):  # noqa: ANN202
+        return object()
+
+
+class TestRegionCapsuleGate:
+    def _target(self):
+        import numpy as np
+
+        frame = molrs.Frame()
+        block = molrs.Block()
+        block.insert("x", np.array([0.0]))
+        block.insert("y", np.array([0.0]))
+        block.insert("z", np.array([0.0]))
+        block.insert("id", np.array([1], dtype=np.uint32))
+        frame["atoms"] = block
+        return molpack.Target(frame, 1)
+
+    def test_cross_minor_region_is_rejected_at_resolve(self) -> None:
+        with pytest.raises(ValueError, match="minor line"):
+            self._target().with_restraint(_LegacyRegion())
+
+    def test_capsule_returning_non_capsule_is_typeerror(self) -> None:
+        with pytest.raises(TypeError, match="PyCapsule"):
+            self._target().with_restraint(_NotACapsule())
+
+    def test_same_line_region_resolves(self) -> None:
+        import numpy as np
+
+        region = molrs.Sphere(np.zeros(3), 5.0)
+        assert self._target().with_restraint(region) is not None

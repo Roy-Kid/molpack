@@ -173,7 +173,7 @@ belongs to callers.
   separate contracts.
 
 **Derived guidance.** High-level workflows may live outside the
-primitive core (`regressions/`, docs, caller code).
+primitive core (docs, examples, caller code).
 
 <!-- mol:law:id:explicit-flow -->
 ## 8. Explicit flow
@@ -274,11 +274,11 @@ of the whole system.
 ### Project testing policy: unit-only by default
 
 New behavior must be unit-testable at its ownership boundary
-(`tests/` mirrors source, one module, `$META.build.test_single`,
-fakes for outbound deps). Integration / end-to-end scenarios go to
-`regressions/` or the project's integration harness, with explicit
-justification. A design that can only be tested end-to-end is
-evidence of a missing boundary.
+(a `#[cfg(test)]` module next to the code, one module,
+`$META.build.test_single`, fakes for outbound deps). molpack has **no**
+integration, end-to-end or regression harness at all: a scenario that
+can only be checked by running a whole pack is not a test here — it is a
+runnable example, or evidence of a missing boundary.
 
 Layout details: `tester` agent.
 
@@ -426,7 +426,7 @@ hydrogens, and stereo centers enter only as user data at the boundary
   aromaticity, element symbols); `molrs::perceive` may only produce
   data the user passes in.
 
-**Derived guidance.** The `ff`-gated in-loop relaxer is an optional
+**Derived guidance.** The in-loop optimizer (`GenCanPack::with_optimizer`) is an optional
 enhancement and must never become a solver dependency. Dependencies
 follow policy (§ 6).
 

@@ -11,14 +11,14 @@ reference output.
 
 ```python
 import molrs
-from molpack import GenCanPack, InsideBoxRestraint, Target
+from molpack import GenCanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
 packer = GenCanPack().with_tolerance(2.0).with_seed(42)

@@ -1,7 +1,7 @@
 """Open-space linear PEO melt.
 
-Chemistry is molrs (SMILES + conformer). Architecture is molpy
-``PolymerBuilder.build_linear``. Packing is molpack: ``LatticeGrow`` at
+Chemistry is molrs (CGsmiles + conformer). Architecture is molpy: a CGsmiles topology grown by ``mp.Assembler`` with
+``mp.GrowthPlacer``. Packing is molpack: ``LatticeGrow`` at
 2.0 Å then ``GenCanPack.with_restart`` at 2.0 Å. Hydrogen packing radius
 defaults to 0.2 Å (``PEO_H_RADIUS=off`` restores ``tolerance/2``):
 hydrogens relax away in the first picoseconds of MD, so making them
@@ -22,35 +22,41 @@ from pathlib import Path
 import molpy as mp
 import molrs
 import numpy as np
-from molpy.builder.assembly import (
-    MonomerLibrary,
-    PolymerBuilder,
-    ResiduePlacer,
-    SiteMap,
-    linear_cgsmiles,
-)
 from molpy.conformer import Conformer
-from molpy.core.atomistic import Atomistic
+from molrs import Atomistic
 
 import molpack
 
 OUT = Path(__file__).resolve().parent / "out"
 
-ETHER = "[O;%a:1][H].[C:2][O;%b][H]>>[O:1][C:2]"
 PEO_C_INF = 5.5
 TET = 1.9106332
+
+
+EO_UNIT = "[<]OCC[>]"  # -O-CH2-CH2-, ports on O (<) and C (>)
+CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
+
+
+def _unit(name: str, body: str, seed: int) -> mp.Atomistic:
+    """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
+    template = molrs.io.SmilesIR.from_fragment(body).to_template()
+    return Conformer(seed=seed).generate(template)[0]
+
+
+def _grow(topology: str, library: dict[str, mp.Atomistic]) -> Atomistic:
+    """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
+    sites = mp.CGSmilesIR(topology).to_coarsegrain()
+    return mp.Assembler(library, mp.GrowthPlacer()).assemble(sites, mp.Atomistic)
+
+
+def linear_topology(n: int) -> str:
+    return f"{{[#EO]|{n}}}"
 
 
 def make_linear(n: int, *, seed: int = 42) -> Atomistic:
     if n < 1:
         raise ValueError(f"linear n must be >= 1, got {n}")
-    eo, _ = Conformer(add_hydrogens=True, seed=seed).generate(mp.io.read_smiles("OCCO"))
-    SiteMap(eo).label_elements("O", "a", "b")
-    return PolymerBuilder(
-        MonomerLibrary({"EO": eo}),
-        mp.Reaction(ETHER),
-        placer=ResiduePlacer(),
-    ).build_linear("EO", n)
+    return _grow(linear_topology(n), {"EO": _unit("EO", EO_UNIT, seed)})
 
 
 def _target(polymer: Atomistic, n_mol: int, name: str) -> molpack.Target:
@@ -69,7 +75,7 @@ def _target(polymer: Atomistic, n_mol: int, name: str) -> molpack.Target:
 
 def pack_linear(n: int, n_mol: int, density: float, seed: int):
     polymer = make_linear(n, seed=seed)
-    print(f"  topology     : {linear_cgsmiles(['EO'] * n)}")
+    print(f"  topology     : {linear_topology(n)}")
     n_at = polymer.n_atoms
     n_bd = len(list(polymer.bonds))
     shape = "tree" if n_bd == n_at - 1 else ("unicyclic" if n_bd == n_at else "cyclic+")
@@ -125,8 +131,12 @@ def main(argv: list[str] | None = None) -> None:
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.mrec.write_frame(str(OUT / "pack_peo_linear.mrec"), packed)
-    molrs.io.write_lammps_traj(str(OUT / "pack_peo_linear.lammpstrj"), [packed])
+    molrs.io.write_mrec(str(OUT / "pack_peo_linear.mrec"), packed)
+    molrs.io.write_lammps_trajectory(
+        str(OUT / "pack_peo_linear.lammpstrj"),
+        [packed],
+        columns=["id", "element", "mol", "x", "y", "z"],
+    )
     if "bonds" in packed and packed["bonds"].nrows:
         molrs.io.write_lammps_dump_local(
             str(OUT / "pack_peo_linear.dump.local"), [packed]

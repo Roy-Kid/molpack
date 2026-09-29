@@ -3,14 +3,14 @@
 //! [`PyTarget`] describes one type of molecule to pack: its template
 //! geometry, topology, and the number of copies.
 //!
-//! The constructor accepts a real molrs/molpy `Frame` (``molrs.Frame`` or
-//! ``molpy.Frame``) carrying an ``"atoms"`` block. The frame crosses the
+//! The constructor accepts a real ``molrs.Frame`` (``molpy.Frame`` is the same
+//! class) carrying an ``"atoms"`` block. The frame crosses the
 //! language boundary **zero-copy** through its stable-FFI capsule (see
 //! [`crate::interop`]) — no dict marshalling, no consumer-side data type. The
 //! full frame, with topology, is handed to the core [`Target`], which owns the
 //! assembly.
 
-use crate::constraint::{extract_collective_restraint, extract_restraint, try_atom_builtin};
+use crate::constraint::{extract_collective_restraint, extract_restraint, try_region};
 use crate::helpers::NpF;
 use crate::types::{PyAngle, PyAxis, PyCenteringMode};
 use molpack::F;
@@ -25,14 +25,11 @@ use pyo3::types::PyAny;
 /// a Rust [`molrs::Frame`] so the core retains its full topology.
 pub(crate) fn target_from_frame(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Target> {
     let rust_frame = crate::interop::owned_frame_from_py(frame)?;
-    let atoms = rust_frame
-        .get("atoms")
-        .ok_or_else(|| PyValueError::new_err(r#"frame must have an "atoms" block"#))?;
-    if atoms.get("x").is_none() {
-        return Err(PyValueError::new_err(
-            r#"atoms block must have "x" / "y" / "z" columns"#,
-        ));
-    }
+    // `Target::new` panics on a frame without float coordinates; answer that
+    // here as a Python error instead of a panic across the boundary.
+    rust_frame
+        .coords()
+        .map_err(|e| PyValueError::new_err(format!("frame has no coordinates: {e}")))?;
     Ok(Target::new(rust_frame, count))
 }
 
@@ -48,8 +45,8 @@ impl PyTarget {
     ///
     /// Parameters
     /// ----------
-    /// frame : molrs.Frame | molpy.Frame
-    ///     A molrs/molpy frame with an ``"atoms"`` block (``x`` / ``y`` / ``z``
+    /// frame : molrs.Frame
+    ///     A frame with an ``"atoms"`` block (``x`` / ``y`` / ``z``
     ///     columns). Resolved zero-copy via its FFI capsule — a plain ``dict``
     ///     is no longer accepted; build a ``molrs.Frame`` first.
     /// count : int
@@ -82,11 +79,10 @@ impl PyTarget {
     ///
     /// Accepts:
     ///
-    /// * a built-in **geometric** restraint (:class:`InsideBoxRestraint`,
-    ///   :class:`InsideSphereRestraint`, :class:`OutsideSphereRestraint`,
-    ///   :class:`AbovePlaneRestraint`, :class:`BelowPlaneRestraint`) or a
-    ///   :class:`StlRegion` (lifted through ``RegionRestraint``) — its
-    ///   ``f`` / ``fg`` see **one atom** at a time;
+    /// * a molrs **region** (``molrs.Sphere``, ``Cuboid``, ``Parallelepiped``,
+    ///   ``HalfSpace``, ``Cylinder``, ``Ellipsoid``, ``Polyhedron``,
+    ///   ``SphereUnion``, or a ``&`` / ``|`` / ``~`` composition) — lifted
+    ///   through ``RegionRestraint``, so every atom must stay inside it;
     /// * a built-in **distribution** restraint (:class:`GaussianPlane`,
     ///   :class:`GaussianPoint`, :class:`ExponentialPlane`,
     ///   :class:`ExponentialPoint`, :class:`TabulatedPlane`,
@@ -94,14 +90,13 @@ impl PyTarget {
     /// * any object with callable ``f`` / ``fg`` — the duck-typed extension
     ///   point.
     ///
-    /// For the geometric built-ins ``f(x, scale, scale2)`` /
-    /// ``fg(x, scale, scale2)`` see a single atom's ``(x, y, z)``. For the
+    /// A region is evaluated per atom. For the
     /// distribution and custom (duck-typed) restraints,
     /// ``f(coords, scale, scale2)`` / ``fg(coords, scale, scale2)`` see **every
     /// copy's** ``(x, y, z)`` (``coords`` is the full list) and ``fg`` returns
     /// ``(energy, [(gx, gy, gz), ...])`` — one gradient triple per copy.
     fn with_restraint(&self, restraint: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
-        if let Some(atom_r) = try_atom_builtin(restraint) {
+        if let Some(atom_r) = try_region(restraint)? {
             Ok(PyTarget {
                 inner: self.inner.clone().with_restraint(atom_r),
             })
@@ -243,6 +238,19 @@ impl PyTarget {
         let table = validate_special_bonds(table)?;
         Ok(PyTarget {
             inner: self.inner.clone().with_special_bonds(table),
+        })
+    }
+
+    /// Name the atoms growth treats as hydrogens (**0-based**), replacing the
+    /// default rule (element symbol ``H``). Lattice growth places hydrogens
+    /// off their backbone neighbour, never on a lattice site; a
+    /// coarse-grained model with no hydrogens passes ``[]``.
+    ///
+    /// Raises ``ValueError`` if an index is out of range.
+    fn with_hydrogens(&self, indices: Vec<usize>) -> PyResult<Self> {
+        validate_atom_indices(&indices, self.inner.natoms())?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_hydrogens(&indices),
         })
     }
 

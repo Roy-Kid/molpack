@@ -73,9 +73,10 @@ criteria:
     status: verified
     last_checked: 2026-09-05
   - id: ac-008
-    summary: Regression markdown pins the public-contract literals
+    summary: ~~Regression markdown pins the public-contract literals~~
     type: runtime
     pass_when: |
+      STRUCK 2026-09-29: regressions/ deleted 2026-09-20 with no replacement (golden pins are no longer a test form); text below is historical.
       regressions/lattice-branch-saw-02-docs.md exists and hard-codes:
       example pick LatticeGrow then GenCanPack.with_restart at 2.0 Å
       (not Auhl, not CbmcGrow fallback); trees including branched

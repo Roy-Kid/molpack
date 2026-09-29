@@ -6,8 +6,8 @@ mol_project:
   build:
     install: "cargo build --all-targets"
     check: "cargo fmt -- --check && cargo fmt --manifest-path python/Cargo.toml -- --check && cargo clippy --all-targets --all-features -- -D warnings && uv run --directory python --group typecheck ruff format --check python tests examples && uv run --directory python --group typecheck ruff check python tests examples && uv run --directory python --group typecheck ty check python tests examples"
-    test: "cargo test -p molcrafts-molpack --lib --tests"
-    test_single: "cargo test -p molcrafts-molpack --lib --tests -- {path}"
+    test: "cargo test -p molcrafts-molpack --lib --features cli,ff,rayon"
+    test_single: "cargo test -p molcrafts-molpack --lib --features cli,ff,rayon -- {path}"
   arch:
     style: layered
     rules_section: "## Law (never violated)"
@@ -17,7 +17,7 @@ mol_project:
     required: true
   ci:
     config: .github/workflows/ci.yml
-    local: "cargo test --features io --lib --tests --examples && cargo test --test cli --features cli && cargo check --no-default-features && cargo check --features rayon && cargo check --features ff && cargo build --benches && uv run --directory python --group dev tox -e py"
+    local: "cargo test --lib --features cli,ff && cargo test --doc --features cli,ff && cargo check --all-targets --features cli,ff && cargo check --no-default-features && cargo check --features rayon && uv run --directory python --group dev tox -e py"
   notes_path: .claude/notes/notes.md
   specs_path: .claude/specs/
 ---
@@ -40,8 +40,8 @@ sibling `../molrs` path dependency.
 
 ## Where things live
 
-- Source code: `src/` (library — lifecycle in `src/pipeline/`, the packing-algorithm seam in `src/stage.rs`, template bond graph in `src/topology.rs`, run state in `src/context/pack_state.rs` + `src/context/rigid_view.rs`, post-stage checks in `src/invariant.rs`; CLI in `src/bin/molpack/`), `python/src/` (PyO3 wheel), `python/python/molpack/` (package)
-- Tests: unit tests in-module (`#[cfg(test)]`); integration tests in `tests/`, one file per subsystem; Python tests in `python/tests/`; `benches/`, `examples/`
+- Source code: `src/` (library — lifecycle in `src/pipeline/`, the packing-algorithm seam in `src/stage.rs`, template reading (coordinates + rotatable-bond policy) in `src/template.rs`, run state in `src/context/pack_state.rs` + `src/context/rigid_view.rs`, post-stage checks in `src/invariant.rs`, restraints in `src/restraint/` — the molrs-region lift `region.rs` + `cell.rs`, `collective/`, and the crate-private `.inp` parity kernels in `geometric/`; regions themselves are `molrs::spatial::region`: molpack has no region type, no geometric restraint class and no file entry for one; CLI in `src/bin/molpack/`), `python/src/` (PyO3 wheel), `python/python/molpack/` (package)
+- Tests: unit tests only, in-module (`#[cfg(test)]`), next to the code that owns the behaviour — there is no `tests/` directory, no `benches/`, no `regressions/`; Python binding tests in `python/tests/`; runnable scenes in `examples/` + `python/examples/`
 - Public documentation: `docs/` (Zensical site: Rust guide + `docs/python/`)
 - Passive project knowledge: `.claude/notes/` — `law.md` (rulebook), `conventions.md` (features, style, gates, layout, molrs sibling + ABI), `architecture.md` (blueprint via `/mol:map`), `notes.md` (decisions)
 - Active runtime specs (alive, deleted on close): `.claude/specs/` + `INDEX.md`
@@ -94,6 +94,7 @@ For non-trivial work, prefer:
      If a section grows past a screen, promote to .claude/notes/<topic>.md. -->
 
 Build, feature, style, and gate details: `.claude/notes/conventions.md`.
-Packmol regression (`examples_batch`, release, `--features io`, `--ignored`) is
-the second tier after `build.test`; run it before any PR that touches
-`gencan/`, `objective`, `context/`, or `initial`.
+There is one test tier: `build.test` (in-module unit tests) plus
+`cargo test --doc`. End-to-end packing suites, Packmol regression runs and
+criterion benches were deleted on 2026-09-20 — the packing-quality measurement
+system is being redesigned; do not reintroduce one ad hoc.

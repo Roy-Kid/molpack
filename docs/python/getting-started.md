@@ -42,8 +42,8 @@ water = Target(frame, count=100).with_name("water")
 
 Arguments:
 
-- `frame` — a `molrs.Frame` or `molpy.Frame` with columns `"x"`, `"y"`,
-  `"z"`, and `"element"` (or `"symbol"` for molrs PDB frames).
+- `frame` — a `molrs.Frame` (`molpy.Frame` is the same class) with columns
+  `"x"`, `"y"`, `"z"`, and `"element"`.
 - `count` — number of copies to produce.
 
 A display label is optional — attach one via `.with_name("...")`.
@@ -56,16 +56,16 @@ Every target needs at least one restraint — the geometric region it
 should be packed into.
 
 ```python
-from molpack import InsideBoxRestraint
+import molrs
 
 water = water.with_restraint(
-    InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
+    molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])   # origin, lengths
 )
 ```
 
-Five geometric built-in restraints: `InsideBoxRestraint`,
-`InsideSphereRestraint`, `OutsideSphereRestraint`, `AbovePlaneRestraint`,
-`BelowPlaneRestraint` — plus a family of collective
+Any molrs region is a restraint: `Sphere`, `Cuboid`, `Parallelepiped`,
+`HalfSpace`, `Cylinder`, `Ellipsoid`, `Polyhedron`, `SphereUnion`, and
+their `&` / `|` / `~` compositions — plus a family of collective
 distribution-matching restraints. Stack multiple restraints with
 repeated `.with_restraint()` calls — see
 [Restraints](guide/restraints.md).
@@ -108,14 +108,14 @@ need the diagnostic fields, or to continue with
 
 ```python
 import molrs
-from molpack import GenCanPack, InsideBoxRestraint, Target
+from molpack import GenCanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
 result = (

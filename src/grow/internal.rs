@@ -18,7 +18,6 @@ use std::collections::HashMap;
 
 use molrs::store::frame::Frame;
 use molrs::system::atomistic::Atomistic;
-use molrs::system::bond::BondType;
 use molrs::types::F;
 
 use crate::grow::GrowError;
@@ -245,12 +244,6 @@ impl InternalTree {
         self.sites[a..b].iter().map(|s| s.atom)
     }
 
-    /// Number of atoms step `k` places.
-    pub fn step_len(&self, k: usize) -> usize {
-        let (a, b) = self.steps[k];
-        b - a
-    }
-
     /// Place the rigid seed at `origin` under rotation `rot` (row-major).
     pub fn place_seed(&self, origin: [F; 3], rot: &[[F; 3]; 3], coords: &mut [[F; 3]]) {
         for (k, &a) in self.seed.iter().enumerate() {
@@ -337,30 +330,13 @@ impl InternalTree {
 
 // ── graph helpers ──────────────────────────────────────────────────────────
 
-/// Copy of `graph` with every unclassed bond re-classed as `Single`, then the
-/// perceived rotatable bonds as an unordered index-pair set.
-///
-/// Formats that carry connectivity without orders — PDB `CONECT`, GROMACS
-/// `.top`, XYZ `Connct` — read back [`BondType::Unknown`], because molrs
-/// reports what the file said rather than guessing. Perception only accepts
-/// [`BondType::Single`], so without this fallback a PDB template would yield
-/// zero rotatable bonds and grow as a rigid body.
+/// The rotatable bonds of `graph` (see [`crate::template::rotatable_bonds`])
+/// as an unordered index-pair set.
 pub(crate) fn rotatable_bond_keys(graph: &Atomistic) -> std::collections::HashSet<(usize, usize)> {
-    use molrs::perceive::rotatable::detect_rotatable_bonds_with_downstream;
-
-    let mut perceived = graph.clone();
-    let unclassed: Vec<_> = perceived
-        .bonds()
-        .filter(|(id, _)| perceived.bond_type(*id) == BondType::Unknown)
-        .map(|(id, _)| id)
-        .collect();
-    for id in unclassed {
-        let _ = perceived.set_bond_type(id, BondType::Single);
-    }
     // `RotatableBond.j` / `.k` are positional indices in `Atomistic::atoms`
     // order, which `Atomistic::from_frame` builds in frame row order — the
     // same index space as the template coordinates.
-    detect_rotatable_bonds_with_downstream(&perceived)
+    crate::template::rotatable_bonds(graph)
         .iter()
         .map(|b| (b.j.min(b.k), b.j.max(b.k)))
         .collect()
@@ -370,25 +346,10 @@ pub(crate) fn rotatable_bond_keys(graph: &Atomistic) -> std::collections::HashSe
 /// linear polymer, so growth runs along the backbone instead of starting in
 /// the middle and having to grow two ways at once.
 fn diameter_endpoint(topo: &molrs::Topology) -> usize {
+    // The farthest atom from `from`; ties go to the lowest index.
     let far = |from: usize| -> usize {
-        let n = topo.n_atoms();
-        let mut dist = vec![usize::MAX; n];
-        let mut queue = std::collections::VecDeque::new();
-        dist[from] = 0;
-        queue.push_back(from);
-        let mut best = from;
-        while let Some(a) = queue.pop_front() {
-            if dist[a] > dist[best] {
-                best = a;
-            }
-            for b in topo.neighbors(a) {
-                if dist[b] == usize::MAX {
-                    dist[b] = dist[a] + 1;
-                    queue.push_back(b);
-                }
-            }
-        }
-        best
+        let dist = topo.distances(from);
+        (0..dist.len()).fold(from, |best, a| if dist[a] > dist[best] { a } else { best })
     };
     far(far(0))
 }
@@ -435,26 +396,8 @@ fn pick_ref(
 
 // ── geometry ───────────────────────────────────────────────────────────────
 
-#[inline]
-pub(crate) fn sub(a: [F; 3], b: [F; 3]) -> [F; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-#[inline]
-pub(crate) fn dot(a: [F; 3], b: [F; 3]) -> F {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-#[inline]
-pub(crate) fn cross(a: [F; 3], b: [F; 3]) -> [F; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-#[inline]
-pub(crate) fn norm(a: [F; 3]) -> F {
-    dot(a, a).sqrt()
-}
+pub(crate) use molrs::op::vec3::{cross, dot, norm, sub};
+
 #[inline]
 fn unit(a: [F; 3]) -> [F; 3] {
     let n = norm(a).max(crate::numerics::near_zero_norm_floor());
@@ -503,8 +446,9 @@ pub(crate) fn nerf(a: [F; 3], b: [F; 3], c: [F; 3], bond: F, angle: F, torsion: 
     ]
 }
 
+/// Wrap an angle (radians) into `(-π, π]`.
 #[inline]
-fn wrap_pi(x: F) -> F {
+pub(crate) fn wrap_pi(x: F) -> F {
     use std::f64::consts::PI;
     let two_pi = 2.0 * PI as F;
     let mut v = x % two_pi;

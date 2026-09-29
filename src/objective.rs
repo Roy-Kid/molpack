@@ -4,6 +4,7 @@
 use crate::constraints::{EvalMode, EvalOutput};
 use crate::context::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat, eulerrmat_derivatives};
+use crate::restraint::GroupCtx;
 use molrs::spatial::simbox::Mic;
 use molrs::types::F;
 #[cfg(feature = "rayon")]
@@ -54,7 +55,7 @@ fn pbc_wrap_delta(dx: F, dy: F, dz: F, pbc: &PbcConstants) -> (F, F, F) {
 }
 
 // Parallel pair evaluation is user-selected via
-// `Molpack::parallel_pair_eval(true)` → `PackContext::parallel_pair_eval`.
+// `PackEngine::with_parallel_eval(true)` → `PackContext::parallel_pair_eval`.
 // The library does not attempt to auto-detect when rayon pays off: the
 // crossover is workload-shaped (call frequency, work-per-call,
 // movebad proportion) rather than something inferrable from a single
@@ -70,8 +71,7 @@ fn pbc_wrap_delta(dx: F, dy: F, dz: F, pbc: &PbcConstants) -> (F, F, F) {
 /// as `has_fixed` / `has_short`. Drift between the four copies would
 /// silently change kernel behaviour — centralising it here means one
 /// edit site. The struct is `#[inline(always)]`-constructed so the call
-/// compiles to the same loads the inlined prologue produced (verified
-/// by the `pair_kernel` bench — see the commit message for Fix 2).
+/// compiles to the same loads the inlined prologue produced.
 #[derive(Clone, Copy)]
 struct AtomHotState {
     props: crate::context::AtomProps,
@@ -141,7 +141,9 @@ pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
         let mut f = accumulate_constraint_values_from_xcart(sys);
         if !sys.init1 {
             f += accumulate_pair_f(sys);
-            f += accumulate_collective_f(sys);
+            let (v, bound) = accumulate_collective_f(sys);
+            f += v;
+            sys.frest = sys.frest.max(bound);
         }
         return f;
     }
@@ -158,7 +160,9 @@ pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
     }
 
     f += accumulate_pair_f(sys);
-    f += accumulate_collective_f(sys);
+    let (v, bound) = accumulate_collective_f(sys);
+    f += v;
+    sys.frest = sys.frest.max(bound);
     update_cached_geometry(x, sys);
 
     f
@@ -181,7 +185,9 @@ pub fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
         let mut f = accumulate_constraint_values_and_gradients_from_xcart(sys);
         if !sys.init1 {
             f += accumulate_pair_fg(sys);
-            f += accumulate_collective_fg(sys);
+            let (v, bound) = accumulate_collective_fg(sys);
+            f += v;
+            sys.frest = sys.frest.max(bound);
         }
         project_cartesian_gradient(x, sys, g);
         return f;
@@ -195,7 +201,9 @@ pub fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
 
     if !sys.init1 {
         f += accumulate_pair_fg(sys);
-        f += accumulate_collective_fg(sys);
+        let (v, bound) = accumulate_collective_fg(sys);
+        f += v;
+        sys.frest = sys.frest.max(bound);
     }
 
     update_cached_geometry(x, sys);
@@ -226,7 +234,10 @@ struct PairContribution {
 /// move-tracking or not) calls this — they differ only in *where* they apply
 /// the result, never in the formula.
 ///
-/// Returns `None` when the pair is skipped (same molecule, or both fixed). The
+/// Returns `None` when the pair is skipped: both fixed, or the same molecule
+/// seen directly. The same molecule seen through a periodic image is another
+/// body and is scored — a copy longer than half the cell can otherwise lie on
+/// its own image unseen. The
 /// two const generics let each caller drop the work it doesn't need at zero
 /// runtime cost: `GRAD` removes the force math for value-only passes,
 /// `VIOLATION` removes the `fdist` term for the gradient-only pass.
@@ -242,8 +253,10 @@ fn pair_term<const GRAD: bool, const VIOLATION: bool>(
     pbc: &PbcConstants,
 ) -> Option<PairContribution> {
     let props_j = sys.atom_props[jcart];
-    // Skip same molecule. State.intra is the intramolecular residual reporter.
-    if hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype {
+    let same_molecule = hot.props.ibmol == props_j.ibmol && hot.props.ibtype == props_j.ibtype;
+    // Without a periodic axis the only view of the same molecule is the direct
+    // one. State.intra is the intramolecular residual reporter.
+    if same_molecule && matches!(pbc.mic, Mic::Free) {
         return None;
     }
     // Skip two fixed atoms (only matters if the system has any at all).
@@ -252,8 +265,20 @@ fn pair_term<const GRAD: bool, const VIOLATION: bool>(
     }
 
     let xj = sys.xcart[jcart];
-    let (dx, dy, dz) = pbc_wrap_delta(xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2], pbc);
+    let raw = [xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2]];
+    let (dx, dy, dz) = pbc_wrap_delta(raw[0], raw[1], raw[2], pbc);
     let datom = dx * dx + dy * dy + dz * dz;
+    // A copy's atoms are one continuous image in `xcart`, so for the same
+    // molecule the direct separation is its own geometry — skipped as above.
+    // Only a strictly nearer shifted image is another body. The relative
+    // margin absorbs the triclinic fractional round trip, which is not exact
+    // even when no shift is applied.
+    if same_molecule {
+        let direct = raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2];
+        if datom >= direct * (1.0 - 64.0 * F::EPSILON) {
+            return None;
+        }
+    }
     let rsum = hot.props.radius + props_j.radius;
     let tol = rsum * rsum;
 
@@ -711,15 +736,24 @@ fn type_icart_start(sys: &PackContext, itype: usize) -> usize {
     start
 }
 
-/// Sum of all collective (group-level) restraint penalties. Each restraint is
-/// evaluated once over **all copies** of its type (gathered from `sys.xcart`).
+/// Sum of all collective (group-level) restraint penalties, and the worst value
+/// among those that are **bounds** (see [`Restraint::is_bound`]). Each restraint
+/// is evaluated once over **all copies** of its type (gathered from `sys.xcart`).
 /// Read-only — used by the value-only `compute_f` paths.
-fn accumulate_collective_f(sys: &PackContext) -> F {
+///
+/// The second number is returned rather than written into `sys.frest` so that
+/// the gradient-only path, which shares the `fg` accumulator, cannot disturb the
+/// convergence verdict — the same split the per-atom
+/// `accumulate_constraint_value` / `_gradient` pair keeps.
+fn accumulate_collective_f(sys: &PackContext) -> (F, F) {
     if sys.collective.is_empty() {
-        return 0.0;
+        return (0.0, 0.0);
     }
     let (scale, scale2) = (sys.scale, sys.scale2);
+    // Same minimum-image convention the pair loop uses, from the same box.
+    let mic = pbc_constants(sys).mic;
     let mut total = 0.0;
+    let mut bound_max = 0.0 as F;
     for (itype, r) in &sys.collective {
         let itype = *itype;
         if !sys.comptype[itype] {
@@ -730,38 +764,53 @@ fn accumulate_collective_f(sys: &PackContext) -> F {
         if len == 0 {
             continue;
         }
-        total += r.f(&sys.xcart[start..start + len], scale, scale2);
+        let ctx = GroupCtx {
+            scale,
+            scale2,
+            natoms_per_copy: sys.natoms[itype],
+            cell: &sys.simbox,
+            mic,
+        };
+        let v = r.f(&sys.xcart[start..start + len], ctx);
+        total += v;
+        if r.is_bound() {
+            bound_max = bound_max.max(v);
+        }
     }
-    total
+    (total, bound_max)
 }
 
 /// Value + gradient of all collective restraints. The coupled gradient is
 /// scattered into `sys.work.gxcar` so the subsequent `project_cartesian_gradient`
 /// maps it onto each molecule's COM/Euler DOF (monatomic species → identity on z).
-/// Returns the summed penalty value. Used by `compute_fg` (value) and
-/// `compute_g` (gradient; value discarded).
-fn accumulate_collective_fg(sys: &mut PackContext) -> F {
+/// Returns `(summed penalty, worst bound penalty)` — see
+/// [`accumulate_collective_f`]. Used by `compute_fg` (both numbers) and
+/// `compute_g` (both discarded, so the gradient path leaves the verdict alone).
+fn accumulate_collective_fg(sys: &mut PackContext) -> (F, F) {
     if sys.collective.is_empty() {
-        return 0.0;
+        return (0.0, 0.0);
     }
     let (scale, scale2) = (sys.scale, sys.scale2);
+    // Same minimum-image convention the pair loop uses, taken before the split
+    // borrow below hands out `xcart` and `work`.
+    let mic = pbc_constants(sys).mic;
     // Move the list out so `sys.xcart` (read) and `sys.work.gxcar` (write) are
     // borrowed as disjoint fields without aliasing the whole `sys`.
     let collective = std::mem::take(&mut sys.collective);
 
-    // Resolve every group's slice first: `type_icart_start` borrows all of
-    // `sys`, and the loop below needs two of its fields split apart.
-    let spans: Vec<(usize, usize)> = collective
-        .iter()
-        .map(|(itype, _)| *itype)
-        .map(|itype| {
-            if !sys.comptype[itype] {
-                return (0, 0);
-            }
-            let len = sys.nmols[itype] * sys.natoms[itype];
-            (type_icart_start(sys, itype), len)
-        })
-        .collect();
+    // Resolve every group's slice and per-copy width first: `type_icart_start`
+    // borrows all of `sys`, and the loop below needs two of its fields split
+    // apart. The list is moved out of the work buffers and back, so it keeps
+    // its capacity across evaluations instead of allocating per call.
+    let mut spans = std::mem::take(&mut sys.work.collective_spans);
+    spans.clear();
+    spans.extend(collective.iter().map(|(itype, _)| *itype).map(|itype| {
+        if !sys.comptype[itype] {
+            return (0, 0, 0);
+        }
+        let len = sys.nmols[itype] * sys.natoms[itype];
+        (type_icart_start(sys, itype), len, sys.natoms[itype])
+    }));
 
     // Split borrow: coordinates are read in place and the coupled gradient is
     // accumulated straight into the scatter buffer. The restraint contract is
@@ -769,22 +818,39 @@ fn accumulate_collective_fg(sys: &mut PackContext) -> F {
     // coordinates nor the gradients need a staging copy — they used to cost
     // two allocations plus two passes per evaluation per group, ~200 us for a
     // 30k-atom species, on a path GENCAN calls thousands of times.
-    let PackContext { xcart, work, .. } = sys;
+    let PackContext {
+        xcart,
+        work,
+        simbox,
+        ..
+    } = sys;
     let mut total = 0.0;
-    for ((start, len), (_, r)) in spans.iter().copied().zip(collective.iter()) {
+    let mut bound_max = 0.0 as F;
+    for ((start, len, natoms_per_copy), (_, r)) in spans.iter().copied().zip(collective.iter()) {
         if len == 0 {
             continue;
         }
-        total += r.fg(
-            &xcart[start..start + len],
+        let ctx = GroupCtx {
             scale,
             scale2,
+            natoms_per_copy,
+            cell: simbox,
+            mic,
+        };
+        let v = r.fg(
+            &xcart[start..start + len],
+            ctx,
             &mut work.gxcar[start..start + len],
         );
+        total += v;
+        if r.is_bound() {
+            bound_max = bound_max.max(v);
+        }
     }
 
     sys.collective = collective;
-    total
+    sys.work.collective_spans = spans;
+    (total, bound_max)
 }
 
 #[inline(always)]
@@ -800,8 +866,8 @@ fn insert_atom_in_cell(icart: usize, pos: &[F; 3], sys: &mut PackContext) {
         sys.lcellfirst = icell as u32;
     }
 
-    // `ibtype` / `ibmol` used to be written here on every eval; they are
-    // now set once in `Molpack::pack` and mirrored into `atom_props`.
+    // `ibtype` / `ibmol` are set once at context construction and mirrored
+    // into `atom_props`.
 }
 
 #[inline(always)]
@@ -1378,9 +1444,7 @@ fn update_cached_geometry(x: &[F], sys: &mut PackContext) {
 // `Objective` is the abstraction the packer's GENCAN loop will talk to. At
 // this checkpoint the trait is defined and implemented for `PackContext` but
 // no call site has been rewired yet (`pgencan` still takes `&mut PackContext`
-// directly). Phase A.6 swaps `pgencan`'s signature to `&mut dyn Objective`
-// and is gated by an explicit extract-bench-loop commit so the dyn-dispatch
-// cost lands with a measurement attached.
+// directly). Phase A.6 swaps `pgencan`'s signature to `&mut dyn Objective`.
 //
 // The trait is intentionally shaped to match what the GENCAN loop reads and
 // writes today — no speculative extra methods.
@@ -1398,9 +1462,8 @@ fn update_cached_geometry(x: &[F], sys: &mut PackContext) {
 /// and the caller (e.g. `pgencan::build_bounds`) builds them from the
 /// concrete context it has in hand.
 ///
-/// See spec `.claude/specs/molrs-pack-plugin-arch.md` §9 Phase A step 5 for
-/// the rationale; Phase B will expose this trait publicly as the extension
-/// hook for custom objectives.
+/// It is public (re-exported at the crate root) as the extension hook for
+/// custom objectives.
 ///
 /// [`evaluate`]: Self::evaluate
 pub trait Objective {
@@ -1572,5 +1635,249 @@ mod objective_trait_tests {
         obj.reset_eval_counters();
         assert_eq!(obj.ncf(), 0, "ncf should be 0 after reset");
         assert_eq!(obj.ncg(), 0, "ncg should be 0 after reset");
+    }
+}
+
+/// Numerical-equivalence test: `compute_fg` with
+/// `PackContext::parallel_pair_eval = true` must produce the same `f`,
+/// `fdist`, and full gradient as the serial path. Guards against any
+/// float-summation reordering regression inside the rayon reduce +
+/// parallel merge.
+///
+/// Parallelism is user-opt-in via `with_parallel_eval(bool)`
+/// → `PackContext::parallel_pair_eval`. These tests flip the flag
+/// explicitly so the parallel code path is actually exercised instead
+/// of relying on a size heuristic.
+#[cfg(all(test, feature = "rayon"))]
+mod parallel_equivalence_tests {
+    use crate::objective::{compute_f, compute_fg};
+    use crate::{F, PackContext};
+
+    /// A synthetic water-in-a-box context: enough molecules that the
+    /// parallel reduce actually splits the pair loop.
+    fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F>) {
+        let atoms_per_mol = 3usize;
+        let ntotat = n_mols * atoms_per_mol;
+        let ntype = 1usize;
+        let mut sys = PackContext::new(ntotat, n_mols, ntype);
+        sys.ntype_with_fixed = ntype;
+        sys.nmols = vec![n_mols];
+        sys.natoms = vec![atoms_per_mol];
+        sys.idfirst = vec![0];
+        sys.comptype = vec![true; ntype];
+        sys.constrain_rot = vec![[false; 3]; ntype];
+        sys.rot_bound = vec![[[0.0; 2]; 3]; ntype];
+        // One reference conformer per copy — `coor` shares `xcart`'s index space.
+        sys.coor = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]].repeat(n_mols);
+        sys.radius.fill(1.0);
+        sys.radius_ini.fill(1.0);
+        sys.fscale.fill(1.0);
+
+        for imol in 0..n_mols {
+            for iatom in 0..atoms_per_mol {
+                let icart = imol * atoms_per_mol + iatom;
+                sys.ibtype[icart] = 0;
+                sys.ibmol[icart] = imol;
+            }
+        }
+        sys.iratom_offsets = vec![0; ntotat + 1];
+        sys.iratom_data.clear();
+
+        let pad: F = 3.0;
+        let side = box_side + 2.0 * pad;
+        let origin = [-pad, -pad, -pad];
+        let mut origin_arr = molrs::types::F3::zeros(3);
+        for k in 0..3 {
+            origin_arr[k] = origin[k];
+        }
+        sys.simbox =
+            molrs::spatial::simbox::SimBox::cube(side, origin_arr, [false; 3]).expect("cell");
+        let cell_side: F = 2.0;
+        sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, cell_side);
+        sys.resize_cell_arrays();
+
+        sys.sizemin = origin;
+        sys.sizemax = [origin[0] + side, origin[1] + side, origin[2] + side];
+
+        sys.sync_atom_props();
+
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let mut x = vec![0.0 as F; 6 * n_mols];
+        for imol in 0..n_mols {
+            x[3 * imol] = rng.random::<F>() * box_side;
+            x[3 * imol + 1] = rng.random::<F>() * box_side;
+            x[3 * imol + 2] = rng.random::<F>() * box_side;
+            let base = 3 * n_mols + 3 * imol;
+            x[base] = rng.random::<F>() * std::f64::consts::TAU;
+            x[base + 1] = rng.random::<F>() * std::f64::consts::TAU;
+            x[base + 2] = rng.random::<F>() * std::f64::consts::TAU;
+        }
+        let _ = compute_f(&x, &mut sys);
+        sys.reset_eval_counters();
+
+        (sys, x)
+    }
+
+    /// `compute_fg` with `parallel_pair_eval = true` produces the same `f`
+    /// and gradient as the serial path (`compute_f` + `compute_g`). Both
+    /// consult the same inner pair kernel; differences can only come from
+    /// rayon's tree-order reduce in the fused path.
+    #[test]
+    fn compute_fg_parallel_matches_compute_g_serial_large_system() {
+        let (mut sys_a, x) = build_water_box(1000, 80.0, 0xC0FFEE);
+        let (mut sys_b, _) = build_water_box(1000, 80.0, 0xC0FFEE);
+        // Explicit opt-in: exercise the parallel branch of
+        // accumulate_pair_fg. `sys_b` stays serial (default false).
+        sys_a.parallel_pair_eval = true;
+
+        // Fused path (parallel — flag is on).
+        let mut g_fused = vec![0.0; x.len()];
+        let f_fused = compute_fg(&x, &mut sys_a, &mut g_fused);
+
+        // Serial path via compute_f + compute_g; compute_g is not
+        // parallelised, so its gradient is the reference ordering.
+        let f_sep = compute_f(&x, &mut sys_b);
+        let mut g_sep = vec![0.0; x.len()];
+        crate::objective::compute_g(&x, &mut sys_b, &mut g_sep);
+
+        // f should be numerically identical up to the partial-sum
+        // reordering inside rayon's reduce — both sum the same set of
+        // scalar contributions, but parallel reduce aggregates them in
+        // tree order. Allow 1e-8 relative tolerance.
+        let rel_f = (f_fused - f_sep).abs() / f_sep.abs().max(1.0);
+        assert!(
+            rel_f < 1e-8,
+            "f mismatch: fused={f_fused} sep={f_sep} rel={rel_f}"
+        );
+
+        // Gradient contributions for each atom pair are identical in both
+        // paths; the parallel merge just adds them up in a different
+        // chunk order. That is associative on f64 *modulo* rounding, so a
+        // relative tolerance of 1e-9 is what to expect in practice.
+        let mut max_abs_err: F = 0.0;
+        let mut max_rel_err: F = 0.0;
+        for (i, (&a, &b)) in g_fused.iter().zip(&g_sep).enumerate() {
+            let abs = (a - b).abs();
+            let rel = abs / a.abs().max(b.abs()).max(1.0);
+            if abs > max_abs_err {
+                max_abs_err = abs;
+            }
+            if rel > max_rel_err {
+                max_rel_err = rel;
+            }
+            assert!(
+                rel < 1e-9,
+                "g[{i}] relative mismatch: fused={a} sep={b} rel={rel}"
+            );
+        }
+        eprintln!("parallel_equivalence: max_abs={max_abs_err:e} max_rel={max_rel_err:e}");
+    }
+
+    /// Small-system path with parallelism still opted-in: even at a
+    /// workload size where parallel is net slower, the numerical result
+    /// must match the serial reference. Guards against regressions where
+    /// the parallel partition/merge subtly diverges (e.g. a stale partial
+    /// buffer slot) that a bigger workload might hide through noise.
+    #[test]
+    fn compute_fg_small_system_parallel_matches_serial() {
+        let (mut sys_a, x) = build_water_box(50, 12.0, 0xBEEF);
+        let (mut sys_b, _) = build_water_box(50, 12.0, 0xBEEF);
+        sys_a.parallel_pair_eval = true;
+
+        let mut g_fused = vec![0.0; x.len()];
+        let f_fused = compute_fg(&x, &mut sys_a, &mut g_fused);
+
+        let f_sep = compute_f(&x, &mut sys_b);
+        let mut g_sep = vec![0.0; x.len()];
+        crate::objective::compute_g(&x, &mut sys_b, &mut g_sep);
+
+        assert!((f_fused - f_sep).abs() < 1e-10);
+        for (a, b) in g_fused.iter().zip(&g_sep) {
+            assert!((a - b).abs() < 1e-10, "g mismatch: {a} vs {b}");
+        }
+    }
+
+    // ── pack-level parity: full GenCanPack run, serial vs parallel ──────────
+
+    use rand::RngExt;
+    use rand::SeedableRng;
+    use rand::rngs::SmallRng;
+
+    // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
+}
+
+/// A molecule is skipped against itself only as seen directly: through a
+/// periodic image it is another body, and a copy longer than half the cell
+/// must not be allowed to lie on its own image.
+#[cfg(test)]
+mod self_image_tests {
+    use crate::objective::compute_f;
+    use crate::{F, PackContext};
+
+    /// One rigid copy with conformer `coor` (centred at the origin), its COM
+    /// at the centre of a `side` Å cube, radii 1 Å (contact at 2 Å).
+    fn one_copy(coor: &[[F; 3]], side: F, pbc: bool) -> (PackContext, Vec<F>) {
+        let na = coor.len();
+        let mut sys = PackContext::new(na, 1, 1);
+        sys.ntype_with_fixed = 1;
+        sys.nmols = vec![1];
+        sys.natoms = vec![na];
+        sys.idfirst = vec![0];
+        sys.comptype = vec![true];
+        sys.constrain_rot = vec![[false; 3]];
+        sys.rot_bound = vec![[[0.0; 2]; 3]];
+        sys.coor = coor.to_vec();
+        sys.radius.fill(1.0);
+        sys.radius_ini.fill(1.0);
+        sys.fscale.fill(1.0);
+        for icart in 0..na {
+            sys.ibtype[icart] = 0;
+            sys.ibmol[icart] = 0;
+        }
+        sys.iratom_offsets = vec![0; na + 1];
+        sys.iratom_data.clear();
+        let origin = molrs::types::F3::zeros(3);
+        sys.simbox = molrs::spatial::simbox::SimBox::cube(side, origin, [pbc; 3]).expect("cell");
+        sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, 2.0);
+        sys.resize_cell_arrays();
+        sys.sizemin = [0.0; 3];
+        sys.sizemax = [side; 3];
+        sys.sync_atom_props();
+        let half = side / 2.0;
+        (sys, vec![half, half, half, 0.0, 0.0, 0.0])
+    }
+
+    #[test]
+    fn a_copy_lying_on_its_own_periodic_image_is_scored() {
+        // Ends 9.5 Å apart directly, 0.5 Å apart through the 10 Å cell.
+        let rod = [[-4.75, 0.0, 0.0], [4.75, 0.0, 0.0]];
+        let (mut sys, x) = one_copy(&rod, 10.0, true);
+        let f = compute_f(&x, &mut sys);
+        assert!(
+            f > 0.0,
+            "the self-image contact must cost something, f = {f}"
+        );
+        assert!(
+            (sys.fdist - (4.0 - 0.25)).abs() < 1e-9,
+            "fdist is the image contact's violation, got {}",
+            sys.fdist
+        );
+
+        let (mut open, x) = one_copy(&rod, 10.0, false);
+        assert_eq!(
+            compute_f(&x, &mut open),
+            0.0,
+            "no image without a periodic axis"
+        );
+        assert_eq!(open.fdist, 0.0);
+    }
+
+    #[test]
+    fn a_copy_is_still_not_scored_against_itself_directly() {
+        // 0.5 Å apart directly, far from any image: the copy's own geometry.
+        let close = [[-0.25, 0.0, 0.0], [0.25, 0.0, 0.0]];
+        let (mut sys, x) = one_copy(&close, 10.0, true);
+        assert_eq!(compute_f(&x, &mut sys), 0.0);
+        assert_eq!(sys.fdist, 0.0);
     }
 }

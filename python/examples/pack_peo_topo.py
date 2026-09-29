@@ -1,11 +1,12 @@
 """Topological PEO: 4-arm star and macrocycle, then pack.
 
 Chemistry is molrs (SMILES + conformer, including hydrogens). Architecture
-is molpy ``PolymerBuilder``. Packing is molpack. No hand-placed coordinates.
+is molpy: CGsmiles topologies grown by ``mp.Assembler`` with
+``mp.GrowthPlacer``. Packing is molpack. No hand-placed coordinates.
 
-A 4-arm star needs a tetrafunctional core. Ethylene glycol only has two
-reaction sites, so ``#[EO](#[EO]:n):4`` cannot branch; the graph is
-``#[X4](#[EO]:n):4`` with pentaerythritol-like ``C(CO)(CO)(CO)CO``.
+A 4-arm star needs a tetrafunctional core. An EO unit only has two ports,
+so the core is ``X4`` (``C(C[>])(C[>])(C[>])C[>]``, pentaerythritol-like)
+with four EO arms.
 
 ::
 
@@ -29,71 +30,64 @@ from pathlib import Path
 import molpy as mp
 import molrs
 import numpy as np
-from molpy.builder.assembly import (
-    MonomerLibrary,
-    PolymerBuilder,
-    ResiduePlacer,
-    SiteMap,
-    ring_cgsmiles,
-    star_cgsmiles,
-)
 from molpy.conformer import Conformer
-from molpy.core.atomistic import Atomistic
+from molrs import Atomistic
 
 import molpack
 
 OUT = Path(__file__).resolve().parent / "out"
 
-ETHER = "[O;%a:1][H].[C:2][O;%b][H]>>[O:1][C:2]"
 PEO_C_INF = 5.5
 TET = 1.9106332
 N_ARMS = 4
 
 
-def smiles_3d(smiles: str, seed: int) -> Atomistic:
-    """molrs SMILES parse + molrs conformer (3D, explicit H)."""
-    mol, _ = Conformer(add_hydrogens=True, seed=seed).generate(
-        mp.io.read_smiles(smiles)
-    )
-    return mol
+EO_UNIT = "[<]OCC[>]"  # -O-CH2-CH2-, ports on O (<) and C (>)
+CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
 
 
-def peo_builder(*, seed: int = 42, with_core: bool = True) -> PolymerBuilder:
-    eo = smiles_3d("OCCO", seed)
-    SiteMap(eo).label_elements("O", "a", "b")
-    library: dict[str, Atomistic] = {"EO": eo}
-    if with_core:
-        core = smiles_3d("C(CO)(CO)(CO)CO", seed + 1)
-        oxygens = [a for a in core.atoms if a.get("element") == "O"]
-        if len(oxygens) < N_ARMS:
-            raise RuntimeError("C(CO)(CO)(CO)CO must carry four hydroxyl oxygens")
-        SiteMap(core).label_atoms(oxygens[:N_ARMS], *(["a"] * N_ARMS))
-        library["X4"] = core
-    return PolymerBuilder(
-        MonomerLibrary(library),
-        mp.Reaction(ETHER),
-        placer=ResiduePlacer(),
-    )
+def _unit(name: str, body: str, seed: int) -> mp.Atomistic:
+    """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
+    template = molrs.io.SmilesIR.from_fragment(body).to_template()
+    return Conformer(seed=seed).generate(template)[0]
+
+
+def _grow(topology: str, library: dict[str, mp.Atomistic]) -> Atomistic:
+    """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
+    sites = mp.CGSmilesIR(topology).to_coarsegrain()
+    return mp.Assembler(library, mp.GrowthPlacer()).assemble(sites, mp.Atomistic)
+
+
+def linear_topology(n: int) -> str:
+    return f"{{[#EO]|{n}}}"
 
 
 def make_linear(n: int, *, seed: int = 42) -> Atomistic:
     if n < 1:
         raise ValueError(f"linear n must be >= 1, got {n}")
-    return peo_builder(seed=seed, with_core=False).build_linear("EO", n)
+    return _grow(linear_topology(n), {"EO": _unit("EO", EO_UNIT, seed)})
+
+
+def star_topology(arm_length: int) -> str:
+    arm = "[#EO]" * arm_length
+    return "{[#X4]" + f"({arm})" * (N_ARMS - 1) + arm + "}"
 
 
 def make_star(arm_length: int, *, seed: int = 42) -> Atomistic:
     if arm_length < 1:
         raise ValueError(f"star arm_length must be >= 1, got {arm_length}")
-    return peo_builder(seed=seed, with_core=True).build_star(
-        "X4", "EO", n_arms=N_ARMS, arm_length=arm_length
-    )
+    library = {"EO": _unit("EO", EO_UNIT, seed), "X4": _unit("X4", CORE_UNIT, seed + 1)}
+    return _grow(star_topology(arm_length), library)
+
+
+def ring_topology(n: int) -> str:
+    return "{[#EO]1" + "[#EO]" * (n - 2) + "[#EO]1}"
 
 
 def make_ring(n: int, *, seed: int = 42) -> Atomistic:
     if n < 3:
         raise ValueError(f"ring needs n >= 3 residues, got {n}")
-    return peo_builder(seed=seed, with_core=False).build_ring("EO", n)
+    return _grow(ring_topology(n), {"EO": _unit("EO", EO_UNIT, seed)})
 
 
 def _h_indices(frame) -> list[int]:
@@ -170,7 +164,7 @@ def lattice_then_push(
 
 def pack_star(dp: int, n_mol: int, density: float, seed: int) -> molpack.State:
     polymer = make_star(dp, seed=seed)
-    print(f"  topology     : {star_cgsmiles('X4', 'EO', n_arms=N_ARMS, arm_length=dp)}")
+    print(f"  topology     : {star_topology(dp)}")
     _report_graph(polymer)
     print(f"  copies       : {n_mol}   density {density} g/cm³")
     target = _target(polymer, n_mol, "star-PEO")
@@ -184,7 +178,7 @@ def pack_star(dp: int, n_mol: int, density: float, seed: int) -> molpack.State:
 
 def pack_ring(dp: int, n_mol: int, density: float, seed: int) -> molpack.State:
     polymer = make_ring(dp, seed=seed)
-    print(f"  topology     : {ring_cgsmiles('EO', dp)}")
+    print(f"  topology     : {ring_topology(dp)}")
     _report_graph(polymer)
     print(f"  copies       : {n_mol}   density {density} g/cm³")
     target = _target(polymer, n_mol, "c-PEO")
@@ -240,8 +234,12 @@ def main(argv: list[str] | None = None) -> None:
         )
     stem = f"pack_peo_topo_{kind}"
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.mrec.write_frame(str(OUT / f"{stem}.mrec"), packed)
-    molrs.io.write_lammps_traj(str(OUT / f"{stem}.lammpstrj"), [packed])
+    molrs.io.write_mrec(str(OUT / f"{stem}.mrec"), packed)
+    molrs.io.write_lammps_trajectory(
+        str(OUT / f"{stem}.lammpstrj"),
+        [packed],
+        columns=["id", "element", "mol", "x", "y", "z"],
+    )
     if "bonds" in packed and packed["bonds"].nrows:
         molrs.io.write_lammps_dump_local(str(OUT / f"{stem}.dump.local"), [packed])
     print(f"  wall         : {time.perf_counter() - t0:.3f} s")

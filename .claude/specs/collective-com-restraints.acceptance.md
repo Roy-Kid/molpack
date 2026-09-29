@@ -28,7 +28,9 @@ criteria:
     summary: StructureFactor 梯度与中心差分一致
     type: code
     pass_when: |
-      tests/gradient.rs 中对 StructureFactor 项做中心差分，
+      StructureFactor 所属模块的 `#[cfg(test)]` 与
+      src/restraint/geometric/tests/gradient.rs（经 objective 的中心差分，同
+      `collective_restraint_gradient_matches_finite_difference_through_the_objective` 的形式）中对 StructureFactor 项做中心差分，
       在正交胞与三斜胞上相对误差均 < 1e-6；axis 几何同样通过。
     status: pending
   - id: ac-005
@@ -37,7 +39,7 @@ criteria:
     pass_when: |
       同一构象池、同一密度、同一 tolerance 下跑两遍（仅 pairwise 目标 vs 加入
       StructureFactor）。加入后最低若干 q 壳层的 S(q) 相对未加入时下降 >= 10 倍；
-      两次运行的 validation 报告均无违反（分子间最小距离满足 tolerance）。
+      两次运行返回的 `State` 均 `fdist <= precision` 且 `frest == 0`（分子间最小距离满足 tolerance；原 validation 报告已删除）。
     status: pending
   - id: ac-006
     summary: 目标剖面：质心分布匹配给定的层状剖面
@@ -95,7 +97,7 @@ criteria:
 
 这是 Auhl–Kremer prepacking 的复现基线，也是本 spec 的核心功能判据。
 **两臂必须用同一个构象池**——链内统计完全相同，唯一变量是放置目标，
-否则数字无法归因。同时必须证明集体项没有以牺牲堆积质量为代价（validation 干净）。
+否则数字无法归因。同时必须证明集体项没有以牺牲堆积质量为代价（`State` 的 `fdist`/`frest` 干净）。
 
 注意这条是"复现已知方法"，不是新贡献；贡献在 AC-006 / AC-007 的非均匀目标上。
 

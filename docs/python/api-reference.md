@@ -12,13 +12,13 @@ from molpack import (
     Pipeline,
     # Typed values
     Angle, Axis, CenteringMode,
-    # Geometric (per-atom) restraints
-    InsideBoxRestraint, InsideSphereRestraint, OutsideSphereRestraint,
-    AbovePlaneRestraint, BelowPlaneRestraint, StlRegion,
+    # (geometric restraints are molrs regions — see "molrs regions as restraints")
     # Collective (distribution-matching) restraints
     GaussianPlane, GaussianPoint,
     ExponentialPlane, ExponentialPoint,
     TabulatedPlane, TabulatedPoint,
+    # Collective (pairwise separation) restraint
+    SelfSeparation,
     # Chain-growth priors
     TorsionPrior, AnglePrior,
     # Script loader (`.inp`)
@@ -34,7 +34,6 @@ from molpack import (
     NoTargetsError,
     EmptyMoleculeError,
     InvalidPBCBoxError,
-    ConflictingPeriodicBoxesError,
 )
 ```
 
@@ -79,8 +78,8 @@ instances.
 Target(frame, count: int)
 ```
 
-- `frame` — a `molrs.Frame` or `molpy.Frame` with atom columns `"x"`,
-  `"y"`, `"z"`, and `"element"` (or `"symbol"` for `molrs` PDB frames).
+- `frame` — a `molrs.Frame` (`molpy.Frame` is the same class) with atom
+  columns `"x"`, `"y"`, `"z"`, and `"element"`.
   Resolved zero-copy via its FFI capsule; a plain dict is not accepted.
 - `count` — number of copies to produce.
 
@@ -108,6 +107,10 @@ Target(frame, count: int)
   `[0, 0, 0, 1]` (depth 3). Empty / non-finite / outside `[0, 1]` raise
   `ValueError`. Fractional `0.5` is stored and refused at
   `CbmcGrow.run`. This is not a force-field `special_bonds` triple.
+- `.with_hydrogens(indices: Sequence[int])` — the atoms lattice growth
+  treats as hydrogens (0-based), placed off their backbone neighbour rather
+  than on a lattice site. Default: element symbol `H`. Pass `[]` for a
+  coarse-grained model. An out-of-range index raises `ValueError`.
 - `.with_perturb_budget(n: int)` — per-target perturbation budget.
 - `.with_centering(mode: CenteringMode)`.
 - `.with_rotation_bound(axis: Axis, center: Angle, half_width: Angle)`.
@@ -161,8 +164,7 @@ Available on `GenCanPack` **and** `CbmcGrow`:
 - `.with_precision(p: float)` — convergence threshold (default 0.01).
 - `.with_seed(seed: int)` — deterministic RNG (default Packmol's 1234567).
 - `.with_periodic_box(min: [x,y,z], max: [x,y,z])` — declare a
-  fully-periodic box directly on the entry (Packmol `pbc`). Alternative
-  to a periodic `InsideBoxRestraint`; see
+  fully-periodic box directly on the entry (Packmol `pbc`); see
   [Periodic boundaries](guide/periodic-boundaries.md).
 - `.with_density(rho: float)` — size the box from a target mass density
   (g/cm³) instead of declaring it: `run()` resolves a cubic, fully
@@ -405,8 +407,7 @@ info.frest
 info.improvement_pct
 info.radscale
 info.precision
-info.relaxer_acceptance  # list[tuple[int, float]]
-info.stage               # StageInfo — which packing algorithm emitted this step
+info.stage             # StageInfo — which packing algorithm emitted this step
 ```
 
 ### `StageInfo`
@@ -427,41 +428,21 @@ inside a multi-stage [`Pipeline`](#pipeline); present, with `index = 0` and
 
 All restraint classes are immutable. Two families, both attached with
 `target.with_restraint(r)` (or the entry's `with_global_restraint(r)`):
-**geometric** per-atom region restraints (below) and **collective**
+**molrs regions** lifted to a per-atom penalty (below) and **collective**
 distribution-matching restraints ([next section](#collective-distribution-matching-restraints)).
 
-### Geometric (per-atom) restraints
+### molrs regions as restraints
 
-Their `f`/`fg` see **one atom** at a time — a soft quadratic penalty that
-is zero inside the region and rises outside.
-
-### `InsideBoxRestraint(min, max, periodic=(False, False, False))`
-
-Axis-aligned box. `periodic` is a 3-tuple of booleans declaring per-axis
-periodicity — see [Periodic boundaries](guide/periodic-boundaries.md).
-
-### `InsideSphereRestraint(center, radius)`
-
-Closed ball.
-
-### `OutsideSphereRestraint(center, radius)`
-
-Complement of closed ball.
-
-### `AbovePlaneRestraint(normal, distance)`
-
-Half-space $\{\mathbf{x} : \mathbf{n}\cdot\mathbf{x} \ge d\}$.
-
-### `BelowPlaneRestraint(normal, distance)`
-
-Half-space $\{\mathbf{x} : \mathbf{n}\cdot\mathbf{x} \le d\}$.
-
-### `StlRegion.from_file(path, scale=1.0)`
-
-Watertight triangle mesh. `scale` is Å per file unit (`1.0` = file already
-Å). Attaches like the geometric restraints above (`target.with_restraint`).
-The predicate is the **atom centre**. Solver split (same as any geometric
-restraint, not STL-specific):
+Any molrs region object attaches as a restraint: `molrs.Sphere`, `Cuboid`,
+`Parallelepiped`, `HalfSpace`, `Cylinder`, `Ellipsoid`, `Polyhedron`,
+`SphereUnion`, or any `&` / `|` / `~` composition of them. The region
+crosses the wheel boundary as a `molrs.RegionRef` capsule (both wheels on
+one molrs minor line) and is lifted to `scale · max(0, distance)²` — a
+soft quadratic penalty on the **atom centre** that is zero inside the
+region and on its boundary. molpack defines no geometric restraint class;
+the shapes, their constructors and their `contains` / `distance` /
+`bounds` queries are documented with molrs. Solver split (the same for
+every region, not inferred from the shape):
 
 - `GenCanPack` — soft exterior penalty.
 - `CbmcGrow` — hard reject on propose; `force_place` may sit outside.
@@ -471,20 +452,13 @@ restraint, not STL-specific):
   template's local geometry and can reach about a bond length past the
   surface; author the mesh with that clearance in it if the wall has to hold.
 
-Queries are served by a BVH built once when the region is constructed, so cost
-grows with the log of the triangle count, not the count. On an 8 700-triangle
-mesh a `signed_distance` call is 2.8 µs against 90 µs for the linear scan it
-replaced — the same answers, 32× less time.
-
-### `StlRegion.contains(points)` / `StlRegion.signed_distance(points)`
-
-The region's two questions for an `(n, 3)` array. `contains` returns `(n,)`
-bool; `signed_distance` returns `(n,)` Å, negative inside. Together they say
-what the packer was told to enforce, without re-deriving mesh geometry:
+The region answers its own questions for an `(n, 3)` array: `contains`
+returns `(n,)` bool; `distance` returns `(n,)` Å, negative inside. Together
+they say what the packer was told to enforce:
 
 ```python
-cavity = molpack.StlRegion.from_file("dendrite.stl")
-depth = cavity.signed_distance(state.positions)
+cavity = molrs.Polyhedron(molrs.io.read_stl("dendrite.stl"))
+depth = cavity.distance(state.positions)
 print(f"{(depth > 0).sum()} atoms outside, worst {depth.max():.2f} Å")
 ```
 
@@ -516,6 +490,50 @@ radial distance to a point ($\xi = \lVert\mathbf{x} - \text{center}\rVert$).
 `lambda_` must be `> 0`; tabulated `xs` must be strictly ascending
 (≥ 2 points) with non-negative `rho` of positive total mass. Invalid
 arguments raise `ValueError` at construction.
+
+### Collective (pairwise separation) restraint
+
+| Class | Constructor | Meaning |
+|-------|-------------|---------|
+| `SelfSeparation` | `(d_min, strength=1.0)` | no two copies of this species closer than `d_min`, centre to centre |
+
+The anti-clustering restraint. A distribution target says *where* copies
+should be; this says how close two of them may come. The pair term keeps
+atoms from overlapping and then stops caring, and it does not distinguish
+two copies of one species from a copy of each of two — so without this a
+species may pile its copies into one corner.
+
+The penalty is silent above `d_min` and grows as $(d_{min} - D)^2$ below it,
+where $D$ is the minimum-image distance between two copies' geometric
+centroids. It is quadratic in the length by which the bound is missed — the
+same shape as a geometric restraint's penalty — so `strength=1.0` weights a
+shortfall like a region lift weights an equal overshoot, and the
+convergence threshold `precision` means the same thing for both.
+
+Centroids, not atoms: for a compact molecule the centroid stands in for the
+whole, but two long chains can interdigitate with distant centroids. The
+restraint states what it measures.
+
+Cost is linear in `count`, not quadratic: the centres are binned into a cell
+grid and only nearby pairs are examined, so the bound stays affordable on a
+melt-sized species.
+
+Feasibility is not checked, and does not need to be. A bound is either met or
+not, so unlike the distribution restraints this one counts toward the restraint
+verdict `frest` and gates convergence: if `count` copies cannot fit at `d_min`,
+the run does not converge and says so — it is never silently relaxed. `d_min`
+and `strength` must be `> 0`; otherwise `ValueError`.
+
+```python
+import molrs
+from molpack import SelfSeparation, Target
+
+ions = (
+    Target(frame, count=27)
+    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(SelfSeparation(10.0))
+)
+```
 
 ---
 
@@ -600,8 +618,6 @@ subclass). Catch the base to handle any packing failure uniformly.
 - `NoTargetsError` — empty target list.
 - `EmptyMoleculeError` — a target has zero atoms.
 - `InvalidPBCBoxError` — periodic box has a non-positive extent.
-- `ConflictingPeriodicBoxesError` — two restraints declared
-  incompatible periodic boxes.
 
 `ValueError` / `TypeError` still surface on Python-side invariants
 (bad atom indices, wrong restraint object, etc.). Growth and density

@@ -16,7 +16,9 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use molpack::{CbmcGrow, GenCanPack, LatticeGrow, LogLevel, PackEngine, StageFactory};
+use molpack::{
+    CbmcGrow, EarlyStopHandler, GenCanPack, LatticeGrow, LogLevel, PackEngine, StageFactory,
+};
 use pyo3::prelude::*;
 
 use crate::constraint::extract_restraint;
@@ -30,7 +32,7 @@ use crate::target::PyTarget;
 type F = molpack::F;
 
 /// Shared entry knobs mirrored on the Python side; the Rust entry is built
-/// at `run()` time (same pattern as the legacy packer binding).
+/// at `run()` time.
 #[derive(Default)]
 struct SharedKnobs {
     tolerance: Option<F>,
@@ -321,6 +323,8 @@ pub struct PyGenCanPack {
     init_box_half_size: Option<F>,
     perturb: Option<(F, bool, bool)>,
     avoid_overlap: Option<bool>,
+    /// `None`: the entry's default early stop; `Some(None)`: switched off.
+    early_stop: Option<Option<EarlyStopHandler>>,
 }
 
 entry_pymethods!(PyGenCanPack {
@@ -334,6 +338,7 @@ entry_pymethods!(PyGenCanPack {
             init_box_half_size: None,
             perturb: None,
             avoid_overlap: None,
+            early_stop: None,
         }
     }
 
@@ -373,15 +378,31 @@ entry_pymethods!(PyGenCanPack {
         c.avoid_overlap = Some(on);
         c
     }
+    /// End a GENCAN phase once, at the user's radii (``radscale == 1``),
+    /// Packmol's ``bestf`` has improved by less than ``threshold_pct``
+    /// percent over ``patience`` loops. On by default with these values
+    /// (10 % is Packmol's movebad threshold); ``enabled=False`` runs every
+    /// phase to ``max_loops`` as Packmol does. A stopped final phase leaves
+    /// ``State.converged`` false.
+    #[pyo3(signature = (enabled = true, *, threshold_pct = 10.0, patience = 10))]
+    fn with_early_stop(&self, enabled: bool, threshold_pct: F, patience: usize) -> Self {
+        let mut c = self.clone_fields();
+        c.early_stop =
+            Some(enabled.then(|| EarlyStopHandler::new(threshold_pct).with_patience(patience)));
+        c
+    }
 
-    /// Run the packing. One engine, one run.
+    /// Run the packing. One engine, one run. ``max_loops`` defaults to
+    /// Packmol's ``nloop``: ``200 * len(targets)``.
+    #[pyo3(signature = (targets, max_loops = None))]
     fn run(
         &mut self,
         py: Python<'_>,
         targets: Vec<PyTarget>,
-        max_loops: usize,
+        max_loops: Option<usize>,
     ) -> PyResult<PyState> {
         self.shared.guard_one_shot()?;
+        let max_loops = max_loops.unwrap_or(GenCanPack::default_max_loops(targets.len()));
         let rust_targets: Vec<_> = targets.into_iter().map(|t| t.inner).collect();
         let engine = self.shared.apply(py, self.build_engine(py)?)?;
         let pb = self.shared.periodic_box;
@@ -413,6 +434,7 @@ impl PyGenCanPack {
             init_box_half_size: None,
             perturb: None,
             avoid_overlap: None,
+            early_stop: None,
         }
     }
 
@@ -438,6 +460,9 @@ impl PyGenCanPack {
         if let Some(on) = self.avoid_overlap {
             engine = engine.with_avoid_overlap(on);
         }
+        if let Some(early_stop) = &self.early_stop {
+            engine = engine.with_early_stop(early_stop.clone());
+        }
         Ok(engine)
     }
 
@@ -450,6 +475,7 @@ impl PyGenCanPack {
             init_box_half_size: self.init_box_half_size,
             perturb: self.perturb,
             avoid_overlap: self.avoid_overlap,
+            early_stop: self.early_stop.clone(),
         })
     }
 }

@@ -3,20 +3,16 @@
 //! Lives in molpack (not molrs): uses packer-local geometry helpers and
 //! self-avoidance scoring on a Frame assembled by the packer.
 
-#![cfg(feature = "ff")]
-
 use std::collections::HashSet;
 use std::f64::consts::PI;
 
-use molrs::ff::potential::{extract_coords, write_coords};
+use molrs::op::rigid;
 use molrs::optimize::{OptReport, Optimizer};
-use molrs::perceive::rotatable::{
-    RotatableBond, atom_id_to_index, detect_rotatable_bonds_with_downstream,
-};
+use molrs::perceive::rotatable::{RotatableBond, atom_id_to_index};
 use molrs::store::frame::Frame;
 use molrs::system::atomistic::Atomistic;
-use molrs::system::bond::BondType;
 use molrs::types::F;
+use molrs::{BondDistanceWeights, Topology};
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
@@ -26,6 +22,9 @@ use crate::random::uniform01_core;
 
 /// Monte-Carlo torsion-angle optimizer for flexible molecules.
 ///
+/// Largest torsion change one proposal makes (radians).
+const MAX_DELTA: F = (PI / 6.0) as F;
+
 /// Implements [`Optimizer`]: each `run` proposes rotations about rotatable
 /// bonds on the Frame's free atoms and accepts against self-avoidance energy
 /// (plus optional soft contact with fixed environment atoms present in the
@@ -33,10 +32,12 @@ use crate::random::uniform01_core;
 #[derive(Debug, Clone)]
 pub struct TorsionMcOptimizer {
     bonds: Vec<RotatableBond>,
-    max_delta: F,
     steps: usize,
     temperature: F,
     self_avoidance_radius: F,
+    /// The molecule's bond graph, kept so the exclusions can be re-derived
+    /// when [`with_special_bonds`](Self::with_special_bonds) changes the table.
+    topology: Topology,
     excluded_pairs: HashSet<(usize, usize)>,
     seed: u64,
 }
@@ -44,36 +45,38 @@ pub struct TorsionMcOptimizer {
 impl TorsionMcOptimizer {
     /// Build from a molecule's topology, perceiving its rotatable bonds.
     ///
-    /// # Unclassed bonds
-    ///
-    /// Rotatable-bond perception only accepts bonds whose class is
-    /// [`BondType::Single`]. Formats that carry connectivity without orders —
-    /// PDB `CONECT`, GROMACS `.top`, XYZ `Connct`, and hand-built coarse-grain
-    /// frames — read back [`BondType::Unknown`], because molrs reports what
-    /// the file said rather than guessing. Perceiving such a molecule directly
-    /// yields **zero** rotatable bonds and turns this optimizer into a silent
-    /// no-op.
-    ///
-    /// So the fallback lives here, at the consumer, where the policy is
-    /// defensible: for a packing conformer search an unclassed bond is treated
-    /// as a rotatable single bond. The caller's graph is not modified — the
-    /// class is filled in on a local copy used for perception only.
-    ///
-    /// [`BondType::Single`]: molrs::system::bond::BondType::Single
-    /// [`BondType::Unknown`]: molrs::system::bond::BondType::Unknown
+    /// A bond whose class the input left unstated counts as a rotatable
+    /// single bond — molpack's one policy for every solver. Self-avoidance
+    /// skips pairs at bond distance 1–3 (the all-atom default); a
+    /// coarse-grained model states its own table with
+    /// [`with_special_bonds`](Self::with_special_bonds).
     pub fn new(graph: &Atomistic) -> Self {
-        let perceived = unclassed_bonds_as_single(graph);
-        let bonds = detect_rotatable_bonds_with_downstream(&perceived);
-        let excluded_pairs = compute_excluded_pairs(graph);
+        let id_to_idx = atom_id_to_index(graph);
+        let edges: Vec<[usize; 2]> = graph
+            .bonds()
+            .map(|(_, b)| [id_to_idx[&b.nodes[0]], id_to_idx[&b.nodes[1]]])
+            .collect();
+        let topology = Topology::from_edges(id_to_idx.len(), &edges);
         Self {
-            bonds,
-            max_delta: (PI / 6.0) as F,
+            bonds: crate::template::rotatable_bonds(graph),
             steps: 10,
             temperature: 1.0,
             self_avoidance_radius: 0.0,
-            excluded_pairs,
+            excluded_pairs: excluded_pairs(
+                &topology,
+                &BondDistanceWeights::from_exclusion_depth(3),
+            ),
+            topology,
             seed: 1,
         }
+    }
+
+    /// Which intramolecular pairs self-avoidance skips: every pair whose
+    /// bond-distance weight is `0` (the same table
+    /// [`Target::with_special_bonds`](crate::Target) takes).
+    pub fn with_special_bonds(mut self, weights: BondDistanceWeights) -> Self {
+        self.excluded_pairs = excluded_pairs(&self.topology, &weights);
+        self
     }
 
     /// Number of rotatable bonds perceived for this molecule, after the
@@ -92,10 +95,6 @@ impl TorsionMcOptimizer {
     }
     pub fn with_steps(mut self, n: usize) -> Self {
         self.steps = n;
-        self
-    }
-    pub fn with_max_delta(mut self, rad: F) -> Self {
-        self.max_delta = rad;
         self
     }
     pub fn with_self_avoidance(mut self, radius: F) -> Self {
@@ -118,11 +117,9 @@ impl Optimizer for TorsionMcOptimizer {
                 final_fmax: 0.0,
             });
         }
-        let flat = extract_coords(frame)?;
-        let n = flat.len() / 3;
-        let coords: Vec<[F; 3]> = (0..n)
-            .map(|i| [flat[3 * i], flat[3 * i + 1], flat[3 * i + 2]])
-            .collect();
+        let xyz = frame.coords().map_err(|e| e.to_string())?;
+        let n = xyz.nrows();
+        let coords = crate::template::coord_rows(&xyz);
 
         // Free mask: only free atoms may be torsion-rotated (environment fixed).
         let free: Vec<bool> = match frame.get("atoms").and_then(|a| a.get_bool("free")) {
@@ -159,7 +156,7 @@ impl Optimizer for TorsionMcOptimizer {
             {
                 continue;
             }
-            let delta = (uniform01_core(&mut rng) * 2.0 - 1.0) * self.max_delta;
+            let delta = (uniform01_core(&mut rng) * 2.0 - 1.0) * MAX_DELTA;
             trial.copy_from_slice(&best);
             rotate_around_bond(&mut trial, bond, delta);
             // Restore fixed atoms.
@@ -182,11 +179,8 @@ impl Optimizer for TorsionMcOptimizer {
             }
         }
 
-        let mut out = Vec::with_capacity(n * 3);
-        for p in &best {
-            out.extend_from_slice(p);
-        }
-        write_coords(frame, &out)?;
+        let out = ndarray::Array2::from(best);
+        frame.set_coords(out.view()).map_err(|e| e.to_string())?;
         Ok(OptReport {
             converged: accepts > 0 || self.steps == 0,
             n_steps: self.steps,
@@ -224,34 +218,20 @@ fn self_avoidance_penalty(coords: &[[F; 3]], radius: F, excluded: &HashSet<(usiz
     penalty
 }
 
+/// Rotate the downstream side of `bond` by `angle` radians about the `j → k`
+/// axis. A degenerate bond (coincident ends) is left alone.
 fn rotate_around_bond(coords: &mut [[F; 3]], bond: &RotatableBond, angle: F) {
-    let j = coords[bond.j];
-    let k = coords[bond.k];
-    let mut u = [k[0] - j[0], k[1] - j[1], k[2] - j[2]];
-    let norm = (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt();
-    if norm < near_zero_norm_floor() {
+    let (j, k) = (coords[bond.j], coords[bond.k]);
+    let axis = [k[0] - j[0], k[1] - j[1], k[2] - j[2]];
+    if (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt() < near_zero_norm_floor() {
         return;
     }
-    u[0] /= norm;
-    u[1] /= norm;
-    u[2] /= norm;
-    let origin = j;
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
+    let Some(rotation) = rigid::axis_angle(axis, angle) else {
+        return;
+    };
+    let motion = rigid::about(rotation, j);
     for &idx in &bond.downstream {
-        let p0 = coords[idx];
-        let p = [p0[0] - origin[0], p0[1] - origin[1], p0[2] - origin[2]];
-        let udotp = u[0] * p[0] + u[1] * p[1] + u[2] * p[2];
-        let cross = [
-            u[1] * p[2] - u[2] * p[1],
-            u[2] * p[0] - u[0] * p[2],
-            u[0] * p[1] - u[1] * p[0],
-        ];
-        coords[idx] = [
-            p[0] * cos_a + cross[0] * sin_a + u[0] * udotp * (1.0 - cos_a) + origin[0],
-            p[1] * cos_a + cross[1] * sin_a + u[1] * udotp * (1.0 - cos_a) + origin[1],
-            p[2] * cos_a + cross[2] * sin_a + u[2] * udotp * (1.0 - cos_a) + origin[2],
-        ];
+        coords[idx] = rigid::apply(&motion, coords[idx]);
     }
 }
 
@@ -292,54 +272,42 @@ fn metropolis_accept(f_trial: F, f_current: F, temperature: F, rng: &mut dyn Rng
     uniform01_core(rng) < (-delta).exp()
 }
 
-/// Copy of `graph` with every [`BondType::Unknown`] bond re-classed as
-/// `Single`, so rotatable-bond perception sees the connectivity the caller
-/// meant. See [`TorsionMcOptimizer::new`] for why this is the consumer's call
-/// and not the reader's.
-///
-/// [`BondType::Unknown`]: molrs::system::bond::BondType::Unknown
-fn unclassed_bonds_as_single(graph: &Atomistic) -> Atomistic {
-    let mut out = graph.clone();
-    let unclassed: Vec<_> = out
-        .bonds()
-        .filter(|(id, _)| out.bond_type(*id) == BondType::Unknown)
-        .map(|(id, _)| id)
-        .collect();
-    for id in unclassed {
-        // Only fails on a stale handle, which `bonds()` cannot produce.
-        let _ = out.set_bond_type(id, BondType::Single);
-    }
-    out
+/// Unordered `(i, j)`, `i < j`, pairs the table exempts, from molrs's
+/// bond-distance walk.
+fn excluded_pairs(topology: &Topology, weights: &BondDistanceWeights) -> HashSet<(usize, usize)> {
+    topology
+        .exclusions(weights)
+        .into_iter()
+        .enumerate()
+        .flat_map(|(i, partners)| {
+            partners
+                .into_iter()
+                .filter(move |&j| j > i)
+                .map(move |j| (i, j))
+        })
+        .collect()
 }
 
-fn compute_excluded_pairs(graph: &Atomistic) -> HashSet<(usize, usize)> {
-    let id_to_idx = atom_id_to_index(graph);
-    let atom_ids: Vec<_> = graph.atoms().map(|(id, _)| id).collect();
-    let mut adj: std::collections::HashMap<_, Vec<_>> = std::collections::HashMap::new();
-    for &id in &atom_ids {
-        adj.insert(id, graph.neighbors(id).collect());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::chain_graph;
+
+    /// The all-atom default skips 1-2, 1-3 and 1-4 pairs and scores 1-5.
+    #[test]
+    fn default_exclusions_reach_bond_distance_three() {
+        let opt = TorsionMcOptimizer::new(&chain_graph(5));
+        assert!(opt.excluded_pairs.contains(&(0, 3)));
+        assert!(!opt.excluded_pairs.contains(&(0, 4)));
     }
-    let mut excluded = HashSet::new();
-    for &root in &atom_ids {
-        let root_idx = id_to_idx[&root];
-        for &n1 in adj.get(&root).unwrap_or(&Vec::new()) {
-            let n1_idx = id_to_idx[&n1];
-            excluded.insert((root_idx.min(n1_idx), root_idx.max(n1_idx)));
-            for &n2 in adj.get(&n1).unwrap_or(&Vec::new()) {
-                if n2 == root {
-                    continue;
-                }
-                let n2_idx = id_to_idx[&n2];
-                excluded.insert((root_idx.min(n2_idx), root_idx.max(n2_idx)));
-                for &n3 in adj.get(&n2).unwrap_or(&Vec::new()) {
-                    if n3 == root || n3 == n1 {
-                        continue;
-                    }
-                    let n3_idx = id_to_idx[&n3];
-                    excluded.insert((root_idx.min(n3_idx), root_idx.max(n3_idx)));
-                }
-            }
-        }
+
+    /// A coarse-grained table is per-target data: excluding only bonded
+    /// neighbours leaves 1-3 pairs to self-avoidance.
+    #[test]
+    fn special_bonds_set_the_exclusion_depth() {
+        let opt = TorsionMcOptimizer::new(&chain_graph(5))
+            .with_special_bonds(BondDistanceWeights::from_exclusion_depth(1));
+        assert!(opt.excluded_pairs.contains(&(0, 1)));
+        assert!(!opt.excluded_pairs.contains(&(0, 2)));
     }
-    excluded
 }

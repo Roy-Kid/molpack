@@ -13,12 +13,13 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::{
-    AbovePlaneRestraint, Angle, AtomRestraint, BelowPlaneRestraint, CenteringMode, GenCanPack,
-    InsideBoxRestraint, InsideCubeRestraint, InsideCylinderRestraint, InsideEllipsoidRestraint,
-    InsideSphereRestraint, OutsideBoxRestraint, OutsideCubeRestraint, OutsideCylinderRestraint,
-    OutsideEllipsoidRestraint, OutsideSphereRestraint, PackEngine, Target,
+use crate::restraint::geometric::{
+    AbovePlaneRestraint, BelowPlaneRestraint, InsideBoxRestraint, InsideCubeRestraint,
+    InsideCylinderRestraint, InsideEllipsoidRestraint, InsideSphereRestraint, OutsideBoxRestraint,
+    OutsideCubeRestraint, OutsideCylinderRestraint, OutsideEllipsoidRestraint,
+    OutsideSphereRestraint,
 };
+use crate::{Angle, AtomRestraint, CenteringMode, GenCanPack, PackEngine, Target};
 
 use super::error::ScriptError;
 use super::parser::{AtomGroup, RestraintSpec, Script, Structure};
@@ -31,7 +32,7 @@ use super::parser::{AtomGroup, RestraintSpec, Script, Structure};
 /// a [`Target`] from the frame, and call [`StructurePlan::apply`] to
 /// stamp on the script's restraints / centering / fixed placement.
 pub struct ScriptPlan {
-    /// Packer pre-configured with `tolerance`, `seed`, and (optional) `pbc`.
+    /// Engine pre-configured with `tolerance`, `seed`, and (optional) `pbc`.
     pub entry: GenCanPack,
     /// One entry per `structure … end structure` block, in source order.
     pub structures: Vec<StructurePlan>,
@@ -190,9 +191,7 @@ fn resolve(base: &Path, path: &Path) -> PathBuf {
 /// kind is one arm here plus one parser arm and one [`RestraintSpec`] variant.
 fn restraint_from_spec(r: &RestraintSpec) -> Box<dyn AtomRestraint> {
     match *r {
-        RestraintSpec::InsideBox { min, max } => {
-            Box::new(InsideBoxRestraint::new(min, max, [false; 3]))
-        }
+        RestraintSpec::InsideBox { min, max } => Box::new(InsideBoxRestraint::new(min, max)),
         RestraintSpec::OutsideBox { min, max } => Box::new(OutsideBoxRestraint::new(min, max)),
         RestraintSpec::InsideCube { origin, side } => {
             Box::new(InsideCubeRestraint::new(origin, side))
@@ -309,5 +308,126 @@ impl Script {
             output: plan.output,
             nloop: plan.nloop,
         })
+    }
+}
+
+#[cfg(test)]
+mod atom_property_tests {
+    //! The four per-atom packing properties at both `.inp` levels —
+    //! structure keyword and `atoms ... end atoms` block — plus the
+    //! lowering that layers them onto a [`Target`](crate::Target).
+
+    use crate::Target;
+    use crate::script::parse;
+
+    fn plan(src: &str) -> crate::script::ScriptPlan {
+        parse(src)
+            .expect("parse")
+            .lower(std::path::Path::new("."))
+            .expect("lower")
+    }
+
+    /// Structure-level `radius`, as Packmol reads it outside an `atoms` block.
+    #[test]
+    fn structure_radius_is_parsed() {
+        let p = plan(
+            "tolerance 2.0\noutput o.xyz\n\
+                 structure a.pdb\n  number 3\n  radius 3.5\n\
+                 inside box 0. 0. 0. 10. 10. 10.\nend structure\n",
+        );
+        assert_eq!(p.structures[0].radius, Some(3.5));
+    }
+
+    /// Atom-specific `radius`, inside an `atoms ... end atoms` block.
+    #[test]
+    fn atom_group_radius_is_parsed() {
+        let p = plan(
+            "tolerance 2.0\noutput o.xyz\n\
+                 structure a.pdb\n  number 1\n\
+                 inside box 0. 0. 0. 10. 10. 10.\n\
+                 atoms 1 3\n  radius 6.0\nend atoms\n\
+                 end structure\n",
+        );
+        let g = &p.structures[0].atom_groups[0];
+        assert_eq!(g.atom_indices, vec![1, 3]);
+        assert_eq!(g.radius, Some(6.0));
+    }
+
+    /// Lowering must reproduce the Rust API's layering, with the script's
+    /// 1-based indices mapped to 0-based.
+    #[test]
+    fn lowering_applies_both_radius_layers() {
+        let p = plan(
+            "tolerance 4.0\noutput o.xyz\n\
+                 structure a.pdb\n  number 2\n  radius 3.0\n\
+                 inside box 0. 0. 0. 10. 10. 10.\n\
+                 atoms 3\n  radius 6.0\nend atoms\n\
+                 end structure\n",
+        );
+        let t = p.structures[0].apply(crate::Target::from_coords(
+            &[[0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            &[1.5; 3],
+            2,
+        ));
+        assert_eq!(t.resolved_radii(2.0), vec![3.0, 3.0, 6.0]);
+    }
+
+    #[test]
+    fn a_non_positive_radius_is_a_parse_error() {
+        let src = "tolerance 2.0\noutput o.xyz\n\
+                       structure a.pdb\n  number 1\n  radius -1.0\n\
+                       inside box 0. 0. 0. 10. 10. 10.\nend structure\n";
+        assert!(parse(src).is_err(), "negative radius must be rejected");
+    }
+    fn plan_body(body: &str) -> crate::script::ScriptPlan {
+        let src = format!(
+            "tolerance 4.0\noutput o.xyz\nstructure a.pdb\n  number 1\n\
+                 inside box 0. 0. 0. 10. 10. 10.\n{body}end structure\n"
+        );
+        parse(&src)
+            .expect("parse")
+            .lower(std::path::Path::new("."))
+            .expect("lower")
+    }
+
+    #[test]
+    fn structure_level_keywords_are_parsed() {
+        let p = plan_body("  fscale 0.5\n  short_radius 0.75\n  short_radius_scale 4.0\n");
+        let s = &p.structures[0];
+        assert_eq!(s.fscale, Some(0.5));
+        assert_eq!(s.short_radius, Some(0.75));
+        assert_eq!(s.short_radius_scale, Some(4.0));
+    }
+
+    #[test]
+    fn atom_level_keywords_are_parsed() {
+        let p = plan_body("atoms 2\n  fscale 0.5\n  short_radius 0.75\nend atoms\n");
+        let g = &p.structures[0].atom_groups[0];
+        assert_eq!(g.fscale, Some(0.5));
+        assert_eq!(g.short_radius, Some(0.75));
+    }
+
+    #[test]
+    fn lowering_applies_every_layer() {
+        let p = plan_body(
+            "  fscale 0.5\n  short_radius 0.75\n\
+                 atoms 3\n  fscale 2.0\n  short_radius_scale 9.0\nend atoms\n",
+        );
+        let t = p.structures[0].apply(Target::from_coords(
+            &[[0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            &[1.5; 3],
+            1,
+        ));
+        assert_eq!(t.resolved_fscale(), vec![0.5, 0.5, 2.0]);
+        assert_eq!(t.resolved_short_radii(1.0), vec![0.75; 3]);
+        assert_eq!(t.resolved_short_radius_scale(3.0), vec![3.0, 3.0, 9.0]);
+        assert_eq!(t.uses_short_radius(), vec![true; 3]);
+    }
+
+    #[test]
+    fn a_non_positive_fscale_is_a_parse_error() {
+        let src = "tolerance 4.0\noutput o.xyz\nstructure a.pdb\n  number 1\n  fscale 0\n\
+                       inside box 0. 0. 0. 10. 10. 10.\nend structure\n";
+        assert!(parse(src).is_err());
     }
 }

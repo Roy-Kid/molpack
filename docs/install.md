@@ -33,7 +33,7 @@ Optional features (crate defaults to none enabled):
 | `cli` | `molpack` binary + clap (implies `io`) |
 | `io` | PDB / XYZ / SDF / LAMMPS readers via molrs |
 | `rayon` | Parallel objective evaluation |
-| `ff` | In-loop geometry optimizers (MMFF + L-BFGS, plus torsion Monte-Carlo) |
+| `ff` | Forwards molrs's force-field module, for binding a force-field optimizer (e.g. `LBFGS`) through `with_optimizer` |
 
 ```toml
 # Cargo.toml — common combinations

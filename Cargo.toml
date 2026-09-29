@@ -15,11 +15,6 @@ categories = ["science", "algorithms"]
 
 [lib]
 name = "molpack"
-# The library carries no `#[bench]` functions; disabling its auto-generated
-# libtest bench harness keeps `cargo bench` (and criterion pass-through args
-# like `--output-format bencher`) scoped to the real criterion benches under
-# `benches/`, which is what the bench CI runs.
-bench = false
 
 [dependencies]
 # Path deps are for local development; `version` fields are used by
@@ -27,22 +22,13 @@ bench = false
 #
 # Library-required. The merged `molcrafts-molrs` crate exposes its former member
 # crates as feature-gated modules: `core` is always on (re-exported at the crate
-# root), while `io` and `ff` are opt-in via the molpack features below.
-#
-# On molrs's default feature union (`full + stream + filesystem + rayon`). That
-# union is the shared-dylib precondition: Rust has no stable ABI, so molpack's
-# graph must resolve molrs identically to molrs's own binders or each side gets
-# its own statically embedded copy. The molpack features below stay as the
-# record of what the library actually needs — they are additive and idempotent
-# with the union.
-molrs = { path = "../molrs/molrs", version = "0.14", package = "molcrafts-molrs" }
+# root), while `io` and `ff` are opt-in via the molpack features below. molrs's
+# own default is just `rayon`; it is switched off here so parallelism stays
+# molpack's own opt-in (the `rayon` feature below) and wasm / Pyodide builds work.
+molrs = { path = "../molrs/molrs", version = "0.15", package = "molcrafts-molrs", default-features = false }
 rand = "0.10"
 ndarray = "0.17"
 log = "0.4"
-# Provides `erf` for the profile-distribution penalties (the error-function
-# interface profile); `erf` is not in Rust stable std. Already in the lockfile
-# as a transitive dep of molrs-core, so this adds no new download.
-libm = "0.2"
 
 # Opt-in parallelism:
 rayon = { version = "1.12", optional = true }
@@ -57,58 +43,21 @@ rayon = ["dep:rayon", "molrs/rayon"]
 # and the molpack CLI. PyO3 / WASM front-ends typically leave this off and
 # provide their own frame loader through `Script::lower` + `Target::from_frame_parts`.
 io = ["molrs/io"]
-# Enables the `molpack` binary and its integration tests.
+# Enables the `molpack` binary.
 cli = ["dep:clap", "io"]
-# Force-field geometry relaxer: enables molrs's `ff` module (MMFF94/MMFF94s typifiers +
-# L-BFGS minimizer) so packing can relax flexible-molecule internal geometry.
+# Forwards molrs's `ff` module (force fields and the optimizers built on them)
+# for callers who bind one through `GenCanPack::with_optimizer`. molpack itself
+# compiles nothing extra: the in-loop optimizer seam is always on.
 ff = ["molrs/ff"]
 
 [dev-dependencies]
 # Used by the example programs under `examples/`.
 env_logger = "0.11"
-# Criterion harness for the benchmark suite under `benches/`.
-criterion = "0.8"
-# The shared molrs dylib host. PATH-ONLY, and deliberately so: cargo strips
-# path-only dev-dependencies when packaging, and `molcrafts-molrs-ffi` is NOT on
-# crates.io (molrs's publish.yml ships only `molcrafts-molrs`), so a `version`
-# key — or a normal dependency — would break `cargo publish` for molpack, the one
-# crate in this chain that publishes. It builds libmolrs_ffi in molpack's own
-# test/bench graph, on the same feature union, so the shared object stays
-# fingerprint-consistent from this side.
-#
-# A dev-dependency alone is NOT enough to pull a binary into that circle: rustc
-# only loads an `--extern` crate that source actually references, so an
-# unreferenced molrs-ffi leaves the test binaries statically embedding molrs
-# (measured: `otool -L` showed no libmolrs_ffi entry). `tests/abi_line.rs` is
-# the reference that closes it — it calls `molrs_ffi::abi::abi_line()` for
-# real, and the compiled `abi_line-*` binary does carry a libmolrs_ffi entry.
-# Keep that call site: deleting it re-inerts this dependency silently.
-#
-# REMAINING LIMIT: the `cli` binary (`cargo build --features cli`) is still out
-# of the circle and embeds molrs statically — closing it needs
-# `molcrafts-molrs-ffi` on the crates.io release train, at which point this
-# entry becomes a normal dependency. The wheel is unaffected either way:
-# python/Cargo.toml depends on molrs-ffi directly and does link it.
-molrs-ffi = { path = "../molrs/molrs-ffi", package = "molcrafts-molrs-ffi" }
 
 [[bin]]
 name = "molpack"
 path = "src/bin/molpack/main.rs"
 required-features = ["cli"]
-bench = false
-
-[[test]]
-name = "cli"
-path = "tests/cli.rs"
-required-features = ["cli"]
-bench = false
-
-# Uses the `cases` example harness, which reads PDB files via molrs-io.
-[[test]]
-name = "examples_batch"
-path = "tests/examples_batch.rs"
-required-features = ["io"]
-bench = false
 
 # Example programs all read PDB files via molrs-io directly, so they need
 # the `io` feature on. Run with `cargo run --example <name> --features io`.
@@ -142,82 +91,21 @@ name = "pack_spherical"
 path = "examples/pack_spherical/main.rs"
 required-features = ["io"]
 
-# Parallel-scaling measurement harness (molpack-jcc paper figure). Needs rayon,
-# not io.
-[[example]]
-name = "mt_scaling"
-path = "examples/mt_scaling/main.rs"
-required-features = ["rayon"]
-
 # Polymer adsorption onto a substrate: a heterogeneous system whose chains relax
 # their conformation in-loop via `TorsionMcOptimizer`. Synthesizes its own
-# coarse-grain geometry, so it needs `ff` (the optimizer) but not `io`.
+# coarse-grain geometry, so it needs no feature.
 [[example]]
 name = "pack_adsorption"
 path = "examples/pack_adsorption/main.rs"
-required-features = ["ff"]
 
 # Polymer translocation initial state: chains threaded through a membrane pore —
-# a configuration MD cannot reach from an unthreaded start. Needs `ff`, not `io`.
+# a configuration MD cannot reach from an unthreaded start. Needs no feature.
 [[example]]
 name = "pack_translocation"
 path = "examples/pack_translocation/main.rs"
-required-features = ["ff"]
 
-# Criterion regression benchmarks under `benches/`. Each is a SMALL, fast
-# regression alarm (one tens-to-few-hundred-atom workload, `sample_size(10)`,
-# ~500 ms measurement) — a guard against a perf regression, not a throughput
-# measurement (the size-swept scaling study is `examples/mt_scaling`). Every
-# bench synthesizes its own geometry in-process, so none require the `io`
-# feature. Each sets `harness = false` for the criterion `main` entry point.
-[[bench]]
-name = "collective_eval"
-path = "benches/collective_eval.rs"
-harness = false
-
-[[bench]]
-name = "pair_kernel"
-path = "benches/pair_kernel.rs"
-harness = false
-
-[[bench]]
-name = "objective_dispatch"
-path = "benches/objective_dispatch.rs"
-harness = false
-
-[[bench]]
-name = "run_iteration"
-path = "benches/run_iteration.rs"
-harness = false
-
-[[bench]]
-name = "restraint_eval"
-path = "benches/restraint_eval.rs"
-harness = false
-
-[[bench]]
-name = "pack_end_to_end"
-path = "benches/pack_end_to_end.rs"
-harness = false
-
-# These four keys are byte-identical across the seven native roots that
-# ../molrs/scripts/sync-dylib-locks.sh lists in its ROOTS array (five in molrs,
-# this one and python/ here) — profile is part of cargo's unit fingerprint, and
-# a mismatch would put two libmolrs_ffi builds behind the one hashless
-# install_name that @rpath resolves at runtime.
-#
-# LTO is on because the default link form is static, so a local --release build
-# matches the published one. The opt-in dynamic form has to turn LTO off — a
-# Rust dylib in a cdylib's graph makes rustc reject it — and the mechanism is
-# documented once, in ../molrs/docs/interop.md.
 [profile.release]
 codegen-units = 1
 lto = "thin"
 opt-level = 3
 strip = "symbols"
-
-[[test]]
-name = "optimizer"
-path = "tests/optimizer.rs"
-required-features = ["ff"]
-bench = false

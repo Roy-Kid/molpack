@@ -6,9 +6,9 @@
 
 use molrs::types::F;
 
-use super::Restraint;
 use super::engine::probit;
 use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg, unit};
+use super::{GroupCtx, Restraint};
 
 /// Gaussian target quantile `q(p) = μ + σ·Φ⁻¹(p)`.
 #[inline]
@@ -24,7 +24,7 @@ fn gaussian_quantile(p: F, mu: F, sigma: F) -> F {
 /// Gaussian distribution `𝒩(μ, σ²)` — i.e. pack the copies into a **slab** of
 /// centre `μ` and width `σ` along the plane normal.
 ///
-/// `strength` (`λ`) scales the squared-Wasserstein penalty; `scale`/`scale2` are
+/// `strength` (`λ`) scales the squared-Wasserstein penalty; the [`GroupCtx`] is
 /// accepted for trait symmetry but unused (the target is fixed, not annealed
 /// with the radius schedule).
 #[derive(Debug, Clone)]
@@ -62,7 +62,7 @@ impl GaussianPlane {
 }
 
 impl Restraint for GaussianPlane {
-    fn f(&self, coords: &[[F; 3]], _scale: F, _scale2: F) -> F {
+    fn f(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>) -> F {
         plane_match_f(
             coords,
             &self.normal,
@@ -72,7 +72,7 @@ impl Restraint for GaussianPlane {
         )
     }
 
-    fn fg(&self, coords: &[[F; 3]], _scale: F, _scale2: F, grads: &mut [[F; 3]]) -> F {
+    fn fg(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
         plane_match_fg(
             coords,
             &self.normal,
@@ -132,11 +132,11 @@ impl GaussianPoint {
 }
 
 impl Restraint for GaussianPoint {
-    fn f(&self, coords: &[[F; 3]], _scale: F, _scale2: F) -> F {
+    fn f(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>) -> F {
         point_match_f(coords, &self.center, self.strength, self.quantile())
     }
 
-    fn fg(&self, coords: &[[F; 3]], _scale: F, _scale2: F, grads: &mut [[F; 3]]) -> F {
+    fn fg(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
         point_match_fg(coords, &self.center, self.strength, self.quantile(), grads)
     }
 
@@ -147,7 +147,16 @@ impl Restraint for GaussianPoint {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testutil::{assert_fd_grad, rng_uniform};
+    use super::super::testutil::{assert_fd_grad, ctx_free, free_box, rng_uniform};
+
+    #[test]
+    fn a_distribution_target_is_not_a_bound() {
+        // A finite sample's squared-Wasserstein penalty never reaches zero, so
+        // folding it into `frest` would make a well-matched pack report as
+        // non-convergent. Only the separation family opts in.
+        assert!(!GaussianPlane::new([0.0, 0.0, 1.0], 0.0, 1.0, 0.0, 3.0).is_bound());
+        assert!(!GaussianPoint::new([0.0; 3], 1.0, 5.0, 1.0).is_bound());
+    }
     use super::*;
 
     #[test]
@@ -191,7 +200,7 @@ mod tests {
         let coords: Vec<[F; 3]> = (0..n)
             .map(|k| [0.0, 0.0, 20.0 + 5.0 * probit((k as F + 0.5) / n as F)])
             .collect();
-        assert!(r.f(&coords, 1.0, 1.0) < 1e-6);
+        assert!(r.f(&coords, ctx_free(&free_box(1_000.0), 1)) < 1e-6);
     }
 
     #[test]
@@ -202,6 +211,9 @@ mod tests {
             .map(|k| [30.0 + 4.0 * probit((k as F + 0.5) / n as F), 0.0, 0.0])
             .collect();
         let clump: Vec<[F; 3]> = (0..n).map(|_| [30.0, 0.0, 0.0]).collect();
-        assert!(r.f(&on_shell, 1.0, 1.0) < r.f(&clump, 1.0, 1.0));
+        assert!(
+            r.f(&on_shell, ctx_free(&free_box(1_000.0), 1))
+                < r.f(&clump, ctx_free(&free_box(1_000.0), 1))
+        );
     }
 }

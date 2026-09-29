@@ -43,7 +43,7 @@ nav = [
     { "Overview" = "rust/index.md" },
     { "Quickstart" = "rust/getting-started.md" },
     { "Restraints and PBC" = "rust/restraints-and-pbc.md" },
-    { "Handlers and Relaxers" = "rust/handlers-relaxers.md" },
+    { "Handlers and Optimizers" = "rust/handlers-optimizers.md" },
     { "Examples" = "rust/examples.md" },
   ] },
   { "Development" = [

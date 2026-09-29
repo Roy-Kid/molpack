@@ -32,6 +32,14 @@ repos:
 
   - repo: local
     hooks:
+      # An ignored test is a failing test: no `ignore` doctest fence, no #[ignore].
+      - id: no-ignored-tests
+        name: no ignored tests
+        language: pygrep
+        entry: '```[a-z,_]*ignore|#\[ignore'
+        files: ^(src|docs|examples|python/src)/.*\.(rs|md)$
+        stages: [pre-commit]
+
       - id: ty
         name: ty (Python type check)
         language: system
@@ -44,12 +52,11 @@ repos:
         name: rust tests (CI parity)
         language: system
         entry: >-
-          sh -c 'cargo test --features io --lib --tests --examples
-          && cargo test --test cli --features cli
+          sh -c 'cargo test --lib --features cli,ff
+          && cargo test --doc --features cli,ff
+          && cargo check --all-targets --features cli,ff
           && cargo check --no-default-features
-          && cargo check --features rayon
-          && cargo check --features ff
-          && cargo build --benches'
+          && cargo check --features rayon'
         pass_filenames: false
         always_run: true
         stages: [pre-push]

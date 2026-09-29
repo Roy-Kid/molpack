@@ -53,17 +53,34 @@ collective restraint sees *every* copy of a species at once and returns a
 single penalty whose gradient is **coupled across the whole group**:
 
 ```text
+pub struct GroupCtx {
+    pub scale: F,             // linear-penalty annealing scale
+    pub scale2: F,            // quadratic-penalty annealing scale
+    pub natoms_per_copy: usize,
+    pub mic: Mic,             // minimum-image convention in force
+}
+
 pub trait Restraint: Send + Sync + std::fmt::Debug {
-    fn f (&self, coords: &[[F; 3]], scale: F, scale2: F) -> F;
-    fn fg(&self, coords: &[[F; 3]], scale: F, scale2: F, grads: &mut [[F; 3]]) -> F;
+    fn f (&self, coords: &[[F; 3]], ctx: GroupCtx) -> F;
+    fn fg(&self, coords: &[[F; 3]], ctx: GroupCtx, grads: &mut [[F; 3]]) -> F;
+    fn is_bound(&self) -> bool { false }
     fn is_parallel_safe(&self) -> bool { true }
     fn name(&self) -> &'static str { std::any::type_name::<Self>() }
 }
 ```
 
-`coords` and `grads` have equal length — one entry per atom in the group.
+`coords` and `grads` have equal length — one entry per atom in the group,
+in the packer's own order: **copy-major, atom-minor**.
 The gradient convention mirrors [`AtomRestraint`](#atomrestraint): `fg` accumulates INTO
 `grads[i]` with `+=`.
+
+`GroupCtx` carries what a group-level term cannot recover from a flat
+coordinate slice: how many atoms make one copy (so `coords` can be cut into
+molecules) and the minimum-image convention (so a term that measures
+distances agrees with the pair loop across a periodic boundary). It is
+captured once per evaluation rather than stored on the restraint — the cell
+is resolved after the targets are lowered, so a restraint that cached a box
+at construction time could cache the wrong one.
 
 ### Why collective?
 
@@ -98,38 +115,94 @@ Attach with `Target::with_collective_restraint(r)`. A `TabulatedPlane`
 with a histogram from a target simulation is the one-line way to drive a
 species toward an experimentally-observed density profile.
 
-## Region
+### Pairwise separation
 
-A [`Region`](crate::Region) is a **geometric predicate** with a signed
-distance function:
+A distribution target says *where* copies should be; it does not say how
+close two of them may come. The packer's own pair term keeps atoms from
+overlapping and then stops caring — and nothing in it distinguishes two
+copies of one species from a copy of each of two. So a species is free to
+pile its copies into one corner as long as they do not interpenetrate.
+
+`SelfSeparation` is the missing statement: *these molecules also keep their
+distance from each other*. It bounds the **centre-to-centre** distance
+between any two copies of one species below by `d_min`, and is silent above
+it:
 
 ```text
-pub trait Region: Send + Sync + std::fmt::Debug {
-    fn contains(&self, x: &[F; 3]) -> bool;
-    fn signed_distance(&self, x: &[F; 3]) -> F;
-    fn signed_distance_grad(&self, x: &[F; 3]) -> [F; 3] { /* default FD */ }
-    fn bounding_box(&self) -> Option<Aabb> { None }
+E = λ · Σ_{c<c'}  (d_min − D)²        for D < d_min,   D = ‖mic(R_c − R_c')‖
+```
+
+where `R_c` is copy `c`'s geometric centroid. It is **quadratic in the length
+by which the bound is missed** — the same shape as a geometric restraint's
+penalty (the `.inp` box kernel is `scale·(overshoot)²`, `RegionRestraint` is `scale·distance²`), and deliberately not
+the pair term's quartic-in-length form. This term reports into `frest`, so it
+has to be commensurate with the other things there: `precision = 0.01` then
+means "within 0.1 Å" for a separation bound exactly as it does for a box wall,
+and that reading does not drift as `d_min` grows.
+
+This is a **local** bound, not a global profile: it does not make a species
+uniform, only un-clustered.
+
+Being local is also what makes it affordable. A double loop over copies would
+cost the same on a converged configuration as on a clumped one — `O(N²)` in the
+number of copies, which at melt scale dominates everything else the objective
+does. `SelfSeparation` instead bins the centres into a `CellGrid` at least
+`d_min` wide and sweeps each cell against itself and its forward neighbours:
+the same partition-and-stencil the packer's own pair loop uses, one level up.
+That is why `GroupCtx` carries the cell. Measured against the double loop, the
+added cost per evaluation falls from 11.8M to 2.6M instructions at 1k copies
+and from ~1.2G to 32M at 10k — linear in the number of copies rather than
+quadratic. Below 64 cells the stencil reaches the whole partition and cannot
+exclude anything, so the sweep falls back to the direct loop.
+
+Because a bound is either met or not — its penalty is exactly zero once it
+holds — `SelfSeparation` declares `is_bound() == true` and its value is folded
+into the restraint verdict `frest`, so it gates convergence like a geometric
+restraint does. A distribution target must not do this: the squared-Wasserstein
+penalty of a finite sample never reaches zero, so a pack reproducing its target
+profile to three decimals would be reported as non-convergent. That is why
+`is_bound` defaults to `false`.
+
+Feasibility is therefore not pre-checked and does not need to be: an impossible
+request simply does not converge, and the run reports it through `frest`.
+
+## Regions (molrs) and their lift
+
+Geometry is not molpack's. A region — a sphere, a box, a triclinic cell, a
+half-space, a cylinder, an ellipsoid, a solid bounded by a watertight
+triangle mesh, a union of spheres around a set of atoms — is a
+[`molrs::spatial::region::Region`], a solid with a signed distance to its
+boundary:
+
+```text
+pub trait Region: Send + Sync + Debug {
+    fn bounds(&self) -> FNx3;                       // 3×2 AABB
+    fn distance(&self, x: &[F; 3]) -> F;           // < 0 inside, > 0 outside
+    fn distance_grad(&self, x: &[F; 3]) -> [F; 3] { /* default FD */ }
+    fn contains_point(&self, x: &[F; 3]) -> bool { self.distance(x) <= 0.0 }
 }
 ```
 
-Regions compose via the zero-cost combinators
-[`And`](crate::And) / [`Or`](crate::Or) / [`Not`](crate::Not), with
-analytic chain-rule gradients (max / min / negate). The
-[`RegionExt`](crate::RegionExt) trait gives every `Region` ergonomic
-`.and(...)` / `.or(...)` / `.not()` methods.
+Every shape describes its inside; outside, shells and voids are the
+compositions `NotRegion` / `AndRegion` / `OrRegion` over
+`Arc<dyn Region + Send + Sync>` (`~`, `&`, `|` in Python). There is no
+"outside sphere" type anywhere — it is `NotRegion(Sphere)`.
 
-Any `Region` lifts to a `Restraint` via
-[`RegionRestraint<R>`](crate::RegionRestraint):
+molpack adds exactly one geometric restraint, the lift of any region to a
+term of the shared objective, [`RegionRestraint`](crate::RegionRestraint):
 
 ```text
-penalty(x) = scale2 * max(0, signed_distance(x))²
+penalty(x) = scale · max(0, distance(x))²
 ```
 
-Use `Region` when you want compositional geometry (intersection /
-union / complement). Use `Restraint` directly when you want a specific
-penalty shape (linear vs quadratic, custom stiffness, multi-atom).
+and one policy object on top of it, [`CellRestraint`](crate::CellRestraint):
+a `Parallelepiped` lift that also *declares* the packing lattice
+([`AtomRestraint::declared_cell`](crate::AtomRestraint::declared_cell)), so a
+triclinic cell is stated once. Use a molrs region for any shape a molecule
+must stay inside; write an `AtomRestraint` when the penalty is not "stay
+inside a region".
 
-## In-loop optimizer (feature `ff`)
+## In-loop optimizer
 
 Rigid-body packing never changes a molecule's internal shape. An **in-loop
 optimizer** does: it rewrites a copy's **reference geometry** — the conformer
@@ -161,10 +234,8 @@ targets it applies to:
 Because each copy is relaxed on its own, copies of one target start identical
 and then diverge — there is no `count == 1` restriction.
 
-Built-in: `TorsionMcOptimizer` (Metropolis torsion sampling with
-self-avoidance). All the names in this section — `OptimizeSelect`,
-`TorsionMcOptimizer`, `with_optimizer` — require the `ff` Cargo feature, so
-they are written in plain code font here rather than linked.
+Built-in: [`TorsionMcOptimizer`](crate::TorsionMcOptimizer) (Metropolis
+torsion sampling with self-avoidance).
 
 ## Handler
 
@@ -178,7 +249,6 @@ pub trait Handler: Send {
     fn on_step         (&mut self, info: &StepInfo, sys);   // required
     fn on_phase_start  (&mut self, info: &PhaseInfo)      {}
     fn on_phase_end    (&mut self, info, report: &PhaseReport) {}
-    fn on_inner_iter   (&mut self, iter, f, sys)          {}
     fn on_stage_start  (&mut self, info: &StageInfo)      {}
     fn on_stage_end    (&mut self, info: &StageInfo, outcome: &StageOutcome, sys) {}
     fn on_finish       (&mut self, sys: &PackContext)     {}
@@ -189,7 +259,7 @@ pub trait Handler: Send {
 Observer contract: `sys` is always `&PackContext`, never `&mut`.
 Handlers cannot modify packer state — bind an in-loop optimizer if you need to.
 
-Built-ins: [`NullHandler`](crate::NullHandler),
+Built-ins: [`LammpsLogHandler`](crate::LammpsLogHandler),
 [`ProgressHandler`](crate::ProgressHandler),
 [`EarlyStopHandler`](crate::EarlyStopHandler),
 [`XYZHandler`](crate::XYZHandler).
@@ -368,6 +438,8 @@ A [`Target`](crate::Target) describes one molecule type:
 - Intramolecular skip table (`with_special_bonds`; default depth-3
   `[0, 0, 0, 1]`). All-atom explicit hydrogen keeps that table and
   shrinks hydrogen via `with_atom_radius`.
+- Which atoms are hydrogens for lattice growth (`with_hydrogens`; default
+  element symbol `H`).
 - Optionally built from a previous run's output as one fixed obstacle
   ([`Target::fixed_from(&result)`](crate::Target::fixed_from)) — the
   chaining primitive for staged packs.
@@ -393,7 +465,7 @@ GenCanPack::new()
     .with_log_level(...)
     .with_handler(...)
     .with_global_restraint(...)  // broadcast to every target
-    .with_periodic_box(min, max) // or via periodic InsideBoxRestraint
+    .with_periodic_box(min, max)
     .run(&[targets], max_loops)  // -> State
 ```
 
@@ -427,8 +499,6 @@ buffers, counters. All optimizer / movebad / handler code paths take
 
 Structure (`molpack/src/context/`):
 
-- `ModelData` — topology and inputs (immutable after init).
-- `RuntimeState` — borrowed telemetry view over `PackContext`.
 - `WorkBuffers` — scratch arrays (xcart, gxcar, radiuswork).
 
 Users rarely touch `PackContext` directly — it reaches them through

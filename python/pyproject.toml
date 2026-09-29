@@ -9,12 +9,11 @@ description = "Python bindings for molpack molecular packing (Packmol port)"
 requires-python = ">=3.12"
 readme = "README.md"
 license = "BSD-3-Clause"
-# Minor-line pins — same major.minor as molrs/molpy; patch may drift.
+# Minor-line pin — same major.minor as molrs; patch may drift.
 dependencies = [
   "numpy>=2.0",
   "typer>=0.12",
-  "molcrafts-molrs>=0.14.0,<0.15",
-  "molcrafts-molpy>=0.14.0,<0.15",
+  "molcrafts-molrs>=0.15.0,<0.16",
 ]
 
 # Installable "extra" carrying the docs-build deps. Unlike the [dependency-groups]
@@ -38,7 +37,9 @@ typecheck = [
   "ty",
   "typer>=0.12",
   "numpy>=2.0",
-  "molcrafts-molrs>=0.14.0,<0.15",
+  "molcrafts-molrs>=0.15.0,<0.16",
+  # `ty check` walks examples/, several of which build templates with molpy.
+  "molcrafts-molpy>=0.15.0,<0.16",
   # `ty check` walks tests/ which imports pytest.
   "pytest",
 ]
@@ -46,8 +47,7 @@ test = [
   "pytest",
   "typer>=0.12",
   "numpy>=2.0",
-  "molcrafts-molrs>=0.14.0,<0.15",
-  "molcrafts-molpy>=0.14.0,<0.15",
+  "molcrafts-molrs>=0.15.0,<0.16",
 ]
 dev = [
   {include-group = "typecheck"},
@@ -76,7 +76,7 @@ Repository = "https://github.com/MolCrafts/molpack"
 [tool.maturin]
 python-source = "python"
 module-name = "molpack.molpack"
-features = ["pyo3/extension-module", "rayon"]
+features = ["rayon"]
 exclude = [
   "python/molpack/*.so",
   "python/molpack/*.dylib",
@@ -87,9 +87,6 @@ exclude = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = [
-  "integration: end-to-end packing tests, some needing an external engine (LAMMPS via molpy)",
-]
 
 [tool.ruff]
 line-length = 88
@@ -128,7 +125,7 @@ extra-paths = ["examples"]
 
 # Isolated binding tests — prek pre-push + CI call: `tox -c python -e py`
 # Non-editable only: sibling molrs path install + maturin wheel + pytest.
-# Requires ../../molrs on the 0.14.* minor line (CI: MOLRS_GIT_REF in ci.yml).
+# Requires ../../molrs on the 0.15.* minor line (CI: MOLRS_GIT_REF in ci.yml).
 [tool.tox]
 requires = ["tox>=4.23"]
 env_list = ["py"]
@@ -167,12 +164,12 @@ pass_env = [
 ]
 allowlist_externals = ["maturin"]
 # toxinidir is python/ when config lives here; sibling molrs is ../.. /molrs.
-# Minor-line only: 0.14.* (patch may differ).
+# Minor-line only: 0.15.* (patch may differ).
 commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import tomllib; from pathlib import Path; p=Path('{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text())['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,14), f'sibling molrs {{v}} not on 0.14.*'",
+    "import tomllib; from pathlib import Path; p=Path('{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text())['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,15), f'sibling molrs {{v}} not on 0.15.*'",
   ],
   [
     "{envpython}",
@@ -184,24 +181,7 @@ commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,14), v",
-  ],
-  [
-    "{envpython}",
-    "-c",
-    "import ast; from pathlib import Path; src=(Path('{toxinidir}')/'..'/'..'/'molpy'/'src'/'molpy'/'version.py').read_text(); v=next(n.value.value for n in ast.parse(src).body if isinstance(n, ast.Assign) and getattr(n.targets[0],'id',None)=='version'); assert tuple(map(int, v.split('.')[:2]))==(0,14), f'sibling molpy {{v}} not on 0.14.*'",
-  ],
-  [
-    "{envpython}",
-    "-m",
-    "pip",
-    "install",
-    "{toxinidir}/../../molpy",
-  ],
-  [
-    "{envpython}",
-    "-c",
-    "import importlib.metadata as m; v=m.version('molcrafts-molpy'); assert tuple(map(int, v.split('.')[:2]))==(0,14), v",
+    "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,15), v",
   ],
   ["maturin", "build", "--release", "-o", "{env_tmp_dir}/wheels"],
   [

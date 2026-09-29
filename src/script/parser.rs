@@ -34,7 +34,7 @@ pub struct Script {
     pub nloop: usize,
     /// Whether to reject initial random placements that overlap a fixed
     /// molecule (`avoid_overlap`, default on). Wired through `Script::build`
-    /// to `Molpack::with_avoid_overlap`.
+    /// to `GenCanPack::with_avoid_overlap`.
     pub avoid_overlap: bool,
     /// Periodic-boundary box (`pbc` keyword). When set, it seeds the
     /// packer's cell grid so the initial ±`sidemax` random placement
@@ -477,9 +477,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
         seed,
         filetype,
         output: output.ok_or(ScriptError::MissingOutput)?,
-        // Packmol default (getinp.f90:537-539): unset `nloop` resolves to
-        // 200 * ntype, where ntype is the number of structure types.
-        nloop: nloop.unwrap_or(200 * structures.len()),
+        nloop: nloop.unwrap_or(crate::GenCanPack::default_max_loops(structures.len())),
         avoid_overlap,
         pbc,
         cell,

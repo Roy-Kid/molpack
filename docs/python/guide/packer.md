@@ -65,7 +65,7 @@ Attach a single restraint to every target in a pack:
 
 ```python
 packer = packer.with_global_restraint(
-    InsideBoxRestraint([0, 0, 0], [40, 40, 40])
+    molrs.Cuboid([0, 0, 0], [40, 40, 40])
 )
 ```
 
@@ -91,9 +91,8 @@ the `Handler` Protocol in `molpack`.
 
 ## Periodic boundaries
 
-PBC can be declared per-axis on an `InsideBoxRestraint`, or as a
-fully-periodic cell directly on the entry via
-`.with_periodic_box(min, max)`. See
+PBC is declared on the entry via `.with_periodic_box(min, max)`; a region
+only confines. See
 [Periodic boundaries](periodic-boundaries.md).
 
 ## Running
@@ -106,8 +105,7 @@ result = packer.run(targets, max_loops=200)
 - `max_loops` — per-phase outer-iteration budget.
 
 Raises one of the typed `PackError` subclasses on failure
-(`NoTargetsError`, `InvalidPBCBoxError`,
-`ConflictingPeriodicBoxesError`, …).
+(`NoTargetsError`, `InvalidPBCBoxError`, …).
 
 `run()` is the entry's only terminal verb and it consumes the entry —
 one engine, one run. Calling `run()` twice on the same object raises

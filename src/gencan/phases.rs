@@ -20,13 +20,12 @@ use crate::handler::{Handler, PhaseInfo, PhaseReport, StageInfo, StepInfo};
 use crate::initial::SwapState;
 use crate::movebad::{MoveBadConfig, movebad};
 use crate::numerics::objective_small_floor;
-#[cfg(feature = "ff")]
 use crate::optimizer::{ResolvedBinding, run_optimizer_bindings};
 
 /// Outcome of one main-loop iteration inside a packing phase.
 ///
-/// Pulled out of `pack()` in phase A.4.3 to isolate the ~140-line per-iteration
-/// body that runs movebad → in-loop optimizers → pgencan → radii schedule. `Continue`
+/// The per-iteration body runs movebad → in-loop optimizers → pgencan → radii
+/// schedule. `Continue`
 /// means "run the next iteration"; `Converged` means the convergence predicate
 /// fired inside this iteration; `EarlyStop` means a `Handler::should_stop()`
 /// returned true.
@@ -43,7 +42,7 @@ pub enum IterOutcome {
 ///
 /// 1. `movebad` when `radscale == 1.0` and previous `fimp <= 10%` (unless
 ///    disabled).
-/// 2. Per-target in-loop optimizer block (`run_optimizer_bindings`, feature `ff`).
+/// 2. Per-target in-loop optimizer block (`run_optimizer_bindings`).
 /// 3. `pgencan` on the working coordinate vector.
 /// 4. Unscaled-radii statistics (`fdist` / `frest` / `fimp`).
 /// 5. Handler `on_step` notification; early stop if any handler opts in.
@@ -70,7 +69,7 @@ pub fn run_iteration(
     flast: &mut F,
     fimp_prev: &mut F,
     radscale: &mut F,
-    #[cfg(feature = "ff")] optimizer_bindings: &mut [ResolvedBinding<'_>],
+    optimizer_bindings: &mut [ResolvedBinding<'_>],
     handlers: &mut [Box<dyn Handler>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
@@ -86,12 +85,9 @@ pub fn run_iteration(
     }
 
     // In-loop optimizers: all-type phase only (full x ⇒ clean COM/Euler).
-    #[cfg(feature = "ff")]
     if is_all {
         run_optimizer_bindings(sys, xwork, optimizer_bindings);
     }
-    #[cfg(not(feature = "ff"))]
-    let _ = phase; // silence if unused without optimizers
 
     // GENCAN on working x (compact for per-type, full for all-type)
     sys.reset_eval_counters();
@@ -134,10 +130,10 @@ pub fn run_iteration(
             phase: phase_info,
             fdist,
             frest,
+            f: fx_unscaled,
             improvement_pct: fimp,
             radscale: *radscale,
             precision,
-            relaxer_acceptance: Vec::new(),
         };
         for h in handlers.iter_mut() {
             h.on_step(&step_info, sys);
@@ -180,12 +176,12 @@ pub fn run_iteration(
     IterOutcome::Continue
 }
 
-/// Outcome of one outer-loop phase in `pack()`.
+/// Outcome of one outer-loop phase.
 ///
-/// Pulled out of `pack()` in phase A.4.2 to isolate the outer per-phase scaffold
-/// (handler phase-start notification, comptype reconfiguration, radii reset,
-/// swap setup, pre-loop precision short-circuit, inner GENCAN loop, swap
-/// restore / xwork-back copy). `Continue` means the outer phase loop should
+/// The per-phase scaffold covers handler phase-start notification, comptype
+/// reconfiguration, radii reset, swap setup, pre-loop precision
+/// short-circuit, inner GENCAN loop, and swap restore / xwork-back copy.
+/// `Continue` means the outer phase loop should
 /// proceed; `Converged` means the all-type phase converged and the outer loop
 /// should break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,7 +222,7 @@ pub fn run_phase(
     sys: &mut PackContext,
     x: &mut [F],
     swap: &mut SwapState,
-    #[cfg(feature = "ff")] optimizer_bindings: &mut [ResolvedBinding<'_>],
+    optimizer_bindings: &mut [ResolvedBinding<'_>],
     handlers: &mut [Box<dyn Handler>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
@@ -331,7 +327,6 @@ pub fn run_phase(
             &mut flast,
             &mut fimp_prev,
             &mut radscale,
-            #[cfg(feature = "ff")]
             optimizer_bindings,
             handlers,
             gencan_workspace,

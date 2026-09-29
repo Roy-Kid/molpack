@@ -40,7 +40,7 @@ criteria:
     summary: k=1 linear chains use the same grow_walk
     type: runtime
     pass_when: |
-      cargo test -p molcrafts-molpack --lib --tests --
+      cargo test -p molcrafts-molpack --lib --
       lattice_grow_bead_chain_constructive is green; there is no separate
       linear-only walk function in src/grow/lattice/saw.rs.
     status: verified
@@ -90,10 +90,15 @@ criteria:
     type: runtime
     pass_when: |
       In-module d==0 rejects as NonTetrahedralTemplate without dropping
-      the atom from the walk. tests/grow.rs lattice_grow_rejects_degree_gt_4
+      the atom from the walk. src/grow/tests/entry.rs::lattice_grow_rejects_degree_gt_4
       is Err whose message does not contain "branched staged".
       lattice_grow_tetrahedral_star_completes and
       lattice_grow_tetrahedral_comb_completes return Ok.
+      (2026-09-29: those two entry-level tests were deleted with the tests/
+      layer on 2026-09-20; star/comb are now covered in-module by
+      src/grow/lattice/decorate.rs::{analyze_backbone_tetrahedral_star,
+      analyze_backbone_comb_has_branch_children} and
+      src/grow/lattice/saw.rs::forced_zigzag_embeds_a_star.)
     status: verified
     last_checked: 2026-09-05
   - id: ac-010
@@ -112,7 +117,8 @@ criteria:
       src/grow/lattice/decorate.rs and saw.rs each have #[cfg(test)] mod
       tests covering analyze_backbone/decorate_chain and
       grow_walk/forced_zigzag; cargo test -p molcrafts-molpack --lib
-      --tests -- grow::lattice is green. tests/grow.rs does not call
+      -- grow::lattice is green. The entry-level tests
+      (src/grow/tests/, formerly the integration file) do not call
       grow_walk.
     status: verified
     last_checked: 2026-09-05
@@ -120,16 +126,20 @@ criteria:
     summary: LatticeGrow::run completes on tetrahedral star and comb
     type: runtime
     pass_when: |
-      tests/grow.rs lattice_grow_tetrahedral_star_completes yields Ok with
+      (Historical, verified 2026-09-05.) The entry-level
+      lattice_grow_tetrahedral_star_completes yields Ok with
       natoms()==10 and lattice_grow_tetrahedral_comb_completes yields Ok
       with natoms()==24; lattice_grow_rejects_branched is absent.
+      STRUCK 2026-09-29: both tests were deleted with the tests/ layer on
+      2026-09-20 and no LatticeGrow::run star/comb completion test
+      replaces them; see ac-009 for the in-module geometry coverage.
     status: verified
     last_checked: 2026-09-05
   - id: ac-013
     summary: LatticeStage still requires None and guarantees All
     type: runtime
     pass_when: |
-      cargo test -p molcrafts-molpack --lib --tests --
+      cargo test -p molcrafts-molpack --lib --
       lattice_stage_requires_none_guarantees_all is green.
     status: verified
     last_checked: 2026-09-05
@@ -144,9 +154,10 @@ criteria:
     status: verified
     last_checked: 2026-09-05
   - id: ac-015
-    summary: Regression pin runs public LatticeGrow on a 5-atom star
+    summary: ~~Regression pin runs public LatticeGrow on a 5-atom star~~
     type: runtime
     pass_when: |
+      STRUCK 2026-09-29: regressions/ deleted 2026-09-20 with no replacement (golden pins are no longer a test form); text below is historical.
       regressions/lattice-branch-saw-01-walk.md shows LatticeGrow::run on
       a 5-atom tetrahedral star, 2 copies, seed 7, box 20 Å, and
       hard-codes Ok, natoms==10, and center–leaf bonds 1.53±1e-6; no

@@ -34,21 +34,8 @@ use molrs::store::frame::Frame;
 use molrs::types::F;
 
 use crate::grow::GrowError;
-use crate::grow::internal::{InternalTree, cross, dihedral, dot, norm, sub};
+use crate::grow::internal::{InternalTree, cross, dihedral, dot, norm, sub, wrap_pi};
 use crate::grow::lattice::saw::DiamondLattice;
-
-const PI: F = std::f64::consts::PI as F;
-const TWO_PI: F = std::f64::consts::TAU as F;
-
-fn wrap_pi(x: F) -> F {
-    let mut v = x % TWO_PI;
-    if v > PI {
-        v -= TWO_PI;
-    } else if v <= -PI {
-        v += TWO_PI;
-    }
-    v
-}
 
 /// The template's heavy-atom tree, InternalTree BFS order, plus decoration
 /// hooks (one per InternalTree variable, on a backbone site).
@@ -62,9 +49,13 @@ pub(crate) struct Backbone {
     pub(crate) children: Vec<Vec<usize>>,
     /// Mean of the parent edges (Å) — sets the lattice constant.
     pub(crate) mean_bond: F,
-    /// Rigid alignment triple; these atoms have no hooks. Leaf-root BFS
-    /// makes this `[0, 1, 2]`.
+    /// Rigid alignment triple. Leaf-root BFS makes this `[0, 1, 2]`. When the
+    /// InternalTree roots at a hydrogen the seed holds fewer than three of
+    /// these, and the rest are placed — and hooked — by ordinary steps.
     pub(crate) align: [usize; 3],
+    /// Backbone index of each template atom (`None` for hydrogens and other
+    /// off-lattice atoms).
+    index_of: Vec<Option<usize>>,
     /// `Site::follows` of each heavy, parallel to `atoms` (seed / no site →
     /// `None`).
     pub(crate) follows: Vec<Option<(usize, F)>>,
@@ -73,26 +64,23 @@ pub(crate) struct Backbone {
     hooks: Vec<Option<(usize, usize, usize, F)>>,
 }
 
-fn is_hydrogen(el: &str) -> bool {
-    el.eq_ignore_ascii_case("h")
-}
-
 /// Extract the heavy-atom tree of `frame` against `tree`.
 ///
-/// The not-H mask is the all-atom default for this function only (missing
-/// element column → `"X"`, so CG walks every atom). Degree `d == 0` and
-/// `d > 4` are [`GrowError::NonTetrahedralTemplate`].
+/// `hydrogen` flags the atoms that stay off-lattice — per-target data
+/// ([`Target::hydrogen_mask`](crate::Target)), never read off element symbols
+/// here. Degree `d == 0` and `d > 4` are
+/// [`GrowError::NonTetrahedralTemplate`].
 #[allow(clippy::needless_range_loop)]
-pub(crate) fn analyze_backbone(frame: &Frame, tree: &InternalTree) -> Result<Backbone, GrowError> {
+pub(crate) fn analyze_backbone(
+    frame: &Frame,
+    tree: &InternalTree,
+    hydrogen: &[bool],
+) -> Result<Backbone, GrowError> {
     let (topo, xyz) = crate::grow::topology_for_growth(frame)?;
     let n = topo.n_atoms();
-    let elements: Vec<String> = frame
-        .get("atoms")
-        .and_then(|b| b.get_string("element"))
-        .map(|c| c.iter().cloned().collect())
-        .unwrap_or_else(|| vec!["X".to_string(); n]);
-
-    let heavy: Vec<bool> = elements.iter().map(|e| !is_hydrogen(e)).collect();
+    let heavy: Vec<bool> = (0..n)
+        .map(|i| !hydrogen.get(i).copied().unwrap_or(false))
+        .collect();
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
     for [i, j] in topo.bonds() {
         if heavy[i] && heavy[j] {
@@ -232,9 +220,6 @@ pub(crate) fn analyze_backbone(frame: &Frame, tree: &InternalTree) -> Result<Bac
         }
         let mut eligible: Vec<usize> = Vec::new();
         for &j in &on_var {
-            if j == align[0] || j == align[1] || j == align[2] {
-                continue;
-            }
             let Some(p) = parent[j] else { continue };
             let Some(g) = parent[p] else { continue };
             // `on_var` was built from `site_of` and `Site::follows`, so both
@@ -263,16 +248,6 @@ pub(crate) fn analyze_backbone(frame: &Frame, tree: &InternalTree) -> Result<Bac
                 "backbone atom {} follows variable {v} on a step that does not own it",
                 atoms[j]
             )));
-        }
-        for s in tree.step_sites(k) {
-            if let Some(aj) = index_of[s.atom]
-                && align.contains(&aj)
-            {
-                return Err(GrowError::NonTetrahedralTemplate(format!(
-                    "hook step {k} places alignment atom {}",
-                    s.atom
-                )));
-            }
         }
         hooks[j] = Some((k, li, v, offset));
     }
@@ -314,6 +289,7 @@ pub(crate) fn analyze_backbone(frame: &Frame, tree: &InternalTree) -> Result<Bac
         children,
         mean_bond,
         align,
+        index_of,
         follows,
         hooks,
     })
@@ -401,7 +377,9 @@ pub(crate) fn decorate_chain(
     // The seed triple is backbone too, so it is its sites like every other
     // backbone atom. Putting it there *before* the rigid steps run means the
     // atoms those steps hang off it — the seed's own hydrogens — are built
-    // against the lattice geometry and not against the template's.
+    // against the lattice geometry and not against the template's. An
+    // alignment atom a step places (the tree rooted at a hydrogen) is seated
+    // again by that step below.
     for j in [a0, a1, a2] {
         coords[bb.atoms[j]] = wb[j];
     }
@@ -424,11 +402,14 @@ pub(crate) fn decorate_chain(
         }
         tree.place_step(k, &vars, coords);
         // Pendant atoms of this step keep the template's local geometry off
-        // their references; the backbone atom itself is the route point. The
+        // their references; every backbone atom the step placed — the hooked
+        // one, a branch sibling, an alignment atom — is its route point. The
         // torsion above still decides where the pendants sit, so it is chosen
         // the same way — it just no longer has to carry the backbone.
-        if let Some(j) = *hooked {
-            coords[bb.atoms[j]] = wb[j];
+        for s in tree.step_sites(k) {
+            if let Some(j) = bb.index_of[s.atom] {
+                coords[s.atom] = wb[j];
+            }
         }
     }
 
@@ -443,34 +424,21 @@ pub(crate) fn decorate_chain(
 mod tests {
     use super::*;
     use molrs::BondDistanceWeights;
-    use molrs::store::block::Block;
+
     use molrs::store::frame::Frame;
     use ndarray::Array1;
 
-    use crate::grow::lattice::saw::T_STEPS;
-
-    fn frame_from_parts(coords: &[[F; 3]], bonds: &[(u32, u32)]) -> Frame {
-        let mut atoms = Block::new();
-        for (name, k) in [("x", 0), ("y", 1), ("z", 2)] {
-            let col: Vec<F> = coords.iter().map(|p| p[k]).collect();
-            atoms
-                .insert(name, Array1::from_vec(col).into_dyn())
-                .expect("coordinate column");
-        }
-        let mut frame = Frame::new();
-        frame.insert("atoms", atoms);
-        let mut block = Block::new();
-        let ai: Vec<u32> = bonds.iter().map(|&(i, _)| i).collect();
-        let aj: Vec<u32> = bonds.iter().map(|&(_, j)| j).collect();
-        block
-            .insert("atomi", Array1::from_vec(ai).into_dyn())
-            .expect("atomi");
-        block
-            .insert("atomj", Array1::from_vec(aj).into_dyn())
-            .expect("atomj");
-        frame.insert("bonds", block);
+    /// The all-atom default hydrogen flags, from the `element` column.
+    fn hydrogens(frame: &Frame) -> Vec<bool> {
         frame
+            .get("atoms")
+            .and_then(|b| b.get_string("element"))
+            .map(|c| c.iter().map(|e| e.eq_ignore_ascii_case("H")).collect())
+            .unwrap_or_default()
     }
+
+    use crate::grow::lattice::saw::T_STEPS;
+    use crate::testutil::frame_from_parts;
 
     fn zigzag(n: usize, bond_len: F) -> (Vec<[F; 3]>, Vec<(u32, u32)>) {
         let theta = 109.5 * std::f64::consts::PI as F / 180.0;
@@ -488,12 +456,82 @@ mod tests {
             .expect("tree")
     }
 
+    /// A hydroxyl-terminated chain roots its InternalTree at a hydrogen, so
+    /// the seed holds only two backbone atoms and the third alignment atom is
+    /// placed by an ordinary step. Decoration must still seat it — and every
+    /// other backbone atom — on its walk site.
+    #[test]
+    fn decorate_chain_seats_every_backbone_atom_when_rooted_at_hydrogen() {
+        use crate::grow::lattice::saw::{SawField, forced_zigzag};
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+
+        let n_heavy = 9;
+        let (mut coords, bonds) = zigzag(n_heavy + 2, 1.45);
+        // Atoms 0 and n_heavy + 1 become the hydroxyl hydrogens, 0.97 Å off
+        // the terminal oxygens along the zigzag.
+        for (h, o) in [(0usize, 1usize), (n_heavy + 1, n_heavy)] {
+            let d = sub(coords[h], coords[o]);
+            let s = 0.97 / norm(d);
+            coords[h] = [
+                coords[o][0] + s * d[0],
+                coords[o][1] + s * d[1],
+                coords[o][2] + s * d[2],
+            ];
+        }
+        let mut frame = frame_from_parts(&coords, &bonds);
+        let mut elements = vec!["C".to_string(); n_heavy + 2];
+        elements[0] = "H".to_string();
+        elements[n_heavy + 1] = "H".to_string();
+        elements[1] = "O".to_string();
+        elements[n_heavy] = "O".to_string();
+        let mut atoms = frame.get("atoms").expect("atoms").clone();
+        atoms
+            .insert("element", Array1::from_vec(elements).into_dyn())
+            .expect("element");
+        frame.insert("atoms", atoms);
+
+        let tree = tree_of(&frame);
+        let bb = analyze_backbone(&frame, &tree, &hydrogens(&frame)).expect("hydroxyl chain");
+        let seed = tree.seed_atoms();
+        let seeded = bb
+            .align
+            .iter()
+            .filter(|&&j| seed.contains(&bb.atoms[j]))
+            .count();
+        assert!(seeded < 3, "fixture must root the tree at a hydrogen");
+
+        let lat = DiamondLattice::fit([0.0; 3], [40.0; 3], bb.mean_bond);
+        let mut field = SawField::new();
+        let mut rng = SmallRng::seed_from_u64(11);
+        let walk = forced_zigzag(
+            &lat,
+            &mut field,
+            0,
+            &bb.parent,
+            &bb.children,
+            &bb.follows,
+            &mut rng,
+        )
+        .expect("walk");
+        let mut out = vec![[0.0 as F; 3]; n_heavy + 2];
+        decorate_chain(&tree, &bb, &lat, &walk.sites, &mut out);
+        for (j, &a) in bb.atoms.iter().enumerate() {
+            let site = lat.to_continuum(walk.sites[j]);
+            let off = norm(sub(out[a], site));
+            assert!(
+                off < 1e-9,
+                "backbone atom {a} is {off} Å off its lattice site"
+            );
+        }
+    }
+
     #[test]
     fn analyze_backbone_linear_parent_is_predecessor() {
         let (coords, bonds) = zigzag(8, 1.53);
         let frame = frame_from_parts(&coords, &bonds);
         let tree = tree_of(&frame);
-        let bb = analyze_backbone(&frame, &tree).expect("linear backbone");
+        let bb = analyze_backbone(&frame, &tree, &hydrogens(&frame)).expect("linear backbone");
         assert_eq!(bb.atoms.len(), 8);
         assert_eq!(bb.align, [0, 1, 2]);
         for j in 1..8 {
@@ -515,7 +553,7 @@ mod tests {
         }
         let frame = frame_from_parts(&coords, &bonds);
         let tree = tree_of(&frame);
-        let bb = analyze_backbone(&frame, &tree).expect("star");
+        let bb = analyze_backbone(&frame, &tree, &hydrogens(&frame)).expect("star");
         assert_eq!(bb.atoms.len(), 5);
         // InternalTree roots at a leaf, so the centre has 3 tree children
         // (the fourth neighbour is the parent leaf).
@@ -535,7 +573,7 @@ mod tests {
         // Need ≥4 heavies: centre + 5 leaves = 6.
         let frame = frame_from_parts(&coords, &bonds);
         let tree = tree_of(&frame);
-        let err = analyze_backbone(&frame, &tree).expect_err("d=5");
+        let err = analyze_backbone(&frame, &tree, &hydrogens(&frame)).expect_err("d=5");
         let msg = format!("{err}");
         assert!(
             msg.contains("5") || msg.contains("degree") || msg.contains("neighbours"),
@@ -575,7 +613,7 @@ mod tests {
         bonds.push((6, 11));
         let frame = frame_from_parts(&coords, &bonds);
         let tree = tree_of(&frame);
-        let bb = analyze_backbone(&frame, &tree).expect("comb");
+        let bb = analyze_backbone(&frame, &tree, &hydrogens(&frame)).expect("comb");
         let branched = bb.children.iter().filter(|c| c.len() >= 2).count();
         assert!(branched >= 1, "expected a fork in children");
     }

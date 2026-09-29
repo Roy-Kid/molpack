@@ -5,17 +5,15 @@
 //! [`GenCanPack::with_optimizer`](crate::GenCanPack::with_optimizer) plus an
 //! [`OptimizeSelect`] that names which components to assemble each call.
 
-#![cfg(feature = "ff")]
-
 use molrs::optimize::{Optimizer, set_free_mask};
-use molrs::store::block::Block;
+use molrs::spatial::simbox::Mic;
 use molrs::store::frame::Frame;
 use molrs::types::F;
-use ndarray::Array1;
 
 use crate::constraints::EvalMode;
 use crate::context::PackContext;
 use crate::euler::eulerrmat;
+use crate::target::centered_coords;
 
 pub mod torsion_mc;
 pub use torsion_mc::TorsionMcOptimizer;
@@ -63,11 +61,6 @@ impl OptimizeSelect {
         self.rcut = rcut;
         self
     }
-
-    pub fn without_environment(mut self) -> Self {
-        self.with_environment = false;
-        self
-    }
 }
 
 /// One bound optimizer + selection, stored on [`crate::GenCanPack`].
@@ -81,8 +74,8 @@ pub struct OptimizerBinding {
 ///
 /// Public because it appears in the signatures of the public
 /// [`run_iteration`](crate::gencan::phases::run_iteration) /
-/// [`run_phase`](crate::gencan::phases::run_phase) entry points that the benches drive.
-/// Built by [`resolve_bindings`] at the start of every run — not constructed
+/// [`run_phase`](crate::gencan::phases::run_phase) entry points.
+/// Built by `resolve_bindings` at the start of every run — not constructed
 /// by callers.
 ///
 /// It borrows rather than owns because of the stage seam's re-entrancy
@@ -144,7 +137,7 @@ pub(crate) fn run_optimizer_bindings(
         return;
     }
     let xcart_snapshot = sys.xcart.clone();
-    let pbc = optimizer_pbc(sys);
+    let mic = sys.simbox.mic().simplified();
 
     for binding in bindings.iter_mut() {
         match binding.select.mode {
@@ -165,7 +158,7 @@ pub(crate) fn run_optimizer_bindings(
                             sys,
                             xwork,
                             &xcart_snapshot,
-                            pbc,
+                            &mic,
                             &spans,
                             &world,
                             binding.select,
@@ -201,7 +194,7 @@ pub(crate) fn run_optimizer_bindings(
                     sys,
                     xwork,
                     &xcart_snapshot,
-                    pbc,
+                    &mic,
                     &spans,
                     &world,
                     binding.select,
@@ -224,7 +217,7 @@ fn optimize_group(
     sys: &mut PackContext,
     xwork: &[F],
     xcart_snapshot: &[[F; 3]],
-    pbc: Option<[F; 3]>,
+    mic: &Mic,
     spans: &[CopySpan],
     world_movable: &[[F; 3]],
     select: &OptimizeSelect,
@@ -234,25 +227,21 @@ fn optimize_group(
     let mut world = world_movable.to_vec();
     let mut free = vec![true; world.len()];
     if select.with_environment {
-        let rcut2 = select.rcut * select.rcut;
         let mut movable_mask = vec![false; xcart_snapshot.len()];
         for s in spans {
             for a in 0..s.na {
                 movable_mask[s.copy_start + a] = true;
             }
         }
-        for (icart, p) in xcart_snapshot.iter().enumerate() {
-            if movable_mask[icart] {
-                continue;
-            }
-            let near = world_movable.iter().any(|w| {
-                let d = min_image([p[0] - w[0], p[1] - w[1], p[2] - w[2]], pbc);
-                d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < rcut2
-            });
-            if near {
-                world.push(*p);
-                free.push(false);
-            }
+        for icart in environment_atoms(
+            xcart_snapshot,
+            &movable_mask,
+            world_movable,
+            select.rcut,
+            mic,
+        ) {
+            world.push(xcart_snapshot[icart]);
+            free.push(false);
         }
     }
 
@@ -266,14 +255,11 @@ fn optimize_group(
     }
 
     // Read back free (movable) coordinates only.
-    let new_flat = match molrs::ff::potential::extract_coords(&frame) {
-        Ok(c) => c,
-        Err(_) => return,
+    let Ok(xyz) = frame.coords() else {
+        return;
     };
-    let n_movable = world_movable.len();
-    let world_new: Vec<[F; 3]> = (0..n_movable)
-        .map(|i| [new_flat[3 * i], new_flat[3 * i + 1], new_flat[3 * i + 2]])
-        .collect();
+    let mut world_new = crate::template::coord_rows(&xyz);
+    world_new.truncate(world_movable.len());
 
     // Map world delta → reference coor per copy (Rᵀ + recenter), then non-harm gate.
     //
@@ -307,7 +293,7 @@ fn optimize_group(
                 coor_old[a][2] + rt[2],
             ];
         }
-        recenter(&mut coor_new);
+        let coor_new = centered_coords(&coor_new);
         saved.push((s.copy_start, s.na, coor_old));
         sys.coor[s.copy_start..s.copy_start + s.na].copy_from_slice(&coor_new);
     }
@@ -319,69 +305,69 @@ fn optimize_group(
         }
         sys.invalidate_geometry_cache();
     }
-    let _ = world_new; // silence if unused after refactor
 }
 
 fn coords_to_frame(world: &[[F; 3]]) -> Frame {
-    let n = world.len();
-    let mut atoms = Block::new();
-    let mut x = Vec::with_capacity(n);
-    let mut y = Vec::with_capacity(n);
-    let mut z = Vec::with_capacity(n);
-    for p in world {
-        x.push(p[0]);
-        y.push(p[1]);
-        z.push(p[2]);
-    }
-    let _ = atoms.insert("x", Array1::from_vec(x).into_dyn());
-    let _ = atoms.insert("y", Array1::from_vec(y).into_dyn());
-    let _ = atoms.insert("z", Array1::from_vec(z).into_dyn());
     let mut frame = Frame::new();
-    frame.insert("atoms", atoms);
+    frame
+        .set_coords(ndarray::Array2::from(world.to_vec()).view())
+        .expect("an N x 3 array always fits a fresh frame");
     frame
 }
 
-fn recenter(coords: &mut [[F; 3]]) {
-    if coords.is_empty() {
-        return;
-    }
-    let n = coords.len() as F;
-    let mut c = [0.0 as F; 3];
-    for p in coords.iter() {
-        c[0] += p[0];
-        c[1] += p[1];
-        c[2] += p[2];
-    }
-    c[0] /= n;
-    c[1] /= n;
-    c[2] /= n;
-    for p in coords.iter_mut() {
-        p[0] -= c[0];
-        p[1] -= c[1];
-        p[2] -= c[2];
-    }
+/// Indices of the non-movable atoms within `rcut` of any movable atom, under
+/// the cell's minimum image — the frozen environment an optimizer relaxes against.
+fn environment_atoms(
+    xcart: &[[F; 3]],
+    movable_mask: &[bool],
+    world_movable: &[[F; 3]],
+    rcut: F,
+    mic: &Mic,
+) -> Vec<usize> {
+    let rcut2 = rcut * rcut;
+    (0..xcart.len())
+        .filter(|&i| !movable_mask[i])
+        .filter(|&i| {
+            let p = xcart[i];
+            world_movable.iter().any(|w| {
+                let d = mic.apply([p[0] - w[0], p[1] - w[1], p[2] - w[2]]);
+                d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < rcut2
+            })
+        })
+        .collect()
 }
 
-fn optimizer_pbc(sys: &PackContext) -> Option<[F; 3]> {
-    let pbc = sys.pbc_periodic();
-    if pbc.iter().any(|&p| p) {
-        let l = sys.simbox.lengths();
-        Some([l[0], l[1], l[2]])
-    } else {
-        None
-    }
-}
+#[cfg(test)]
+mod tests {
+    use molrs::spatial::simbox::SimBox;
+    use ndarray::array;
 
-#[inline]
-fn min_image(d: [F; 3], pbc: Option<[F; 3]>) -> [F; 3] {
-    match pbc {
-        Some(l) => std::array::from_fn(|k| {
-            if l[k] > 0.0 {
-                d[k] - (d[k] / l[k]).round() * l[k]
-            } else {
-                d[k]
-            }
-        }),
-        None => d,
+    use super::*;
+
+    /// A slab (`z` not periodic): an atom across the `z` face is far, one
+    /// across the `x` face is near. Wrapping every axis once any axis is
+    /// periodic pulled the `z` atom in as environment.
+    #[test]
+    fn environment_wraps_only_periodic_axes() {
+        let bx = SimBox::ortho(
+            array![10.0, 10.0, 10.0],
+            array![0.0, 0.0, 0.0],
+            [true, true, false],
+        )
+        .unwrap();
+        let mic = bx.mic().simplified();
+        let xcart = [[0.5, 5.0, 0.5], [9.5, 5.0, 0.5], [0.5, 5.0, 9.5]];
+        let movable = [true, false, false];
+        let near = environment_atoms(&xcart, &movable, &xcart[..1], 2.0, &mic);
+        assert_eq!(near, vec![1]);
+    }
+
+    /// No periodic axis: nothing wraps, so neither face neighbour is near.
+    #[test]
+    fn environment_without_pbc_does_not_wrap() {
+        let xcart = [[0.5, 5.0, 0.5], [9.5, 5.0, 0.5], [0.5, 5.0, 9.5]];
+        let movable = [true, false, false];
+        let near = environment_atoms(&xcart, &movable, &xcart[..1], 2.0, &Mic::Free);
+        assert!(near.is_empty());
     }
 }

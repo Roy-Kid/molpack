@@ -73,7 +73,6 @@ pub struct CgResult {
 /// Solve the trust-region quadratic subproblem by CG.
 /// Operates on the free-variable set `ind[0..nind)`.
 #[allow(clippy::too_many_arguments)]
-#[allow(unused_assignments)]
 pub fn cg_solve(
     nind: usize,
     ind: &[usize],
@@ -137,7 +136,7 @@ pub fn cg_solve(
 
     let mut iter = 0usize;
     let mut itnqmp = 0usize;
-    let mut qprev = infabs;
+    let mut qprev: F;
     let mut bestprog = 0.0 as F;
 
     let s = &mut scratch.s[..nind];
@@ -154,16 +153,15 @@ pub fn cg_solve(
     r.copy_from_slice(gfree);
 
     let mut q = 0.0 as F;
-    let mut gts = 0.0 as F;
+    let mut gts: F;
     let mut snorm2 = 0.0 as F;
-    let mut snorm2prev = 0.0 as F;
     let mut rnorm2 = gnorm2;
     let mut rnorm2prev = rnorm2;
     let mut dnorm2 = 0.0 as F;
     let mut dtr = 0.0 as F;
     let mut dtw = 0.0 as F;
     let mut alpha = 0.0 as F;
-    let mut inform = 0i32;
+    let inform: i32;
 
     let mut rbdind: Option<usize> = None;
     let mut rbdtype = 0i32;
@@ -313,7 +311,6 @@ pub fn cg_solve(
         for j in 0..nind {
             s[j] += alpha * d[j];
         }
-        snorm2prev = snorm2;
         snorm2 = snorm2 + alpha * alpha * dnorm2 + 2.0 * alpha * dts;
 
         // Update residual r = r + alpha * w
@@ -329,7 +326,6 @@ pub fn cg_solve(
         gts = (0..nind).map(|j| gfree[j] * s[j]).sum();
         if gts > 0.0 || gts * gts < theta * theta * gnorm2 * snorm2 {
             s.copy_from_slice(sprev);
-            snorm2 = snorm2prev;
             q = qprev;
             inform = 3;
             break;

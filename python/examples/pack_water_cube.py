@@ -32,7 +32,7 @@ def main() -> None:
     water = (
         molpack.Target(frame, count=100)
         .with_name("water")
-        .with_restraint(molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
+        .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
     )
 
     packer = molpack.GenCanPack()
@@ -53,8 +53,12 @@ def main() -> None:
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.mrec.write_frame(str(OUT / "pack_water_cube.mrec"), packed)
-    molrs.io.write_lammps_traj(str(OUT / "pack_water_cube.lammpstrj"), [packed])
+    molrs.io.write_mrec(str(OUT / "pack_water_cube.mrec"), packed)
+    molrs.io.write_lammps_trajectory(
+        str(OUT / "pack_water_cube.lammpstrj"),
+        [packed],
+        columns=["id", "element", "mol", "x", "y", "z"],
+    )
     if "bonds" in packed and packed["bonds"].nrows:
         molrs.io.write_lammps_dump_local(
             str(OUT / "pack_water_cube.dump.local"), [packed]

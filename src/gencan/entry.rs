@@ -7,8 +7,7 @@ use crate::entry::setup::CellDecl;
 use crate::entry::{PackSettings, State};
 use crate::error::PackError;
 use crate::gencan::solver::{GencanSettings, GencanStage};
-use crate::handler::Handler;
-#[cfg(feature = "ff")]
+use crate::handler::{EarlyStopHandler, Handler};
 use crate::optimizer::OptimizerBinding;
 use crate::pipeline::{EngineSetup, PackEngine, Pipeline, StageFactory};
 use crate::stage::Stage;
@@ -23,6 +22,7 @@ use crate::target::Target;
 pub struct GenCanPack {
     settings: PackSettings,
     handlers: Vec<Box<dyn Handler>>,
+    early_stop: Option<EarlyStopHandler>,
     inner_iterations: usize,
     init_passes: Option<usize>,
     init_box_half_size: F,
@@ -31,7 +31,6 @@ pub struct GenCanPack {
     perturb: bool,
     avoid_overlap: bool,
     seed_placements: Option<Placements>,
-    #[cfg(feature = "ff")]
     optimizers: Vec<OptimizerBinding>,
 }
 
@@ -42,12 +41,20 @@ impl Default for GenCanPack {
 }
 
 impl GenCanPack {
+    /// Packmol's default `nloop` for `ntype` structure types: `200 * ntype`
+    /// GENCAN loops per phase (getinp.f90:537-539). What `max_loops` to pass
+    /// when the caller has no reason to pick another.
+    pub const fn default_max_loops(ntype: usize) -> usize {
+        200 * ntype
+    }
+
     pub fn new() -> Self {
         // One home for the GENCAN defaults: `GencanSettings::default()`.
         let d = GencanSettings::default();
         Self {
             settings: PackSettings::default(),
             handlers: Vec::new(),
+            early_stop: Some(EarlyStopHandler::default()),
             inner_iterations: d.inner_iterations,
             init_passes: d.init_passes,
             init_box_half_size: d.init_box_half_size,
@@ -56,7 +63,6 @@ impl GenCanPack {
             perturb: d.perturb,
             avoid_overlap: d.avoid_overlap,
             seed_placements: None,
-            #[cfg(feature = "ff")]
             optimizers: Vec::new(),
         }
     }
@@ -79,29 +85,15 @@ impl GenCanPack {
     /// ([`PackError::SeedMismatch`] otherwise); fixed targets may be appended
     /// after the free ones.
     pub fn with_restart(mut self, result: &State) -> Self {
-        let cell = &result.placements.cell;
-        let hv = cell.h_view();
-        let ov = cell.origin_view();
-        let mut h = [[0.0 as F; 3]; 3];
-        for (i, row) in h.iter_mut().enumerate() {
-            for (j, v) in row.iter_mut().enumerate() {
-                *v = hv[[i, j]];
-            }
-        }
         // The seed's cell flows through the shared settings — one source of
         // truth, and the existing mutual-exclusion errors fire if the caller
         // declares a second box.
-        self.settings.cell = Some(CellDecl::Matrix {
-            h,
-            origin: [ov[0], ov[1], ov[2]],
-            pbc: cell.pbc(),
-        });
+        self.settings.cell = Some(CellDecl::Resolved(result.placements.cell.clone()));
         self.seed_placements = Some(result.placements.clone());
         self
     }
 
-    /// Bind an in-loop optimizer to a selection of copies (feature `ff`).
-    #[cfg(feature = "ff")]
+    /// Bind an in-loop optimizer to a selection of copies.
     pub fn with_optimizer(
         mut self,
         select: crate::OptimizeSelect,
@@ -141,6 +133,20 @@ impl GenCanPack {
         self
     }
 
+    /// End a phase whose best objective (Packmol's `bestf`) has stopped
+    /// improving at the user's radii, instead of running it to `max_loops`.
+    ///
+    /// On by default with [`EarlyStopHandler::default`] — 10 % over 10 loops
+    /// at `radscale == 1`, the criterion spelled out on that type. A pack
+    /// that stalls there is almost always too dense, and the useful answer is
+    /// `converged == false` in minutes, not an hour of GENCAN. Pass a
+    /// configured handler to tune it, or `None` to run every phase to
+    /// `max_loops` as Packmol does.
+    pub fn with_early_stop(mut self, early_stop: impl Into<Option<EarlyStopHandler>>) -> Self {
+        self.early_stop = early_stop.into();
+        self
+    }
+
     /// Reject initial placements that overlap a fixed molecule.
     pub fn with_avoid_overlap(mut self, on: bool) -> Self {
         self.avoid_overlap = on;
@@ -173,7 +179,11 @@ impl StageFactory for GenCanPack {
     }
 
     fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
-        std::mem::take(self.handlers_mut())
+        let mut handlers = std::mem::take(self.handlers_mut());
+        if let Some(early_stop) = self.early_stop.take() {
+            handlers.push(Box::new(early_stop));
+        }
+        handlers
     }
 
     fn stages(&mut self, setup: &EngineSetup<'_>) -> Result<Vec<Box<dyn Stage>>, PackError> {
@@ -206,7 +216,6 @@ impl StageFactory for GenCanPack {
             Some(seed) => stage.with_seed_placements(seed),
             None => stage,
         };
-        #[cfg(feature = "ff")]
         let stage = stage.with_optimizers(std::mem::take(&mut self.optimizers));
         Ok(vec![Box::new(stage)])
     }

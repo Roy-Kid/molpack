@@ -2,13 +2,14 @@
 slug: chain-growth-solver
 criteria:
   - id: ac-001
-    summary: src/grow/ 与 src/solver.rs 不依赖 ff feature，先验是纯几何数据
+    summary: src/grow/ 与 src/stage.rs 不依赖 ff feature，先验是纯几何数据
     type: code
     pass_when: |
       `cargo build -p molcrafts-molpack`（default feature，不带 io/ff/cli/rayon）
-      成功，且 src/grow/（含 prior.rs）与 src/solver.rs 均已编入。
-      `grep -rn 'cfg(feature = "ff")\|molrs::ff\|molrs::optimize' src/grow/ src/solver.rs`
-      无命中。TorsionPrior / AnglePrior 的构造只收数据（角度、权重、C∞、
+      成功，且 src/grow/（含 prior.rs）与 src/stage.rs 均已编入。
+      `grep -rn 'molrs::ff\|molrs::optimize' src/grow/ src/stage.rs`
+      无命中（接缝文件现为 `src/stage.rs`；crate 内已无
+      `cfg(feature = "ff")`，`ff` 只透传 `molrs/ff`，故不再以该 cfg 为判据）。TorsionPrior / AnglePrior 的构造只收数据（角度、权重、C∞、
       持久长度），不收任何力场对象。
       `cd python && maturin develop --release` 后 `import molpack` 能取到生长入口，
       wheel 的 feature 集合未新增。
@@ -18,16 +19,18 @@ criteria:
     summary: 生长是 Solver 接缝上的平级算法，方法选择是 per-target 的
     type: code
     pass_when: |
-      src/solver.rs 定义 `pub trait Solver`（接收 `&mut PackContext` +
-      `&[Target]` + `PlacementsMut` + `&Budget`，返回 `SolveOutcome`；
-      Budget / SolveOutcome 标 `#[non_exhaustive]`）。
-      `Target::with_method(PackMethod)` 存在，
-      `PackMethod::{Gencan, Grow(GrowConfig)}`，默认 Gencan；`GrowConfig` /
-      `GrowError` 定义在叶子文件 src/grow/config.rs（`grep -n 'use crate::(target|packer|context)' src/grow/config.rs` 无命中）；
-      不存在全局 `Molpack::with_solver`。
-      `pack` / `pack_with_report` 公开签名不变；`PackResult` 既有四字段不变，
-      仅新增 `softened: usize`（gencan 路径恒为 0）。
-      `grep -rn 'pgencan\|run_phase\|run_iteration' src/grow/ src/solver.rs`
+      （2026-09-29 按现行接缝改写：`Solver`/`PlacementsMut`/`SolveOutcome`、
+      `Target::with_method`/`PackMethod`、`pack_with_report` 已随 engine-entry-split
+      与 stage-pipeline 删除。）
+      src/stage.rs 定义 `pub trait Stage`（`name`/`requires`/`guarantees`/`run`，
+      `run` 收 `&mut PackState`，返回 `Result<StageOutcome, PackError>`；
+      Budget / StageOutcome 标 `#[non_exhaustive]`）。方法选择由调用方挑入口
+      （`GenCanPack` / `CbmcGrow` / `LatticeGrow`，或 `Pipeline::with_stage` 组合），
+      不存在全局 solver 开关；`GrowConfig` /
+      `GrowError` 定义在叶子文件 src/grow/config.rs（`grep -nE 'use crate::(target|entry|context)' src/grow/config.rs` 无命中）；
+      公开结果是冻结的 `State`（`frame`/`fdist`/`intra`/`frest`/`converged`/`degraded`），
+      原 `softened` 由 `State::degraded` 承载（各阶段 `StageOutcome::softened` 之和）。
+      `grep -rn 'pgencan\|run_phase\|run_iteration' src/grow/ src/stage.rs`
       无命中——solver 永不调用 pack 内部代码，生长与 GENCAN 并列不嵌套。
       `Method::Grow` 配给原子数 < 3 或无键模板返回具名错误，不静默退化为刚体。
     status: pending
@@ -36,7 +39,9 @@ criteria:
     summary: 内坐标往返精确，且任意自由变量下成键几何不变（环键误判探测器）
     type: runtime
     pass_when: |
-      tests/grow.rs 中：(i) 对模板帧构建 InternalTree 后用模板扭转值重建，
+      src/grow/tests/internal.rs 中（`internal_roundtrip_{linear,branched,ring}`、
+      `internal_random_vars_preserve_bonded_geometry`、`internal_rigid_molecule_no_vars`）：
+      (i) 对模板帧构建 InternalTree 后用模板扭转值重建，
       与模板坐标逐点比较 ‖Δ‖∞ < 1e-9；(ii) 用**随机**自由变量重建后，所有
       键长、键角、非自由二面角、以及环闭合键长仍等于模板（1e-9 / 1e-9 rad）。
       (ii) 是 (i) 抓不住的两类 bug（环内键被误判为自由变量、步分组错误）的
@@ -47,9 +52,10 @@ criteria:
     summary: 无重叠是构造保证，且报告数字来自共享 objective
     type: runtime
     pass_when: |
-      生长产物经 `validation::validate_from_targets` 检查无违反；
-      `PackResult::fdist == 0.0`（严格等零）；`PackResult::softened == 0`
-      （公开载体即此字段）；
+      生长产物的 `State::frest == 0.0`（restraint 无违反；原
+      `validation::validate_from_targets` 已于 2026-09-29 删除，裁决读 `State`）；
+      `State::fdist == 0.0`（严格等零）；`State::degraded == 0`
+      （公开载体即此字段，原 `softened`）；
       独立复算的最小非排除原子间距（最小镜像下）≥ tolerance。
       SolveOutcome 的 fdist/frest 由收尾时对共享 objective（Constraints 入口）
       的一次评估产出，src/grow/ 中不存在自行赋值最终 fdist/frest 的路径。
@@ -92,7 +98,7 @@ criteria:
     type: runtime
     pass_when: |
       一个带 `InsideSphereRestraint` 的生长算例：全部原子落在球内，
-      `PackResult::frest == 0.0`（严格零，非 < precision——候选在 r.f > 0 时
+      `State::frest == 0.0`（严格零，非 < precision——候选在 r.f > 0 时
       被拒绝，不是被惩罚）。
       `grep -rn 'trait .*Restraint' src/grow/` 无命中——生长不定义新约束 trait，
       只调用现有 `AtomRestraint::f`。
@@ -112,9 +118,10 @@ criteria:
     summary: 既有 Packmol 路径逐条不变
     type: runtime
     pass_when: |
-      `cargo test -p molcrafts-molpack --lib --tests` 全绿；
-      `cargo test -p molcrafts-molpack --release --test examples_batch -- --ignored`
-      五个官方 Packmol 例子在固定 seed 下收敛且 validation 无违反。
+      `cargo test -p molcrafts-molpack --lib --features cli,ff,rayon` 全绿；
+      五个官方 Packmol 例子（`cargo run --release --features io --example pack_<name>`）
+      在固定 seed 下收敛且 `State::frest == 0`（原 `examples_batch` harness 与
+      validation 已删除）。
       在 Task 1（只立接缝 + per-target dispatch）之后与全部任务完成之后各跑一次，
       两次结果一致。接缝是新增分支，不是对既有算法的改写——这是守门条件。
     status: pending
@@ -140,7 +147,10 @@ criteria:
     summary: CG 合成链在 default feature 下达到目标持久统计
     type: scientific
     pass_when: |
-      tests/grow.rs 中程序化合成的 Kremer–Grest 型珠链模板（无 io、无 ff）：
+      STRUCK 2026-09-29：KG 珠链 c∞ = 1.76 夹具随集成测试层于 2026-09-20 删除，无替代；
+      采样链的 C∞ 契约现由 src/grow/tests/prior.rs 的
+      `prior_uniform_freely_rotating_c_inf` / `prior_ris_calibrated_c_inf` 钉住。以下为历史文本。
+      （原）程序化合成的 Kremer–Grest 型珠链模板（无 io、无 ff）：
       `AnglePrior::Wlc`（或 States）校准后，孤立链 c∞ = 1.76 ± 10%
       （Auhl et al. 2003 的 NRRW 目标值）。
       `exclusion_depth` 为 per-target 参数且该用例显式设置（不依赖 AA 默认 3）。
@@ -165,7 +175,7 @@ criteria:
     pass_when: |
       主线：PEO(`Method::Grow`) + 小分子(`Method::Gencan`) 算例——盒子按总质量
       定容，生长先行，链原子在刚体阶段作为 fixed 结构逐位不动，整体
-      validation 无违反。
+      `State::frest == 0`（原 validation 已删）。
       Task 9 检查点缩容时的替代判据：混合方法返回具名错误（不是 panic、不是
       静默单方法），且后续 spec 已在 INDEX 立项。两种结果都算过，静默错配不算。
     status: pending
@@ -174,8 +184,8 @@ criteria:
 # chain-growth-solver — 验收
 
 本文件是 `/mol:impl` 的完成契约。每条 `pass_when` 必须可被机械核验；
-`type: scientific` 与 `type: performance` 由 `examples/pack_peo`（AA）与
-tests/grow.rs 的 CG 用例产出的量化报告佐证。
+`type: scientific` 与 `type: performance` 由 `examples/pack_peo`（AA）产出的量化报告佐证
+（原集成层的 CG 用例已于 2026-09-20 删除；先验统计见 src/grow/tests/prior.rs）。
 
 判据对照基线来自两处：实测数据（Domain basis §一–四）与文献值
 （Domain basis §五：C∞ = 2.00 解析值、PEO C∞ = 5.51、KG c∞ = 1.76、

@@ -16,9 +16,9 @@ harness-layout rows.
 |---|---|
 | `default` | nothing |
 | `io` | `molrs/io` (PDB / XYZ / SDF / LAMMPS readers) |
-| `cli` | `clap` + `io` (binary + integration tests) |
+| `cli` | `clap` + `io` (the `molpack` binary) |
 | `rayon` | `rayon` + `molrs/rayon` (parallel evaluation) |
-| `ff` | `molrs/ff` (MMFF + L-BFGS) — enables the in-loop `Optimizer` bindings |
+| `ff` | `molrs/ff` — a forward for callers binding a force-field optimizer; the in-loop `Optimizer` seam itself is always on |
 
 The Python wheel is built **without** `io` — the wheel relies on the user's
 `molrs` Python package for frame loading, then builds targets from the loaded
@@ -36,23 +36,40 @@ frame (the PyO3 `target_from_frame` helper) and lowers scripts with
 ## Tests and gates
 
 - TDD: RED first, then GREEN, then refactor. 80% coverage minimum.
-- Unit tests live in-module (`#[cfg(test)]`); integration tests in `tests/`, one file per subsystem (`grow.rs`, `pipeline.rs`, `examples_batch.rs`, …); Python tests in `python/tests/`.
-- `stage-pipeline` chain, one file per subsystem, each owning only its own type's contract:
-  `src/template.rs` in-module (`frame_positions`; bond graphs are `molrs::Topology`); `tests/context_rigid_view.rs`
-  (the rigid placement vector `src/context/rigid_view.rs`); `src/context/pack_state/tests.rs`
-  (`PackState` + `evaluate_unscaled`, in-crate rather than in `tests/` because both were
-  `pub(crate)` when written and so invisible to an integration test in a separate crate — mounted
-  from `src/context/pack_state.rs` via `#[cfg(test)] mod tests;` and still collected by the
-  ordinary `--lib` gate); `tests/stage.rs` (the `Stage` seam's own contract — object safety,
-  `requires`/`guarantees`, re-entrancy — on fake stages only, never a production stage; what each
-  concrete stage declares stays with its owner, `tests/gencan.rs` / `tests/grow.rs`);
-  `tests/pipeline.rs` (the multi-stage lifecycle body `src/pipeline/`); `tests/invariant.rs`
-  (`Layers` / `Invariant` / `RestraintsSatisfied`, `src/invariant.rs`).
-- `cargo test -p molcrafts-molpack --lib --tests` — fast tier, must always be green (`mol_project.build.test`). A single test: append `-- <name filter>` (`build.test_single`).
-- `cargo test -p molcrafts-molpack --release --features io --test examples_batch -- --ignored` — Packmol regression (five official examples, fixed seed). Requires test data: `bash ../molrs/scripts/fetch-test-data.sh` (one time).
+- **Unit tests only, in-module.** Every test lives in a `#[cfg(test)]` module
+  next to the code that owns the behaviour (law § 11); a test body that is too
+  large for its file gets a child `tests.rs` / `tests/` module
+  (`src/grow/tests/`, `src/pipeline/tests.rs`,
+  `src/context/pack_state/tests.rs`, `src/restraint/geometric/tests/`); fixtures
+  shared across modules live in `src/testutil.rs` (`cfg(test)`). There
+  is **no** `tests/` directory, **no** `benches/` and **no** `regressions/` —
+  they were deleted on 2026-09-20 with the end-to-end packing suites, the
+  Packmol regression harness and the criterion benches. Reintroducing any of
+  them is a design decision, not a convenience.
+- **No golden / bitwise-continuity tests.** A test asserts a property the code
+  owns (a named refusal, a layering rule, an exact geometric identity), never
+  "the numbers this build happened to produce".
+- Ownership examples: `src/euler.rs` (rotation algebra), `src/stage.rs` (the
+  `Stage` seam, on fake stages only — what a concrete stage declares stays with
+  that stage), `src/pipeline/tests.rs` (the multi-stage lifecycle body),
+  `src/invariant.rs` (`Layers` / `Invariant` / `RestraintsSatisfied`),
+  `src/grow/tests/{internal,field,prior,entry}.rs`, `src/target.rs` +
+  `src/script/build.rs` (the four per-atom properties, API side and `.inp`
+  side), `src/context/build.rs` (what context construction refuses).
+- `cargo test -p molcrafts-molpack --lib --features cli,ff,rayon` — the gate,
+  must always be green (`mol_project.build.test`); seconds, not minutes. A
+  single test: append `-- <name filter>` (`build.test_single`).
+- `cargo test --doc --features cli,ff` — the rustdoc examples, part of the same
+  tier. That feature set is the one doctests are written for: a snippet that
+  needs `io` or `ff` is a plain `no_run` block, with any setup on hidden `#`
+  lines.
+- An ignored test is a failing test. No `ignore` doctest fence, no `#[ignore]`:
+  the `no-ignored-tests` prek hook (commit stage, mirrored in CI `lint`) rejects
+  both. Uncompiled illustration is a `text` fence.
 - `uv run --directory python --group dev tox -e py` — Python wheel, isolated and non-editable (`maturin develop` is not the gate).
-- `cargo bench --benches` — criterion regression benches (pair kernel, objective dispatch, one `run_iteration` step, restraint eval, tiny end-to-end pack). Each synthesizes its own geometry, so **no** `io` feature is needed; one bench: `cargo bench --bench pack_end_to_end`. Perf history is tracked on canonical pushes by `.github/workflows/bench.yml`.
-- CI parity (pre-push hooks in `.pre-commit-config.yaml`, mirrored by `mol_project.ci.local`): Rust tests with `io`, the `cli` test, `--no-default-features` / `rayon` / `ff` checks, bench build, then tox.
+- CI parity (pre-push hooks in `.pre-commit-config.yaml`, mirrored by
+  `mol_project.ci.local`): lib tests, doc tests, `--all-targets` check (bin +
+  examples must compile), `--no-default-features` / `rayon` checks, then tox.
 
 ## Repo layout
 
@@ -60,15 +77,14 @@ frame (the PyO3 `target_from_frame` helper) and lowers scripts with
 |---|---|
 | `src/` | library + CLI binary (`src/bin/molpack/`) |
 | `python/` | PyO3 wheel (`python/src/`) + package (`python/python/molpack/`) + tests |
-| `tests/` | Rust integration tests (incl. `examples_batch.rs` regression suite) |
-| `benches/` | small criterion regression benches (self-synthesized geometry, no `io`) |
 | `examples/` | runnable example programs (need `--features io`) |
 | `docs/` | public docs site (Rust guide + `docs/python/` binding docs) — published via Zensical (`zensical.toml`) with the shared `molcrafts` theme |
 | `.claude/specs/` | active feature specs, indexed in `INDEX.md`; deleted on close |
 | `.claude/notes/` | passive knowledge: `law.md`, `conventions.md`, `architecture.md`, `notes.md` |
 
-Template geometry is the crate-root leaf `src/template.rs` (`frame_positions`,
-Å). Bond graphs are `molrs::Topology`; molpack does not re-export that type.
+Template geometry is read with `molrs::Frame::coords` (Å); the crate-root leaf
+`src/template.rs` holds only `coord_rows` (array → `[x, y, z]` rows) and the
+rotatable-bond policy. Bond graphs are `molrs::Topology`; molpack does not re-export that type.
 
 Skills and agents come from the `mol` plugin (`molcrafts-harness`); the repo
 carries no project-local `.claude/skills/` or `.claude/agents/` (the former
@@ -97,5 +113,5 @@ handle capsules with the installed `molcrafts-molrs` wheel; both must embed the
 same molrs **major.minor** (minor line = ABI version — see molrs
 `docs/interop.md`). Gates: `molpack/version.py` (wheel metadata, at
 `import molpack`), `interop::check_abi` (`molrs._ffi_abi_token()`, at extension
-init), and the versioned capsule names (`molrs.FrameRef/<line>`) from
+init), and the versioned capsule names (`molrs.FrameRef/<line>`, `molrs.RegionRef/<line>`) from
 `molrs_ffi::abi`.

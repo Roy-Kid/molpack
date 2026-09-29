@@ -84,7 +84,7 @@ Auhl 减排斥体积生长 → 慢 push-off 只属于 `CbmcGrow` 路径（`test_
 - `python/examples/pack_peo_topo.py`
 - `docs/python/api-reference.md`
 - `docs/python/guide/growth.md`
-- `regressions/lattice-branch-saw-02-docs.md` (new)
+- ~~`regressions/lattice-branch-saw-02-docs.md` (new)~~（`regressions/` 已于 2026-09-20 删除，无替代：golden 钉值不再是测试形式）
 
 ## Tasks
 
@@ -92,7 +92,7 @@ Auhl 减排斥体积生长 → 慢 push-off 只属于 `CbmcGrow` 路径（`test_
 - [x] Implement `pack_star` in `python/examples/pack_peo_topo.py` as `LatticeGrow` @ 2.0 Å then `GenCanPack.with_restart` @ 2.0 Å; delete lattice try/except and the `CbmcGrow` body; do not print Auhl; drop unused `_grow_tol`; keep `PEO_H_RADIUS` on `_target`
 - [x] Replace the LatticeGrow v1 sentence in `docs/python/api-reference.md` with the trees / `RingTemplate` / non-tetrahedral acceptance set (no C3, no BFS, no “stars use lattice”)
 - [x] Rewrite `docs/python/guide/growth.md` section “Branched trees and rings” as an explicit `pack_star` pick (`LatticeGrow` then caller-side `with_restart`); keep `CbmcGrow` a peer tree grower; rings raise `RingTemplate` on both growers and `pack_ring` picks rigid `GenCanPack`
-- [x] Add regression example `regressions/lattice-branch-saw-02-docs.md` (public API only; hard-coded goldens, no third-party runtime)
+- [x] ~~Add regression example `regressions/lattice-branch-saw-02-docs.md` (public API only; hard-coded goldens, no third-party runtime)~~（`regressions/` 已于 2026-09-20 删除，无替代：golden 钉值不再是测试形式）
 - [x] Verify owned files against the regression literals and the 2.0 Å / `RingTemplate` cases
 - [x] Run full check + test suite
 
@@ -104,7 +104,7 @@ Python 单测所有权在 `python/tests/test_pack_peo_topo.py`。单文件绿：
 - Edge：`make_ring(4)` + `LatticeGrow.run` → `ValueError`，`match="ring"`。
 - Peer：`test_cbmc_grows_one_star`；`test_auhl_two_stars_push_off_converges`（0.6 Å 然后 2.0 Å）。
 - Domain：容差字面量 2.0 Å，禁止 0.6 Å 出现在格相星形测试或 `pack_star`。不断言格相 `fdist == 0`。
-- Regression：`regressions/lattice-branch-saw-02-docs.md` 钉字面量（日期 2026-09-05）。
+- ~~Regression：`regressions/lattice-branch-saw-02-docs.md` 钉字面量（日期 2026-09-05）。~~（`regressions/` 已于 2026-09-20 删除，无替代：golden 钉值不再是测试形式）
 
 ## Out of scope
 

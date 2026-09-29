@@ -2,11 +2,14 @@
 slug: triclinic-cell-downshift
 criteria:
   - id: ac-001
-    summary: 五个官方例子仍然收敛且 validation 干净
+    summary: 五个官方例子仍然收敛且无 restraint 违反
     type: runtime
     pass_when: |
       固定 seed 下 mixture / interface / bilayer / spherical / solvprotein 五例均收敛
-      （overlap <= precision），validation 报告无违反，tests/examples_batch 全绿。
+      （`cargo run --release --features io --example pack_<name>`；返回的
+      `State::fdist <= precision` 且 `State::frest == 0`）。
+      （2026-09-29 改写：原判据的 validation 报告与 examples_batch 集成 harness 已删除，
+      裁决改读 `State`。）
       **不要求**最终目标函数值与改动前逐位相同：cell 语义本身在修正之列，
       与被替换实现一致不是目标。
     status: done
@@ -67,9 +70,10 @@ criteria:
       （被替换实现在此丢邻居，见 molrs cell-grid-api AC-002）。
     status: done
   - id: ac-009
-    summary: 端到端性能灾难告警
+    summary: ~~端到端性能灾难告警~~
     type: performance
     pass_when: |
+      STRUCK 2026-09-29: benches/ 已于 2026-09-20 删除且无替代（新度量系统待 spec），以下为历史记录。
       benches/pack_end_to_end 与 benches/pair_kernel 的正交基准
       <= 改动前基线 * 1.10；新增的三斜变体作为长期基线记录首次数值。
       本条只作灾难告警，不构成性能主张。

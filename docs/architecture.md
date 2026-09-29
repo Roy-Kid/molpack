@@ -28,10 +28,10 @@ src/
 │   ├── setup.rs        density / pbc / cell resolution + restraint broadcast
 │   └── result.rs       State + the verbatim Placements a run hands the next one
 ├── target.rs           Target — molecule type + per-molecule restraints + fixed_from
-├── template.rs         frame_positions — template coordinates in Å (crate-root
-│                       leaf: std + molrs Frame; bond graphs are molrs::Topology)
-├── restraint/          AtomRestraint trait + geometric/ and collective/ impls
-├── region.rs           Region trait + And/Or/Not + RegionRestraint
+├── template.rs         coord_rows — Frame::coords as [x, y, z] rows (Å); rotatable_bonds
+│                       — the one unclassed-bond policy (crate-root leaf over molrs)
+├── restraint/          AtomRestraint trait; region.rs (RegionRestraint over molrs Region),
+│                       cell.rs (CellRestraint), collective/, crate-private geometric/ (.inp kernels)
 ├── handler.rs          Handler trait + LogLevel + 4 built-in observers
 ├── objective.rs        compute_f / compute_g / compute_fg + Objective impl
 ├── context/            PackContext = single owner of mutable packing state
@@ -64,13 +64,11 @@ src/
 │   ├── field.rs        OverlapField — cell-listed hard-core / soft-shell probe
 │   ├── driver.rs       GrowStage round loop (seeding, retraction, softening)
 │   └── moves.rs        propose / commit / retract / relax primitives
-├── optimizer/          in-loop conformation optimizers (ff feature)
+├── optimizer/          in-loop conformation optimizers
 ├── initial.rs          initial random placement + restmol pre-fit
 ├── movebad.rs          worst-molecule perturbation heuristic
 ├── euler.rs            Euler angles ↔ rotation matrices
-├── frame.rs            PackContext ↔ molrs::Frame conversions
 ├── assemble.rs         packed coords + targets → topology-complete Frame
-├── validation.rs       post-pack correctness check
 ├── script/             .inp parser + lowering to Targets
 └── bin/molpack/        CLI front-end (cli feature)
 ```
@@ -97,7 +95,9 @@ src/
 ```
 
 `target` / `template` / `restraint` / `region` are pure data — no driver imports.
-`template.rs` owns `frame_positions` (Å). Bond graphs are `molrs::Topology`;
+`template.rs` owns `coord_rows` (Å) and `rotatable_bonds` (an unclassed
+bond is a rotatable single bond — for growth and the torsion optimizer alike).
+Bond graphs are `molrs::Topology`;
 molpack does not ship a parallel Topology type.
 `pipeline/` is the only module that imports everything else; `entry/`
 shrank to settings + space + result and imports nothing from `pipeline/` —
@@ -145,8 +145,6 @@ USER INPUTS                 ─→  Target / PackEngine builders
                                 a. broadcast global → per-target restraints
                                 b. snapshot every Target
                                 c. build PackContext, wrap into PackState
-                                     ModelData (immutable topology)
-                                     RuntimeState (borrowed telemetry view over PackContext)
                                      WorkBuffers (xcart, gxcar, scratch)
                                 d. flatten restraints → CSR pool
                                 e. per stage: Stage::run(state, targets, …)
@@ -296,7 +294,7 @@ fn run_iteration(loop_idx, radscale, optimizer_bindings):
     if movebad enabled:
         identify atoms with largest restraint + pair penalty
         perturb their COM/Euler within init_box_half_size
-    // 2. In-loop optimizers (feature `ff`) — all-type phase only, so that
+    // 2. In-loop optimizers — all-type phase only, so that
     //    COM/Euler indexing covers every molecule.
     for binding in optimizer_bindings:
         assemble a Frame per selection (moving copies + frozen neighbours)
@@ -439,5 +437,5 @@ atoms into their regions before pair conflicts matter.
 | What does the initial pre-fit do? | `initial.rs::initial`, `initial.rs::restmol` |
 | How is precision-based termination tested? | `gencan/mod.rs::packmolprecision` |
 | What does `movebad` do? | `movebad.rs::movebad` |
-| How is torsion MC wired in? | `optimizer/torsion_mc.rs::TorsionMcOptimizer::run`, called from `optimizer/mod.rs::run_optimizer_bindings` (feature `ff`) |
+| How is torsion MC wired in? | `optimizer/torsion_mc.rs::TorsionMcOptimizer::run`, called from `optimizer/mod.rs::run_optimizer_bindings` |
 | Where does periodic boundary wrap apply? | `context/pack_context.rs::pbc_distance` |

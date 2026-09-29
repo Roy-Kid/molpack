@@ -85,7 +85,7 @@ molecule templates, copy counts, geometric restraints, then one packing run.
     <strong>Rust API</strong>
     <em>Native Target and PackEngine builders inside your crate.</em>
   </a>
-  <a href="rust/handlers-relaxers/">
+  <a href="rust/handlers-optimizers/">
     <span>06</span>
     <strong>Handlers</strong>
     <em>Observe steps, dump trajectories, or stop a run early.</em>
@@ -138,7 +138,7 @@ the writer or analysis code you already use. See the [Python API](python/).
 
 ```python
 water = Target(frame, 100).with_restraint(
-    InsideBoxRestraint([0, 0, 0], [40, 40, 40])
+    molrs.Cuboid([0, 0, 0], [40, 40, 40])
 )
 packed = GenCanPack().with_seed(42).run([water], max_loops=200).frame
 ```
@@ -169,7 +169,7 @@ let result = GenCanPack::new()
 ### Observe or stop a run
 
 Handlers receive structured events from the packing loop. See
-[Handlers and relaxers](rust/handlers-relaxers/).
+[Handlers and optimizers](rust/handlers-optimizers/).
 
 ```rust
 impl Handler for WatchFdist {

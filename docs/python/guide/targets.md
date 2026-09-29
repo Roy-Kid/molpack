@@ -13,15 +13,10 @@ from molpack import Target
 target = Target(frame, count)
 ```
 
-- `frame` — a `molrs.Frame` or `molpy.Frame`, resolved zero-copy via its
-  FFI capsule. Supported sources:
-
-  | Source | Element column |
-  |--------|---------------|
-  | `molrs.io.read_pdb(path)` | `"symbol"` |
-  | `molrs.io.read_xyz(path)` | `"element"` |
-  | `molrs.Frame({"atoms": {...}})` | `"element"` |
-  | `molpy.Frame` | `"element"` |
+- `frame` — a `molrs.Frame` (`molpy.Frame` is the same class), resolved
+  zero-copy via its FFI capsule. Element symbols come from the `"element"`
+  atom column, which every molrs reader (`molrs.io.read_pdb`,
+  `molrs.io.read_xyz`, …) writes; a frame built in memory must carry it too.
 
 - `count` — number of copies to produce.
 
@@ -122,10 +117,10 @@ target = (
 ### All atoms of the target
 
 ```python
-from molpack import InsideBoxRestraint
+import molrs
 
 target = target.with_restraint(
-    InsideBoxRestraint([0, 0, 0], [40, 40, 40])
+    molrs.Cuboid([0, 0, 0], [40, 40, 40])   # a molrs region: origin, lengths
 )
 ```
 
@@ -134,19 +129,17 @@ Stack multiple restraints by calling `.with_restraint()` again:
 ```python
 target = (
     target
-    .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
-    .with_restraint(OutsideSphereRestraint([20, 20, 20], 5.0))
+    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(~molrs.Sphere([20, 20, 20], 5.0))
 )
 ```
 
 ### A subset of atoms
 
 ```python
-from molpack import AbovePlaneRestraint, BelowPlaneRestraint
-
 target = target.with_atom_restraint(
     [30, 31],                                     # 0-based Rust-native indices
-    BelowPlaneRestraint([0.0, 0.0, 1.0], 2.0),
+    molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 2.0]),   # z <= 2
 )
 ```
 

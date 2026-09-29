@@ -77,3 +77,18 @@ class TestTarget:
         # Amber 1-4 0.5 is a legal table on Target; growth refuses it at run.
         t = Target(_chain_frame(), 1).with_special_bonds([0.0, 0.0, 0.5, 1.0])
         assert t.special_bonds == [0.0, 0.0, 0.5, 1.0]
+
+
+class TestWithHydrogens:
+    """``Target.with_hydrogens`` index marshalling."""
+
+    def test_returns_a_new_target(self):
+        original = Target(_chain_frame(), 1)
+        assert original.with_hydrogens([0, 4]) is not original
+
+    def test_empty_list_is_accepted(self):
+        Target(_chain_frame(), 1).with_hydrogens([])
+
+    def test_out_of_range_index_raises_value_error(self):
+        with pytest.raises(ValueError):
+            Target(_chain_frame(5), 1).with_hydrogens([5])

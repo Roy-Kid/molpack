@@ -15,13 +15,16 @@ use ndarray::array;
 
 use crate::error::PackError;
 use crate::restraint::AtomRestraint;
+use crate::restraint::cell::{simbox_from_lengths_angles, simbox_from_matrix};
 use crate::target::Target;
 
 pub(crate) type PeriodicSpec = ([F; 3], [F; 3], [bool; 3]);
 
 /// A packing cell as the caller declared it, resolved to a [`SimBox`]
 /// inside the engine lifecycle so the builders can stay infallible.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// `Resolved` is a cell that is already a [`SimBox`] (a seed's inherited
+/// cell), carried as-is rather than taken apart and rebuilt.
+#[derive(Clone, Debug)]
 pub(crate) enum CellDecl {
     LengthsAngles {
         lengths: [F; 3],
@@ -33,53 +36,40 @@ pub(crate) enum CellDecl {
         origin: [F; 3],
         pbc: [bool; 3],
     },
+    Resolved(SimBox),
 }
 
 impl CellDecl {
     pub(crate) fn resolve(self) -> Result<SimBox, PackError> {
-        let (h, origin, pbc) = match self {
+        match self {
             CellDecl::LengthsAngles {
                 lengths,
                 angles_deg,
                 pbc,
-            } => (
-                SimBox::matrix_from_lengths_angles(lengths, angles_deg).map_err(|_| {
-                    PackError::InvalidCell {
-                        detail: format!(
-                            "lengths {lengths:?} and angles {angles_deg:?} do not describe a cell"
-                        ),
-                    }
-                })?,
-                [0.0; 3],
-                pbc,
-            ),
-            CellDecl::Matrix { h, origin, pbc } => (
-                array![
-                    [h[0][0], h[0][1], h[0][2]],
-                    [h[1][0], h[1][1], h[1][2]],
-                    [h[2][0], h[2][1], h[2][2]]
-                ],
-                origin,
-                pbc,
-            ),
-        };
-        SimBox::new(h, array![origin[0], origin[1], origin[2]], pbc).map_err(|_| {
-            PackError::InvalidCell {
-                detail: "lattice matrix is singular".to_string(),
-            }
-        })
+            } => simbox_from_lengths_angles(lengths, angles_deg, pbc),
+            CellDecl::Matrix { h, origin, pbc } => simbox_from_matrix(h, origin, pbc),
+            CellDecl::Resolved(bx) => Ok(bx),
+        }
     }
 }
 
-/// Reject a half-space restraint declared across a periodic lattice direction.
+/// Reject a restraint that is open along a periodic lattice direction.
 ///
-/// A plane splits space in two. Under periodicity along lattice vector `a`,
-/// translating a point by `a` must leave it on the same side, which holds only
-/// when the normal is orthogonal to `a`. Packmol evaluates such a constraint
-/// anyway, in the frame of whichever cell the origin sits in, so whether it is
-/// satisfied depends on where the user put the origin. There is no
-/// interpretation to salvage — the declaration is refused, naming the axis.
-pub(crate) fn reject_planes_across_periodic_axes(
+/// Restraints are evaluated at lab coordinates, never at wrapped ones, so a
+/// restraint used with periodic boundaries has to answer the same way in every
+/// image. [`AtomRestraint::holds_along`] is where each restraint says
+/// whether it does — by confining atoms to one image, or by repeating with the
+/// lattice. One that does neither is satisfied or not depending on which image
+/// an atom drifted into, and on where the user happened to put the origin.
+/// There is no interpretation to salvage, so the declaration is refused,
+/// naming the axis and the restraint.
+///
+/// This covers every restraint the same way: the `.inp` plane kernels, a
+/// molrs region lifted by [`RegionRestraint`](crate::RegionRestraint) — a
+/// half-space across a periodic axis is refused whichever spelling built it —
+/// and a user-supplied `f` / `fg`, which is taken at its word by the trait's
+/// default.
+pub(crate) fn reject_restraints_across_periodic_axes(
     targets: &[Target],
     bx: &SimBox,
 ) -> Result<(), PackError> {
@@ -87,9 +77,10 @@ pub(crate) fn reject_planes_across_periodic_axes(
     if !pbc.iter().any(|&p| p) {
         return Ok(());
     }
-    let h = bx.h_view();
-    // Lattice vectors are the columns of H.
-    let lattice = |k: usize| [h[[0, k]], h[[1, k]], h[[2, k]]];
+    let lattice = |k: usize| {
+        let v = bx.lattice(k);
+        [v[0], v[1], v[2]]
+    };
 
     for target in targets {
         let restraints = target
@@ -97,20 +88,12 @@ pub(crate) fn reject_planes_across_periodic_axes(
             .iter()
             .chain(target.atom_restraints.iter().map(|(_, r)| r));
         for r in restraints {
-            let Some(n) = r.plane_normal() else { continue };
-            let n_norm = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
-            if n_norm <= 0.0 {
-                continue;
-            }
             for (k, &periodic) in pbc.iter().enumerate() {
-                if !periodic {
-                    continue;
-                }
-                let a = lattice(k);
-                let a_norm = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
-                let cos = (n[0] * a[0] + n[1] * a[1] + n[2] * a[2]) / (n_norm * a_norm);
-                if cos.abs() > 1e-9 {
-                    return Err(PackError::PlaneAcrossPeriodicAxis { axis: k, normal: n });
+                if periodic && !r.holds_along(lattice(k)) {
+                    return Err(PackError::RestraintAcrossPeriodicAxis {
+                        axis: k,
+                        restraint: r.name(),
+                    });
                 }
             }
         }
@@ -118,75 +101,32 @@ pub(crate) fn reject_planes_across_periodic_axes(
     Ok(())
 }
 
-/// Do two lattices describe the same cell?
-pub(crate) fn cells_agree(a: &SimBox, b: &SimBox) -> bool {
-    let (ha, hb) = (a.h_view(), b.h_view());
-    let (oa, ob) = (a.origin_view(), b.origin_view());
-    let tol: F = 1e-9;
-    (0..3).all(|i| (0..3).all(|j| (ha[[i, j]] - hb[[i, j]]).abs() <= tol))
-        && (0..3).all(|k| (oa[k] - ob[k]).abs() <= tol)
-        && a.pbc() == b.pbc()
-}
+/// Absolute tolerance (Å) under which two declared lattices are the same cell,
+/// per [`SimBox::approx_eq`]: every matrix and origin entry within it, identical
+/// PBC flags, and the same `is_cell_defined`. The last one is stricter than the
+/// hand-rolled check it replaced, on purpose: a no-cell box never agrees with
+/// a real lattice.
+const CELL_AGREE_TOL: F = 1e-9;
 
 /// Scan every restraint on every target for an `AtomRestraint::declared_cell`.
 ///
-/// Mirrors [`derive_periodic_box`]: at most one distinct lattice may be
-/// declared across the whole system, otherwise the packing has no
-/// well-defined cell.
-pub(crate) fn derive_cell(targets: &[Target]) -> Result<Option<CellDecl>, PackError> {
-    let mut found: Option<CellDecl> = None;
+/// At most one distinct lattice may be declared across the whole system,
+/// otherwise the packing has no well-defined cell.
+pub(crate) fn derive_cell(targets: &[Target]) -> Result<Option<SimBox>, PackError> {
+    let mut found: Option<SimBox> = None;
     for target in targets {
         let restraints = target
             .molecule_restraints
             .iter()
             .chain(target.atom_restraints.iter().map(|(_, r)| r));
         for r in restraints {
-            if let Some((h, origin, pbc)) = r.declared_cell() {
-                let candidate = CellDecl::Matrix { h, origin, pbc };
-                match found {
+            if let Some(candidate) = r.declared_cell() {
+                match &found {
                     None => found = Some(candidate),
-                    Some(existing) if existing == candidate => {}
+                    Some(existing) if existing.approx_eq(&candidate, CELL_AGREE_TOL) => {}
                     Some(_) => {
                         return Err(PackError::InvalidCell {
                             detail: "restraints declare more than one lattice".to_string(),
-                        });
-                    }
-                }
-            }
-        }
-    }
-    Ok(found)
-}
-
-/// Scan every restraint on every target for a `AtomRestraint::periodic_box`
-/// override. Returns `Ok(None)` if no restraint declares one, `Ok(Some(...))`
-/// if exactly one unique declaration exists (duplicates with identical
-/// bounds + flags are allowed — they come from `with_global_restraint`
-/// broadcast and from two targets sharing the same restraint object).
-/// Returns `Err(ConflictingPeriodicBoxes)` when two declarations disagree
-/// and `Err(InvalidPBCBox)` if the declared box has a non-positive extent
-/// on any axis.
-pub(crate) fn derive_periodic_box(targets: &[Target]) -> Result<Option<PeriodicSpec>, PackError> {
-    let mut found: Option<PeriodicSpec> = None;
-    for target in targets {
-        let restraints = target
-            .molecule_restraints
-            .iter()
-            .chain(target.atom_restraints.iter().map(|(_, r)| r));
-        for r in restraints {
-            if let Some(candidate) = r.periodic_box() {
-                let (min, max, _periodic) = candidate;
-                let length = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-                if length.iter().any(|&v| v <= 0.0) {
-                    return Err(PackError::InvalidPBCBox { min, max });
-                }
-                match found {
-                    None => found = Some(candidate),
-                    Some(existing) if existing == candidate => {}
-                    Some(existing) => {
-                        return Err(PackError::ConflictingPeriodicBoxes {
-                            first: existing,
-                            second: candidate,
                         });
                     }
                 }
@@ -201,7 +141,6 @@ pub(crate) fn derive_periodic_box(targets: &[Target]) -> Result<Option<PeriodicS
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedSpace {
     pub cell: Option<SimBox>,
-    pub pbc: Option<PeriodicSpec>,
 }
 
 /// Resolve the caller's space declarations against the targets' own.
@@ -250,14 +189,14 @@ pub(crate) fn resolve_pack_space(
             return Err(PackError::InvalidPBCBox { min, max });
         }
     }
-    let derived = derive_periodic_box(targets)?;
     let derived_cell = derive_cell(targets)?;
-    let declared_cell = match (declared_cell, derived_cell) {
+    let declared_cell = match (
+        declared_cell.map(CellDecl::resolve).transpose()?,
+        derived_cell,
+    ) {
         (None, other) | (other, None) => other,
         (Some(builder), Some(restraint)) => {
-            let from_builder = builder.resolve()?;
-            let from_restraint = restraint.resolve()?;
-            if cells_agree(&from_builder, &from_restraint) {
+            if builder.approx_eq(&restraint, CELL_AGREE_TOL) {
                 Some(builder)
             } else {
                 return Err(PackError::InvalidCell {
@@ -268,27 +207,15 @@ pub(crate) fn resolve_pack_space(
             }
         }
     };
-    if declared_cell.is_some() && (declared_box.is_some() || derived.is_some()) {
+    if declared_cell.is_some() && declared_box.is_some() {
         return Err(PackError::InvalidCell {
             detail: "a declared cell and a periodic box are mutually exclusive; \
                      drop the `pbc` declaration or express it as the cell"
                 .to_string(),
         });
     }
-    let pbc = match (declared_box, derived) {
-        (None, derived) => derived,
-        (Some(global), None) => Some(global),
-        (Some(global), Some(derived)) if global == derived => Some(global),
-        (Some(global), Some(derived)) => {
-            return Err(PackError::ConflictingPeriodicBoxes {
-                first: global,
-                second: derived,
-            });
-        }
-    };
-
-    let cell = match (declared_cell, pbc) {
-        (Some(decl), _) => Some(decl.resolve()?),
+    let cell = match (declared_cell, declared_box) {
+        (Some(cell), _) => Some(cell),
         (None, Some((min, max, periodic))) => Some(
             SimBox::ortho(
                 array![max[0] - min[0], max[1] - min[1], max[2] - min[2]],
@@ -300,9 +227,9 @@ pub(crate) fn resolve_pack_space(
         (None, None) => None,
     };
     if let Some(bx) = cell.as_ref() {
-        reject_planes_across_periodic_axes(targets, bx)?;
+        reject_restraints_across_periodic_axes(targets, bx)?;
     }
-    Ok(ResolvedSpace { cell, pbc })
+    Ok(ResolvedSpace { cell })
 }
 
 /// Broadcast global restraints to each target (scope equivalence, spec §4).
@@ -326,5 +253,237 @@ pub(crate) fn broadcast_global_restraints<'a>(
                 })
                 .collect(),
         )
+    }
+}
+
+#[cfg(test)]
+mod periodic_declaration_tests {
+    //! Periodicity is declared on the engine entry and nowhere else. What a
+    //! restraint still answers for is whether it survives the wrap, and
+    //! [`reject_restraints_across_periodic_axes`] refuses the ones that do
+    //! not — for the `.inp` plane kernels here, and for a lifted molrs region
+    //! in `region_under_wrap_tests` below.
+
+    use crate::restraint::geometric::{AbovePlaneRestraint, BelowPlaneRestraint};
+    use crate::{GenCanPack, PackEngine, PackError, Target};
+
+    fn one_atom(n: usize) -> Target {
+        Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.5], n)
+    }
+
+    /// The `.inp` plane kernels declare a normal, and a normal with a
+    /// component along a periodic lattice vector has no well-defined side:
+    /// [`reject_restraints_across_periodic_axes`] names the first such axis.
+    #[test]
+    fn a_plane_across_a_periodic_axis_is_rejected_naming_the_axis() {
+        let target = one_atom(4).with_restraint(AbovePlaneRestraint::new([0.0, 0.0, 1.0], 5.0));
+        let err = GenCanPack::new()
+            .with_seed(1)
+            .with_periodic_box([0.0; 3], [30.0; 3], [true; 3])
+            .run(std::slice::from_ref(&target), 2)
+            .expect_err("plane across a periodic axis must be rejected");
+        assert!(
+            matches!(err, PackError::RestraintAcrossPeriodicAxis { axis: 2, .. }),
+            "unexpected error: {err:?}"
+        );
+        assert!(
+            format!("{err}").contains("periodic lattice direction 2"),
+            "the error must name the offending axis, got: {err}"
+        );
+
+        let target = one_atom(4).with_restraint(BelowPlaneRestraint::new([1.0, 0.0, 0.0], 5.0));
+        let err = GenCanPack::new()
+            .with_seed(1)
+            .with_periodic_box([0.0; 3], [30.0; 3], [true, true, false])
+            .run(std::slice::from_ref(&target), 2)
+            .expect_err("plane across a periodic axis must be rejected");
+        assert!(
+            matches!(err, PackError::RestraintAcrossPeriodicAxis { axis: 0, .. }),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    /// The same plane along a confined axis is the slab an interface needs.
+    #[test]
+    fn a_plane_along_a_confined_axis_is_accepted() {
+        let target = one_atom(4).with_restraint(AbovePlaneRestraint::new([0.0, 0.0, 1.0], 5.0));
+        let result = GenCanPack::new()
+            .with_seed(1)
+            .with_periodic_box([0.0; 3], [30.0; 3], [true, true, false])
+            .run(std::slice::from_ref(&target), 5);
+        assert!(
+            result.is_ok(),
+            "expected the slab plane to be accepted: {result:?}"
+        );
+    }
+
+    /// A periodic box with no extent on an axis is named, not silently
+    /// collapsed into a two-dimensional cell.
+    #[test]
+    fn zero_extent_declaration_is_rejected() {
+        let result = GenCanPack::new()
+            .with_seed(7)
+            .with_periodic_box([0.0; 3], [10.0, 0.0, 10.0], [true; 3])
+            .run(&[one_atom(1)], 5);
+        assert!(
+            matches!(result, Err(PackError::InvalidPBCBox { .. })),
+            "expected InvalidPBCBox, got: {result:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod region_under_wrap_tests {
+    //! The same rule, reached through the public spelling: a molrs region
+    //! lifted by `RegionRestraint`. This is what used to go unchecked — a
+    //! half-space handed in as a region was accepted whatever the cell did,
+    //! and its "inside" then depended on where the origin sat.
+
+    use std::sync::Arc;
+
+    use crate::restraint::AtomRestraint;
+    use crate::{GenCanPack, PackEngine, PackError, RegionRestraint, Target};
+    use molrs::spatial::region::{AndRegion, Cuboid, HalfSpace, NotRegion, Region, Sphere};
+    use ndarray::array;
+
+    fn one_atom(n: usize) -> Target {
+        Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.5], n)
+    }
+
+    fn lift(r: impl Region + 'static) -> RegionRestraint {
+        RegionRestraint(Arc::new(r))
+    }
+
+    fn half_space_above_z() -> RegionRestraint {
+        // Inside is `z <= 5`; open downwards, so it repeats along x and y
+        // and not along z.
+        lift(HalfSpace::new([0.0, 0.0, 1.0], [0.0, 0.0, 5.0]).expect("plane"))
+    }
+
+    #[test]
+    fn a_lifted_half_space_across_a_periodic_axis_is_rejected() {
+        let target = one_atom(4).with_restraint(half_space_above_z());
+        let err = GenCanPack::new()
+            .with_seed(1)
+            .with_periodic_box([0.0; 3], [30.0; 3], [true; 3])
+            .run(&[target], 2)
+            .expect_err("a region open along z cannot be used with periodic z");
+
+        match err {
+            PackError::RestraintAcrossPeriodicAxis { axis, restraint } => {
+                assert_eq!(axis, 2, "the error names the offending axis");
+                assert_eq!(restraint, "RegionRestraint", "and the restraint");
+            }
+            other => panic!("expected RestraintAcrossPeriodicAxis, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_same_region_along_confined_axes_is_the_slab_it_should_be() {
+        let target = one_atom(4).with_restraint(half_space_above_z());
+        let result = GenCanPack::new()
+            .with_seed(1)
+            .with_periodic_box([0.0; 3], [30.0; 3], [true, true, false])
+            .run(&[target], 5);
+        assert!(
+            result.is_ok(),
+            "the region repeats along x and y, which is exactly the slab an \
+             interface system asks for: {result:?}"
+        );
+    }
+
+    /// The decision is per restraint, not per shape family: a bounded region
+    /// keeps its atoms inside one image, so every axis may wrap.
+    #[test]
+    fn a_bounded_region_is_usable_along_every_axis() {
+        let cuboid = lift(Cuboid::new(array![0.0, 0.0, 0.0], array![30.0, 30.0, 30.0]));
+        let ball = lift(Sphere::new(array![15.0, 15.0, 15.0], 10.0));
+        for shift in [[30.0, 0.0, 0.0], [0.0, 30.0, 0.0], [0.0, 0.0, 30.0]] {
+            assert!(cuboid.holds_along(shift), "cuboid, {shift:?}");
+            assert!(ball.holds_along(shift), "sphere, {shift:?}");
+        }
+    }
+
+    /// A confining member rescues an open one: the intersection is bounded,
+    /// so the composition is usable even though the half-space alone is not.
+    #[test]
+    fn a_confined_composition_is_usable_where_its_open_member_is_not() {
+        let open = HalfSpace::new([0.0, 0.0, 1.0], [0.0, 0.0, 5.0]).expect("plane");
+        let cell = Cuboid::new(array![0.0, 0.0, 0.0], array![30.0, 30.0, 30.0]);
+        let both = lift(AndRegion::new(Arc::new(cell), Arc::new(open)));
+        assert!(
+            both.holds_along([0.0, 0.0, 30.0]),
+            "the box confines z, so the plane inside it has one meaning",
+        );
+    }
+
+    /// A void — pack everything *outside* a ball — keeps working: the region
+    /// molpack must not silently mishandle is the open one, not this.
+    #[test]
+    fn a_void_region_stays_usable() {
+        let void = lift(NotRegion::new(Arc::new(Sphere::new(
+            array![15.0, 15.0, 15.0],
+            5.0,
+        ))));
+        assert!(void.holds_along([0.0, 0.0, 30.0]));
+    }
+}
+
+#[cfg(test)]
+mod broadcast_tests {
+    //! The scope equivalence a global restraint promises: declaring it once on
+    //! the engine is the same thing as attaching it to every target by hand.
+
+    use std::sync::Arc;
+
+    use super::broadcast_global_restraints;
+    use crate::Target;
+    use crate::restraint::AtomRestraint;
+    use crate::restraint::geometric::InsideCubeRestraint;
+
+    fn one_atom(name: &str) -> Target {
+        Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 2).with_name(name)
+    }
+
+    #[test]
+    fn no_global_restraint_borrows_the_targets_untouched() {
+        let targets = vec![one_atom("a"), one_atom("b")];
+        let out = broadcast_global_restraints(&targets, &[]);
+        assert!(matches!(out, std::borrow::Cow::Borrowed(_)));
+        assert!(out.iter().all(|t| t.molecule_restraints.is_empty()));
+    }
+
+    #[test]
+    fn a_global_restraint_reaches_every_target() {
+        let targets = vec![one_atom("a"), one_atom("b")];
+        let global: Vec<Arc<dyn AtomRestraint>> =
+            vec![Arc::new(InsideCubeRestraint::new([0.0; 3], 30.0))];
+
+        let out = broadcast_global_restraints(&targets, &global);
+
+        assert_eq!(out.len(), 2, "broadcasting must not add or drop a target");
+        for t in out.iter() {
+            assert_eq!(
+                t.molecule_restraints.len(),
+                1,
+                "every target carries the global restraint"
+            );
+        }
+    }
+
+    #[test]
+    fn a_global_restraint_is_appended_to_the_target_s_own() {
+        let own = InsideCubeRestraint::new([0.0; 3], 10.0);
+        let targets = vec![one_atom("a").with_restraint(own)];
+        let global: Vec<Arc<dyn AtomRestraint>> =
+            vec![Arc::new(InsideCubeRestraint::new([0.0; 3], 30.0))];
+
+        let out = broadcast_global_restraints(&targets, &global);
+
+        assert_eq!(
+            out[0].molecule_restraints.len(),
+            2,
+            "the global restraint is added to the target's own, never replacing it"
+        );
     }
 }

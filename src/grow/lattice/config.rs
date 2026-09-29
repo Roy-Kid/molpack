@@ -13,17 +13,20 @@ use crate::grow::prior::TorsionPrior;
 pub struct LatticeConfig {
     pub(crate) torsion_prior: TorsionPrior,
     pub(crate) occupancy_guard: bool,
-    pub(crate) max_backtrack: usize,
-    pub(crate) max_reseed: usize,
 }
+
+/// Recoil budget per chain attempt before the walk reseeds elsewhere.
+pub(crate) const MAX_BACKTRACK: usize = 20_000;
+
+/// Reseed attempts per chain before the solver gives up on the guard (the
+/// escape is counted in `degraded` and the run reports honestly).
+pub(crate) const MAX_RESEED: usize = 200;
 
 impl LatticeConfig {
     pub fn new(torsion_prior: TorsionPrior) -> Self {
         Self {
             torsion_prior,
             occupancy_guard: true,
-            max_backtrack: 20_000,
-            max_reseed: 200,
         }
     }
 
@@ -32,19 +35,6 @@ impl LatticeConfig {
     /// which keeps every non-bonded pair at ≥ the 2nd-neighbour distance.
     pub fn with_occupancy_guard(mut self, on: bool) -> Self {
         self.occupancy_guard = on;
-        self
-    }
-
-    /// Recoil budget per chain attempt before the walk reseeds elsewhere.
-    pub fn with_max_backtrack(mut self, n: usize) -> Self {
-        self.max_backtrack = n.max(1);
-        self
-    }
-
-    /// Reseed attempts per chain before the solver gives up on the guard
-    /// (the escape is counted in `degraded` and the run reports honestly).
-    pub fn with_max_reseed(mut self, n: usize) -> Self {
-        self.max_reseed = n.max(1);
         self
     }
 }

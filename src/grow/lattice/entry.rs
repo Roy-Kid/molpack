@@ -33,7 +33,7 @@ use super::decorate::analyze_backbone;
 /// ([`GenCanPack::with_restart`](crate::GenCanPack::with_restart)).
 ///
 /// A molecule-level geometric restraint (including
-/// [`StlRegion`](crate::StlRegion)) masks the diamond lattice: sites whose
+/// any molrs region lifted by [`RegionRestraint`](crate::RegionRestraint)) masks the diamond lattice: sites whose
 /// continuum position lies outside the region are blocked, and the SAW
 /// only walks Region ∩ lattice. An empty intersection is
 /// [`GrowError::LatticeRegionEmpty`].
@@ -85,7 +85,7 @@ impl StageFactory for LatticeGrow {
             let frame = t.template.as_ref().expect("validate_template checked");
             let tree = crate::grow::tree_from_target(t)
                 .map_err(|source| PackError::Grow { target: i, source })?;
-            analyze_backbone(frame, &tree)
+            analyze_backbone(frame, &tree, &t.hydrogen_mask())
                 .map_err(|source| PackError::Grow { target: i, source })?;
         }
         Ok(())

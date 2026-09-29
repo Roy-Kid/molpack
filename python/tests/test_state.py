@@ -35,7 +35,7 @@ def _make_tiny_pack() -> molpack.State:
     positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float64)
     frame = _make_frame(positions, ["O", "H"])
     target = molpack.Target(frame, 3).with_restraint(
-        molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
+        molrs.Cuboid([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
     )
     packer = molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
     return packer.run([target], max_loops=50)
@@ -130,7 +130,7 @@ class TestFrameTopology:
 
     def _pack(self, copies: int, box: bool = False) -> molpack.State:
         target = molpack.Target(self._diatomic_with_bond(), copies).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
         )
         packer = (
             molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(7)

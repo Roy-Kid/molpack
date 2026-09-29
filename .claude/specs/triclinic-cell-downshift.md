@@ -127,14 +127,15 @@ therefore floating-point summation order, so it cannot be validated by the
   `avoid_overlap` stencil scan via `CellGrid`
 - `molpack/src/restraint/mod.rs`, `molpack/src/restraint/geometric/bounded.rs` —
   fractional `InsideCell`; periodic-axis rejection for plane restraints
-- `molpack/src/region.rs` — `InsideCellRegion` in the `And`/`Or`/`Not` algebra
+- `molpack/src/region.rs` — `CellRestraint` in the `And`/`Or`/`Not` algebra
 - `molpack/src/packer.rs`, `molpack/src/handler.rs`, `molpack/src/script/build.rs`
   — builder + script plumbing
 - `molpack/src/context/work_buffers.rs` — buffer sizing from `CellGrid::n_cells`
-- `molpack/benches/pack_end_to_end.rs`, `molpack/benches/pair_kernel.rs` —
-  triclinic variants added
-- `molpack/tests/` — new `triclinic.rs`; existing `packer.rs`,
-  `examples_batch.rs`, `gradient.rs` must pass unchanged
+- ~~`molpack/benches/pack_end_to_end.rs`, `molpack/benches/pair_kernel.rs` —
+  triclinic variants added~~ (`benches/` deleted 2026-09-20; no replacement yet)
+- ~~`molpack/tests/` — new `triclinic.rs`; existing `packer.rs`,
+  `examples_batch.rs`, `gradient.rs` must pass unchanged~~ (`tests/` deleted
+  2026-09-20; coverage is in-module, e.g. `entry::setup` periodic-declaration tests)
 
 ## Tasks
 

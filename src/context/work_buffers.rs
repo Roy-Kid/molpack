@@ -25,6 +25,11 @@ pub struct WorkBuffers {
     /// `comptype` each call (cheap index arithmetic, no trig); persisting the
     /// `Vec` keeps that hot rebuild allocation-free.
     pub mol_descs: Vec<(usize, usize, usize, usize)>,
+    /// Reused `(icart0, len, natoms_per_copy)` span list for the collective
+    /// restraints, rebuilt from the current `comptype` on every evaluation.
+    /// Persisting the `Vec` keeps `accumulate_collective_fg` allocation-free
+    /// on a path GENCAN calls thousands of times.
+    pub collective_spans: Vec<(usize, usize, usize)>,
     /// Temporary radius backup used by movebad/radius scaling paths.
     pub radiuswork: Vec<F>,
     /// Per-molecule score buffer used by flashsort/movebad ranking.
@@ -51,6 +56,7 @@ impl WorkBuffers {
             #[cfg(feature = "rayon")]
             grad_partials: Vec::new(),
             mol_descs: Vec::new(),
+            collective_spans: Vec::new(),
             radiuswork: vec![0.0; ntotat],
             fmol: Vec::new(),
             flash_ind: Vec::new(),
@@ -60,16 +66,6 @@ impl WorkBuffers {
             cached_init1: false,
             cached_geometry: None,
         }
-    }
-
-    pub fn ensure_atom_capacity(&mut self, ntotat: usize) {
-        if self.gxcar.len() != ntotat {
-            self.gxcar.resize(ntotat, [0.0; 3]);
-        }
-        if self.radiuswork.len() != ntotat {
-            self.radiuswork.resize(ntotat, 0.0);
-        }
-        self.cached_geometry = None;
     }
 
     pub fn matches_cached_geometry(

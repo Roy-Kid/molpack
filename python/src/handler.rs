@@ -19,7 +19,7 @@
 //! Missing methods are silently skipped (matching the Rust trait's default
 //! no-op impls). Exceptions raised inside any method are stashed in
 //! [`helpers::PACK_ERR`][crate::helpers] and trigger early termination;
-//! `Molpack.pack()` re-raises after the loop exits.
+//! the entry's `run()` re-raises after the loop exits.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -98,6 +98,10 @@ pub struct PyStepInfo {
     /// Max restraint violation (0.0 = all restraints satisfied).
     #[pyo3(get)]
     pub frest: F,
+    /// GENCAN objective at the user's radii (Packmol's ``fx``); growth
+    /// reports ``0.0``.
+    #[pyo3(get)]
+    pub f: F,
     /// Improvement from last iteration, as percentage (positive = improving).
     #[pyo3(get)]
     pub improvement_pct: F,
@@ -107,11 +111,6 @@ pub struct PyStepInfo {
     /// Convergence precision target.
     #[pyo3(get)]
     pub precision: F,
-    /// Per-relaxer acceptance rate this iteration, as
-    /// ``[(target_index, rate), ...]``. Empty when no relaxers are
-    /// attached.
-    #[pyo3(get)]
-    pub relaxer_acceptance: Vec<(usize, F)>,
 }
 
 impl PyStepInfo {
@@ -129,10 +128,10 @@ impl PyStepInfo {
             molecule_type: info.phase.molecule_type,
             fdist: info.fdist,
             frest: info.frest,
+            f: info.f,
             improvement_pct: info.improvement_pct,
             radscale: info.radscale,
             precision: info.precision,
-            relaxer_acceptance: info.relaxer_acceptance.clone(),
         }
     }
 }
@@ -199,15 +198,7 @@ impl PyStepContext {
     /// Atoms the growth solver has not placed yet sit at their sentinel.
     #[getter]
     fn positions<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, numpy::PyArray2<f64>>> {
-        let sys = self.live()?;
-        let n = sys.xcart.len();
-        let mut flat: Vec<f64> = Vec::with_capacity(n * 3);
-        for p in &sys.xcart {
-            flat.extend_from_slice(p);
-        }
-        Ok(ndarray::Array2::from_shape_vec((n, 3), flat)
-            .expect("xcart is exactly (n, 3)")
-            .into_pyarray(py))
+        Ok(ndarray::Array2::from(self.live()?.xcart.clone()).into_pyarray(py))
     }
 
     /// Total atom count of the packing system.

@@ -221,15 +221,14 @@ impl Stage for GrowStage {
         // chain, one round per stage (module docs). Without it a density the
         // hard core cannot satisfy spins forever instead of returning an
         // honest unconverged result (debt D-01 (ii)).
-        let max_rounds = {
-            let max_n_steps = self
-                .species
+        let max_rounds = max_rounds(
+            budget.max_loops,
+            self.species
                 .iter()
                 .map(|s| s.tree.n_steps())
                 .max()
-                .unwrap_or(0);
-            (budget.max_loops.max(1) as u64).saturating_mul(max_n_steps as u64 + 1)
-        };
+                .unwrap_or(0),
+        );
         let min_hard_scale = self
             .species
             .iter()
@@ -449,10 +448,10 @@ impl Stage for GrowStage {
                 },
                 fdist: 0.0,
                 frest: 0.0,
+                f: 0.0,
                 improvement_pct: 0.0,
                 radscale: hard_scale,
                 precision: budget.precision,
-                relaxer_acceptance: Vec::new(),
             };
             for h in handlers.iter_mut() {
                 h.on_step(&info, sys);
@@ -517,6 +516,19 @@ impl Stage for GrowStage {
     }
 }
 
+/// Upper bound on the round loop.
+///
+/// Growth reads `max_loops` as an allowance of *passes over a chain*, and one
+/// pass costs `n_steps + 1` rounds (the seed plus every step), so the cap is
+/// `max(max_loops, 1) × (max_n_steps + 1)`: a zero budget still buys one pass.
+/// Saturating, because the product of two user-supplied counts must not wrap
+/// into a small cap — that would turn a generous budget into an early
+/// surrender. Without any cap a density the hard core cannot satisfy spins
+/// forever instead of returning an honest unconverged result (debt D-01 (ii)).
+fn max_rounds(max_loops: usize, max_n_steps: usize) -> u64 {
+    (max_loops.max(1) as u64).saturating_mul((max_n_steps as u64).saturating_add(1))
+}
+
 /// Retract depth from the consecutive dead-end streak.
 ///
 /// `base.saturating_mul(1 << (streak / 4).min(12))`. Reads `deadend_streak`
@@ -548,6 +560,26 @@ fn force_due(hard_scale: F, min: F, streak: usize, soften_after: usize) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The cap is an allowance of passes over a chain, not of rounds: a zero
+    /// budget still buys one pass, and the product never wraps.
+    #[test]
+    fn max_rounds_is_passes_times_chain_length() {
+        assert_eq!(max_rounds(1, 4), 5, "one pass = seed + 4 steps");
+        assert_eq!(max_rounds(3, 4), 15);
+        assert_eq!(max_rounds(0, 4), 5, "a zero budget still buys one pass");
+        assert_eq!(
+            max_rounds(2, 0),
+            2,
+            "a rigid template is one round per pass"
+        );
+        assert_eq!(
+            max_rounds(usize::MAX, usize::MAX),
+            u64::MAX,
+            "the cap saturates — wrapping would turn a generous budget into an \
+             early surrender"
+        );
+    }
 
     #[test]
     fn retract_depth_reads_deadend_streak() {

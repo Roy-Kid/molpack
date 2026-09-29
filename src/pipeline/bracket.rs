@@ -11,8 +11,6 @@
 
 use std::sync::{Arc, Mutex};
 
-use molrs::types::F;
-
 use crate::context::PackContext;
 use crate::entry::setup::ResolvedSpace;
 use crate::handler::{Handler, LammpsLogHandler, PhaseInfo, PhaseReport, StageInfo, StepInfo};
@@ -66,7 +64,7 @@ pub(super) fn open_bracket(
             setup.settings.seed(),
             budget.max_loops,
             setup.ntype_with_fixed,
-            space.pbc,
+            space.cell.clone(),
         )));
     }
     let position = Arc::new(Mutex::new(StageInfo {
@@ -127,10 +125,6 @@ impl Handler for StageTagger {
 
     fn should_stop(&self) -> bool {
         self.inner.should_stop()
-    }
-
-    fn on_inner_iter(&mut self, iter: u32, f: F, sys: &PackContext) {
-        self.inner.on_inner_iter(iter, f, sys);
     }
 
     fn on_phase_end(&mut self, info: &PhaseInfo, report: &PhaseReport) {

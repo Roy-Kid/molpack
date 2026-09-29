@@ -9,6 +9,7 @@
 use molrs::types::F;
 use rand::Rng;
 
+use crate::grow::internal::wrap_pi;
 use crate::random::uniform01;
 
 const PI: F = std::f64::consts::PI as F;
@@ -145,15 +146,4 @@ impl AnglePrior {
             }
         }
     }
-}
-
-#[inline]
-fn wrap_pi(x: F) -> F {
-    let mut v = x % TWO_PI;
-    if v > PI {
-        v -= TWO_PI;
-    } else if v <= -PI {
-        v += TWO_PI;
-    }
-    v
 }

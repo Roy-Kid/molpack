@@ -53,18 +53,22 @@ packmol on the other 4 examples; the missing init rejection was the sole cause o
 
 ### Regression coverage / no-regression check
 
-- `tests/packer.rs::avoid_overlap_reduces_work_around_fixed_solute` — fixed solute + solvent
-  converges in strictly fewer outer loops with avoidance on (deterministic, seed 1234567: 5 vs 9).
+- ~~`avoid_overlap_reduces_work_around_fixed_solute` — fixed solute + solvent
+  converges in strictly fewer outer loops with avoidance on (deterministic, seed 1234567: 5 vs 9).~~
+  Struck 2026-09-29: the integration test layer was deleted 2026-09-20 and no in-module test covers it.
 - Re-timed all 5 shipped examples via `diag_sp`: mixture 0.69s, interface 0.13s, bilayer 10.8s,
   spherical 19.1s, solvprotein **2.9s** — all converge (overlap ≤ precision); the 4 non-fixed cases
   are unchanged within noise (their code path does not change).
-- **Separate bug found & fixed while validating:** `tests/examples_batch` was failing solvprotein
-  not from packing (the packer reaches `fdist=0`) but from validation: `validation.rs::expand_targets`
-  enumerated molecules **free-first** while `PackResult::positions()` now returns **declared order**
+- **Separate bug found & fixed while validating** (historical; the `examples_batch` harness and
+  `validation.rs` were deleted 2026-09-20 / 2026-09-29, and the declared-order contract now lives only in
+  `entry::result::positions_in_target_order`, which `State::positions()` uses): the batch harness was failing solvprotein
+  not from packing (the packer reaches `fdist=0`) but from validation: its `expand_targets`
+  enumerated molecules **free-first** while `State::positions()` returns **declared order**
   (the in-flight frame-topology work). A `fixed` solute declared first thus had its coordinates
   sliced into the wrong molecules, flagging its own ~1.5 Å bonds as inter-molecule overlaps
   (solvprotein: 2501 false pairs). Fixed `expand_targets` to iterate declared order; `examples_batch`
-  now passes all 5. Guard: `validation::tests::fixed_target_declared_first_skips_its_internal_contacts`.
+  now passes all 5. ~~Guard: `fixed_target_declared_first_skips_its_internal_contacts`~~ (deleted with
+  `validation.rs`; no replacement test).
 - The adaptive-`maxit` workaround proposed below is therefore **unnecessary** and was not built.
 
 ---
@@ -132,11 +136,12 @@ that GENCAN is packmol-faithful and tuning lives in the packer.
 
 ## Test plan
 
-- **Unit/integration (`cargo test -p molcrafts-molpack --lib --tests`)** — must stay green; add
-  a `tests/packer.rs` case asserting `with_anneal_maxit` is honored and a solvprotein-like
-  fixed-solute + dense-solvent case converges in fewer outer loops than the flat-20 baseline.
-- **Regression (`cargo test --release --test examples_batch -- --ignored`)** — must pass
-  unchanged (same final overlap tolerance).
+- **Unit (`cargo test -p molcrafts-molpack --lib --features cli,ff,rayon`)** — must stay green; add
+  an in-module case (in `src/gencan/`) asserting `with_anneal_maxit` is honored. ~~A solvprotein-like
+  fixed-solute + dense-solvent case converging in fewer outer loops~~ — struck 2026-09-29: an
+  end-to-end packing case belongs in `examples/`, not the test layer (notes 2026-09-20).
+- **Regression (the five `cargo run --release --features io --example pack_<name>` programs; the
+  `examples_batch` harness was deleted 2026-09-20)** — must converge unchanged (same final overlap tolerance).
 - **Benchmark gate (manual, documented in this spec):** the 5-example table below; require
   solvprotein < 2× packmol and no >10% regression elsewhere.
 - **Python (`cd python && maturin develop --release && pytest`)** — if the builder is exposed,

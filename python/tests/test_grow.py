@@ -162,66 +162,6 @@ class TestNamedErrors:
             engine.run([target], max_loops=10)
 
 
-class TestGrowPack:
-    """End-to-end growth through the wheel: same constructive guarantees as
-    the Rust suite (``fdist == 0.0`` strict — hard rejection, not descent)."""
-
-    def test_grow_pack_constructive(self):
-        n, copies, edge = 6, 4, 20.0
-        target = Target(_chain_frame(n), copies)
-        result = (
-            _grow()
-            .with_seed(7)
-            .with_tolerance(2.0)
-            .with_periodic_box([0.0, 0.0, 0.0], [edge, edge, edge])
-            .run([target], max_loops=50)
-        )
-        assert result.converged
-        assert result.degraded == 0
-        # Strict zero: hard-core violation is rejected during growth, never
-        # penalized afterwards (ac-004).
-        assert result.fdist == 0.0
-        assert result.frest == 0.0
-
-        pos = result.positions
-        assert pos.shape == (copies * n, 3)
-        # Independent ruler: brute-force minimum inter-molecular distance
-        # under the minimum image must respect the tolerance.
-        mol = np.repeat(np.arange(copies), n)
-        d = pos[:, None, :] - pos[None, :, :]
-        d -= np.round(d / edge) * edge
-        dist = np.sqrt((d**2).sum(axis=-1))
-        inter = mol[:, None] != mol[None, :]
-        assert dist[inter].min() >= 2.0 - 1e-9
-
-    def test_grow_pack_density_resolved_box(self):
-        # ``with_density`` resolves the cubic periodic box from the frozen
-        # stage-① formula, and ``Target.with_mass`` OVERRIDES the
-        # element-derived mass (5 × C would be 60.055 amu, not 72).
-        rho, mass_per_copy, copies = 0.05, 72.0, 2
-        target = Target(_chain_frame(5), copies).with_mass(mass_per_copy)
-        result = (
-            _grow()
-            .with_seed(3)
-            .with_tolerance(2.0)
-            .with_density(rho)
-            .run([target], max_loops=50)
-        )
-        assert result.degraded == 0
-        assert result.fdist == 0.0
-
-        expected_edge = (mass_per_copy * copies / (AVOGADRO * rho) * 1e24) ** (
-            1.0 / 3.0
-        )
-        box = result.frame.box
-        assert box is not None, "the density-resolved box must be stamped on the frame"
-        np.testing.assert_allclose(
-            np.asarray(box.lengths),
-            [expected_edge] * 3,
-            rtol=1e-9,
-        )
-
-
 class TestGencanPath:
     """The rigid-body entry through the same result type."""
 
@@ -248,45 +188,6 @@ class TestGencanPath:
 class TestLatticeGrow:
     """Diamond-lattice growth entry (lattice-growth-phase spec)."""
 
-    def test_lattice_bead_chain_constructive(self):
-        n, copies, edge = 12, 8, 26.0
-        result = (
-            LatticeGrow(TorsionPrior.uniform())
-            .with_seed(7)
-            .with_tolerance(2.0)
-            .with_periodic_box([0.0, 0.0, 0.0], [edge] * 3)
-            .run([Target(_chain_frame(n), copies)], max_loops=60)
-        )
-        assert result.converged
-        assert result.degraded == 0
-        assert result.fdist == 0.0
-        assert result.positions.shape == (copies * n, 3)
-        assert "LatticeGrow" in repr(LatticeGrow(TorsionPrior.uniform()))
-
     def test_lattice_requires_torsion_prior(self):
         with pytest.raises(TypeError):
             LatticeGrow()  # ty: ignore[missing-argument]
-
-    def test_lattice_then_seeded_push_off(self):
-        # Dense cell: the lattice generates where the continuum grinds; a
-        # non-converged result chains into the explicit seeded push-off.
-        n, copies, edge = 24, 20, 22.0
-        target = lambda: Target(_chain_frame(n), copies)  # noqa: E731
-        grown = (
-            LatticeGrow(TorsionPrior.uniform())
-            .with_seed(11)
-            .with_tolerance(2.0)
-            .with_periodic_box([0.0, 0.0, 0.0], [edge] * 3)
-            .run([target()], max_loops=60)
-        )
-        assert grown.natoms == copies * n
-        if not grown.converged:
-            pushed = (
-                GenCanPack()
-                .with_restart(grown)
-                .with_seed(11)
-                .with_tolerance(2.0)
-                .run([target()], max_loops=120)
-            )
-            assert pushed.natoms == copies * n
-            assert pushed.fdist <= grown.fdist

@@ -40,7 +40,7 @@
 //!
 //! Run with:
 //! ```sh
-//! cargo run --release --example pack_adsorption --features ff
+//! cargo run --release --example pack_adsorption
 //! ```
 //!
 //! | env var | effect |
@@ -58,9 +58,46 @@ mod analysis;
 mod geometry;
 
 use molpack::{
-    AbovePlaneRestraint, BelowPlaneRestraint, CenteringMode, F, GenCanPack, InsideBoxRestraint,
-    OptimizeSelect, PackEngine, ProgressHandler, Target, TorsionMcOptimizer,
+    CenteringMode, F, GenCanPack, OptimizeSelect, PackEngine, ProgressHandler, RegionRestraint,
+    Target, TorsionMcOptimizer,
 };
+use std::sync::Arc;
+
+use molrs::spatial::region::{Cuboid, HalfSpace, NotRegion};
+use ndarray::array;
+
+// ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
+
+fn inside_box(min: [F; 3], max: [F; 3]) -> RegionRestraint {
+    RegionRestraint(Arc::new(Cuboid::new(
+        array![min[0], min[1], min[2]],
+        array![max[0] - min[0], max[1] - min[1], max[2] - min[2]],
+    )))
+}
+
+/// `n · x >= d`: the complement of the half-space behind the plane.
+fn above_plane(normal: [F; 3], distance: F) -> RegionRestraint {
+    let n = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    let point = [
+        distance * normal[0] / n,
+        distance * normal[1] / n,
+        distance * normal[2] / n,
+    ];
+    RegionRestraint(Arc::new(NotRegion::new(Arc::new(
+        HalfSpace::new(normal, point).expect("plane"),
+    ))))
+}
+
+/// `n · x <= d`: the half-space behind the plane.
+fn below_plane(normal: [F; 3], distance: F) -> RegionRestraint {
+    let n = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    let point = [
+        distance * normal[0] / n,
+        distance * normal[1] / n,
+        distance * normal[2] / n,
+    ];
+    RegionRestraint(Arc::new(HalfSpace::new(normal, point).expect("plane")))
+}
 
 // ── system definition ──────────────────────────────────────────────────────
 
@@ -98,12 +135,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let span = SUB_N as F * SUB_SPACING;
     let half = span / 2.0;
     // Periodic in x/y, open in z: a slab geometry with one solid face.
-    let cell = InsideBoxRestraint::new(
-        [-half, -half, 0.0],
-        [half, half, CELL_Z],
-        [true, true, false],
-    );
-    let wall = AbovePlaneRestraint::new([0.0, 0.0, 1.0], WALL_Z);
+    let cell = inside_box([-half, -half, 0.0], [half, half, CELL_Z]);
+    let wall = above_plane([0.0, 0.0, 1.0], WALL_Z);
 
     let (chain_frame, chain_graph, sticky) = geometry::chain(N_BEADS, BOND_LEN, STICKY_EVERY);
 
@@ -118,10 +151,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    applies to the sticky beads *only*, leaving the rest free to loop.
     let chains = Target::new(chain_frame, N_CHAINS)
         .with_name("chain")
-        .with_restraint(cell)
-        .with_restraint(wall)
-        .with_atom_restraint(&sticky, AbovePlaneRestraint::new([0.0, 0.0, 1.0], SLAB_LO))
-        .with_atom_restraint(&sticky, BelowPlaneRestraint::new([0.0, 0.0, 1.0], SLAB_HI));
+        .with_restraint(cell.clone())
+        .with_restraint(wall.clone())
+        .with_atom_restraint(&sticky, above_plane([0.0, 0.0, 1.0], SLAB_LO))
+        .with_atom_restraint(&sticky, below_plane([0.0, 0.0, 1.0], SLAB_HI));
 
     // 3. Solvent — rigid single beads filling the rest of the cell.
     let solvent = Target::new(geometry::solvent_bead(), N_SOLVENT)
@@ -148,7 +181,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut packer = GenCanPack::new()
         .with_tolerance(TOLERANCE)
-        .with_seed(20_260_807);
+        .with_seed(20_260_807)
+        .with_periodic_box(
+            [-half, -half, 0.0],
+            [half, half, CELL_Z],
+            [true, true, false],
+        );
     // Control switch: packing the same system with rigid chains is what shows
     // the in-loop optimizer is doing the work, rather than the restraints being
     // satisfiable by placement alone.

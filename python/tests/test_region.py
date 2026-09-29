@@ -1,8 +1,13 @@
-"""StlRegion Python binding — attach path, not a packing run."""
+"""molrs regions as molpack restraints — the attach path and the lift.
+
+molpack has no region class of its own: a region is a molrs object
+(``Sphere``, ``Cuboid``, ``Parallelepiped``, ``HalfSpace``, ``Cylinder``,
+``Ellipsoid``, ``Polyhedron``, ``SphereUnion`` or a ``&`` / ``|`` / ``~``
+composition) that crosses the wheel boundary as a ``molrs.RegionRef`` capsule
+and is lifted to "stay inside" by ``RegionRestraint``.
+"""
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import molrs
 import numpy as np
@@ -11,87 +16,89 @@ import pytest
 import molpack
 
 
-def _ascii_unit_cube() -> str:
-    # Watertight [0,1]³ Å, 12 triangles (same winding as Rust cube_tris).
-    faces = [
-        ((0, 0, 0), (0, 0, 1), (0, 1, 1), (0, 1, 0)),
-        ((1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 0, 1)),
-        ((0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)),
-        ((0, 1, 0), (0, 1, 1), (1, 1, 1), (1, 1, 0)),
-        ((0, 0, 0), (0, 1, 0), (1, 1, 0), (1, 0, 0)),
-        ((0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)),
-    ]
-    lines = ["solid cube"]
-    for a, b, c, d in faces:
-        lines += _facet(a, b, c)
-        lines += _facet(a, c, d)
-    lines.append("endsolid cube")
-    return "\n".join(lines) + "\n"
-
-
-def _facet(a, b, c) -> list[str]:
-    return [
-        "  facet normal 0 0 0",
-        "    outer loop",
-        f"      vertex {a[0]} {a[1]} {a[2]}",
-        f"      vertex {b[0]} {b[1]} {b[2]}",
-        f"      vertex {c[0]} {c[1]} {c[2]}",
-        "    endloop",
-        "  endfacet",
-    ]
-
-
-def _one_atom_target():
-    frame = molrs.Frame(
+def _one_atom_frame(x=0.5, y=0.5, z=0.5):
+    return molrs.Frame(
         {
             "atoms": {
-                "x": np.array([0.5]),
-                "y": np.array([0.5]),
-                "z": np.array([0.5]),
+                "x": np.array([x]),
+                "y": np.array([y]),
+                "z": np.array([z]),
+                "element": ["X"],
             }
         }
     )
-    return molpack.Target(frame, 1)
 
 
-class TestStlRegion:
-    def test_from_file_unit_cube(self, tmp_path: Path):
-        p = tmp_path / "cube.stl"
-        p.write_text(_ascii_unit_cube())
-        r = molpack.StlRegion.from_file(p)
-        assert "StlRegion" in repr(r)
-        r2 = molpack.StlRegion.from_file(p, scale=1.0)
-        assert "StlRegion" in repr(r2)
+class TestRegionAttach:
+    def test_every_region_class_attaches(self):
+        z = [0.0, 0.0, 0.0]
+        regions = [
+            molrs.Sphere(z, 5.0),
+            molrs.Cuboid(z, [10.0, 10.0, 10.0]),
+            molrs.Parallelepiped.cube(10.0, z),
+            molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 8.0]),
+            molrs.Cylinder(z, [0.0, 0.0, 1.0], 4.0, 10.0),
+            molrs.Ellipsoid(z, [5.0, 6.0, 7.0]),
+            molrs.SphereUnion(np.array([[1.0, 1.0, 1.0], [3.0, 1.0, 1.0]]), 2.0),
+            ~molrs.Sphere(z, 1.0) & molrs.Cuboid(z, [10.0, 10.0, 10.0]),
+        ]
+        target = molpack.Target(_one_atom_frame(), 1)
+        for region in regions:
+            assert target.with_restraint(region) is not None, type(region)
+            assert target.with_atom_restraint([0], region) is not None, type(region)
+            assert molpack.GenCanPack().with_global_restraint(region) is not None
 
-    def test_missing_path_oserror(self, tmp_path: Path):
-        with pytest.raises(OSError):
-            molpack.StlRegion.from_file(tmp_path / "nope.stl")
+    def test_region_is_lifted_not_duck_typed(self):
+        sphere = molrs.Sphere([0.0, 0.0, 0.0], 5.0)
+        assert not callable(getattr(sphere, "f", None))
+        assert callable(sphere._ffi_regionref_capsule)
 
-    def test_leaky_mesh_valueerror(self, tmp_path: Path):
-        p = tmp_path / "tri.stl"
-        p.write_text(
-            "solid t\n  facet normal 0 0 0\n    outer loop\n"
-            "      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n"
-            "    endloop\n  endfacet\nendsolid t\n"
+    def test_no_molpack_geometry_classes(self):
+        for name in (
+            "StlRegion",
+            "InsideBoxRestraint",
+            "InsideSphereRestraint",
+            "OutsideSphereRestraint",
+            "AbovePlaneRestraint",
+            "BelowPlaneRestraint",
+        ):
+            assert not hasattr(molpack, name), name
+
+    def test_non_region_without_f_fg_is_a_typeerror(self):
+        with pytest.raises(TypeError, match="expected a restraint"):
+            molpack.Target(_one_atom_frame(), 1).with_atom_restraint([0], object())
+
+
+class TestRegionPacking:
+    def test_confines_inside_sphere(self):
+        centre = [10.0, 10.0, 10.0]
+        radius = 4.0
+        ball = molrs.Sphere(centre, radius)
+        target = molpack.Target(_one_atom_frame(), 8).with_restraint(ball)
+        state = (
+            molpack.GenCanPack()
+            .with_seed(3)
+            .with_tolerance(2.0)
+            .with_precision(1e-4)
+            .with_progress(False)
+            .run([target], max_loops=200)
         )
-        with pytest.raises(ValueError):
-            molpack.StlRegion.from_file(p)
+        # Every atom centre stays inside the sphere (a soft wall: allow the
+        # sub-tolerance excursion the precision permits).
+        assert molrs.Sphere(centre, radius + 0.5).contains(state.positions).all()
 
-    def test_no_empty_constructor(self):
-        with pytest.raises(TypeError):
-            molpack.StlRegion()
-
-    def test_bad_scale(self, tmp_path: Path):
-        p = tmp_path / "cube.stl"
-        p.write_text(_ascii_unit_cube())
-        with pytest.raises(ValueError):
-            molpack.StlRegion.from_file(p, scale=0.0)
-
-    def test_with_restraint_and_atom_restraint(self, tmp_path: Path):
-        p = tmp_path / "cube.stl"
-        p.write_text(_ascii_unit_cube())
-        stl = molpack.StlRegion.from_file(p)
-        assert not callable(getattr(stl, "f", None))
-        target = _one_atom_target()
-        target.with_restraint(stl)
-        target.with_atom_restraint([0], stl)
+    def test_void_of_a_sphere_union_is_respected(self):
+        beads = np.array([[10.0, 10.0, 10.0]])
+        polymer = molrs.SphereUnion(beads, 4.0)
+        void = ~polymer & molrs.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
+        target = molpack.Target(_one_atom_frame(), 6).with_restraint(void)
+        state = (
+            molpack.GenCanPack()
+            .with_seed(5)
+            .with_tolerance(2.0)
+            .with_precision(1e-4)
+            .with_progress(False)
+            .run([target], max_loops=200)
+        )
+        d = np.linalg.norm(state.positions - beads[0], axis=1)
+        assert (d > 4.0 - 0.5).all(), d

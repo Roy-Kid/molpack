@@ -23,9 +23,13 @@ criteria:
     summary: 拆分本身不改变任何数值结果
     type: runtime
     pass_when: |
-      tests/gradient.rs 全部通过（含 collective 那两条经过变异验证的）；
-      tests/parallel_equivalence.rs 三条通过；
-      固定 seed 下五个官方 Packmol 例子收敛且 validation 无违反。
+      src/restraint/geometric/tests/gradient.rs 全部通过（含 collective 那两条经过变异验证的：
+      `collective_restraint_gradient_matches_finite_difference_through_the_objective`、
+      `self_separation_gradient_matches_finite_difference_through_the_objective`）；
+      src/objective.rs 的 `compute_fg_parallel_matches_compute_g_serial_large_system`、
+      `compute_fg_small_system_parallel_matches_serial` 与
+      src/gencan/entry.rs 的 `gencan_entry_is_deterministic` 通过（`--features rayon`）；
+      固定 seed 下五个官方 Packmol 例子（`--example pack_<name>`）收敛且 `State::frest == 0`。
       本条是 Task 1 的唯一功能判据——此步不动遍历，行为必须逐条不变。
     status: pending
   - id: ac-004

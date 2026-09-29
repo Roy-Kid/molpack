@@ -18,11 +18,11 @@ Fixes #
 
 <!-- How did you verify this? Check all that apply. -->
 
-- [ ] `cargo test -p molcrafts-molpack` passes
-- [ ] `cargo clippy -- -D warnings` clean
+- [ ] `cargo test -p molcrafts-molpack --lib --features cli,ff` passes
+- [ ] `cargo test -p molcrafts-molpack --doc --features cli,ff` passes
+- [ ] `cargo clippy --all-targets --all-features -- -D warnings` clean
 - [ ] `cargo fmt --check` clean
-- [ ] New tests added for new behaviour
-- [ ] `cargo test --release --test examples_batch -- --ignored` passes (required for restraint / objective changes)
+- [ ] New behaviour has a unit test in the module that owns it
 - [ ] Python tests pass (`cd python && pytest`)
 
 ## Breaking changes

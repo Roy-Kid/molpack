@@ -126,22 +126,23 @@ impl IntraResidual {
 /// Frozen public outcome of one engine [`crate::PackEngine::run`].
 ///
 /// This is **not** [`crate::PackState`] (the live run object a `Pipeline`
-/// carries between stages) and **not** [`crate::context::RuntimeState`] (a
-/// borrowed telemetry view over [`crate::PackContext`]). Those three types
-/// are one lifecycle, not aliases: a live [`crate::PackState`] is consumed
+/// carries between stages). The two are one lifecycle, not aliases: a live
+/// [`crate::PackState`] is consumed
 /// by private `Pipeline::assemble`, which is the freeze point, and the
 /// caller then holds this `State`. There is no `type` alias either way.
 ///
 /// Cross-entry continuation (`GenCanPack::with_restart`) reads the hidden
-/// [`Placements`] snapshot, not the public [`Self::frame`] — reconstructing
+/// `Placements` snapshot, not the public [`Self::frame`] — reconstructing
 /// COM from the assembled frame would lose bitwise continuity.
 ///
-/// The `frame` contains an "atoms" block with x, y, z, element, mol_id
-/// columns — moved from the packing context (zero-copy ownership transfer).
+/// The `frame` is built by [`crate::assemble::assemble_frame`]: every
+/// template replayed onto the packed coordinates, topology included.
 /// Intra-molecular residual distances on [`Self::intra`] are in Å.
 #[derive(Debug, Clone)]
 pub struct State {
-    /// Atoms frame with x, y, z (f64), element (String), mol_id (i64).
+    /// The packed system: an `atoms` block with `id` and `mol_id` (both
+    /// 1-based, unsigned), `x` / `y` / `z` (Å) and each template's carried
+    /// columns, plus the templates' relation blocks and the resolved cell.
     pub frame: molrs::Frame,
     /// The verbatim placement solution, for cross-entry seeding
     /// (`GenCanPack::with_restart`).
@@ -165,15 +166,12 @@ pub struct State {
 impl State {
     /// Extract atom positions as `Vec<[F; 3]>` (SoA→AoS conversion).
     pub fn positions(&self) -> Vec<[F; 3]> {
-        let atoms = self.frame.get("atoms").expect("frame has no 'atoms' block");
-        let x = atoms.get_float("x").expect("no 'x' column");
-        let y = atoms.get_float("y").expect("no 'y' column");
-        let z = atoms.get_float("z").expect("no 'z' column");
-        x.iter()
-            .zip(y.iter())
-            .zip(z.iter())
-            .map(|((&xi, &yi), &zi)| [xi, yi, zi])
-            .collect()
+        crate::template::coord_rows(
+            &self
+                .frame
+                .coords()
+                .expect("an assembled frame always carries x / y / z"),
+        )
     }
 
     /// Number of atoms in the result.
@@ -218,45 +216,12 @@ pub(crate) fn positions_in_target_order(
 mod tests {
     use super::IntraResidual;
     use crate::target::Target;
+    use crate::testutil::{chain_bonds, frame_from_parts};
     use molrs::BondDistanceWeights;
     use molrs::spatial::simbox::SimBox;
-    use molrs::store::block::Block;
-    use molrs::store::frame::Frame;
-    use molrs::types::{F, Idx};
-    use ndarray::{Array1, array};
 
-    /// Coordinates + explicit bond list as a `molrs::Frame`: atoms `x`/`y`/`z`
-    /// and, unless `bonds` is empty, a bonds block with uint `atomi`/`atomj`.
-    fn frame_from_parts(coords: &[[F; 3]], bonds: &[(Idx, Idx)]) -> Frame {
-        let mut atoms = Block::new();
-        for (name, k) in [("x", 0), ("y", 1), ("z", 2)] {
-            let col: Vec<F> = coords.iter().map(|p| p[k]).collect();
-            atoms
-                .insert(name, Array1::from_vec(col).into_dyn())
-                .expect("coordinate column");
-        }
-        let mut frame = Frame::new();
-        frame.insert("atoms", atoms);
-        if !bonds.is_empty() {
-            let mut block = Block::new();
-            let ai: Vec<Idx> = bonds.iter().map(|&(i, _)| i).collect();
-            let aj: Vec<Idx> = bonds.iter().map(|&(_, j)| j).collect();
-            block
-                .insert("atomi", Array1::from_vec(ai).into_dyn())
-                .expect("atomi column");
-            block
-                .insert("atomj", Array1::from_vec(aj).into_dyn())
-                .expect("atomj column");
-            frame.insert("bonds", block);
-        }
-        frame
-    }
-
-    fn chain_bonds(n: usize) -> Vec<(Idx, Idx)> {
-        (0..n.saturating_sub(1) as Idx)
-            .map(|i| (i, i + 1))
-            .collect()
-    }
+    use molrs::types::F;
+    use ndarray::array;
 
     fn along_x(n: usize) -> Vec<[F; 3]> {
         (0..n).map(|i| [i as F, 0.0, 0.0]).collect()

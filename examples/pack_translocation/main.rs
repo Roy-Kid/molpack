@@ -46,7 +46,7 @@
 //!
 //! Run with:
 //! ```sh
-//! cargo run --release --example pack_translocation --features ff
+//! cargo run --release --example pack_translocation
 //! ```
 //! `MOLPACK_TRANSLOCATION_XYZ=path` dumps the structure;
 //! `MOLPACK_TRANSLOCATION_LOOPS=n` sets the outer iteration count.
@@ -54,9 +54,52 @@
 mod geometry;
 
 use molpack::{
-    AbovePlaneRestraint, BelowPlaneRestraint, CenteringMode, F, GenCanPack, InsideBoxRestraint,
-    InsideCylinderRestraint, OptimizeSelect, PackEngine, Target, TorsionMcOptimizer,
+    CenteringMode, F, GenCanPack, OptimizeSelect, PackEngine, RegionRestraint, Target,
+    TorsionMcOptimizer,
 };
+use std::sync::Arc;
+
+use molrs::spatial::region::{Cuboid, Cylinder, HalfSpace, NotRegion};
+use ndarray::array;
+
+// ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
+
+fn inside_box(min: [F; 3], max: [F; 3]) -> RegionRestraint {
+    RegionRestraint(Arc::new(Cuboid::new(
+        array![min[0], min[1], min[2]],
+        array![max[0] - min[0], max[1] - min[1], max[2] - min[2]],
+    )))
+}
+
+/// `n · x >= d`: the complement of the half-space behind the plane.
+fn above_plane(normal: [F; 3], distance: F) -> RegionRestraint {
+    let n = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    let point = [
+        distance * normal[0] / n,
+        distance * normal[1] / n,
+        distance * normal[2] / n,
+    ];
+    RegionRestraint(Arc::new(NotRegion::new(Arc::new(
+        HalfSpace::new(normal, point).expect("plane"),
+    ))))
+}
+
+/// `n · x <= d`: the half-space behind the plane.
+fn below_plane(normal: [F; 3], distance: F) -> RegionRestraint {
+    let n = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    let point = [
+        distance * normal[0] / n,
+        distance * normal[1] / n,
+        distance * normal[2] / n,
+    ];
+    RegionRestraint(Arc::new(HalfSpace::new(normal, point).expect("plane")))
+}
+
+fn inside_cylinder(base: [F; 3], axis: [F; 3], radius: F, length: F) -> RegionRestraint {
+    RegionRestraint(Arc::new(
+        Cylinder::new(base, axis, radius, length).expect("cylinder"),
+    ))
+}
 
 // ── system ─────────────────────────────────────────────────────────────────
 
@@ -97,11 +140,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let span = MEM_N as F * MEM_SPACING;
     let half = span / 2.0;
-    let cell = InsideBoxRestraint::new(
-        [-half, -half, Z_LO],
-        [half, half, Z_HI],
-        [true, true, false],
-    );
+    let cell = inside_box([-half, -half, Z_LO], [half, half, Z_HI]);
 
     let (chain_frame, chain_graph, seg) = geometry::chain(N_BEADS, BOND_LEN, CIS_LEN, PORE_LEN);
 
@@ -121,7 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .enumerate()
         .map(|(i, hole)| {
-            let pore = InsideCylinderRestraint::new(
+            let pore = inside_cylinder(
                 [hole[0], hole[1], pore_z0],
                 [0.0, 0.0, 1.0],
                 HOLE_R - TOLERANCE,
@@ -129,21 +168,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             Target::new(chain_frame.clone(), 1)
                 .with_name(format!("threaded{i}"))
-                .with_restraint(cell)
-                .with_atom_restraint(&seg.cis, BelowPlaneRestraint::new([0.0, 0.0, 1.0], CIS_Z))
+                .with_restraint(cell.clone())
+                .with_atom_restraint(&seg.cis, below_plane([0.0, 0.0, 1.0], CIS_Z))
                 .with_atom_restraint(&seg.pore, pore)
-                .with_atom_restraint(
-                    &seg.trans,
-                    AbovePlaneRestraint::new([0.0, 0.0, 1.0], TRANS_Z),
-                )
+                .with_atom_restraint(&seg.trans, above_plane([0.0, 0.0, 1.0], TRANS_Z))
         })
         .collect();
 
     // Same molecule, different ask: stay in the cis chamber, unthreaded.
     let free = Target::new(chain_frame, N_FREE)
         .with_name("free")
-        .with_restraint(cell)
-        .with_restraint(BelowPlaneRestraint::new([0.0, 0.0, 1.0], CIS_Z));
+        .with_restraint(cell.clone())
+        .with_restraint(below_plane([0.0, 0.0, 1.0], CIS_Z));
 
     let solvent = Target::new(geometry::solvent_bead(), N_SOLVENT)
         .with_name("solvent")
@@ -180,6 +216,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = GenCanPack::new()
         .with_tolerance(TOLERANCE)
         .with_seed(20_260_807)
+        .with_periodic_box(
+            [-half, -half, Z_LO],
+            [half, half, Z_HI],
+            [true, true, false],
+        )
         .with_optimizer(
             OptimizeSelect::per_copy(names).with_environment(8.0),
             torsion,

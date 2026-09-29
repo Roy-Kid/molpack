@@ -119,15 +119,19 @@ kinks).
 #     fn f(&self, _x: &[F; 3], _s: F, _s2: F) -> F { 0.0 }
 #     fn fg(&self, _x: &[F; 3], _s: F, _s2: F, _g: &mut [F; 3]) -> F { 0.0 }
 # }
-use molpack::{InsideBoxRestraint, Target};
+use std::sync::Arc;
+use molpack::{RegionRestraint, Target};
+use molrs::spatial::region::Cuboid;
+use ndarray::array;
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 
+let cube = Cuboid::new(array![0.0, 0.0, 0.0], array![40.0, 40.0, 40.0]);
 let target = Target::from_coords(pos, rad, 100)
-    .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]))
+    .with_restraint(RegionRestraint(Arc::new(cube)))
     .with_restraint(PlaneTether { normal: [0.0, 0.0, 1.0], offset: 20.0, k: 1.0 });
 ```
 
-Built-in `InsideBoxRestraint` and user `PlaneTether` take the same
+The region lift `RegionRestraint` and the user `PlaneTether` take the same
 code path — direction-3 in action.
 
 ### In Python — the same restraint, duck-typed
@@ -177,31 +181,40 @@ copy), and pack.
 > minimum of `U` — the mode of `ρ*` — so the sites collapse onto the peak instead
 > of spreading over the distribution. To drive a whole species onto a target
 > profile, use a **collective** restraint (`Target.with_collective_restraint`,
-> e.g. the built-in `ProfileMatch`), whose penalty is a function of the entire
+> e.g. the built-in `TabulatedPlane`), whose penalty is a function of the entire
 > group and whose gradient couples the copies, so the fixed point is *empirical
 > distribution = target*.
 
 ## Custom `Region`
 
-Goal: a conical region with apex at origin, axis along +z,
-half-angle 30°.
+A region is molrs vocabulary: implement
+[`molrs::spatial::region::Region`] and lift it with
+[`RegionRestraint`](crate::RegionRestraint). Goal: a conical region with
+apex at origin, axis along +z, half-angle 30°.
 
 ```rust
-use molrs::types::F;
-# use molpack::Region;
+use molrs::spatial::region::Region;
+use molrs::types::{F, FNx3};
+use ndarray::Array2;
 
 #[derive(Debug, Clone, Copy)]
-pub struct ConeRegion {
+pub struct Cone {
     pub apex: [F; 3],
     pub axis: [F; 3],
     pub half_angle_cos: F,
 }
 
-impl Region for ConeRegion {
-    fn contains(&self, x: &[F; 3]) -> bool {
-        self.signed_distance(x) <= 0.0
+impl Region for Cone {
+    fn bounds(&self) -> FNx3 {
+        // Unbounded along the axis; ±∞ is the honest answer.
+        let mut b = Array2::zeros((3, 2));
+        for d in 0..3 {
+            b[[d, 0]] = F::NEG_INFINITY;
+            b[[d, 1]] = F::INFINITY;
+        }
+        b
     }
-    fn signed_distance(&self, x: &[F; 3]) -> F {
+    fn distance(&self, x: &[F; 3]) -> F {
         let dx = x[0] - self.apex[0];
         let dy = x[1] - self.apex[1];
         let dz = x[2] - self.apex[2];
@@ -209,57 +222,63 @@ impl Region for ConeRegion {
         if r < 1e-12 { return 0.0; }
         let axis_dot =
             (dx * self.axis[0] + dy * self.axis[1] + dz * self.axis[2]) / r;
+        // Not Euclidean, but the sign and the gradient direction are right,
+        // which is all the lift needs.
         self.half_angle_cos - axis_dot
     }
-    // Default FD gradient is OK for prototypes. Override analytically
-    // for hot-path use — see below.
+    // The default `distance_grad` is a finite difference — fine for a
+    // prototype; override analytically for hot-path use (below).
 }
 ```
 
 ### Compose with built-ins
 
 ```no_run
-# use molrs::types::F;
-# use molpack::Region;
+# use molrs::spatial::region::Region;
+# use molrs::types::{F, FNx3};
+# use ndarray::Array2;
 # #[derive(Debug, Clone, Copy)]
-# pub struct ConeRegion { pub apex: [F; 3], pub axis: [F; 3], pub half_angle_cos: F }
-# impl Region for ConeRegion {
-#     fn contains(&self, _x: &[F; 3]) -> bool { true }
-#     fn signed_distance(&self, _x: &[F; 3]) -> F { 0.0 }
+# pub struct Cone { pub apex: [F; 3], pub axis: [F; 3], pub half_angle_cos: F }
+# impl Region for Cone {
+#     fn bounds(&self) -> FNx3 { Array2::zeros((3, 2)) }
+#     fn distance(&self, _x: &[F; 3]) -> F { 0.0 }
 # }
-use molpack::{InsideSphereRegion, RegionExt, RegionRestraint, Target};
+use std::sync::Arc;
+use molpack::{RegionRestraint, Target};
+use molrs::spatial::region::{AndRegion, Sphere};
+use ndarray::array;
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 
-let cone = ConeRegion {
+let cone = Cone {
     apex: [0.0; 3],
     axis: [0.0, 0.0, 1.0],
     half_angle_cos: (std::f64::consts::PI / 6.0).cos(),
 };
-let sphere = InsideSphereRegion::new([0.0; 3], 10.0);
-let region = cone.and(sphere);
+let sphere = Sphere::new(array![0.0, 0.0, 0.0], 10.0);
+let region = AndRegion::new(Arc::new(cone), Arc::new(sphere));
 
 let target = Target::from_coords(pos, rad, 100)
-    .with_restraint(RegionRestraint(region));
+    .with_restraint(RegionRestraint(Arc::new(region)));
 ```
 
-[`RegionExt::and`](crate::RegionExt::and) / `or` / `not` come from a
-blanket impl on every `Region`. The resulting type
-`And<ConeRegion, InsideSphereRegion>` is static-dispatch — no heap.
+`AndRegion` / `OrRegion` / `NotRegion` take `Arc<dyn Region + Send + Sync>`:
+one algebra for Rust, for Python (`&`, `|`, `~`), and for a region handed
+across the wheel boundary.
 
 ### Analytic gradient override
 
-For hot-path use, override `signed_distance_grad` analytically. The
-cone above:
+For hot-path use, override `distance_grad` analytically. The cone above:
 
 ```rust
-# use molrs::types::F;
-# use molpack::Region;
+# use molrs::spatial::region::Region;
+# use molrs::types::{F, FNx3};
+# use ndarray::Array2;
 # #[derive(Debug, Clone, Copy)]
-# pub struct ConeRegion { pub apex: [F; 3], pub axis: [F; 3], pub half_angle_cos: F }
-# impl Region for ConeRegion {
-#     fn contains(&self, _x: &[F; 3]) -> bool { true }
-#     fn signed_distance(&self, _x: &[F; 3]) -> F { 0.0 }
-fn signed_distance_grad(&self, x: &[F; 3]) -> [F; 3] {
+# pub struct Cone { pub apex: [F; 3], pub axis: [F; 3], pub half_angle_cos: F }
+# impl Region for Cone {
+#     fn bounds(&self) -> FNx3 { Array2::zeros((3, 2)) }
+#     fn distance(&self, _x: &[F; 3]) -> F { 0.0 }
+fn distance_grad(&self, x: &[F; 3]) -> [F; 3] {
     let dx = x[0] - self.apex[0];
     let dy = x[1] - self.apex[1];
     let dz = x[2] - self.apex[2];
@@ -268,7 +287,7 @@ fn signed_distance_grad(&self, x: &[F; 3]) -> [F; 3] {
     if r < 1e-12 { return [0.0; 3]; }
     let axis_dot = (dx * self.axis[0] + dy * self.axis[1] + dz * self.axis[2]) / r;
     let inv_r = 1.0 / r;
-    // signed_distance = cos(α) - axis_dot ⇒ grad = -∂axis_dot/∂x
+    // distance = cos(α) - axis_dot ⇒ grad = -∂axis_dot/∂x
     [
         -(self.axis[0] * inv_r - axis_dot * dx * inv_r * inv_r),
         -(self.axis[1] * inv_r - axis_dot * dy * inv_r * inv_r),
@@ -336,7 +355,7 @@ Handler notes:
   `on_phase_start` / `on_phase_end` bracket one GENCAN phase; both are
   no-op defaults, and a single-stage run calls neither.
 
-## Custom in-loop optimizer (feature `ff`)
+## Custom in-loop optimizer
 
 Everything above places molecules as **rigid bodies**: the packer moves and
 turns a copy, but the copy's internal shape — its *conformer* — stays frozen at
@@ -365,8 +384,8 @@ ships `LBFGS`, a force-field minimizer. Anything else implementing the trait
 drops into the same slot.
 
 The trait, its molpack implementation, and the `GenCanPack::with_optimizer`
-binder all live behind molpack's `ff` Cargo feature, which pulls in molrs's
-force-field module.
+binder are always compiled. Binding a molrs force-field optimizer such as
+`LBFGS` needs molrs's `ff` module, which molpack's `ff` feature forwards.
 
 ![Flexible chains packed inside a spherical cavity](assets/images/paper-confinement-sphere.png)
 
@@ -374,8 +393,8 @@ Confinement like this is a molpack extension workflow, not a Packmol parity
 claim: an in-loop optimizer reshapes flexible chains while the packer places
 them, so one engine can fit them inside a cavity no rigid pose would clear.
 Two runnable programs drive `TorsionMcOptimizer` exactly this way —
-`cargo run --release --example pack_adsorption --features ff` and
-`cargo run --release --example pack_translocation --features ff`.
+`cargo run --release --example pack_adsorption` and
+`cargo run --release --example pack_translocation`.
 
 ### Step 1 — implement `Optimizer`
 
@@ -387,8 +406,8 @@ mechanics stay visible.
 Two conventions the packer relies on:
 
 - **Coordinates arrive and leave through the `Frame`.** Read them with
-  `molrs::ff::potential::extract_coords` — a flat `[x₀, y₀, z₀, x₁, …]` buffer
-  in ångström — and write them back with `write_coords`.
+  `Frame::coords` — an `N × 3` array in ångström — and write them back with
+  `Frame::set_coords`.
 - **Frozen atoms are flagged.** When the binding asks for the local
   environment, the `Frame` also carries neighbouring atoms that must not move.
   They are marked by a boolean `atoms.free` column; a missing column means
@@ -396,9 +415,8 @@ Two conventions the packer relies on:
 
 ```rust
 use molrs::Frame;
-use molrs::ff::potential::{extract_coords, write_coords};
 use molrs::optimize::{OptReport, Optimizer};
-use molrs::types::F;
+use molrs::types::{F, FNx3};
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 
@@ -417,21 +435,20 @@ impl JiggleOptimizer {
 }
 
 /// Toy score (Å²): squared distance of the free atoms from the origin.
-fn score(coords: &[F], free: &[bool]) -> F {
-    (0..free.len())
-        .filter(|&i| free[i])
-        .map(|i| {
-            coords[3 * i] * coords[3 * i]
-                + coords[3 * i + 1] * coords[3 * i + 1]
-                + coords[3 * i + 2] * coords[3 * i + 2]
-        })
+fn score(coords: &FNx3, free: &[bool]) -> F {
+    coords
+        .rows()
+        .into_iter()
+        .zip(free)
+        .filter(|(_, free)| **free)
+        .map(|(r, _)| r.dot(&r))
         .sum()
 }
 
 impl Optimizer for JiggleOptimizer {
     fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String> {
-        let mut best = extract_coords(frame)?;
-        let n = best.len() / 3;
+        let mut best = frame.coords().map_err(|e| e.to_string())?;
+        let n = best.nrows();
         let free: Vec<bool> = match frame.get("atoms").and_then(|a| a.get_bool("free")) {
             Some(col) if col.len() == n => col.iter().copied().collect(),
             _ => vec![true; n],
@@ -452,9 +469,9 @@ impl Optimizer for JiggleOptimizer {
                 if !free[i] {
                     continue; // never move a frozen environment atom
                 }
-                trial[3 * i] += d[0];
-                trial[3 * i + 1] += d[1];
-                trial[3 * i + 2] += d[2];
+                for k in 0..3 {
+                    trial[[i, k]] += d[k];
+                }
             }
             let trial_score = score(&trial, &free);
             if trial_score < best_score {
@@ -464,7 +481,7 @@ impl Optimizer for JiggleOptimizer {
             }
         }
 
-        write_coords(frame, &best)?;
+        frame.set_coords(best.view()).map_err(|e| e.to_string())?;
         Ok(OptReport {
             converged: accepted > 0,
             n_steps: self.steps,
@@ -485,11 +502,14 @@ single movable group. `.with_environment(rcut)` additionally includes every
 atom within `rcut` ångström as frozen context, so a chain folds against its
 real neighbours rather than empty space.
 
-The next snippet is marked `ignore`, so rustdoc shows it without compiling it:
-`with_optimizer` and `OptimizeSelect` exist only in an `ff` build, and doctests
-run on the default feature set.
-
-```ignore
+```no_run
+# use molrs::{Frame, optimize::{OptReport, Optimizer}, types::F};
+# struct JiggleOptimizer;
+# impl JiggleOptimizer { fn new(_: usize, _: F, _: u64) -> Self { Self } }
+# impl Optimizer for JiggleOptimizer {
+#     fn run(&mut self, _: &mut Frame) -> Result<OptReport, String> { unimplemented!() }
+# }
+# let targets: Vec<molpack::Target> = Vec::new();
 use molpack::{GenCanPack, OptimizeSelect, PackEngine};
 
 let result = GenCanPack::new()
@@ -499,6 +519,7 @@ let result = GenCanPack::new()
         JiggleOptimizer::new(25, 0.5, 42),
     )
     .run(&targets, 200)?;
+# Ok::<(), molpack::PackError>(())
 ```
 
 Optimizer notes:
@@ -940,18 +961,22 @@ Stage notes:
 
 ## Testing discipline
 
+molpack keeps **one** test tier: unit tests in a `#[cfg(test)]` module next to
+the code that owns the behaviour. There is no `tests/` directory, no benchmark
+suite and no regression harness — an end-to-end packing scenario belongs in
+`examples/`, not in the test suite.
+
 | Kind | Location | Convention |
 |---|---|---|
 | Unit test | `#[cfg(test)] mod tests` in the same file | One `#[test]` fn per behavior |
-| Integration test | `tests/<name>.rs` | `use molpack::{…};` only public API |
-| Gradient finite-difference | alongside unit test | ε=1e-5, tol=1e-3 |
-| Regression vs Packmol | `tests/examples_batch.rs` (`#[ignore]`) | Run with `--ignored --release` |
+| Large test body | child module (`src/grow/tests/`, `src/pipeline/tests.rs`) | Still `--lib`, still owned by that module |
+| Gradient finite-difference | alongside the unit test | ε=1e-5, tol=1e-3 |
 
 Run all:
 
 ```bash
-cargo test --all-features
-cargo test --release --test examples_batch -- --ignored
+cargo test --lib --all-features
+cargo test --doc --all-features
 ```
 
 Rules:

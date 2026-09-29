@@ -21,7 +21,7 @@ body:
       label: Minimal reproducible example
       description: |
         A self-contained snippet that demonstrates the issue. Include molecule coordinates,
-        restraint setup, and the `Molpack::pack()` call that triggers the bug.
+        restraint setup, and the engine `run()` call that triggers the bug.
       render: rust
     validations:
       required: true

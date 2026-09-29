@@ -1,13 +1,12 @@
 //! Handler trait and built-in handlers for packing progress callbacks.
 
+use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use std::io::BufWriter;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::context::PackContext;
-use crate::frame::compute_mol_ids;
-use crate::numerics::objective_small_floor;
 use crate::stage::StageOutcome;
 
 // ── Info structs ─────────────────────────────────────────────────────────────
@@ -110,6 +109,10 @@ pub struct StepInfo {
     pub fdist: F,
     /// Max constraint violation (0.0 = all constraints satisfied).
     pub frest: F,
+    /// GENCAN: the objective at the user's radii — Packmol's `fx` after a
+    /// loop (packmol.f90:833-841), the value `fimp` and `bestf` are measured
+    /// on. Growth: a constructive `0.0`, like `fdist` / `frest`.
+    pub f: F,
     /// Improvement from last iteration, as percentage (positive = improving).
     pub improvement_pct: F,
     /// GENCAN: current radius scaling factor (starts at discale, decays to
@@ -121,8 +124,6 @@ pub struct StepInfo {
     pub radscale: F,
     /// Convergence precision target.
     pub precision: F,
-    /// Relaxer acceptance rates: `(type_index, acceptance_rate)`.
-    pub relaxer_acceptance: Vec<(usize, F)>,
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
@@ -152,20 +153,6 @@ pub trait Handler: Send {
         false
     }
 
-    // ── v2 additions (spec §6.6) — default no-op, backward compatible ──
-
-    /// Called after each inner GENCAN iteration (more granular than [`on_step`]).
-    ///
-    /// Default: no-op. Implement when you need per-inner-iteration feedback
-    /// (e.g. plotting objective evolution, adaptive stop criteria).
-    ///
-    /// - `iter` — 0-based inner iteration counter within the current outer step
-    /// - `f` — current objective value (pair + restraint)
-    /// - `sys` — read-only view of the packing context
-    ///
-    /// [`on_step`]: Handler::on_step
-    fn on_inner_iter(&mut self, _iter: u32, _f: F, _sys: &PackContext) {}
-
     /// Called at the end of each packing phase, with a summary report.
     ///
     /// Default: no-op. Paired with [`on_phase_start`] for symmetric
@@ -173,8 +160,6 @@ pub trait Handler: Send {
     ///
     /// [`on_phase_start`]: Handler::on_phase_start
     fn on_phase_end(&mut self, _info: &PhaseInfo, _report: &PhaseReport) {}
-
-    // ── stage-pipeline-04-stage additions — default no-op, backward compatible ──
 
     /// Called before a stage starts, with the stage's identity.
     ///
@@ -197,15 +182,6 @@ pub trait Handler: Send {
     fn on_stage_end(&mut self, _info: &StageInfo, _outcome: &StageOutcome, _sys: &PackContext) {}
 }
 
-// ── NullHandler ───────────────────────────────────────────────────────────────
-
-/// A no-op handler.
-pub struct NullHandler;
-
-impl Handler for NullHandler {
-    fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {}
-}
-
 // ── XYZHandler ────────────────────────────────────────────────────────────────
 
 /// Writes packing snapshots as a multi-frame XYZ trajectory.
@@ -217,7 +193,8 @@ pub struct XYZHandler {
     /// Write every `n` steps (must be >= 1).
     every: usize,
     file: Option<BufWriter<std::fs::File>>,
-    /// Precomputed global molecule ID per atom (constant across all frames).
+    /// Global molecule ID per atom, 1-based like the final frame's `mol_id`
+    /// (constant across all frames).
     mol_ids: Vec<usize>,
 }
 
@@ -279,7 +256,7 @@ impl XYZHandler {
 
 impl Handler for XYZHandler {
     fn on_initialized(&mut self, sys: &PackContext) {
-        self.mol_ids = compute_mol_ids(sys);
+        self.mol_ids = mol_ids(sys);
     }
 
     fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
@@ -289,11 +266,27 @@ impl Handler for XYZHandler {
     }
 }
 
+/// Per-atom global molecule ID in `xcart` order (for each type, each copy,
+/// each atom), 1-based — the numbering the assembled frame's `mol_id` uses.
+fn mol_ids(sys: &PackContext) -> Vec<usize> {
+    let mut ids = Vec::with_capacity(sys.ntotat);
+    let mut mol = 0usize;
+    for itype in 0..sys.ntype_with_fixed {
+        for _ in 0..sys.nmols[itype] {
+            mol += 1;
+            ids.extend(std::iter::repeat_n(mol, sys.natoms[itype]));
+        }
+    }
+    ids
+}
+
 // ── ProgressHandler ───────────────────────────────────────────────────────────
 
 /// Prints human-readable progress lines to `stderr`.
 ///
-/// Installed by the engine lifecycle according to [`LogSpec`](crate::entry::LogSpec).
+/// Attach it with [`PackEngine::with_handler`](crate::PackEngine::with_handler);
+/// the screen log the engine installs from its log level is
+/// [`LammpsLogHandler`].
 pub struct ProgressHandler {
     start: Option<Instant>,
 }
@@ -377,7 +370,7 @@ pub struct LammpsLogHandler {
     seed: u64,
     max_loops: usize,
     ntypes: usize,
-    periodic_box: Option<([F; 3], [F; 3], [bool; 3])>,
+    cell: Option<SimBox>,
     start: Option<Instant>,
     phase_start: Option<Instant>,
 }
@@ -392,7 +385,7 @@ impl LammpsLogHandler {
         seed: u64,
         max_loops: usize,
         ntypes: usize,
-        periodic_box: Option<([F; 3], [F; 3], [bool; 3])>,
+        cell: Option<SimBox>,
     ) -> Self {
         Self {
             level,
@@ -402,7 +395,7 @@ impl LammpsLogHandler {
             seed,
             max_loops,
             ntypes,
-            periodic_box,
+            cell,
             start: None,
             phase_start: None,
         }
@@ -429,7 +422,7 @@ impl Handler for LammpsLogHandler {
         self.start = Some(now);
         self.phase_start = Some(now);
 
-        eprintln!("Molpack screen log");
+        eprintln!("molpack screen log");
         eprintln!("System information:");
         eprintln!("  molecule types = {}", self.ntypes);
         eprintln!("  molecules      = {ntotmol}");
@@ -439,12 +432,26 @@ impl Handler for LammpsLogHandler {
         eprintln!("  precision      = {:.6}", self.precision);
         eprintln!("  seed           = {}", self.seed);
         eprintln!("  nloop          = {}", self.max_loops);
-        match self.periodic_box {
-            Some((min, max, flags)) => eprintln!(
-                "  pbc            = [{:.6}, {:.6}, {:.6}] -> [{:.6}, {:.6}, {:.6}]  flags={:?}",
-                min[0], min[1], min[2], max[0], max[1], max[2], flags
-            ),
-            None => eprintln!("  pbc            = off"),
+        match &self.cell {
+            Some(cell) => {
+                let (o, h) = (cell.origin_view(), cell.h_view());
+                eprintln!(
+                    "  cell origin    = [{:.6}, {:.6}, {:.6}]  pbc={:?}",
+                    o[0],
+                    o[1],
+                    o[2],
+                    cell.pbc()
+                );
+                for (k, axis) in ["a", "b", "c"].iter().enumerate() {
+                    eprintln!(
+                        "  cell {axis}         = [{:.6}, {:.6}, {:.6}]",
+                        h[[0, k]],
+                        h[[1, k]],
+                        h[[2, k]]
+                    );
+                }
+            }
+            None => eprintln!("  cell           = none"),
         }
     }
 
@@ -544,100 +551,199 @@ impl Handler for LammpsLogHandler {
 
 // ── EarlyStopHandler ──────────────────────────────────────────────────────────
 
-/// Requests early termination when improvement stalls.
+/// Ends a GENCAN phase whose best objective has stopped improving.
 ///
-/// Tracks `fdist + frest` total violation. After `warmup` iterations, if the
-/// relative improvement drops below `threshold` for `patience` consecutive
-/// steps, sets the stop flag.
+/// Packmol has no early stop — a phase runs until it converges or reaches
+/// `nloop` — so this handler is molpack's, but it is phrased entirely in
+/// Packmol's own quantities (`app/packmol.f90`):
 ///
-/// Installed by the engine lifecycle according to [`LogSpec`](crate::entry::LogSpec).
+/// * the objective is `fx`, the function value at the user's radii after each
+///   loop ([`StepInfo::f`]), and `bestf` is its per-phase minimum
+///   (packmol.f90:808, 869, 894);
+/// * improvement is Packmol's `fimprov`, `-100 * (fx - bestf) / bestf`, in
+///   percent, with `bestf == 0` counting as 100 % (packmol.f90:844-845) —
+///   here measured across a window: `bestf` now against `bestf` `patience`
+///   loops ago;
+/// * a phase is judged only once `radscale` has come down to 1.0. That is
+///   where Packmol itself starts treating poor progress as a stall (movebad
+///   fires only at `radscale == 1` and `fimp <= 10`, packmol.f90:815); above
+///   1.0 its own schedule is still shrinking the radii (packmol.f90:940-947);
+/// * the default threshold is that same 10 %.
+///
+/// So the rule is: at the user's radii, if `bestf` has improved by less than
+/// `threshold_pct` over the last `patience` loops, end the phase. `bestf`
+/// rather than `fx` because movebad kicks `fx` up on purpose.
+///
+/// The stop ends the current phase only; later phases and later pipeline
+/// stages still run. [`GenCanPack`](crate::GenCanPack) installs one by
+/// default ([`Default`] values); `with_early_stop` replaces or removes it. A
+/// run whose final phase was stopped is not converged:
+/// [`State::converged`](crate::State) reports `false`, as Packmol's
+/// "maximum number of GENCAN loops achieved" would.
+#[derive(Debug, Clone)]
 pub struct EarlyStopHandler {
-    /// Relative improvement threshold.
-    pub threshold: F,
-    /// Iterations to skip before tracking. Default: `5`.
-    pub warmup: usize,
-    /// Consecutive stall iterations before stopping. Default: `3`.
+    /// Minimum improvement of `bestf` across `patience` loops, in percent
+    /// (Packmol's `fimprov` units). Default: `10.0`, Packmol's movebad
+    /// threshold.
+    pub threshold_pct: F,
+    /// Window length, in loops at `radscale == 1`. Default: `10`.
     pub patience: usize,
-    prev_violation: F,
-    stall_count: usize,
+    /// Per-phase best `fx` (Packmol's `bestf`).
+    bestf: F,
+    /// `bestf` after each loop judged so far in this phase.
+    window: Vec<F>,
     stop: bool,
 }
 
 impl EarlyStopHandler {
-    pub fn new(threshold: F) -> Self {
+    pub fn new(threshold_pct: F) -> Self {
         Self {
-            threshold,
-            warmup: 5,
-            patience: 3,
-            prev_violation: F::INFINITY,
-            stall_count: 0,
+            threshold_pct,
+            patience: 10,
+            bestf: F::INFINITY,
+            window: Vec::new(),
             stop: false,
         }
-    }
-
-    pub fn with_warmup(mut self, warmup: usize) -> Self {
-        self.warmup = warmup;
-        self
     }
 
     pub fn with_patience(mut self, patience: usize) -> Self {
         self.patience = patience.max(1);
         self
     }
+
+    fn reset(&mut self) {
+        self.bestf = F::INFINITY;
+        self.window.clear();
+        self.stop = false;
+    }
+
+    /// One outer loop: `fx` at the user's radii, and the radius scale the
+    /// loop ran with.
+    fn observe(&mut self, fx: F, radscale: F) {
+        self.bestf = self.bestf.min(fx);
+        if radscale != 1.0 {
+            return;
+        }
+        self.window.push(self.bestf);
+        let n = self.window.len();
+        if n <= self.patience {
+            return;
+        }
+        let before = self.window[n - 1 - self.patience];
+        let fimprov = if before > 0.0 {
+            -100.0 * (self.bestf - before) / before
+        } else {
+            100.0
+        };
+        if fimprov < self.threshold_pct {
+            log::debug!(
+                "EarlyStop: bestf {before:.3e} -> {:.3e} ({fimprov:.2} %) over {} loops",
+                self.bestf,
+                self.patience
+            );
+            self.stop = true;
+        }
+    }
 }
 
 impl Default for EarlyStopHandler {
-    /// Default is intentionally conservative (effectively disabled),
-    /// so Packmol-sized examples are not stopped before convergence.
     fn default() -> Self {
-        Self::new(F::NEG_INFINITY)
+        Self::new(10.0)
     }
 }
 
 impl Handler for EarlyStopHandler {
     fn on_initialized(&mut self, _sys: &PackContext) {
-        self.prev_violation = F::INFINITY;
-        self.stall_count = 0;
-        self.stop = false;
+        self.reset();
     }
 
     fn on_phase_start(&mut self, _info: &PhaseInfo) {
-        self.prev_violation = F::INFINITY;
-        self.stall_count = 0;
-        self.stop = false;
+        self.reset();
+    }
+
+    /// The stop is phase-scoped: GENCAN polls `should_stop` right after
+    /// `on_step` and ends the phase, then calls this. Clearing here keeps the
+    /// flag from reaching the pipeline's between-stage check, where it would
+    /// also cancel every later stage.
+    fn on_phase_end(&mut self, _info: &PhaseInfo, _report: &PhaseReport) {
+        self.reset();
     }
 
     fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
-        let v = info.fdist + info.frest;
-        if info.loop_idx <= self.warmup {
-            self.prev_violation = v;
-            return;
-        }
-        let rel_change = if self.prev_violation > 0.0 {
-            (self.prev_violation - v) / self.prev_violation
-        } else if v < objective_small_floor() {
-            1.0 // already converged
-        } else {
-            F::INFINITY
-        };
-
-        if rel_change < self.threshold {
-            self.stall_count += 1;
-            if self.stall_count >= self.patience {
-                log::debug!(
-                    "EarlyStop: stalled for {} iters (rel_change={:.2e})",
-                    self.stall_count,
-                    rel_change
-                );
-                self.stop = true;
-            }
-        } else {
-            self.stall_count = 0;
-        }
-        self.prev_violation = v;
+        self.observe(info.f, info.radscale);
     }
 
     fn should_stop(&self) -> bool {
         self.stop
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(h: &mut EarlyStopHandler, fx: &[F], radscale: F) -> Option<usize> {
+        for (i, &f) in fx.iter().enumerate() {
+            h.observe(f, radscale);
+            if h.should_stop() {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn early_stop_fires_after_patience_loops_of_a_plateau() {
+        // The first judged loop only seeds the window: a flat bestf is
+        // stopped on loop `patience`.
+        assert_eq!(
+            run(&mut EarlyStopHandler::default(), &[3.0; 30], 1.0),
+            Some(10)
+        );
+    }
+
+    #[test]
+    fn early_stop_never_judges_above_the_user_radii() {
+        // Packmol's own radscale schedule is still running: never stop there.
+        assert_eq!(run(&mut EarlyStopHandler::default(), &[3.0; 60], 1.1), None);
+    }
+
+    #[test]
+    fn early_stop_keeps_a_phase_whose_bestf_falls_ten_percent_per_window() {
+        // fx is kicked up every 5 loops (movebad) but bestf still falls
+        // 2 % a loop, ~18 % per 10-loop window.
+        let fx: Vec<F> = (0..60)
+            .map(|i| {
+                if i % 5 == 4 {
+                    1e3
+                } else {
+                    100.0 * (0.98 as F).powi(i)
+                }
+            })
+            .collect();
+        assert_eq!(run(&mut EarlyStopHandler::default(), &fx, 1.0), None);
+    }
+
+    #[test]
+    fn early_stop_carries_bestf_from_the_scaled_loops() {
+        // bestf is per phase, as in Packmol, so a good point found at
+        // radscale > 1 is what the first judged loop is measured against.
+        let mut h = EarlyStopHandler::default();
+        assert_eq!(run(&mut h, &[1.0], 1.1), None);
+        assert_eq!(run(&mut h, &[5.0; 20], 1.0), Some(10));
+    }
+
+    #[test]
+    fn early_stop_resets_at_phase_end_and_never_fires_on_zero() {
+        let mut h = EarlyStopHandler::default();
+        assert_eq!(run(&mut h, &[3.0; 11], 1.0), Some(10));
+        let info = PhaseInfo {
+            phase: 0,
+            total_phases: 1,
+            molecule_type: None,
+        };
+        h.on_phase_end(&info, &PhaseReport::default());
+        assert!(!h.should_stop(), "the stop must not outlive its phase");
+        assert_eq!(run(&mut h, &[0.0; 40], 1.0), None);
     }
 }

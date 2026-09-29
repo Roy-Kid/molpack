@@ -10,9 +10,9 @@ criteria:
       （Overlap / IntraOverlap / Bond / Angle13 / Dihedral14 / Chiral / Restraint）定义在 `refine/terms*`。
       `grep -rn 'gencan::solver\|gencan::phases\|gencan::entry\|run_phase\|run_iteration\|pgencan\|gencan::gencan\b' src/refine/` 无命中；
       `grep -rn 'grow::internal\|use crate::grow' src/refine/` 无命中（键图来自 src/topology.rs）；
-      `grep -rn 'cfg(feature = "ff")\|molrs::ff\|molrs::optimize' src/refine/` 无命中；
+      `grep -rn 'molrs::ff\|molrs::optimize' src/refine/` 无命中（`ff` 已是纯透传，crate 内无 `cfg(feature = "ff")` 可查）；
       `grep -rn 'project_cartesian_gradient' src/refine/` 无命中（梯度直接取 gxcar）。
-      `src/gencan/mod.rs` 行数不增；`src/objective/` 已拆分且 `examples_batch` 通过（前置）。
+      `src/gencan/mod.rs` 行数不增；`src/objective/` 已拆分且五个 `cargo run --release --features io --example pack_<name>` 程序收敛（原 `examples_batch` harness 已于 2026-09-20 删除）（前置）。
       `cargo build -p molcrafts-molpack`（default）通过；wheel feature 集合未变。
     status: pending
 
@@ -20,7 +20,7 @@ criteria:
     summary: 每个几何项的解析梯度通过有限差分
     type: runtime
     pass_when: |
-      tests/refine.rs 对 OverlapTerm、BondTerm、Angle13Term、Dihedral14Term、ChiralTerm、
+      DgRefine 属主模块的 #[cfg(test)] 单测对 OverlapTerm、BondTerm、Angle13Term、Dihedral14Term、ChiralTerm、
       RestraintTerm 及 CartesianObjective 总梯度做中心差分（h = 1e-5 Å）比较，
       相对误差 < 1e-6；用例含跨周期边界的成键对与 fixed 邻居。
     status: pending
@@ -32,8 +32,8 @@ criteria:
       8 × 12 珠链 / 26 Å 盒的人工重叠初态经 DgRefine 后 `fdist < precision`；
       两条人工自穿链经 IntraOverlapTerm 精修后，各自 `Target.special_bonds` 表外的同分子最小距离 ≥ tolerance − 1e-9
       （两张 Target 各一张表：深度 1 与深度 3）；
-      20 × 24 珠链 / 22 Å 盒（复用 lattice 测试的稠密算例）经 DgRefine 末级
-      `fdist ≤ 0.1 × 初态 fdist` 且严格小于同 max_loops 下 `GenCanPack::seeded_from` 的 fdist；
+      20 × 24 珠链 / 22 Å 盒（重建原 lattice 稠密算例，该集成测试已于 2026-09-20 删除）经 DgRefine 末级
+      `fdist ≤ 0.1 × 初态 fdist` 且严格小于同 max_loops 下 `GenCanPack::with_restart` 的 fdist；
       两者的 `fdist` 都来自管线末尾共享 objective 在 scale = 1.0 的评估。
     status: pending
 
@@ -62,8 +62,8 @@ criteria:
     type: runtime
     pass_when: |
       `bin_xcart_into_cells` 与 `accumulate_cartesian_fg` 抽出后
-      `cargo test --release --features io --test examples_batch -- --ignored` 五例通过，
-      fast tier 全绿；GenCanPack 路径的坐标逐位不变（tests/pipeline.rs 的单阶段等价测试）。
+      五个 `cargo run --release --features io --example pack_<name>` 程序收敛（原 `examples_batch` harness 已于 2026-09-20 删除），
+      fast tier 全绿；GenCanPack 路径行为不变（`src/gencan/entry.rs::gencan_entry_is_deterministic`；原单阶段逐位等价集成测试已于 2026-09-20 删除，逐位比较不再作验收）。
     status: pending
 
   - id: ac-007

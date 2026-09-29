@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use molrs::types::F;
 use rand::rngs::SmallRng;
 
+use crate::grow::internal::wrap_pi;
 use crate::random::uniform01;
 
 /// The four A-site bond vectors, in a/4 units.
@@ -212,16 +213,6 @@ fn slot_angle(st: i8) -> F {
 
 const PI: F = std::f64::consts::PI as F;
 
-fn wrap_pi(x: F) -> F {
-    let mut v = x % (2.0 * PI);
-    if v > PI {
-        v -= 2.0 * PI;
-    } else if v <= -PI {
-        v += 2.0 * PI;
-    }
-    v
-}
-
 /// Grow one self-avoiding tree walk. `parent` / `children` / `follows` are
 /// the InternalTree heavy projection (`Backbone`). Returns `None` when the
 /// walk could not complete within the recoil/reseed budget.
@@ -246,10 +237,13 @@ pub(crate) fn grow_walk(
 
     for _ in 0..max_reseed {
         let mut abs: Vec<Option<[i64; 3]>> = vec![None; n];
-        let mut occupied: Vec<[i64; 3]> = Vec::new();
+        // Placement stack: (atom, wrapped site) in the order atoms were
+        // placed. Every atom is placed after its parent, so any prefix is a
+        // parent-closed partial walk and a recoil pops a suffix.
+        let mut stack: Vec<(usize, [i64; 3])> = Vec::new();
 
-        let clear = |field: &mut SawField, occupied: &[[i64; 3]]| {
-            for p in occupied {
+        let clear = |field: &mut SawField, stack: &[(usize, [i64; 3])]| {
+            for (_, p) in stack {
                 field.occ.remove(p);
             }
         };
@@ -289,8 +283,8 @@ pub(crate) fn grow_walk(
         abs[1] = Some(p1);
         field.occ.insert(p0, chain_id);
         field.occ.insert(p1w, chain_id);
-        occupied.push(p0);
-        occupied.push(p1w);
+        stack.push((0, p0));
+        stack.push((1, p1w));
 
         // Align[2]: one non-backtracking continuation from atom 1.
         let mut placed2 = false;
@@ -305,12 +299,12 @@ pub(crate) fn grow_walk(
             }
             abs[2] = Some(qabs);
             field.occ.insert(qw, chain_id);
-            occupied.push(qw);
+            stack.push((2, qw));
             placed2 = true;
             break;
         }
         if !placed2 {
-            clear(field, &occupied);
+            clear(field, &stack);
             continue;
         }
 
@@ -321,15 +315,24 @@ pub(crate) fn grow_walk(
             Some([a[0] - b[0], a[1] - b[1], a[2] - b[2]])
         };
 
+        // Recoil: a dead end pops the most recent placements off the stack
+        // and regrows from there, instead of throwing the whole chain away.
+        // The depth doubles every two consecutive dead ends that get no
+        // further than the deepest one so far; `max_backtrack` recoils buy
+        // one reseed.
         let mut backtracks = 0usize;
+        let mut streak = 0usize;
+        let mut wall = 0usize;
         let mut failed = false;
-        'place: for p in 0..n {
+        let mut p = 0usize;
+        'place: while p < n {
             let unplaced: Vec<usize> = children[p]
                 .iter()
                 .copied()
                 .filter(|&c| abs[c].is_none())
                 .collect();
             if unplaced.is_empty() {
+                p += 1;
                 continue;
             }
             let Some(pabs) = abs[p] else {
@@ -364,6 +367,7 @@ pub(crate) fn grow_walk(
 
             let mut assign: Vec<(usize, [i64; 3], [i64; 3])> = Vec::new(); // (child, abs, wrapped)
             let mut used_now = used;
+            let mut dead_end = false;
 
             if let Some(h) = hooked {
                 struct Cand {
@@ -402,23 +406,23 @@ pub(crate) fn grow_walk(
                     cands.push(Cand { ti, qabs, qw, wgt });
                 }
                 if cands.is_empty() {
-                    backtracks += 1;
-                    failed = true;
-                    break 'place;
+                    dead_end = true;
                 }
-                let total: F = cands.iter().map(|c| c.wgt).sum();
-                let mut ticket = uniform01(rng) * total;
-                let mut pick = cands.len() - 1;
-                for (i, c) in cands.iter().enumerate() {
-                    ticket -= c.wgt;
-                    if ticket <= 0.0 {
-                        pick = i;
-                        break;
+                if !dead_end {
+                    let total: F = cands.iter().map(|c| c.wgt).sum();
+                    let mut ticket = uniform01(rng) * total;
+                    let mut pick = cands.len() - 1;
+                    for (i, c) in cands.iter().enumerate() {
+                        ticket -= c.wgt;
+                        if ticket <= 0.0 {
+                            pick = i;
+                            break;
+                        }
                     }
+                    let Cand { ti, qabs, qw, .. } = cands[pick];
+                    used_now[ti] = true;
+                    assign.push((h, qabs, qw));
                 }
-                let Cand { ti, qabs, qw, .. } = cands[pick];
-                used_now[ti] = true;
-                assign.push((h, qabs, qw));
             }
 
             let mut others: Vec<usize> = unplaced
@@ -427,6 +431,9 @@ pub(crate) fn grow_walk(
                 .filter(|&c| Some(c) != hooked)
                 .collect();
             others.sort_unstable();
+            if dead_end {
+                others.clear();
+            }
             for c in others {
                 let mut best: Option<(F, usize, [i64; 3], [i64; 3])> = None;
                 for (ti, &t) in T_STEPS.iter().enumerate() {
@@ -451,21 +458,48 @@ pub(crate) fn grow_walk(
                     }
                 }
                 let Some((_, ti, qabs, qw)) = best else {
-                    failed = true;
-                    break 'place;
+                    dead_end = true;
+                    break;
                 };
                 used_now[ti] = true;
                 assign.push((c, qabs, qw));
             }
 
-            if failed {
-                break;
+            if dead_end {
+                // Nothing of `assign` is committed yet, so only the stack
+                // beyond the seed triple can be popped.
+                if backtracks >= max_backtrack {
+                    failed = true;
+                    break 'place;
+                }
+                backtracks += 1;
+                if stack.len() > wall {
+                    wall = stack.len();
+                    streak = 0;
+                } else {
+                    streak += 1;
+                }
+                let depth = (1usize << (streak / 2).min(16)).min(stack.len() - 3);
+                if depth == 0 {
+                    failed = true;
+                    break 'place;
+                }
+                let mut resume = n;
+                for _ in 0..depth {
+                    let (a, w) = stack.pop().expect("depth never reaches the seed");
+                    field.occ.remove(&w);
+                    abs[a] = None;
+                    resume = resume.min(parent[a].expect("only the root has no parent"));
+                }
+                p = resume;
+                continue 'place;
             }
             for (c, qabs, qw) in assign {
                 abs[c] = Some(qabs);
                 field.occ.insert(qw, chain_id);
-                occupied.push(qw);
+                stack.push((c, qw));
             }
+            p += 1;
         }
 
         if !failed && abs.iter().all(|s| s.is_some()) {
@@ -473,10 +507,7 @@ pub(crate) fn grow_walk(
                 sites: abs.into_iter().map(|s| s.unwrap()).collect(),
             });
         }
-        clear(field, &occupied);
-        if backtracks > max_backtrack {
-            continue;
-        }
+        clear(field, &stack);
     }
     None
 }
@@ -720,6 +751,34 @@ mod tests {
                 t_index(&lat, walk.sites[p], walk.sites[j]).is_some(),
                 "atom {j} is not a diamond neighbour of its parent"
             );
+        }
+    }
+
+    /// A dead end recoils instead of discarding the chain: one attempt
+    /// (`max_reseed = 1`) still completes a long guarded walk, which simple
+    /// sampling — abandon at the first dead end — almost never does.
+    #[test]
+    fn grow_walk_recoils_out_of_dead_ends() {
+        let lat = DiamondLattice::fit([0.0; 3], [20.0; 3], 1.53);
+        let (parent, children, follows) = linear_tree(300);
+        let weights = RisWeights { p_t: 0.6, p_g: 0.2 };
+        for seed in 0..8 {
+            let mut field = SawField::new();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let walk = grow_walk(
+                &lat, &mut field, 0, &parent, &children, &follows, &weights, true, 20_000, 1,
+                &mut rng,
+            );
+            let walk = walk.unwrap_or_else(|| panic!("seed {seed}: the single attempt gave up"));
+            for j in 1..300 {
+                let p = parent[j].unwrap();
+                assert!(t_index(&lat, walk.sites[p], walk.sites[j]).is_some());
+            }
+            let mut wrapped: Vec<[i64; 3]> = walk.sites.iter().map(|&s| lat.wrap(s)).collect();
+            wrapped.sort_unstable();
+            wrapped.dedup();
+            assert_eq!(wrapped.len(), 300, "seed {seed}: the walk revisits a site");
+            assert_eq!(field.occ.len(), 300, "seed {seed}: recoil leaked occupancy");
         }
     }
 

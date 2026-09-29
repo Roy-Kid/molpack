@@ -51,12 +51,14 @@ A `Target` is one molecule species plus the number of copies to place. Every
 mobile target needs a spatial restraint:
 
 ```python
-from molpack import InsideBoxRestraint, Target
+import molrs
+from molpack import Target
 
+box = molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])  # a molrs region
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    .with_restraint(box)
 )
 ```
 

@@ -27,7 +27,7 @@ def main() -> None:
     sodium_frame = molrs.io.read_pdb(str(DATA / "sodium.pdb"))
     chloride_frame = molrs.io.read_pdb(str(DATA / "chloride.pdb"))
 
-    sphere = molpack.InsideSphereRestraint([0.0, 0.0, 0.0], 50.0)
+    sphere = molrs.Sphere([0.0, 0.0, 0.0], 50.0)
 
     protein = (
         molpack.Target(protein_frame, count=1)
@@ -73,8 +73,12 @@ def main() -> None:
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.mrec.write_frame(str(OUT / "pack_solvprotein.mrec"), packed)
-    molrs.io.write_lammps_traj(str(OUT / "pack_solvprotein.lammpstrj"), [packed])
+    molrs.io.write_mrec(str(OUT / "pack_solvprotein.mrec"), packed)
+    molrs.io.write_lammps_trajectory(
+        str(OUT / "pack_solvprotein.lammpstrj"),
+        [packed],
+        columns=["id", "element", "mol", "x", "y", "z"],
+    )
     if "bonds" in packed and packed["bonds"].nrows:
         molrs.io.write_lammps_dump_local(
             str(OUT / "pack_solvprotein.dump.local"), [packed]

@@ -2,14 +2,11 @@
 
 from ._protocols import Handler, Restraint
 from .molpack import (
-    AbovePlaneRestraint,
     Angle,
     AnglePrior,
     Axis,
-    BelowPlaneRestraint,
     CbmcGrow,
     CenteringMode,
-    ConflictingPeriodicBoxesError,
     ConstraintsFailedError,
     EmptyMoleculeError,
     ExponentialPlane,
@@ -17,22 +14,19 @@ from .molpack import (
     GaussianPlane,
     GaussianPoint,
     GenCanPack,
-    InsideBoxRestraint,
-    InsideSphereRestraint,
     IntraResidual,
     InvalidPBCBoxError,
     LatticeGrow,
     MaxIterationsError,
     NoTargetsError,
-    OutsideSphereRestraint,
     PackError,
     Pipeline,
     ScriptJob,
+    SelfSeparation,
     StageInfo,
     State,
     StepContext,
     StepInfo,
-    StlRegion,
     TabulatedPlane,
     TabulatedPoint,
     Target,
@@ -52,13 +46,6 @@ __all__ = [
     # Growth statistics inputs
     "TorsionPrior",
     "AnglePrior",
-    # Restraints
-    "InsideBoxRestraint",
-    "InsideSphereRestraint",
-    "OutsideSphereRestraint",
-    "AbovePlaneRestraint",
-    "BelowPlaneRestraint",
-    "StlRegion",
     # Group-level distribution-matching restraints
     "GaussianPlane",
     "GaussianPoint",
@@ -66,6 +53,8 @@ __all__ = [
     "ExponentialPoint",
     "TabulatedPlane",
     "TabulatedPoint",
+    # Group-level separation restraint
+    "SelfSeparation",
     # Core
     "Target",
     "GenCanPack",
@@ -87,7 +76,6 @@ __all__ = [
     # Duck-type protocols
     "Handler",
     "Restraint",
-    # Post-pack whole-system relaxation (LAMMPS via molpy)
     # Errors
     "PackError",
     "ConstraintsFailedError",
@@ -95,7 +83,6 @@ __all__ = [
     "NoTargetsError",
     "EmptyMoleculeError",
     "InvalidPBCBoxError",
-    "ConflictingPeriodicBoxesError",
     "MOLRS_MINOR",
     "check_molrs_version",
     "version",

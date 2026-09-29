@@ -53,6 +53,8 @@ pub mod internal;
 pub mod lattice;
 pub(crate) mod moves;
 pub mod prior;
+#[cfg(test)]
+mod tests;
 
 pub use config::{GrowConfig, GrowError};
 pub use driver::GrowStage;
@@ -75,8 +77,7 @@ use crate::target::Target;
 pub(crate) fn topology_for_growth(
     frame: &Frame,
 ) -> Result<(molrs::Topology, Vec<[F; 3]>), GrowError> {
-    let xyz = crate::template::frame_positions(frame)
-        .map_err(|crate::template::FramePositionsError::NoAtomsBlock| GrowError::NoAtomsBlock)?;
+    let xyz = crate::template::coord_rows(&frame.coords().map_err(|_| GrowError::NoAtomsBlock)?);
     let n = xyz.len();
     if let Some(err) = first_bond_out_of_range(frame, n) {
         return Err(err);
@@ -146,9 +147,9 @@ pub(crate) fn validate_grow_cell(
             source: crate::grow::GrowError::NoBox,
         });
     };
-    let h = simbox.h_view();
-    let ortho = (0..3).all(|i| (0..3).all(|j| i == j || h[(i, j)].abs() < 1e-9));
-    if !ortho {
+    // molrs's own classification — the one minimum image and the cell grid
+    // use — so growth never accepts a box the rest of the run treats as tilted.
+    if !matches!(simbox.kind(), molrs::spatial::simbox::BoxKind::Ortho { .. }) {
         return Err(crate::error::PackError::Grow {
             target,
             source: crate::grow::GrowError::TriclinicCell,

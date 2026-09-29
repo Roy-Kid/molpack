@@ -313,10 +313,6 @@ pub(crate) fn build_context(
     // objective kernels.
     sys.parallel_pair_eval = knobs.parallel_eval;
 
-    // Write constant columns (element, mol_id) into the output frame.
-    // These don't change during optimization; positions are added at the end.
-    crate::frame::init_frame_constants(&mut sys);
-
     Ok(BuiltContext {
         sys,
         maxmove_per_type,
@@ -326,4 +322,66 @@ pub(crate) fn build_context(
         ntotat,
         ntotat_free,
     })
+}
+
+#[cfg(test)]
+mod short_radius_tests {
+    //! The short penalty is only meaningful as the tighter of the two radii,
+    //! so context construction refuses a short radius that is not shorter —
+    //! by target and atom index, never silently.
+
+    use super::{ContextKnobs, build_context};
+    use crate::error::PackError;
+    use crate::{F, Target};
+
+    fn knobs() -> ContextKnobs {
+        ContextKnobs {
+            tolerance: 4.0,
+            short_tolerance: None,
+            parallel_eval: false,
+        }
+    }
+
+    fn two_atoms(count: usize) -> Target {
+        Target::from_coords(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], &[1.0, 1.0], count)
+    }
+
+    #[test]
+    fn a_short_radius_below_the_radius_is_accepted() {
+        let target = two_atoms(1).with_radius(2.0).with_short_radius(1.0);
+        assert!(build_context(&knobs(), &[target]).is_ok());
+    }
+
+    #[test]
+    fn a_short_radius_equal_to_the_radius_names_the_atom() {
+        let target = two_atoms(1)
+            .with_radius(2.0)
+            .with_atom_short_radius(&[1], 2.0);
+
+        let err = match build_context(&knobs(), &[target]) {
+            Err(e) => e,
+            Ok(_) => panic!("a short radius equal to the radius must be refused"),
+        };
+
+        match err {
+            PackError::ShortRadiusNotShorter {
+                target,
+                atom,
+                short_radius,
+                radius,
+            } => {
+                assert_eq!((target, atom), (0, 1), "the error names target and atom");
+                assert_eq!((short_radius, radius), (2.0 as F, 2.0 as F));
+            }
+            other => panic!("expected ShortRadiusNotShorter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_atom_that_never_opted_in_is_not_checked() {
+        // Default short radius (half the tolerance) exceeds this radius, but
+        // the atom never asked for the short penalty, so nothing is refused.
+        let target = two_atoms(1).with_radius(0.1);
+        assert!(build_context(&knobs(), &[target]).is_ok());
+    }
 }

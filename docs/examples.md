@@ -2,18 +2,24 @@
 
 Five canonical Packmol-equivalent workloads ship in `examples/`. Each
 exercises a different combination of restraints, fixed placements, and
-target counts, and all five are covered by the regression suite
-(`tests/examples_batch.rs`). A sixth program, `examples/pack_peo`, is a
-measurement harness rather than a Packmol workload: it evaluates the
-chain-growth solver against the rigid-body path on a PEO melt
+target counts. A sixth program, `examples/pack_peo`, is a measurement
+harness rather than a Packmol workload: it evaluates the chain-growth
+solver against the rigid-body path on a PEO melt
 (`cargo run --release --example pack_peo --features io -- grow 200 25 1.0 42`).
 Polymer PEO scenes are Python-only (`python/examples/pack_peo_*.py`):
 monomers from molrs SMILES + conformer, architecture from molpy
 `PolymerBuilder`, then molpack packing. Linear melt and mixed
 linear+star share `LatticeGrow` @ 2.0 Å then `GenCanPack.with_restart`;
 the ring path is `pack_peo_topo.py ring` (named grower reject, rigid
-`GenCanPack`); STL-confined linear PEO is `pack_peo_stl.py` (`StlRegion`
-masks lattice sites outside the mesh, then `GenCanPack.with_restart`).
+`GenCanPack`); mesh-confined linear PEO is `pack_peo_mesh.py` (a
+`molrs.Polyhedron` read from STL masks lattice sites outside the mesh), and
+`pack_peo_void.py` grows PEO through the solvent-accessible void of a
+bead-spring frame (`~molrs.SphereUnion` over the bonded beads of a LAMMPS
+data file).
+`python/examples/pack_ion_dispersion.py` is also Python-only: it packs the
+same ions-in-water box twice, once plain and once with `SelfSeparation`, and
+prints the ion-ion spacing both ways so the effect of the bound is the only
+difference between the runs.
 
 | Workload | Rust example | Python example | Molecules | Restraints | Demonstrates |
 |---|---|---|---|---|---|
@@ -49,8 +55,8 @@ Optional progress / trajectory dumps are gated behind environment
 variables:
 
 ```bash
-MOLRS_PACK_EXAMPLE_PROGRESS=1 cargo run --release --example pack_mixture --features io
-MOLRS_PACK_EXAMPLE_XYZ=1      cargo run --release --example pack_mixture --features io
+MOLPACK_EXAMPLE_PROGRESS=1 cargo run --release --example pack_mixture --features io
+MOLPACK_EXAMPLE_XYZ=1      cargo run --release --example pack_mixture --features io
 ```
 
 ## Run the Python examples
@@ -69,7 +75,8 @@ python examples/pack_solvprotein.py
 python examples/pack_peo_linear.py 8 8 0.5 42
 python examples/pack_peo_mix.py 4 2 4 4 0.5 42
 python examples/pack_peo_topo.py star 4 8 0.5 42
-python examples/pack_peo_stl.py 4 4 30 42
+python examples/pack_peo_mesh.py 4 4 30 42
+python examples/pack_peo_void.py frame.data 4 4 42
 ```
 
 `python/examples/pack_water_cube.py` is a minimal standalone starter

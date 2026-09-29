@@ -20,17 +20,30 @@
 //!
 //! Run with:
 //! ```sh
-//! cargo run -p molrs-pack --example pack_interface --release
+//! cargo run --release --example pack_interface --features io
 //! ```
 
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
 use molpack::{
-    Angle, CenteringMode, GenCanPack, InsideBoxRestraint, PackEngine, ProgressHandler, Target,
+    Angle, CenteringMode, F, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target,
     XYZHandler,
 };
+use std::sync::Arc;
+
 use molrs::io::data::pdb::read_pdb_frame;
+use molrs::spatial::region::Cuboid;
+use ndarray::array;
+
+// ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
+
+fn inside_box(min: [F; 3], max: [F; 3]) -> RegionRestraint {
+    RegionRestraint(Arc::new(Cuboid::new(
+        array![min[0], min[1], min[2]],
+        array![max[0] - min[0], max[1] - min[1], max[2] - min[2]],
+    )))
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = env_logger::try_init();
@@ -43,19 +56,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let t3 = read_pdb_frame(base.join("t3.pdb"))?;
 
     let water_target = Target::new(water, 100)
-        .with_restraint(InsideBoxRestraint::new(
-            [-20.0, 0.0, 0.0],
-            [0.0, 39.0, 39.0],
-            [false; 3],
-        ))
+        .with_restraint(inside_box([-20.0, 0.0, 0.0], [0.0, 39.0, 39.0]))
         .with_name("water");
 
     let chloro_target = Target::new(chloroform, 30)
-        .with_restraint(InsideBoxRestraint::new(
-            [0.0, 0.0, 0.0],
-            [21.0, 39.0, 39.0],
-            [false; 3],
-        ))
+        .with_restraint(inside_box([0.0, 0.0, 0.0], [21.0, 39.0, 39.0]))
         .with_name("chloroform");
 
     let t3_target = Target::new(t3, 1)
@@ -69,10 +74,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ]);
 
     let mut packer = GenCanPack::new();
-    if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
+    if std::env::var_os("MOLPACK_EXAMPLE_PROGRESS").is_some() {
         packer = packer.with_handler(Box::new(ProgressHandler::new()));
     }
-    if std::env::var_os("MOLRS_PACK_EXAMPLE_XYZ").is_some() {
+    if std::env::var_os("MOLPACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
         packer = packer.with_handler(Box::new(XYZHandler::new(out_dir.join("interface.xyz"), 10)));

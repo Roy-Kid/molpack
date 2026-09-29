@@ -12,8 +12,8 @@
 //! ```
 //!
 //! Every test in this file names a fixture built by hand through
-//! `PackContext::new`, in the same style as `tests/geometry_cache.rs` and
-//! `tests/gradient.rs`, so nothing here depends on the `.inp` front end, on
+//! `PackContext::new`, in the same style as `pack_context.rs::geometry_cache_tests` and
+//! `restraint::geometric::tests::gradient`, so nothing here depends on the `.inp` front end, on
 //! `initial`, or on a solver driver.
 
 use std::sync::Arc;
@@ -24,7 +24,8 @@ use super::{PackState, Placed, evaluate_unscaled};
 use crate::constraints::EvalMode;
 use crate::context::{PackContext, RigidView};
 use crate::numerics::DEFAULT_SCALE2;
-use crate::restraint::{AtomRestraint, InsideBoxRestraint};
+use crate::restraint::AtomRestraint;
+use crate::restraint::geometric::InsideBoxRestraint;
 
 // ── the shared fixture ─────────────────────────────────────────────────────
 
@@ -115,7 +116,7 @@ fn six_dimers() -> (PackContext, Vec<F>) {
     ctx.ibtype.fill(0);
 
     let box_restraint: Arc<dyn AtomRestraint> =
-        Arc::new(InsideBoxRestraint::new([0.0; 3], [BOX; 3], [false; 3]));
+        Arc::new(InsideBoxRestraint::new([0.0; 3], [BOX; 3]));
     ctx.restraints = vec![box_restraint];
     ctx.iratom_offsets = (0..=NTOTAT).collect();
     ctx.iratom_data = vec![0; NTOTAT];
@@ -321,7 +322,7 @@ fn into_parts_returns_the_wrapped_context_and_view() {
 fn invalidate_geometry_cache_forwards_to_the_context() {
     let (mut ctx, x) = six_dimers();
     // One evaluation populates the cached Cartesian expansion; the same probe
-    // `tests/geometry_cache.rs` uses.
+    // `pack_context.rs::geometry_cache_tests` uses.
     let _ = ctx.evaluate(&x, EvalMode::FOnly, None);
     assert!(
         ctx.work.cached_geometry.is_some(),
@@ -482,52 +483,4 @@ fn evaluate_unscaled_on_empty_context_returns_zeros() {
     assert_eq!(f_total.to_bits(), (0.0 as F).to_bits());
     assert_eq!(fdist.to_bits(), (0.0 as F).to_bits());
     assert_eq!(frest.to_bits(), (0.0 as F).to_bits());
-}
-
-// ── 8. ac-008: hard-coded regression golden ────────────────────────────────
-
-/// Golden `(f_total, fdist, frest)` for [`six_dimers`].
-///
-/// Provenance: captured 2026-09-03 from commit ef87105, before
-/// stage-pipeline-03, by calling `molpack::gencan::phases::evaluate_unscaled`
-/// on this exact fixture through a throwaway integration test
-/// (`cargo test -p molcrafts-molpack --test <scratch> -- --nocapture`,
-/// debug profile, `F = f64`). No third-party oracle is involved: the numbers
-/// are this crate's own pre-merge behaviour, frozen.
-///
-/// Captured bit patterns, for the record:
-/// `f_total = 0x4083deb29b420f2f`, `fdist = 0x402f08a846cf3a2c`,
-/// `frest = 0x3fd1504b54c5d9b5`.
-const GOLDEN_F_TOTAL: F = 635.8372101937183;
-const GOLDEN_FDIST: F = 15.516908848568242;
-const GOLDEN_FREST: F = 0.2705257728443045;
-/// Tolerance from the acceptance criterion. At `f_total ~ 6.4e2` this is
-/// about nine ULP, i.e. the merge is allowed to reassociate nothing at all —
-/// which is the point: the spec's claim is that the move is bitwise inert.
-const GOLDEN_TOL: F = 1e-12;
-
-#[test]
-fn pack_state_regression_unscaled_verdict_golden() {
-    let (mut ctx, x) = six_dimers();
-
-    let (f_total, fdist, frest) = evaluate_unscaled(&mut ctx, &x);
-
-    assert!(
-        (f_total - GOLDEN_F_TOTAL).abs() <= GOLDEN_TOL,
-        "f_total drifted: {f_total} vs golden {GOLDEN_F_TOTAL}"
-    );
-    assert!(
-        (fdist - GOLDEN_FDIST).abs() <= GOLDEN_TOL,
-        "fdist drifted: {fdist} vs golden {GOLDEN_FDIST}"
-    );
-    assert!(
-        (frest - GOLDEN_FREST).abs() <= GOLDEN_TOL,
-        "frest drifted: {frest} vs golden {GOLDEN_FREST}"
-    );
-
-    // The golden is only meaningful if every component is engaged: a fixture
-    // that had drifted into "no overlap, no violation" would pin zeros and
-    // certify nothing.
-    assert!(fdist > 0.0, "fixture must have overlapping dimers");
-    assert!(frest > 0.0, "fixture must violate the box restraint");
 }

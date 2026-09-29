@@ -58,11 +58,11 @@ impl PyState {
     /// Packed atom positions as a numpy array of shape ``(N, 3)``.
     #[getter]
     fn positions<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<NpF>> {
-        let pos = self.inner.positions();
-        let n = pos.len();
-        let flat: Vec<F> = pos.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
-        let arr = ndarray::Array2::from_shape_vec((n, 3), flat).expect("positions shape");
-        arr.into_pyarray(py)
+        self.inner
+            .frame
+            .coords()
+            .expect("an assembled frame always carries x / y / z")
+            .into_pyarray(py)
     }
 
     /// Packed ``molrs.Frame`` (same object every access).
@@ -75,15 +75,18 @@ impl PyState {
         self.py_frame.clone_ref(py)
     }
 
+    /// Element symbol per atom. Raises ``KeyError`` when the templates carry
+    /// no ``element`` column (a coarse-grained model, for one).
     #[getter]
-    fn elements(&self) -> Vec<String> {
-        let atoms = self.inner.frame.get("atoms").expect("no atoms block");
-        atoms
-            .get_string("element")
-            .expect("no element column")
-            .iter()
-            .cloned()
-            .collect()
+    fn elements(&self) -> PyResult<Vec<String>> {
+        self.inner
+            .frame
+            .get("atoms")
+            .and_then(|atoms| atoms.get_string(molrs::store::keys::ELEMENT))
+            .map(|column| column.iter().cloned().collect())
+            .ok_or_else(|| {
+                pyo3::exceptions::PyKeyError::new_err("the packed frame has no element column")
+            })
     }
 
     #[getter]

@@ -108,7 +108,8 @@ impl LatticeStage {
                 .template
                 .as_ref()
                 .expect("tree_from_target requires a template");
-            let backbone = analyze_backbone(frame, &tree).map_err(|e| (i, e))?;
+            let backbone =
+                analyze_backbone(frame, &tree, &t.hydrogen_mask()).map_err(|e| (i, e))?;
             species.push(LatticeSpecies { tree, backbone });
         }
         Ok(Self {
@@ -253,8 +254,8 @@ impl Stage for LatticeStage {
                     &sp.backbone.follows,
                     &weights,
                     self.cfg.occupancy_guard,
-                    self.cfg.max_backtrack,
-                    self.cfg.max_reseed,
+                    config::MAX_BACKTRACK,
+                    config::MAX_RESEED,
                     &mut rng,
                 ) {
                     w
@@ -267,8 +268,8 @@ impl Stage for LatticeStage {
                     &sp.backbone.follows,
                     &weights,
                     false,
-                    self.cfg.max_backtrack,
-                    self.cfg.max_reseed,
+                    config::MAX_BACKTRACK,
+                    config::MAX_RESEED,
                     &mut rng,
                 ) {
                     relaxed = 1;
@@ -317,10 +318,10 @@ impl Stage for LatticeStage {
                     },
                     fdist: 0.0,
                     frest: 0.0,
+                    f: 0.0,
                     improvement_pct: 0.0,
                     radscale: 1.0,
                     precision: budget.precision,
-                    relaxer_acceptance: Vec::new(),
                 };
                 for h in handlers.iter_mut() {
                     h.on_step(&info, sys);

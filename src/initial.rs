@@ -304,15 +304,15 @@ fn init_loop_one_type(
 /// (`sys.init1`) until the main loop takes over. Faithful port of
 /// `initial.f90`; the exact call order is listed at module level.
 ///
-/// `x` is the run's flat rigid placement vector, `6 * sys.ntotmol` values in
-/// the layout [`RigidView`] owns: the centre-of-mass block first, the Euler
-/// block second. This routine drives it as a bare slice because its body is
-/// offset arithmetic throughout (`ilubar` / `ilugan` / `icart`, as in the
-/// Fortran), and lends it to a temporary [`RigidView`] at the two points
-/// where it needs lab-frame coordinates rebuilt.
+/// `view` is the run's rigid placement vector — the one [`RigidView`] the
+/// caller already holds, not a copy of it. The body reads it as a flat slice
+/// because its arithmetic is offsets throughout (`ilubar` / `ilugan` /
+/// `icart`, as in the Fortran), and hands the view itself back whenever
+/// lab-frame coordinates have to be rebuilt, so the placements and the
+/// coordinates rebuilt from them can never be two different things.
 #[allow(clippy::too_many_arguments)]
 pub fn initial(
-    x: &mut [F],
+    view: &mut RigidView,
     sys: &mut PackContext,
     precision: F,
     discale: F,
@@ -324,6 +324,7 @@ pub fn initial(
     rng: &mut impl Rng,
 ) {
     let t0 = Instant::now();
+    let x = view.as_mut_slice();
     let mut workspace = GencanWorkspace::new();
 
     sys.move_flag = false;
@@ -401,17 +402,13 @@ pub fn initial(
     }
 
     // Init xcart (Packmol initial.f90 lines 121-138). The rebuild has one
-    // home — `RigidView::write_xcart`; this routine still drives the flat
-    // layout, so it lends the placements to a view for the crossing.
-    {
-        let mut view = RigidView::fresh(sys.ntotmol);
-        view.as_mut_slice().copy_from_slice(x);
-        view.write_xcart(sys);
-    }
+    // home, `RigidView::write_xcart`, and one input — the caller's view.
+    view.write_xcart(sys);
+    let x = view.as_mut_slice();
 
     let free_atoms = sys.ntotat - sys.nfixedat;
     // Packmol's initial.f90 lines 140-165 re-flip fixedatom=true on the
-    // fixed-atom tail here, but by this point `Molpack::pack` has already
+    // fixed-atom tail here, but by this point context construction has already
     // done that and called `sync_atom_props` — writing the `Vec<bool>`
     // directly would desynchronize `atom_props` and trip the debug
     // invariant in `compute_f`. The assertion below confirms the state
@@ -463,21 +460,11 @@ pub fn initial(
         t0.elapsed().as_secs_f64()
     );
 
-    // Update xcart from the Phase-1 result
-    {
-        let mut view = RigidView::fresh(sys.ntotmol);
-        view.as_mut_slice().copy_from_slice(x);
-        view.write_xcart(sys);
-    }
+    // Update xcart from the Phase-1 result.
+    view.write_xcart(sys);
+    let x = view.as_mut_slice();
 
-    // Packmol sets radmax as the maximum *diameter* (2 * radius),
-    // not the maximum radius (packmol.f90 lines 532-534).
-    let radmax = sys
-        .radius_ini
-        .iter()
-        .copied()
-        .map(|r| 2.0 * r)
-        .fold(0.0 as F, F::max);
+    let radmax = coverage_radmax(sys);
 
     let mut smin = [1.0e20 as F; 3];
     let mut smax = [-1.0e20 as F; 3];
@@ -726,7 +713,7 @@ fn random_angle_for_type(itype: usize, axis: usize, sys: &PackContext, rng: &mut
 /// grid for the shared-objective evaluation).
 ///
 /// Extracted verbatim from `initial` (Packmol initial.f90 lines 272-317);
-/// behavior-preserving, guarded by the `examples_batch` regression.
+/// behavior-preserving.
 pub(crate) fn install_simbox_and_grid(
     sys: &mut PackContext,
     simbox: SimBox,
@@ -786,15 +773,119 @@ pub(crate) fn install_simbox_and_grid(
 /// (growth, lattice growth, and a GENCAN stage that continues from existing
 /// placements).
 ///
-/// `radmax` reads `radius_ini`, the *unscaled* packing radius: `radius` is
-/// GENCAN's transient working copy (scaled by `discale` at each phase
-/// start), so reading it here would size the grid from whatever the
-/// *previous* stage happened to leave behind. On a freshly built context the
-/// two are equal, which is what keeps this bitwise the pre-pipeline
-/// derivation. (Debt D-02 — this `1.01 * discale * radmax` coverage vs
-/// `initial()`'s `2 * max(radius_ini)` — is untouched here.)
+/// The coverage scale is [`coverage_radmax`], the same derivation
+/// [`initial`] uses — there is one answer to "how wide must a cell be", and
+/// both entries into the grid read it from the same place.
 pub(crate) fn install_resolved_cell(sys: &mut PackContext, cell: &SimBox, discale: F) {
-    let radmax = sys.radius_ini.iter().cloned().fold(0.0 as F, F::max);
+    let radmax = coverage_radmax(sys);
     let free_atoms = sys.ntotat - sys.nfixedat;
     install_simbox_and_grid(sys, cell.clone(), radmax, discale, free_atoms);
+}
+
+/// The distance the cell grid has to cover: the largest **diameter** among
+/// the unscaled packing radii (Packmol's `radmax`, `packmol.f90` 532-534).
+///
+/// Two properties, both load-bearing:
+///
+/// - **Diameter, not radius.** The pair kernel interacts out to
+///   `radius_i + radius_j` on radii already multiplied by `discale`, so the
+///   reach is `2 · discale · max(radius_ini)` and the cell side
+///   (`discale · 1.01 · radmax`) covers it with 1% to spare. Sized from the
+///   radius instead, the side is half the reach and a `±1` stencil never
+///   enumerates the pairs in between — the objective then reports a clean
+///   structure that overlaps.
+/// - **`radius_ini`, not `radius`.** `radius` is GENCAN's transient working
+///   copy, rescaled at every phase start, so reading it would size the grid
+///   from whatever the previous stage happened to leave behind.
+pub(crate) fn coverage_radmax(sys: &PackContext) -> F {
+    sys.radius_ini
+        .iter()
+        .copied()
+        .map(|r| 2.0 * r)
+        .fold(0.0 as F, F::max)
+}
+
+#[cfg(test)]
+mod grid_coverage_tests {
+    //! The cell grid must cover the pair kernel's reach.
+    //!
+    //! A `±1` stencil finds every pair closer than one cell side, so the side
+    //! has to be at least the largest interacting distance — `2 · discale ·
+    //! max(radius_ini)`, since the kernel's cutoff is `radius_i + radius_j` on
+    //! radii already scaled by `discale`. A grid sized from the *radius*
+    //! instead of the *diameter* is half that, and the pairs in between are
+    //! not merely found late: they are never enumerated, so the objective
+    //! reports a clean structure that overlaps.
+
+    use super::install_resolved_cell;
+    use crate::objective::compute_f;
+    use crate::{F, PackContext};
+    use molrs::spatial::simbox::SimBox;
+    use molrs::types::F3;
+
+    const DISCALE: F = 1.1;
+
+    /// Two single-atom molecules `dx` apart on the x axis in a 20 Å free box,
+    /// with the working radius already scaled by `discale` (what a phase
+    /// start leaves behind).
+    fn two_atoms(dx: F) -> (PackContext, Vec<F>) {
+        let mut sys = PackContext::new(2, 2, 1);
+        sys.ntype_with_fixed = 1;
+        sys.nmols = vec![2];
+        sys.natoms = vec![1];
+        sys.idfirst = vec![0];
+        sys.comptype = vec![true];
+        sys.coor = vec![[0.0; 3]; 2];
+        sys.radius_ini = vec![1.0; 2];
+        sys.radius = vec![DISCALE; 2];
+        sys.fscale = vec![1.0; 2];
+        sys.ibmol = vec![0, 1];
+        sys.iratom_offsets = vec![0, 0, 0];
+        sys.sync_atom_props();
+
+        let cell = SimBox::cube(20.0, F3::zeros(3), [false; 3]).expect("box");
+        install_resolved_cell(&mut sys, &cell, DISCALE);
+
+        // Placed off the cell boundary so the pair straddles two cell widths
+        // under the under-sized grid.
+        let x = vec![
+            1.1,
+            10.0,
+            10.0,
+            1.1 + dx,
+            10.0,
+            10.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ];
+        (sys, x)
+    }
+
+    #[test]
+    fn an_overlapping_pair_two_cells_apart_is_still_seen() {
+        // Contact is `radius_i + radius_j` = 2.2 Å; 2.15 Å is an overlap, and
+        // it is further apart than the radius-sized cell (1.11 Å), so only a
+        // diameter-sized grid enumerates it.
+        let (mut sys, x) = two_atoms(2.15);
+        assert!(
+            compute_f(&x, &mut sys) > 0.0,
+            "a 2.15 Å pair inside a 2.2 Å contact must be found: the grid has \
+             to cover the kernel's reach, not half of it",
+        );
+    }
+
+    #[test]
+    fn a_pair_beyond_contact_stays_free() {
+        // The complement: coverage is not an excuse to invent a penalty.
+        let (mut sys, x) = two_atoms(2.25);
+        assert_eq!(
+            compute_f(&x, &mut sys),
+            0.0,
+            "2.25 Å is outside the 2.2 Å contact — no pair term is owed",
+        );
+    }
 }

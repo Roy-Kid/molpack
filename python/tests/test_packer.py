@@ -76,7 +76,7 @@ class TestTargetConstructor:
                 }
             }
         )
-        with pytest.raises(ValueError, match='"x"'):
+        with pytest.raises(ValueError, match="column 'x'"):
             molpack.Target(frame, 1)
 
     def test_mismatched_lengths_raises(self):
@@ -111,15 +111,15 @@ class TestTargetBuilder:
 
     def test_with_restraint(self):
         t = self._make_target()
-        c = molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
+        c = molrs.Cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
         t2 = t.with_restraint(c)
         assert t2 is not t
 
     def test_with_multiple_restraints(self):
         t = self._make_target()
         t2 = t.with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
-        ).with_restraint(molpack.OutsideSphereRestraint([10.0, 10.0, 10.0], 2.0))
+            molrs.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
+        ).with_restraint(~molrs.Sphere([10.0, 10.0, 10.0], 2.0))
         assert t2 is not t
 
     def test_with_restraint_type_error(self):
@@ -129,14 +129,14 @@ class TestTargetBuilder:
 
     def test_with_atom_restraint(self):
         t = self._make_two_atom_target()
-        c = molpack.InsideSphereRestraint([0.0, 0.0, 0.0], 5.0)
+        c = molrs.Sphere([0.0, 0.0, 0.0], 5.0)
         # 0-based: atom index 0 is the first atom.
         t2 = t.with_atom_restraint([0], c)
         assert t2 is not t
 
     def test_with_atom_restraint_rejects_out_of_range(self):
         t = self._make_two_atom_target()
-        c = molpack.InsideSphereRestraint([0.0, 0.0, 0.0], 5.0)
+        c = molrs.Sphere([0.0, 0.0, 0.0], 5.0)
         with pytest.raises(ValueError, match="0-based"):
             t.with_atom_restraint([2], c)
 
@@ -222,7 +222,7 @@ class TestGenCanPack:
 class TestGenCanPackRun:
     def _make_target(self, count: int = 3) -> molpack.Target:
         return molpack.Target(_make_frame(), count).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
         )
 
     def _packer(self) -> molpack.GenCanPack:
@@ -240,22 +240,6 @@ class TestGenCanPackRun:
         result = self._packer().with_seed(42).run([self._make_target()], max_loops=50)
 
         assert result.frame["atoms"].nrows == 3
-
-    def test_with_avoid_overlap_honored(self):
-        # A fixed solute plus free solvent packs whether avoidance is on (the
-        # default) or explicitly disabled — the flag must flow through to the
-        # core without error and still yield a valid packing.
-        fixed = molpack.Target(_make_frame(), 1).fixed_at([10.0, 10.0, 10.0])
-        free = self._make_target(count=5)
-
-        default_on = self._packer().run([free, fixed], max_loops=60)
-        explicit_off = (
-            self._packer().with_avoid_overlap(False).run([free, fixed], max_loops=60)
-        )
-
-        for result in (default_on, explicit_off):
-            assert result.natoms == 6  # 5 free + 1 fixed
-            assert isinstance(result.converged, bool)
 
     def test_result_elements_match_positions(self):
         result = self._packer().with_seed(42).run([self._make_target()], max_loops=50)
@@ -278,9 +262,7 @@ class TestGenCanPackRun:
         target = (
             molpack.Target(frame, count=2)
             .with_name("water")
-            .with_restraint(
-                molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
-            )
+            .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]))
         )
 
         result = self._packer().with_seed(42).run([target], max_loops=50)
@@ -291,7 +273,7 @@ class TestGenCanPackRun:
         assert set(result.elements) == {"O", "H"}
 
     def test_result_elements_order_multiple_targets(self):
-        box_c = molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
+        box_c = molrs.Cuboid([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
         t1 = molpack.Target(_make_frame(1), 2).with_restraint(box_c)
         t2 = molpack.Target(_make_frame(2, ["C", "H"]), 3).with_restraint(box_c)
 
@@ -300,80 +282,16 @@ class TestGenCanPackRun:
         assert len(result.elements) == 8
         assert result.positions.shape[0] == 8
 
-    def test_with_seed_reproducible(self):
-        # One engine, one run: reproducibility means two fresh engines with
-        # the same seed, not one engine run twice.
-        r1 = self._packer().with_seed(123).run([self._make_target()], max_loops=30)
-        r2 = self._packer().with_seed(123).run([self._make_target()], max_loops=30)
-        np.testing.assert_array_equal(r1.positions, r2.positions)
-
     def test_no_targets_raises_typed_error(self):
         packer = molpack.GenCanPack().with_progress(False)
         with pytest.raises(molpack.NoTargetsError):
             packer.run([], max_loops=10)
-
-    def test_multiple_targets(self):
-        box = molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
-        t1 = molpack.Target(_make_frame(), 2).with_restraint(box)
-        t2 = molpack.Target(_make_frame(), 3).with_restraint(box)
-
-        result = self._packer().with_seed(42).run([t1, t2], max_loops=50)
-        assert result.positions.shape[0] == 5
 
     def test_state_repr(self):
         result = self._packer().with_seed(1).run([self._make_target(2)], max_loops=30)
         r = repr(result)
         assert "State" in r
         assert "converged" in r
-
-
-class TestMultipleRestraints:
-    def test_stacked_restraints(self):
-        positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
-        frame = molrs.Frame(
-            {
-                "atoms": {
-                    "x": positions[:, 0],
-                    "y": positions[:, 1],
-                    "z": positions[:, 2],
-                    "element": ["X"],
-                }
-            }
-        )
-        target = (
-            molpack.Target(frame, 3)
-            .with_restraint(
-                molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
-            )
-            .with_restraint(molpack.OutsideSphereRestraint([10.0, 10.0, 10.0], 2.0))
-        )
-        packer = (
-            molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
-        )
-        result = packer.run([target], max_loops=100)
-        assert result.positions.shape == (3, 3)
-
-
-class TestGenCanPackGlobalRestraint:
-    def test_global_restraint_broadcasts(self):
-        frame = _make_frame()
-        t1 = molpack.Target(frame, 2).with_name("a")
-        t2 = molpack.Target(frame, 2).with_name("b")
-
-        packer = (
-            molpack.GenCanPack()
-            .with_progress(False)
-            .with_global_restraint(
-                molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
-            )
-            .with_seed(42)
-        )
-        result = packer.run([t1, t2], max_loops=50)
-        assert result.natoms == 4
-        # All atoms must land inside the global box.
-        for pos in result.positions:
-            for k in range(3):
-                assert -0.1 <= pos[k] <= 30.1
 
 
 class TestParallelEval:

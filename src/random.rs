@@ -14,9 +14,10 @@ pub fn uniform01(rng: &mut impl Rng) -> F {
     rng.random::<f64>() as F
 }
 
-/// Same as [`uniform01`], but for trait-object RNGs. Its only consumer is the
-/// in-loop torsion optimizer, so it carries that module's feature gate.
-#[cfg(feature = "ff")]
+/// A unit draw for trait-object RNGs, used by the in-loop torsion optimizer.
+/// It maps `next_u64` onto `[0, 1)` directly, which is a different stream from
+/// [`uniform01`]; the two stay separate so neither the GENCAN / growth
+/// trajectories nor the torsion-MC trajectories change.
 #[inline]
 pub fn uniform01_core(rng: &mut dyn Rng) -> F {
     let unit = (rng.next_u64() as f64) / ((u64::MAX as f64) + 1.0);

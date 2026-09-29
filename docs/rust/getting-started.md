@@ -11,7 +11,10 @@ A Rust packing job has three parts:
 ## One molecule type in a box
 
 ```rust
-use molpack::{GenCanPack, InsideBoxRestraint, PackEngine, Target};
+use std::sync::Arc;
+use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
+use molrs::spatial::region::Cuboid;
+use ndarray::array;
 
 let water_positions = [
     [0.0, 0.0, 0.0],
@@ -22,11 +25,7 @@ let water_radii = [1.52, 1.20, 1.20];
 
 let water = Target::from_coords(&water_positions, &water_radii, 100)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint::new(
-        [0.0, 0.0, 0.0],
-        [40.0, 40.0, 40.0],
-        [false, false, false],
-    ));
+    .with_restraint(RegionRestraint(Arc::new(Cuboid::new(array![0.0, 0.0, 0.0], array![40.0, 40.0, 40.0]))));
 
 let result = GenCanPack::new()
     .with_tolerance(2.0)

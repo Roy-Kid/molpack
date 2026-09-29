@@ -9,16 +9,16 @@
 //!   are compiled only when the `io` feature is on, so they are written
 //!   in plain code font here rather than as cross-references:
 //!
-//!   ```ignore
+//!   ```no_run
 //!   use std::path::Path;
-//!   use molpack::script;
+//!   use molpack::{PackEngine, script};
 //!
 //!   let src = std::fs::read_to_string("mixture.inp")?;
 //!   let script = script::parse(&src)?;
 //!   let built = script.build(Path::new("."))?;
 //!
-//!   let frame = built.packer.pack(&built.targets, built.nloop)?;
-//!   script::write_frame(&built.output, &frame)?;
+//!   let state = built.entry.run(&built.targets, built.nloop)?;
+//!   script::write_frame(&built.output, &state.frame)?;
 //!   # Ok::<(), Box<dyn std::error::Error>>(())
 //!   ```
 //!

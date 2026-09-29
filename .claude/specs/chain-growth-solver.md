@@ -7,6 +7,13 @@ revised: 2026-08-28 — 合并 /mol:litrev 结论与四条设计原则；per-tar
 
 # chain-growth-solver
 
+> **2026-09-29 名称对照**（本 spec 写于 2026-08，设计节里的行号与 `packer.rs` 布局是当时的代码）：
+> `Solver` 接缝 → `Stage`（`src/stage.rs`）；原结果类型 → 冻结的 `State`（`softened` → `State::degraded`）；
+> 跨入口接续 → `GenCanPack::with_restart`；`Target::with_method` / `PackMethod` / `pack_with_report`
+> → 按入口选择（`GenCanPack` / `CbmcGrow` / `LatticeGrow`，经 `Pipeline` 组合）；原集成测试层
+> 于 2026-09-20 删除，覆盖改为 `src/grow/tests/{internal,field,prior,entry,driver}.rs` 等模块内单测；
+> 独立的校验模块于 2026-09-29 删除，裁决读 `State::fdist` / `frest`。
+
 ## Summary
 
 molpack 今天只有一个 packing 算法：刚体放置 + GENCAN 下降。本 spec 引入第二个
@@ -16,7 +23,7 @@ molpack 今天只有一个 packing 算法：刚体放置 + GENCAN 下降。本 s
 生长**不是**给刚体 packer 做预处理的组件，也**不是**挂在
 `Molpack::with_optimizer` 钩子上的构象搜索（该钩子在熔体密度下已实测无效，见
 Domain basis）。它是一个独立求解器：消费同一个 `PackContext`（同样的半径、约束、
-cell），被同一个目标函数（`fdist`/`frest`）评判，返回同一个 `PackResult`。
+cell），被同一个目标函数（`fdist`/`frest`）评判，返回同一个 `State`。
 **用哪个算法由用户按 target 声明**（`Target::with_method`），不是全局开关，
 更不是 molpack 替用户判断。GENCAN 与生长的关系是**并列**，不是包含。
 
@@ -31,7 +38,7 @@ cell），被同一个目标函数（`fdist`/`frest`）评判，返回同一个 
    `ff` 只能是可选增强，永不成为 solver 的依赖。
 2. **packer（GENCAN）与 grow 平级。** solver 没有任何理由触碰 pack 内部代码
    （`pgencan` / `run_phase` / `run_iteration`），但两者共享同一套架构与生命周期：
-   基础设施段 ①②⑤、`PackContext`、共享目标函数、`PackResult`。
+   基础设施段 ①②⑤、`PackContext`、共享目标函数、`State`。
 3. **用户自己选择什么 target 用什么方法。** 不替用户判断，不静默退化
    （小分子不自动降为刚体）。不支持的组合报具名错误，不猜。
 4. **算法须同时适配 all-atom 与 CG。** 排除深度、角度处理、可旋转键感知等决策
@@ -206,9 +213,9 @@ recoil growth（§5.2）仍是唯一有文献支撑的 lookahead 升级通道。
 | ② | 建 `PackContext`：半径、`Constraints`、`SimBox` + `CellGrid` | 基础设施 |
 | ③ | 初始状态 | **算法** |
 | ④ | 迭代驱动 | **算法** |
-| ⑤ | 重建 `xcart` → `assemble_frame` → `PackResult` | 基础设施 |
+| ⑤ | 重建 `xcart` → `assemble_frame` → `State` | 基础设施 |
 
-新增 `src/solver.rs`：
+新增接缝文件（原 `solver.rs`，现 `src/stage.rs`，trait 现名 `Stage`）：
 
 ```rust
 /// 一个 packing 求解器。实现者把 PackContext 驱动到可行解，
@@ -245,8 +252,8 @@ pub struct Budget { pub max_loops: usize, pub precision: F }
 pub struct SolveOutcome { pub converged: bool, pub fdist: F, pub frest: F, pub softened: usize }
 ```
 
-`softened` 的公开载体：`PackResult` **新增** `pub softened: usize` 字段
-（加法扩展；既有四字段不变；gencan 路径恒为 0）——ac-004 的 `softened == 0`
+`softened` 的公开载体：`State::degraded: usize`（原计划为结果类型上的 `softened` 字段；
+现为各阶段 `StageOutcome::softened` 之和，gencan 路径恒为 0）——ac-004 的 `softened == 0`
 断言由它承载，`StepInfo.radscale`（§4g）只是过程可见性。
 
 **方法选择是 per-target 的**（原则 3；polyply 先例 §5.6）：
@@ -392,10 +399,11 @@ objective 复算（§1 的 `SolveOutcome` 契约）。`Budget.max_loops` 在生�
 ### 5. 不依赖 `ff`
 
 `src/grow/` 只用 `molrs::{perceive::rotatable, system, store, types}`，均未被
-`ff` 门控。`src/grow/` 与 `src/solver.rs` 进 **default feature**，Python wheel
+`ff` 门控。`src/grow/` 与接缝文件（现 `src/stage.rs`）进 **default feature**，Python wheel
 无需新 feature。先验是几何数据：用户（或外部工具）可以从力场推导权重，但
-molpack 的 API 只收数据，不收力场（原则 1）。这与 `src/optimizer/`
-（`#![cfg(feature = "ff")]`）形成对照。
+molpack 的 API 只收数据，不收力场（原则 1）。`src/optimizer/` 是唯一经
+`molrs::optimize` 接力场优化器的地方，由 `GenCanPack::with_optimizer` 显式选用
+（2026-09-29 起不再有 `#![cfg(feature = "ff")]`；`ff` 只透传 `molrs/ff`）。
 
 ### 6. 混合体系：串行组合，复用 fixed 机制
 
@@ -466,8 +474,8 @@ molpack 的 API 只收数据，不收力场（原则 1）。这与 `src/optimize
 
 ## Files
 
-- `molpack/src/solver.rs` — 新。`Solver` / `PlacementsMut` / `Budget` /
-  `SolveOutcome`（后两者 `#[non_exhaustive]`）
+- `molpack/src/stage.rs`（原 `solver.rs`）— `Stage` / `Budget` / `StageOutcome`
+  （后两者 `#[non_exhaustive]`；`PlacementsMut` / `SolveOutcome` 已不存在）
 - `molpack/src/target.rs` — `PackMethod` 枚举 + `Target::with_method` +
   `Target::with_mass`（§7 质量覆盖）
 - `molpack/src/grow/config.rs` — 新，**叶子文件**（不 import
@@ -488,23 +496,24 @@ molpack 的 API 只收数据，不收力场（原则 1）。这与 `src/optimize
 - `molpack/src/initial.rs` — 一处抽取：SimBox+CellGrid 安装段（:524-581）
   抽为 ② 级 helper（§1 接缝；行为保持代码搬移）
 - `molpack/src/packer.rs` — per-target dispatch（§1，搬移 cell 解析 :781-797
-  至接缝前）；`with_density`（§7）；`PackResult` 加 `softened` 字段；混合体系
+  至接缝前）；`with_density`（§7）；`State` 带 `degraded` 字段（原 `softened`）；混合体系
   两 context 组合 + 跨 context 位置收集（§6）。注：packer.rs 已超文件预算
   （1608 行，既有债务），新增逻辑保持薄壳、重活在 grow/driver.rs
 - `molpack/src/lib.rs` — `pub mod grow; pub mod solver;` + prelude re-export
   （`PackMethod` 可进 prelude；`GrowConfig` 等从 `grow::` 取）
 - `molpack/python/src/packer.rs` — **类型化** `GrowConfig` / `PackMethod` 绑定
   （不是字符串选择），wheel 不加 feature
-- `molpack/tests/grow.rs` — 集成测试（往返、随机 vars 不变量、无重叠、密度、
-  先验梯度、CG 合成链、约束、串联、混合、确定性）
+- 生长测试（往返、随机 vars 不变量、先验、占据场、入口拒绝、确定性）——现为
+  模块内单测 `src/grow/tests/{internal,prior,field,entry,driver}.rs`；原集成文件的
+  无重叠/密度/CG 合成链/混合场景于 2026-09-20 删除，无替代
 - `molpack/examples/pack_peo/` — 评测程序转正（`[[example]]` +
   `required-features = ["io"]`，生长模式不需要 `ff`），量化报告含密度均匀性
   E(d)；`out/` 加入 .gitignore
-- `molpack/CLAUDE.md` — 架构表增加 `src/grow/` 与 `src/solver.rs` 两行
+- `molpack/CLAUDE.md` — 架构表增加 `src/grow/` 与接缝文件（现 `src/stage.rs`）两行
 
 ## Tasks
 
-1. **Add** `src/solver.rs` seam + `Target::with_method`（`PackMethod`）+
+1. **Add** 接缝（原 `solver.rs`，现 `src/stage.rs`）+ `Target::with_method`（已删）（`PackMethod`）+
    `pack_with_report` 在 ③ 前 dispatch（762/764 之间）。含两处行为保持搬移：
    cell 解析提前、initial.rs 的 box/grid 安装段抽 helper。全 `Gencan` 走今天
    的内联路径。此步**不新增任何算法**，`examples_batch` 五例必须逐条不变。
@@ -549,9 +558,9 @@ molpack 的 API 只收数据，不收力场（原则 1）。这与 `src/optimize
    **检查点**：抽取实测侵入过深 → 缩为具名错误并另立 spec，其余不受影响。
    ✅ 2026-08-29（检查点未触发：`build_context` 抽取后 examples_batch 通过；
    `src/compose.rs` 落地；测试断言链逐位不动且与纯生长参照逐位一致，一次通过）
-10. **Add** `tests/grow.rs` 与 `examples/pack_peo` 转正；AA（PEO）与 CG
+10. **Add** 生长集成测试（2026-09-20 删除，见文首对照）与 `examples/pack_peo` 转正；AA（PEO）与 CG
     （合成 Kremer–Grest 链，无 io）两份量化报告。
-    ✅ 2026-08-29（tests/grow.rs 42 测试 + push-off 不搬移探测器（变异验证）；
+    ✅ 2026-08-29（生长集成测试 42 条 + push-off 不搬移探测器（变异验证）；
     pack_peo 转正含内置 PEO 合成器与 E(d)/内距/链序偏差报告。**注**：KG 熔体
     判据（ac-011）与 AA 熔体判据（ac-004/006(3)/010）的最终断言形式待验收
     重新谈判——见 Testing 附注）
@@ -573,8 +582,8 @@ molpack 的 API 只收数据，不收力场（原则 1）。这与 `src/optimize
 
 - **内坐标往返** ‖Δ‖∞ < 1e-9 + **随机 vars 不变量**（Task 2；后者是环键误判的
   唯一探测器）。
-- **无重叠构造性**：`validation::validate_from_targets` 无违反、
-  `PackResult::fdist == 0.0`（严格零）、`softened == 0`、独立复算最小非排除
+- **无重叠构造性**：`State::frest == 0.0`（独立校验模块已于 2026-09-29 删除，裁决读 `State`）、
+  `State::fdist == 0.0`（严格零）、`softened == 0`、独立复算最小非排除
   间距 ≥ tolerance。
 - **密度命中**：相对偏差 < 1e-6（解析换算，防单位错）。
 - **链统计阶梯**（先验从弱到强，每级都是上一级的回归门）：
@@ -595,11 +604,12 @@ molpack 的 API 只收数据，不收力场（原则 1）。这与 `src/optimize
 - **串联**：生长产物直接喂 GENCAN，零坐标变换、首轮 fdist 不劣化；写回契约
   可断言（euler = (0,0,0)，COM = coor 质心，1e-9）。
 - **混合**：PEO(`Grow`) + 小分子(`Gencan`) 算例：链原子在刚体阶段逐位不动，
-  整体 validation 无违反（Task 9 检查点若缩容，则断言具名错误）。
+  整体 `State::frest == 0`（Task 9 检查点若缩容，则断言具名错误）。
 - **确定性**：同 seed 两次逐位一致；RNG 流按 (seed, copy, step) 哈希——
   单元测试断言"移除一条链不改变另一条链的提议序列"（轮快照 + 独立流的
   联合探测器，也是并行等价性的地基）。
-- **回归**：`examples_batch` 五例在 Task 1 后与全部完成后各跑一次，逐条不变。
+- **回归**：五个官方例子（`cargo run --release --features io --example pack_{mixture,interface,bilayer,spherical,solvprotein}`）
+  收敛（原 `examples_batch` harness 已于 2026-09-20 删除）。
 - **性能**：dp=200×25、ρ=1.0（35050 原子）单线程完成不 DeadEnd，耗时入
   commit message；对照基线"刚体路径 60 loops 不收敛"。
 

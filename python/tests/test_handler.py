@@ -56,7 +56,7 @@ class TestHandlerCallbacks:
         # iterate — a too-easy setup converges during init and
         # `on_step` never fires.
         target = molpack.Target(_two_water_frame(), count=30).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
         _packer().with_handler(log).with_seed(1).run([target], max_loops=5)
 
@@ -84,12 +84,11 @@ class TestHandlerCallbacks:
                         info.improvement_pct,
                         info.radscale,
                         info.precision,
-                        info.relaxer_acceptance,
                     )
                 )
 
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         _packer().with_handler(Grabber()).with_seed(1).run([target], max_loops=2)
 
@@ -102,8 +101,6 @@ class TestHandlerCallbacks:
         # molecule_type is None for the final all-types phase, int otherwise
         assert first[4] is None or isinstance(first[4], int)
         assert all(isinstance(v, float) for v in first[5:10])
-        # relaxer_acceptance is a (possibly empty) list of (int, float) tuples
-        assert isinstance(first[10], list)
 
     def test_methods_are_optional(self):
         """Handler with *no* methods must not crash."""
@@ -112,7 +109,7 @@ class TestHandlerCallbacks:
             pass
 
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         result = _packer().with_handler(Empty()).with_seed(1).run([target], max_loops=2)
         assert result.natoms == 4
@@ -128,7 +125,7 @@ class TestHandlerEarlyStop:
                 return True  # request immediate stop
 
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
         )
         _packer().with_handler(StopAfterOne()).with_seed(1).run([target], max_loops=50)
 
@@ -140,6 +137,38 @@ class TestHandlerEarlyStop:
         )
 
 
+class TestGenCanEarlyStop:
+    """``GenCanPack.with_early_stop`` — on by default, switchable off."""
+
+    @staticmethod
+    def _loops_per_phase(packer: molpack.GenCanPack, max_loops: int) -> list[int]:
+        # Forty atoms at 2 A tolerance in a 3 A cube can never pack, so
+        # every phase stalls and only the early stop can end it before
+        # max_loops.
+        seen: dict[int, int] = {}
+
+        class Count:
+            def on_step(self, info: molpack.StepInfo, ctx: molpack.StepContext) -> None:
+                seen[info.phase] = seen.get(info.phase, 0) + 1
+
+        target = molpack.Target(_two_water_frame(), count=20).with_restraint(
+            molrs.Cuboid([0.0, 0.0, 0.0], [3.0, 3.0, 3.0])
+        )
+        result = (
+            packer.with_handler(Count()).with_seed(1).run([target], max_loops=max_loops)
+        )
+        assert not result.converged
+        return list(seen.values())
+
+    def test_default_stops_a_stalled_phase(self):
+        loops = self._loops_per_phase(_packer(), max_loops=60)
+        assert loops and all(n < 60 for n in loops), loops
+
+    def test_disabled_runs_every_phase_to_max_loops(self):
+        loops = self._loops_per_phase(_packer().with_early_stop(False), max_loops=60)
+        assert loops and all(n == 60 for n in loops), loops
+
+
 class TestHandlerErrorPropagation:
     def test_exception_in_on_step_is_reraised(self):
         class Explodes:
@@ -147,7 +176,7 @@ class TestHandlerErrorPropagation:
                 raise ValueError("boom from handler")
 
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         with pytest.raises(ValueError, match="boom from handler"):
             _packer().with_handler(Explodes()).with_seed(1).run([target], max_loops=5)
@@ -158,7 +187,7 @@ class TestHandlerErrorPropagation:
                 raise RuntimeError("boom from on_start")
 
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         with pytest.raises(RuntimeError, match="boom from on_start"):
             _packer().with_handler(ExplodesEarly()).with_seed(1).run(
@@ -171,7 +200,7 @@ class TestMultipleHandlers:
         log1 = CallLog()
         log2 = CallLog()
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         _packer().with_handler(log1).with_handler(log2).with_seed(1).run(
             [target], max_loops=2
@@ -191,7 +220,7 @@ class TestStepContext:
                 frames.append((info.loop_idx, ctx.positions))
 
         target = molpack.Target(_two_water_frame(), count=30).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
         _packer().with_handler(Recorder()).with_seed(1).run([target], max_loops=5)
 
@@ -214,7 +243,7 @@ class TestStepContext:
                 stashed.append(ctx)
 
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
         _packer().with_handler(Stasher()).with_seed(1).run([target], max_loops=2)
 
@@ -226,7 +255,7 @@ class TestStepContext:
     def test_handler_ignoring_context_still_works(self):
         log = CallLog()
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+            molrs.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
         _packer().with_handler(log).with_seed(1).run([target], max_loops=2)
         assert log.finished is True

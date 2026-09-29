@@ -10,12 +10,7 @@ use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use ndarray::array;
 
-use super::model::ModelData;
-use super::state::{RuntimeState, RuntimeStateMut};
 use super::work_buffers::WorkBuffers;
-
-/// Index of a restraint assigned to a specific atom.
-pub type RestraintRef = usize;
 
 /// `flags` bit for a fixed-structure atom inside [`AtomProps`].
 pub const ATOM_FLAG_FIXED: u32 = 1 << 0;
@@ -105,7 +100,7 @@ pub struct PackContext {
     /// Shares `xcart`'s index space exactly (type-major, copy-major,
     /// atom-minor, free types then fixed types), so `icart` addresses both.
     /// Copies of one type start identical; in-loop optimizers
-    /// (module `crate::optimizer`, feature `ff`) relax each copy
+    /// (module `crate::optimizer`) relax each copy
     /// independently, after which they diverge. Size: `ntotat`.
     pub coor: Vec<[F; 3]>,
 
@@ -193,7 +188,7 @@ pub struct PackContext {
     /// restraints of atom `icart` are in `iratom_data[iratom_offsets[icart]..iratom_offsets[icart+1]]`.
     pub iratom_offsets: Vec<usize>,
     /// Flattened per-atom restraint indices.
-    pub iratom_data: Vec<RestraintRef>,
+    pub iratom_data: Vec<usize>,
     /// Group-level restraints, paired with the (0-based) type they act on:
     /// `(itype, restraint)`. Evaluated once per group in the objective with the
     /// coordinates of all copies of `itype`; the coupled gradient is scattered
@@ -274,7 +269,7 @@ pub struct PackContext {
     /// an explicit opt-in via [`PackEngine::with_parallel_eval`](crate::PackEngine::with_parallel_eval) because the
     /// crossover is workload-shaped and can't be inferred reliably from
     /// `active_cells.len()`. The flag is stored regardless of the
-    /// `rayon` feature so the `Molpack` API stays the same; when the
+    /// `rayon` feature so the engine API stays the same; when the
     /// feature is off the field is read but the parallel path doesn't
     /// exist and the serial branch runs unconditionally.
     pub parallel_pair_eval: bool,
@@ -292,11 +287,6 @@ pub struct PackContext {
 
     // ---- Work buffers ----
     pub work: WorkBuffers,
-
-    // ---- Output frame (owned, built incrementally) ----
-    /// Frame that accumulates constant columns (element, mol_id) during init
-    /// and receives position columns at the end of packing.
-    pub frame: molrs::Frame,
 
     // ---- Debug: call counters (zeroed per pgencan call) ----
     ncf: usize,
@@ -373,28 +363,9 @@ impl PackContext {
             sizemax: [0.0; 3],
             dmax: vec![0.0; ntype],
             work: WorkBuffers::new(ntotat),
-            frame: molrs::Frame::new(),
             ncf: 0,
             ncg: 0,
         }
-    }
-
-    /// Context view for mostly static model data.
-    #[inline]
-    pub fn model(&self) -> ModelData<'_> {
-        ModelData { ctx: self }
-    }
-
-    /// Read-only runtime state view.
-    #[inline]
-    pub fn runtime(&self) -> RuntimeState<'_> {
-        RuntimeState { ctx: self }
-    }
-
-    /// Mutable runtime state view.
-    #[inline]
-    pub fn runtime_mut(&mut self) -> RuntimeStateMut<'_> {
-        RuntimeStateMut { ctx: self }
     }
 
     /// Unified constraints evaluation entrypoint.
@@ -744,12 +715,6 @@ impl PackContext {
         self.grid.celldim().map(|d| d as usize)
     }
 
-    /// Per-axis periodicity of the packing cell.
-    #[inline(always)]
-    pub fn pbc_periodic(&self) -> [bool; 3] {
-        self.grid.pbc()
-    }
-
     /// Compact identity of the packing geometry, for the evaluation cache.
     ///
     /// Everything the cell list depends on: the partition and the lattice it
@@ -1038,5 +1003,272 @@ mod neighbor_table_tests {
         let sys = ctx_with_grid([2, 1, 1], [true; 3]);
         assert_eq!(sys.neighbors(0), &[1]);
         assert_eq!(sys.neighbors(1), &[] as &[u32]);
+    }
+}
+
+#[cfg(test)]
+mod geometry_cache_tests {
+    #![allow(clippy::needless_range_loop)]
+    //! Tests for the geometry cache fast path in `compute_f` / `compute_fg` /
+    //! `compute_g`. The cache is hit when the caller evaluates at the same `x`
+    //! (and identical comptype / cell grid) as the previous call — in that case
+    //! the Cartesian expansion and cell-list rebuild are skipped and only the
+    //! pair / constraint kernels re-run on the stored state.
+    //!
+    //! These tests assert the cache path produces bit-identical results to the
+    //! fresh-rebuild path across several call sequences used by the packer.
+
+    use std::sync::Arc;
+
+    use crate::objective::{compute_f, compute_fg};
+    use crate::testutil::inside_box;
+    use crate::{F, PackContext};
+
+    // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
+
+    // ── setup helpers (mirror restraint::geometric::tests::gradient patterns) ──────────────────────
+
+    fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
+        let side = cell_len * cell_n as F;
+        sys.simbox =
+            molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
+                .expect("cell");
+        sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
+        sys.resize_cell_arrays();
+    }
+
+    /// Three single-atom molecules inside a 5³ box with a pair-overlap setup.
+    fn mixed_system() -> (PackContext, Vec<F>) {
+        let mut sys = PackContext::new(3, 3, 1);
+        sys.ntype_with_fixed = 1;
+        sys.nmols = vec![3];
+        sys.natoms = vec![1];
+        sys.idfirst = vec![0];
+        sys.comptype = vec![true];
+        // `coor` holds one reference conformer **per copy**, sharing `xcart`'s
+        // index space — three single-atom copies, so three entries.
+        sys.coor = vec![[0.0, 0.0, 0.0]; 3];
+
+        sys.radius = vec![1.0; 3];
+        sys.radius_ini = vec![1.0; 3];
+        sys.fscale = vec![1.0; 3];
+        sys.ibmol = vec![0, 1, 2];
+        sys.sync_atom_props();
+
+        sys.restraints = vec![Arc::new(inside_box([0.0, 0.0, 0.0], [5.0, 5.0, 5.0]))];
+        sys.iratom_offsets = vec![0, 1, 2, 3];
+        sys.iratom_data = vec![0, 0, 0];
+
+        setup_cells(&mut sys, 1, 10.0);
+
+        // x = [com0(3), com1(3), com2(3), euler0(3), euler1(3), euler2(3)]
+        let x = vec![
+            6.0, 2.0, 2.0, // com0: outside box on +x, forces restraint penalty
+            3.0, 2.0, 2.0, // com1: close to com2, forces pair penalty
+            3.5, 2.5, 2.0, // com2
+            0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 0.2, 0.1, 0.4,
+        ];
+        (sys, x)
+    }
+
+    fn force_cache_miss(sys: &mut PackContext) {
+        sys.work.cached_geometry = None;
+    }
+
+    // ── compute_f cache ────────────────────────────────────────────────────────
+
+    #[test]
+    fn compute_f_cached_path_matches_fresh() {
+        let (mut sys_a, x) = mixed_system();
+        let (mut sys_b, _) = mixed_system();
+
+        // Prime both systems: one cache, one fresh each call.
+        let f_a1 = compute_f(&x, &mut sys_a);
+        let fdist_a1 = sys_a.fdist;
+        let frest_a1 = sys_a.frest;
+
+        force_cache_miss(&mut sys_b);
+        let f_b1 = compute_f(&x, &mut sys_b);
+        let fdist_b1 = sys_b.fdist;
+        let frest_b1 = sys_b.frest;
+
+        assert_eq!(
+            f_a1.to_bits(),
+            f_b1.to_bits(),
+            "compute_f first call must agree bitwise"
+        );
+        assert_eq!(fdist_a1.to_bits(), fdist_b1.to_bits());
+        assert_eq!(frest_a1.to_bits(), frest_b1.to_bits());
+
+        // Second call at same x: a hits cache, b forced miss.
+        let f_a2 = compute_f(&x, &mut sys_a);
+        force_cache_miss(&mut sys_b);
+        let f_b2 = compute_f(&x, &mut sys_b);
+
+        assert_eq!(f_a2.to_bits(), f_b2.to_bits());
+        assert_eq!(f_a2.to_bits(), f_a1.to_bits(), "cache must be pure");
+        assert_eq!(sys_a.fdist.to_bits(), sys_b.fdist.to_bits());
+        assert_eq!(sys_a.frest.to_bits(), sys_b.frest.to_bits());
+    }
+
+    // ── compute_fg cache ───────────────────────────────────────────────────────
+
+    #[test]
+    fn compute_fg_cached_path_matches_fresh() {
+        let (mut sys_a, x) = mixed_system();
+        let (mut sys_b, _) = mixed_system();
+
+        let mut g_a1 = vec![0.0; x.len()];
+        let mut g_b1 = vec![0.0; x.len()];
+        let f_a1 = compute_fg(&x, &mut sys_a, &mut g_a1);
+        force_cache_miss(&mut sys_b);
+        let f_b1 = compute_fg(&x, &mut sys_b, &mut g_b1);
+
+        assert_eq!(f_a1.to_bits(), f_b1.to_bits());
+        for i in 0..x.len() {
+            assert_eq!(
+                g_a1[i].to_bits(),
+                g_b1[i].to_bits(),
+                "compute_fg first call: g[{i}] mismatch {} vs {}",
+                g_a1[i],
+                g_b1[i]
+            );
+        }
+
+        // Second call at same x — a hits cache, b forced miss.
+        let mut g_a2 = vec![0.0; x.len()];
+        let mut g_b2 = vec![0.0; x.len()];
+        let f_a2 = compute_fg(&x, &mut sys_a, &mut g_a2);
+        force_cache_miss(&mut sys_b);
+        let f_b2 = compute_fg(&x, &mut sys_b, &mut g_b2);
+
+        assert_eq!(f_a2.to_bits(), f_b2.to_bits());
+        assert_eq!(f_a2.to_bits(), f_a1.to_bits(), "cache must be pure");
+        for i in 0..x.len() {
+            assert_eq!(g_a2[i].to_bits(), g_b2[i].to_bits());
+            assert_eq!(g_a1[i].to_bits(), g_a2[i].to_bits());
+        }
+    }
+
+    // ── cross-mode cache reuse (compute_fg → compute_f at same x) ──────────────
+
+    #[test]
+    fn compute_f_reuses_compute_fg_geometry() {
+        let (mut sys_a, x) = mixed_system();
+        let (mut sys_b, _) = mixed_system();
+
+        // A: warm with compute_fg then call compute_f — cache hit expected.
+        let mut g_a = vec![0.0; x.len()];
+        let _ = compute_fg(&x, &mut sys_a, &mut g_a);
+        let f_a = compute_f(&x, &mut sys_a);
+
+        // B: always fresh.
+        let mut g_b = vec![0.0; x.len()];
+        force_cache_miss(&mut sys_b);
+        let _ = compute_fg(&x, &mut sys_b, &mut g_b);
+        force_cache_miss(&mut sys_b);
+        let f_b = compute_f(&x, &mut sys_b);
+
+        assert_eq!(f_a.to_bits(), f_b.to_bits());
+        assert_eq!(sys_a.fdist.to_bits(), sys_b.fdist.to_bits());
+        assert_eq!(sys_a.frest.to_bits(), sys_b.frest.to_bits());
+    }
+
+    // ── packer's "unscaled re-evaluation" pattern ─────────────────────────────
+    //
+    // After `pgencan` converges, `packer.rs` swaps `radius := radius_ini` and calls
+    // `compute_f` at the same `x` to measure violations under the true (unscaled)
+    // atomic radii. The cache key intentionally does not include `radius`, so this
+    // pattern hits the cache — verify the result under a radius mutation between
+    // the scaled and unscaled calls is identical to a fresh full evaluation.
+
+    #[test]
+    fn radii_swap_between_fg_and_f_cached_matches_fresh() {
+        let (mut sys_a, x) = mixed_system();
+        let (mut sys_b, _) = mixed_system();
+
+        // Scaled radii (typical during packing: discale=1.2).
+        let scaled: Vec<F> = sys_a.radius_ini.iter().map(|r| r * 1.2).collect();
+        let unscaled = sys_a.radius_ini.clone();
+
+        // --- A: cached path ---
+        sys_a.radius = scaled.clone();
+        sys_a.sync_atom_props();
+        let mut g_a = vec![0.0; x.len()];
+        let _ = compute_fg(&x, &mut sys_a, &mut g_a);
+
+        sys_a.radius = unscaled.clone();
+        sys_a.sync_atom_props();
+        let f_a = compute_f(&x, &mut sys_a);
+
+        // --- B: always rebuild ---
+        sys_b.radius = scaled.clone();
+        sys_b.sync_atom_props();
+        let mut g_b = vec![0.0; x.len()];
+        force_cache_miss(&mut sys_b);
+        let _ = compute_fg(&x, &mut sys_b, &mut g_b);
+
+        sys_b.radius = unscaled.clone();
+        sys_b.sync_atom_props();
+        force_cache_miss(&mut sys_b);
+        let f_b = compute_f(&x, &mut sys_b);
+
+        assert_eq!(f_a.to_bits(), f_b.to_bits());
+        assert_eq!(sys_a.fdist.to_bits(), sys_b.fdist.to_bits());
+        assert_eq!(sys_a.frest.to_bits(), sys_b.frest.to_bits());
+    }
+
+    // ── move_flag path must stay on the slow path ─────────────────────────────
+    //
+    // When `move_flag` is true (during movebad), per-atom `fdist_atom` /
+    // `frest_atom` are accumulated inside the pair / constraint kernels. Running
+    // the cache path a second time would double-count; so cache must be bypassed
+    // whenever `move_flag` is set.
+
+    #[test]
+    fn move_flag_true_bypasses_cache() {
+        let (mut sys, x) = mixed_system();
+
+        // Warm the cache at normal (move_flag=false) state.
+        let _ = compute_f(&x, &mut sys);
+        assert!(sys.work.cached_geometry.is_some());
+
+        // Now turn on move_flag and reset per-atom trackers.
+        sys.move_flag = true;
+        sys.fdist_atom.iter_mut().for_each(|v| *v = 0.0);
+        sys.frest_atom.iter_mut().for_each(|v| *v = 0.0);
+        let _ = compute_f(&x, &mut sys);
+        let fdist_move_a = sys.fdist_atom.clone();
+        let frest_move_a = sys.frest_atom.clone();
+
+        // Fresh context, same sequence, cache forced off each call.
+        let (mut sys2, _) = mixed_system();
+        force_cache_miss(&mut sys2);
+        let _ = compute_f(&x, &mut sys2);
+        sys2.move_flag = true;
+        sys2.fdist_atom.iter_mut().for_each(|v| *v = 0.0);
+        sys2.frest_atom.iter_mut().for_each(|v| *v = 0.0);
+        force_cache_miss(&mut sys2);
+        let _ = compute_f(&x, &mut sys2);
+
+        assert_eq!(
+            fdist_move_a.len(),
+            sys2.fdist_atom.len(),
+            "fdist_atom shape mismatch"
+        );
+        for (i, (&a, &b)) in fdist_move_a.iter().zip(sys2.fdist_atom.iter()).enumerate() {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "fdist_atom[{i}] mismatch under move_flag: {a} vs {b}"
+            );
+        }
+        for (i, (&a, &b)) in frest_move_a.iter().zip(sys2.frest_atom.iter()).enumerate() {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "frest_atom[{i}] mismatch under move_flag: {a} vs {b}"
+            );
+        }
     }
 }

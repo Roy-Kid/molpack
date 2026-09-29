@@ -14,15 +14,15 @@
 //! | `StepInfo`       | [`PyStepInfo`]       | Read-only snapshot for handlers    |
 //! | `StageInfo`      | [`PyStageInfo`]      | Which stage a callback came from   |
 //! | `StepContext`    | [`PyStepContext`]    | Callback-scoped live-context guard |
-//! | `InsideBox`      | [`PyInsideBox`]      | Box restraint                      |
-//! | `InsideSphere`   | [`PyInsideSphere`]   | Sphere restraint (inside)          |
-//! | `OutsideSphere`  | [`PyOutsideSphere`]  | Sphere restraint (outside)         |
-//! | `AbovePlane`     | [`PyAbovePlane`]     | Half-space restraint               |
-//! | `BelowPlane`     | [`PyBelowPlane`]     | Half-space restraint               |
 //!
-//! Custom Python restraints are attached by passing any object with
-//! callable `f(x, scale, scale2)` and `fg(x, scale, scale2)` methods to
-//! `Target.with_restraint` — no dedicated class needed.
+//! Geometric restraints are molrs region objects (`molrs.Sphere`, `Cuboid`,
+//! `Parallelepiped`, `HalfSpace`, `Cylinder`, `Ellipsoid`, `Polyhedron`,
+//! `SphereUnion`, or a `&` / `|` / `~` composition), resolved through their
+//! `molrs.RegionRef/<line>` capsule and lifted by `RegionRestraint` — this
+//! wheel defines no geometry class. Custom Python restraints are attached by
+//! passing any object with callable `f(x, scale, scale2)` and
+//! `fg(x, scale, scale2)` methods to `Target.with_restraint` — no dedicated
+//! class needed.
 //!
 //! Custom Python progress handlers are registered via the entries'
 //! `with_handler(obj)`; see the [`handler`] module for the method contract.
@@ -37,14 +37,10 @@ use helpers::register_errors;
 mod types;
 use types::{PyAngle, PyAxis, PyCenteringMode};
 
-mod region;
-use region::PyStlRegion;
-
 mod constraint;
 use constraint::{
-    PyAbovePlaneRestraint, PyBelowPlaneRestraint, PyExponentialPlane, PyExponentialPoint,
-    PyGaussianPlane, PyGaussianPoint, PyInsideBoxRestraint, PyInsideSphereRestraint,
-    PyOutsideSphereRestraint, PyTabulatedPlane, PyTabulatedPoint,
+    PyExponentialPlane, PyExponentialPoint, PyGaussianPlane, PyGaussianPoint, PySelfSeparation,
+    PyTabulatedPlane, PyTabulatedPoint,
 };
 
 mod handler;
@@ -78,18 +74,13 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyAxis>()?;
     m.add_class::<PyCenteringMode>()?;
 
-    m.add_class::<PyInsideBoxRestraint>()?;
-    m.add_class::<PyInsideSphereRestraint>()?;
-    m.add_class::<PyOutsideSphereRestraint>()?;
-    m.add_class::<PyAbovePlaneRestraint>()?;
-    m.add_class::<PyBelowPlaneRestraint>()?;
-    m.add_class::<PyStlRegion>()?;
     m.add_class::<PyGaussianPlane>()?;
     m.add_class::<PyGaussianPoint>()?;
     m.add_class::<PyExponentialPlane>()?;
     m.add_class::<PyExponentialPoint>()?;
     m.add_class::<PyTabulatedPlane>()?;
     m.add_class::<PyTabulatedPoint>()?;
+    m.add_class::<PySelfSeparation>()?;
 
     m.add_class::<grow::PyTorsionPrior>()?;
     m.add_class::<grow::PyAnglePrior>()?;

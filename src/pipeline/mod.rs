@@ -103,10 +103,10 @@
 mod bracket;
 pub mod combinators;
 pub mod engine;
+#[cfg(test)]
+mod tests;
 
-use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
-use ndarray::Array1;
 
 use crate::context::build::{ContextKnobs, build_context};
 use crate::context::{PackState, Placed};
@@ -250,6 +250,7 @@ impl Pipeline {
         if let Some((i, _)) = targets.iter().enumerate().find(|(_, t)| t.natoms() == 0) {
             return Err(PackError::EmptyMolecule(i));
         }
+        crate::assemble::check_templates(targets)?;
         for f in &self.factories {
             f.validate_targets(targets)?;
         }
@@ -350,7 +351,7 @@ impl Pipeline {
         space: &ResolvedSpace,
         outcome: (bool, usize),
         precision: F,
-    ) -> State {
+    ) -> Result<State, PackError> {
         let (last_converged, degraded) = outcome;
         {
             let ctx = state.ctx_mut();
@@ -386,24 +387,14 @@ impl Pipeline {
         let xcart = std::mem::take(&mut sys.xcart);
         let positions = positions_in_target_order(setup.targets, &xcart, setup.ntotat_free);
         let intra = IntraResidual::from_targets(setup.targets, &positions, &sys.simbox);
-        let mut frame = crate::assemble::assemble_frame(setup.targets, &positions);
-        if let Some((min, max, flags)) = space.pbc {
-            let lengths = Array1::from_vec(vec![max[0] - min[0], max[1] - min[1], max[2] - min[2]]);
-            let origin = Array1::from_vec(min.to_vec());
-            if let Ok(simbox) = SimBox::ortho(lengths, origin, flags) {
-                frame.simbox = Some(simbox);
-            }
-        }
-        // A DECLARED cell (with_cell / a seeded run's inherited cell) is
-        // user-stated geometry and belongs on the output frame; a box merely
-        // inferred from restraints stays off it.
-        if frame.simbox.is_none()
-            && let Some(cell) = &space.cell
-        {
-            frame.simbox = Some(cell.clone());
-        }
+        let mut frame = crate::assemble::assemble_frame(setup.targets, &positions)?;
+        // The resolved cell — a periodic box, a declared lattice or a seed's
+        // inherited cell — is user-stated geometry and belongs on the output
+        // frame; the fallback box drawn around the atoms (`sys.simbox` when no
+        // cell was declared) is not.
+        frame.simbox = space.cell.clone();
 
-        State {
+        Ok(State {
             frame,
             placements,
             fdist,
@@ -411,7 +402,7 @@ impl Pipeline {
             frest,
             converged,
             degraded,
-        }
+        })
     }
 }
 
@@ -433,7 +424,7 @@ impl PackEngine for Pipeline {
         let space = resolve_pack_space(
             self.settings.density,
             self.settings.periodic_box,
-            self.settings.cell,
+            self.settings.cell.clone(),
             targets,
         )?;
 
@@ -476,13 +467,6 @@ impl PackEngine for Pipeline {
         )?;
 
         // ── 5. Rebuild, close the bracket, assemble ───────────────────────
-        Ok(Self::assemble(
-            state,
-            &mut handlers,
-            &setup,
-            &space,
-            outcome,
-            precision,
-        ))
+        Self::assemble(state, &mut handlers, &setup, &space, outcome, precision)
     }
 }

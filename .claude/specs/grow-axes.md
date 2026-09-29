@@ -161,13 +161,14 @@ with_max_reseed`（→ `Escape` 列表）。不留别名。
 
 ## Numerical contract
 
-- **CbmcGrow 逐位守门**：对 `tests/grow.rs` 的现有 fixture（`grow_pack` 8 × 12 珠、双物种、
-  KG 熔体、约束算例）在 `with_relax(0, _)` 下于重构**前**记录坐标哈希（RED 阶段提交进
-  测试），重构后逐位相同。RNG 契约不变：每步的抽样次数与顺序保持（种子 3 + 3 uniform，
+- **CbmcGrow 守门**：~~对原集成 fixture（`grow_pack` 8 × 12 珠、双物种、KG 熔体、约束算例）
+  于重构前记录坐标哈希、重构后逐位相同~~——2026-09-29 撤：这些 fixture 已于 2026-09-20 删除，
+  且 conventions 禁止 golden / 逐位连续性测试。改为：`src/grow/tests/` 全绿 + 同种子确定性单测
+  （形式同 `gencan/entry.rs::gencan_entry_is_deterministic`）。RNG 契约不变：每步的抽样次数与顺序保持（种子 3 + 3 uniform，
   每 trial 1 torsion + 角先验 draws，选择 1 uniform）。
 - **LatticeGrow 统计守门**（顺序 → 轮转、全局 RNG → 哈希流，数值必变）：
-  `lattice_grow_bead_chain_constructive` 的 `fdist == 0`、`softened == 0`、键长逐位模板
-  三条断言不变；稀释极限 RIS 走法的 C_n 与 `prior_ris_calibrated_c_inf` 同容差；新增
+  原集成测试 `lattice_grow_bead_chain_constructive`（2026-09-20 删除）的 `fdist == 0`、`softened == 0`、
+  键长逐位模板三条性质改由 `src/grow/lattice/` 模块内单测承担；稀释极限 RIS 走法的 C_n 与 `prior_ris_calibrated_c_inf` 同容差；新增
   "删一条链不改另一条链"对格相成立。
 - **WalkGrow**：稀释极限与 ρ* = 0.85（KG 珠链）两种密度下 C_n 逐位相同（无排除体积 ⇒
   与密度无关，这是可断言的构造性质）；RIS 先验下 C_n = C∞ ± 0.3；`converged == false`
@@ -178,10 +179,11 @@ with_max_reseed`（→ `Escape` 列表）。不留别名。
 
 ## Test plan
 
-- `tests/grow.rs`：类型名与 builder 调整；删除 relax 相关断言；`grow_cg_kremer_grest_c_inf`
-  保持 ±10%。
-- `tests/grow_axes.rs`（新）：
-  1. CbmcGrow 逐位哈希（四个 fixture）；
+- `src/grow/tests/{internal,field,prior,entry,driver}.rs`：类型名与 builder 调整；删除 relax 相关断言。
+  ~~`grow_cg_kremer_grest_c_inf` 保持 ±10%~~（该 KG 夹具于 2026-09-20 删除，C∞ 由
+  `prior.rs::prior_ris_calibrated_c_inf` 承担）。
+- 新增属主模块内单测（`src/grow/tests/` 下新子模块，crate 无 `tests/` 目录）：
+  1. ~~CbmcGrow 逐位哈希（四个 fixture）~~——撤：禁止 golden，改为同种子确定性；
   2. LatticeGrow 流独立性 + 统计三断言；
   3. WalkGrow 密度无关 C_n（逐位）与 RIS C∞ 命中；
   4. 软化局部化（双物种 + 不可满足约束）；
@@ -189,7 +191,7 @@ with_max_reseed`（→ `Escape` 列表）。不留别名。
   6. `Rosenbluth { Enumerate }` 在连续空间报具名错误（无意义组合，`Grow::validate`）；
   7. `Escape` 列表为空时死路 → `converged == false` 且具名 `StageOutcome`（WalkGrow 永不死路，
      CbmcGrow 空梯用于测试）。
-- `examples_batch` 不受影响（纯 grow 路径）。
+- GENCAN 路径（五个 `--example pack_<name>` 程序）不受影响（纯 grow 路径；原 `examples_batch` 已删）。
 - `python/tests/test_grow.py`：`WalkGrow` 冒烟、`with_schedule` 校验、被删 builder 不存在。
 
 ## Doc plan
