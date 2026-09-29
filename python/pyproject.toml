@@ -113,7 +113,9 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.uv.sources]
-molcrafts-molrs = { path = "../../molrs/molrs-python" }
+# Same path and editable flag as molpy. The dev group pulls molpy in, and uv
+# rejects two source rows for molcrafts-molrs that disagree on editable.
+molcrafts-molrs = { path = "../../molrs/molrs-python", editable = true }
 molcrafts-molpy = { path = "../../molpy" }
 
 [tool.ty]
