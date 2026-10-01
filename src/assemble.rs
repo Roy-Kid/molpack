@@ -11,7 +11,7 @@
 //! every binding gets identical output: bindings only marshal the frame across
 //! the language boundary, never re-derive it.
 
-use molrs::store::block::Block;
+use molrs::store::block::{Block, Column};
 use molrs::store::keys;
 use molrs::store::schema::block_names::ATOMS;
 use molrs::store::schema::{self, RowKind, relation_endpoints};
@@ -109,7 +109,7 @@ fn topology_frame(
             }
             if let Some((_, ends)) = relation_endpoints(&name, |k| block.contains_key(k)) {
                 for column in ends {
-                    if let Some(index) = block.get_uint_mut(column) {
+                    if let Some(index) = block.get_mut(column).and_then(Column::as_uint_mut) {
                         *index += atom_base as Idx;
                     }
                 }
@@ -235,7 +235,8 @@ mod tests {
         frame
             .get(block)
             .unwrap()
-            .get_uint(key)
+            .get(key)
+            .and_then(Column::as_uint)
             .unwrap()
             .iter()
             .copied()
@@ -246,7 +247,8 @@ mod tests {
         frame
             .get(block)
             .unwrap()
-            .get_string(key)
+            .get(key)
+            .and_then(Column::as_string)
             .unwrap()
             .iter()
             .cloned()
@@ -330,7 +332,8 @@ mod tests {
         let xs: Vec<F> = frame
             .get("atoms")
             .unwrap()
-            .get_float("x")
+            .get("x")
+            .and_then(Column::as_float)
             .unwrap()
             .iter()
             .copied()

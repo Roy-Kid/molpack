@@ -58,7 +58,7 @@ struct LatticeSpecies {
 }
 
 /// Sites whose continuum position violates any molecule-level restraint
-/// (`f(x, 1, 0.01) > 0`, same scale as CBMC). Empty input → empty mask.
+/// (`f(x, 1, DEFAULT_SCALE2) > 0`, same scale as CBMC). Empty input → empty mask.
 fn blocked_sites(lat: &DiamondLattice, restraints: &[Arc<dyn AtomRestraint>]) -> HashSet<[i64; 3]> {
     if restraints.is_empty() {
         return HashSet::new();
@@ -66,7 +66,9 @@ fn blocked_sites(lat: &DiamondLattice, restraints: &[Arc<dyn AtomRestraint>]) ->
     lat.iter_sites()
         .filter(|&p| {
             let x = lat.to_continuum(p);
-            restraints.iter().any(|r| r.f(&x, 1.0, 0.01) > 0.0)
+            restraints
+                .iter()
+                .any(|r| r.f(&x, 1.0, crate::numerics::DEFAULT_SCALE2) > 0.0)
         })
         .collect()
 }
@@ -187,7 +189,7 @@ impl Stage for LatticeStage {
         // See `install_resolved_cell` for why `radmax` reads `radius_ini`.
         if let Some((cell, discale)) = &self.cell {
             let sys = state.ctx_mut();
-            crate::initial::install_resolved_cell(sys, cell, *discale);
+            crate::context::grid::install_resolved_cell(sys, cell, *discale);
         }
 
         let (sys, x) = state.rigid_split_mut();

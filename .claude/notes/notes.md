@@ -19,13 +19,21 @@ Format per entry:
 **Why:** 删除项在 `tests/`/`benches/`/`regressions/` 退场（2026-09-20）后已无消费者；接缝只依赖 molrs 核心的 `Optimizer`，`ff` 门控没有理由；早停对齐 Packmol 的平台期收手，而不是跑满 `max_loops`。
 **How to apply:** 新代码不要再引用上述名字；判收敛读 `State`，读模板坐标用 `Frame::coords` + `coord_rows`；想跑满预算显式 `with_early_stop(None)`。
 
-## 2026-09-29 — 对齐 molrs 0.15 定稿；债务 D-07：三处等 molrs 原语的手写代码
+## 2026-10-01 — pack 一族、grow 一族；D-07 清
+
+刚性放置（`initial` / `movebad` / `gencan`）在 `src/pack/`，对箱外 `pub(crate)`。生长仍是 `src/grow/`，晶格行走是它的同级子模块，不是 CBMC 驱动的孩子。`euler` 与可选的循环内优化器留在族外。网格安装在 `context::grid`（`CellGrid::for_cutoff_capped`），生长不再依赖 GENCAN 驱动。`GrowError` 在箱根叶子 `grow_error`（晶格变体留在同一个枚举上）。`EvalMode` / `EvalOutput` 在 `eval`；`PackContext::evaluate` 的实现在 `objective`；`Constraints` 删除。`StageOutcome` 在 `outcome`。`Target::fixed_from` 收 `&Frame`。阶段类型名是 `GenCanStage`（`NAME` 仍是 `"gencan"`）。箱根不再重导出 `LatticeConfig`。
+
+**D-07 清**：(1) 单点卷回已是 `SimBox::wrap_row`；(2) 网格封顶是 `CellGrid::for_cutoff_capped`；(3) `topology_for_growth` 映射 `TopologyError`（`MissingBondEndpoint` / `BondOutOfRange { row, atom, n }`），不再自扫键。`Block` 读列走 `Column::as_*`。
+**Why:** 审查要求一族一个模块，并且和本地 molrs 0.15 对齐。环（initial↔gencan↔movebad、objective↔constraints、handler↔stage、target↔entry、error↔grow）是违规，不是风格。
+**How to apply:** 新的刚性驱动放进 `pack/`；生长的拒绝只加在 `GrowError` 上；网格覆盖只读 `context::grid::coverage_radmax`（直径）。不要打开 molrs `builder`，也不要把 CBMC 和晶格并成一个泛型驱动。
+
+## 2026-09-29 — 对齐 molrs 0.15 定稿
 
 molpack 以 `default-features = false` 依赖 molrs / molrs-ffi（molrs 的 default 是 `full` 全家桶，此前 molpack 的 `io`/`ff`/`rayon` 特性只管自己的代码，管不住依赖）。同批清掉的 molpack 侧问题：优化器环境的最小像改用 `SimBox::mic()`（原实现只要任一轴周期就三轴全卷，slab 盒错）；`mol_id` 统一 1 起；`assemble` 改用 molrs `Block::select_rows`/`merge`/`Column::resize`，回放 schema 的全部关系块（含 `pairs`/`exclusions`），模板列 dtype 冲突为具名错误 `PackError::TemplateColumns`（运行前检查）；未分类键→可旋转单键的策略只在 `template::rotatable_bonds` 一处；`TorsionMcOptimizer` 排除表来自 molrs `Topology::exclusions`，`with_special_bonds` 可改；晶胞只剩 `SimBox`（`declared_cell -> Option<SimBox>`，删 `CellDeclaration` 与 `ResolvedSpace.pbc`，`CellDecl` 只是构建器的未校验输入）；氢的识别是 `Target::with_hydrogens`（默认元素 `H`）；删 `src/frame.rs` 与 `PackContext.frame`。
 
-**D-07（可见例外，等 molrs）**：(1) `grow::field::OverlapField::wrap` 手写单点卷回——molrs `SimBox::wrap_row` 是 `pub(crate)`，公开的 `wrap` 吃 N×3 数组；(2) 网格封顶 `initial::install_simbox_and_grid` 与 `restraint::collective::separation::partition` 各写一遍——molrs `CellGrid` 无封顶构造器，molpack 内找公共家会逆层依赖；(3) `grow::topology_for_growth` 重复 `Topology::from_frame` 的键越界检查——molrs 返回字符串错误，无法区分原因。
-**Why:** law「一事一家」「依赖随策略」——三处都是 molrs 原语缺口，在 molpack 里造家只会多一个家。
-**How to apply:** molrs 公开 `SimBox::wrap_row`、加 `CellGrid::for_cutoff_capped(bx, cutoff, max_cells)`、给 `Topology::from_frame` 类型化错误后，逐处删除手写版。
+**D-07** 已于 2026-10-01 清偿，见上条。
+**Why:** law「一事一家」「依赖随策略」。
+**How to apply:** 见 2026-10-01 条。
 
 ## 2026-09-20 — 审查修复：一套 cell list、一处网格覆盖、退休无生产者的声明面
 

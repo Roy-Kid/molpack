@@ -513,9 +513,9 @@ impl Target {
     ///
     /// The named chaining primitive of engine-entry-split: grow first, then
     /// pack the next stage around the grown matrix held fixed —
-    /// `GenCanPack::new().run(&[Target::fixed_from(&grown), solvent], …)`.
-    pub fn fixed_from(result: &crate::entry::State) -> Self {
-        Self::new(result.frame.clone(), 1)
+    /// `GenCanPack::new().run(&[Target::fixed_from(&grown.frame), solvent], …)`.
+    pub fn fixed_from(frame: &molrs::Frame) -> Self {
+        Self::new(frame.clone(), 1)
             .with_centering(CenteringMode::Off)
             .fixed_at([0.0; 3])
     }
@@ -633,7 +633,8 @@ fn geometric_center(coords: &[[F; 3]]) -> (F, F, F) {
 fn radii_and_elements(frame: &molrs::Frame, n: usize) -> (Vec<F>, Vec<String>) {
     let column = frame
         .get("atoms")
-        .and_then(|atoms| atoms.get_string(molrs::store::keys::ELEMENT));
+        .and_then(|atoms| atoms.get(molrs::store::keys::ELEMENT))
+        .and_then(molrs::store::block::Column::as_string);
     let Some(symbols) = column else {
         return (vec![1.5; n], vec!["X".to_string(); n]);
     };

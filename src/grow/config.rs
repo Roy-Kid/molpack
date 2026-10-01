@@ -1,11 +1,9 @@
-//! Leaf configuration and error types for growth.
+//! Leaf configuration for growth.
 //!
 //! The `CbmcGrow` entry carries a [`GrowConfig`], so this file must stay a
 //! **leaf**: importing `target` / `entry` / `context` from here would close
 //! a dependency cycle between the entry layer and the growth module. Only
 //! sibling leaves (`prior`) and `molrs` types are allowed.
-
-use std::fmt;
 
 use molrs::BondDistanceWeights;
 use molrs::types::F;
@@ -34,12 +32,14 @@ pub struct GrowConfig {
     /// Tail length (in steps) of the periodic regrowth.
     pub(crate) relax_window: usize,
     /// Cumulative dead ends on a chain per softening rung (`rung_due`
-    /// watermark; one rung multiplies the hard-core scale by 0.97). Not
-    /// consecutive: commits do not reset this cadence.
+    /// watermark; one rung multiplies the hard-core scale by
+    /// [`Self::SOFTEN_RUNG`]). Not consecutive: commits do not reset this
+    /// cadence.
     pub(crate) soften_after: usize,
     /// Floor for the dimensionless hard-core scale. `1.0` is full declared
     /// contact (`radius_i + radius_j`); the softening ladder walks the scale
-    /// down by 0.97 per rung, never below this floor. Default 0.8 — Auhl's
+    /// down by [`Self::SOFTEN_RUNG`] per rung, never below this floor. Default
+    /// 0.8 — Auhl's
     /// 0.8σ push-off bound, where σ is the excluded-volume (bead) diameter
     /// (Auhl et al. 2003). Contacts tighter than that floor are a poor
     /// starting point for a subsequent excluded-volume push-off.
@@ -60,6 +60,10 @@ pub struct GrowConfig {
 }
 
 impl GrowConfig {
+    /// One softening rung. `hard_scale` is multiplied by this and never
+    /// falls below [`Self::min_hard_scale`].
+    pub const SOFTEN_RUNG: F = 0.97;
+
     /// A growth configuration with the mandatory torsion prior and defaults
     /// for everything else.
     pub fn new(torsion_prior: TorsionPrior) -> Self {
@@ -135,7 +139,7 @@ impl GrowConfig {
     }
 
     /// Cumulative dead ends on a chain before the hard core softens by one rung
-    /// (one rung multiplies the dimensionless hard-core scale by 0.97).
+    /// (one rung multiplies the dimensionless hard-core scale by [`Self::SOFTEN_RUNG`]).
     ///
     /// The clock is **cumulative** dead ends on that chain (`deadends_total`
     /// versus the `rungs_earned` watermark), **not** consecutive. A successful
@@ -159,8 +163,8 @@ impl GrowConfig {
     /// Softening floor for the dimensionless hard-core scale.
     ///
     /// `hard_scale` is dimensionless: `1.0` is full declared contact
-    /// (`radius_i + radius_j`); the ladder walks it down by 0.97 per rung
-    /// to this floor. Clamped to `[0.0, 1.0]`; default 0.8 is Auhl's 0.8σ
+    /// (`radius_i + radius_j`); the ladder walks it down by [`Self::SOFTEN_RUNG`]
+    /// per rung to this floor. Clamped to `[0.0, 1.0]`; default 0.8 is Auhl's 0.8σ
     /// push-off bound, where σ is the excluded-volume (bead) diameter
     /// (Auhl et al. 2003). Contacts tighter than that floor are a poor
     /// starting point for a subsequent excluded-volume push-off.
@@ -191,150 +195,10 @@ pub(crate) fn binary_violation(weights: &BondDistanceWeights) -> Option<(usize, 
         .find(|&(_, w)| w != 0.0 && w != 1.0)
 }
 
-/// Why a target cannot be grown.
+/// Rosenbluth crowding cap shared by propose and commit.
 ///
-/// Growth consumes the template's *chemistry* (its bond graph), so a target
-/// that carries none is refused with a named error — never silently degraded
-/// to rigid-body packing. The caller chooses the method per target.
-///
-/// Template-graph refusals stop at the first match, in this order:
-/// `NoAtomsBlock → BondOutOfRange → NoBonds → TemplateTooSmall →
-/// Disconnected → RingTemplate`.
-#[derive(Debug, Clone)]
-pub enum GrowError {
-    /// The target was built without a template frame
-    /// ([`Target::from_coords`][crate::Target::from_coords]), so there is no
-    /// bond graph to grow from.
-    MissingTemplate,
-    /// The template has fewer than 3 atoms; growth needs a rigid seed of 3.
-    TemplateTooSmall(usize),
-    /// The template frame has no readable `atoms` block (`x` / `y` / `z` in Å).
-    NoAtomsBlock,
-    /// A bond names an endpoint outside the template.
-    BondOutOfRange {
-        /// First endpoint of the offending bond, as written in the frame.
-        a: usize,
-        /// Second endpoint of the offending bond, as written in the frame.
-        b: usize,
-        /// Atom count of the template (`xyz.len()`).
-        n: usize,
-    },
-    /// The template frame carries no bonds (missing/empty graph).
-    NoBonds,
-    /// The template's bond graph does not connect all atoms.
-    Disconnected,
-    /// No placed reference atom could be found while decomposing atom `.0`.
-    NoReference(usize),
-    /// Rotatable-bond perception failed.
-    Perceive(String),
-    /// A Grow target needs a box: neither a periodic box nor a cell (nor a
-    /// density, once `with_density` lands) was declared.
-    NoBox,
-    /// The declared cell is not orthorhombic; the v1 overlap field only
-    /// supports orthorhombic boxes (`triclinic-cell-downshift` lifts this).
-    TriclinicCell,
-    /// `fixed_at` combined with a growth entry — a fixed placement is by
-    /// definition not grown.
-    FixedTarget,
-    /// The template's bond graph contains a cycle. Growth decomposes the
-    /// template into a *tree* of internal coordinates; a ring bond would be
-    /// silently dropped and the ring grown open — refused instead (lattice
-    /// ring closure is its own future spec).
-    RingTemplate,
-    /// A special-bonds weight is neither 0 nor 1. Growth compiles a binary
-    /// skip table; `index` is the 0-based slot (slot 0 is 1-2, slot 2 is 1-4).
-    NonBinarySpecialBond {
-        /// 0-based table slot.
-        index: usize,
-        /// The stored weight at `index`.
-        weight: F,
-    },
-    /// The template's heavy-atom backbone does not fit the diamond lattice
-    /// (the message names the offense). Tetrahedral heavy degree `1..=4` is
-    /// accepted (linear is the `d = 2` degeneracy); degree `> 4`, a
-    /// detached heavy, or a non-sp³ interior bond is named here.
-    NonTetrahedralTemplate(String),
-    /// The attached region contains no usable diamond site for this chain
-    /// (empty Region ∩ lattice, or the tree cannot embed in the allowed
-    /// subgraph).
-    LatticeRegionEmpty,
+/// Both steps must use this value: a trial accepted against one shell and
+/// scored against another is a different move than the one that was chosen.
+pub(crate) fn crowding_cap(selectivity: F) -> F {
+    60.0 / selectivity.max(0.1)
 }
-
-impl fmt::Display for GrowError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            GrowError::MissingTemplate => write!(
-                f,
-                "the target has no template frame (built from bare coordinates); growth needs \
-                 a bond graph — load the species from a file or build a frame with bonds, or \
-                 pack this target with GenCanPack"
-            ),
-            GrowError::TemplateTooSmall(n) => write!(
-                f,
-                "the template has {n} atom(s); growth needs at least 3 — pack this \
-                 target with GenCanPack"
-            ),
-            GrowError::NoAtomsBlock => {
-                write!(f, "the template frame has no readable atoms block")
-            }
-            GrowError::BondOutOfRange { a, b, n } => write!(
-                f,
-                "bond ({a}, {b}) references an atom outside the template (natoms = {n})"
-            ),
-            GrowError::NoBonds => write!(
-                f,
-                "the template frame carries no bonds; growth needs the bond graph — pack \
-                 this target with GenCanPack or supply connectivity"
-            ),
-            GrowError::Disconnected => {
-                write!(f, "the template's bond graph does not connect all atoms")
-            }
-            GrowError::NoReference(i) => write!(
-                f,
-                "no placed reference atom found while decomposing atom {i}"
-            ),
-            GrowError::Perceive(msg) => write!(f, "rotatable-bond perception failed: {msg}"),
-            GrowError::NoBox => write!(
-                f,
-                "growth needs a box: declare with_periodic_box / with_cell (or a density) \
-                 — the box is at its final volume from the first atom"
-            ),
-            GrowError::TriclinicCell => write!(
-                f,
-                "growth currently supports orthorhombic boxes only; declare an \
-                 orthorhombic cell or periodic box"
-            ),
-            GrowError::RingTemplate => write!(
-                f,
-                "the template contains a ring: growth decomposes the bond graph \
-                 into a tree, and a ring bond would be silently dropped; ring \
-                 templates are refused"
-            ),
-            GrowError::NonBinarySpecialBond { index, weight } => {
-                let pair = index + 2;
-                write!(
-                    f,
-                    "special-bonds 1-{pair} weight is {weight}; growth compiles a \
-                     binary skip table (0 or 1). For all-atom explicit hydrogen, \
-                     use Target::with_atom_radius rather than a fractional weight"
-                )
-            }
-            GrowError::NonTetrahedralTemplate(msg) => write!(
-                f,
-                "the template's backbone does not fit the diamond lattice: {msg}"
-            ),
-            GrowError::FixedTarget => write!(
-                f,
-                "a fixed target cannot be grown: drop fixed_at or pack this \
-                 target with GenCanPack"
-            ),
-            GrowError::LatticeRegionEmpty => write!(
-                f,
-                "LatticeGrow: the attached region contains no usable diamond \
-                 site for this chain; enlarge the mesh or reduce the template"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for GrowError {}

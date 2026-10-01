@@ -93,24 +93,24 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 ### Layer roles
 
 - `src/script/` — **front end**. `parser` depends on `error` only; `build.rs` lowers an `.inp` onto `GenCanPack` + `Target` + `PackEngine` + restraints. Nothing in the packing lifecycle depends on it but `bin/` and `python/src/script.rs`.
-- `src/target.rs` — **specification layer**. Depends on `restraint`, `frame`, `entry` (`fixed_from(&State)`).
+- `src/target.rs` — **specification layer**. Depends on `restraint`. `fixed_from` takes `&Frame`; `entry` depends on `target`, not the reverse.
 - `src/entry/` — **shared settings + space + frozen result**. Depends on `context`, `error`, `handler`, `restraint`, `target`. Names neither `pipeline` nor `stage`. Owns `State` (freeze point) and hidden `Placements` (the seed `with_restart` reads).
 - `src/pipeline/` — **lifecycle owner** (the only `PackEngine::run` in the crate). Assembles `State` after the last stage; does not return a live `PackState`. Names no algorithm module.
-- `src/stage.rs` — **the seam**. Depends on `context`, `error`, `handler`, `target`. No `ff`, no algorithm module.
-- `src/gencan/`, `src/grow/`, `src/grow/lattice/` — **algorithm peers**, each with one `*Stage` on the seam and one preset entry via `Pipeline::single`. Neither names the other. Cross-algorithm hand-off is caller-side (`Pipeline::with_stage` or `GenCanPack::with_restart`).
+- `src/stage.rs` — **the seam**. Depends on `context`, `error`, `handler`, `target`, and re-exports `StageOutcome` from the `outcome` leaf. No `ff`, no algorithm module. `handler` reads `StageOutcome` from `outcome`, not from `stage`.
+- `src/pack/` (`gencan/`, `initial`, `movebad`, `restmol`) and `src/grow/` (`lattice/` a peer inside the family) — **algorithm families**. Each stage is a preset entry via `Pipeline::single`. A family does not call the other's driver. Cross-algorithm hand-off is caller-side (`Pipeline::with_stage` or `GenCanPack::with_restart`). `pack` and `euler` are `pub(crate)`.
 - `src/invariant.rs` — **guard leaf**; depends on `context` only (`PackState`).
 - `src/template.rs` — **pure leaf**; `std` + molrs `Frame` only. Bond graphs are `molrs::Topology`.
-- `src/context/`, `src/objective.rs`, `src/constraints/`, `src/restraint/` — **shared bottom layer**.
-- `src/error.rs` — no upward edge to `pipeline`/`stage`, but see the `error → grow` edge below.
-- `src/initial.rs`, `src/movebad.rs` — **GENCAN-path machinery** at crate root; `install_resolved_cell` is also called by grow.
+- `src/context/` (including `grid` and `geometry`), `src/objective.rs`, `src/eval.rs`, `src/restraint/` — **shared bottom layer**. `PackContext::evaluate` is implemented in `objective`. There is no `constraints` module. `GeometryKey` lives in `geometry.rs`.
+- `src/error.rs` — wraps `grow_error::GrowError` and does not import `grow`. `validate_grow_cell` returns `GrowError`; entries map `PackError::Grow`.
+- `src/grow_error.rs`, `src/outcome.rs` — leaves. Lattice-only faults stay variants of `GrowError`.
 - `src/euler.rs`, `src/numerics.rs`, `src/random.rs`, `src/template.rs` — leaf utilities; `src/assemble.rs`, `src/handler.rs` — cross-cutting.
 - `src/optimizer/` — **optional add-on** (always compiled, opt-in via `with_optimizer`), reached only from `gencan/`.
 - `src/bin/molpack/` — **CLI front end** (`cli`).
 - `python/src/` — **binding layer**. `PyState` wraps crate `State`; `with_restart` is bound on `PyGenCanPack` only.
 
-**Known cycles / debts** — `initial ↔ gencan`; `initial ↔ movebad`; `movebad ↔ gencan`; `objective ↔ constraints`; `target ↔ entry` (`fixed_from(&crate::entry::State)`); `context ↔ frame`; `handler ↔ stage`. Non-cycle layer break: `error → grow`. Open debts in `.claude/notes/notes.md`: **D-01** growth hard-core unreachable at melt density (partial local fix landed; rest owed to `grow-axes`), **D-02** two derivations of the grid `radmax` coverage radius (spellings unified onto `radius_ini`; coverage `R` vs `2R` still split), **D-04** the `uv … tox` spelling cannot resolve (molrs double pin), **D-05** `initial()` still speaks flat slices and bridges through a temporary `RigidView` twice. **D-03 cleared** 2026-09-03.
+**Known cycles / debts** — the 2026-10-01 split cleared `initial ↔ gencan ↔ movebad` as a cross-module cycle (the three now share `pack/`), `objective ↔ constraints` (no `Constraints` type), `target ↔ entry`, `handler ↔ stage`, `context ↔ frame` (`frame.rs` is gone), and `error → grow`. Inside `pack/`, placement calls the bad-move heuristic and both call `restmol`; the heuristic does not call placement. `phases` reads `STAGE_NAME` and does not import the stage type. `grow/internal` reads `GrowError` from `grow_error`, not from the `grow` facade. Open debts in `.claude/notes/notes.md`: **D-01** growth hard-core unreachable at melt density (partial local fix landed; rest owed to `grow-axes`), **D-04** the `uv … tox` spelling cannot resolve (molrs double pin). **D-02**, **D-03**, **D-05**, **D-07** are cleared. Grid coverage is `context::grid::coverage_radmax` (`2 * radius_ini`) for every stage.
 
-Files over the 800-line cap (`conventions.md`: 200–400 typical, 800 max; counts include in-module tests): `src/objective.rs` (1883), `src/context/pack_context.rs` (1274), `src/gencan/mod.rs` (1203), `src/script/parser.rs` (1189), `src/target.rs` (1153), `src/pipeline/tests.rs` (1094), `src/initial.rs` (891), `src/restraint/geometric/tests/gradient.rs` (870), `src/grow/lattice/saw.rs` (840), `python/src/entry.rs` (804). Past the typical band: `src/context/rigid_view.rs` (773), `src/handler.rs` (749), `src/grow/moves.rs` (707), `python/src/constraint.rs` (694), `src/grow/driver.rs` (622), `src/grow/lattice/decorate.rs` (620), `src/restraint/collective/separation.rs` (595), `src/grow/tests/entry.rs` (588), `src/stage.rs` (561), plus thirteen files between 400 and 540 lines.
+Files over the 800-line cap (`conventions.md`: 200–400 typical, 800 max; counts include in-module tests), as of the 2026-10-01 family split — `gencan/mod.rs`, `initial.rs`, and `saw.rs` were brought under the cap (`search.rs` / `linesearch.rs`, grid tests moved to `context/grid.rs`, walks in `saw/walk.rs`): `src/objective.rs`, `src/context/pack_context.rs`, `src/script/parser.rs`, `src/target.rs`, `src/pipeline/tests.rs`, `src/restraint/geometric/tests/gradient.rs`, `python/src/entry.rs`. Those were not part of this split.
 
 <!-- mol:map:managed end -->
 
@@ -121,11 +121,11 @@ Files over the 800-line cap (`conventions.md`: 200–400 typical, 800 max; count
                                             presets: GenCanPack / CbmcGrow / LatticeGrow
                                                      = Pipeline::single(entry)
                                                      │
-                                                     └─ Stage seam ─▶ gencan/ | grow/ | grow/lattice/   (peers)
+                                                     └─ Stage seam ─▶ pack/ | grow/   (peer families; lattice is inside grow)
                                                         combinators: Repeat / Guarded (pipeline/combinators.rs)
                                                         guards:      Invariant / Layers (invariant.rs)
-                                                        shared:      context/ (PackState, RigidView), objective,
-                                                                     constraints/, restraint/, template
+                                                        shared:      context/ (PackState, RigidView, grid), objective,
+                                                                     eval, restraint/, template
 ```
 
 Landed 2026-09-03 (`stage-pipeline` chain 01–07): the seam is `Stage` (fallible

@@ -82,7 +82,8 @@ impl PyState {
         self.inner
             .frame
             .get("atoms")
-            .and_then(|atoms| atoms.get_string(molrs::store::keys::ELEMENT))
+            .and_then(|atoms| atoms.get(molrs::store::keys::ELEMENT))
+            .and_then(molrs::store::block::Column::as_string)
             .map(|column| column.iter().cloned().collect())
             .ok_or_else(|| {
                 pyo3::exceptions::PyKeyError::new_err("the packed frame has no element column")

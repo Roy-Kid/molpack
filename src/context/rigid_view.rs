@@ -21,8 +21,8 @@
 //! so it describes the molecule's shape and nothing else. `ctx.xcart` holds
 //! *lab-frame* coordinates: where those atoms actually sit in the packing
 //! cell. The three Euler angles are the three-parameter description of the
-//! rotation matrix `R` that carries the first frame into the second (see
-//! [`crate::euler`]), so a molecule's placement is exactly `(com, euler)` and
+//! rotation matrix `R` that carries the first frame into the second (the
+//! `euler` module), so a molecule's placement is exactly `(com, euler)` and
 //! its shape is exactly its block of `coor`.
 //!
 //! Besides the accessors the view owns the two conversions between those

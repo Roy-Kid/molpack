@@ -1,6 +1,6 @@
 //! GENCAN on the [`Stage`] seam.
 //!
-//! [`GencanStage`] is the rigid-body path behind the stage seam: the same
+//! [`GenCanStage`] is the rigid-body path behind the stage seam: the same
 //! lifecycle the growth stages implement, judged by
 //! the same shared-objective ruler, selected by the same seam.
 
@@ -12,12 +12,12 @@ use rand::rngs::SmallRng;
 use crate::context::{PackState, Placed, RigidView};
 use crate::entry::result::Placements;
 use crate::error::PackError;
-use crate::gencan::phases::{PhaseOutcome, run_phase};
-use crate::gencan::{GencanParams, GencanWorkspace};
 use crate::handler::Handler;
-use crate::initial::{SwapState, initial};
-use crate::movebad::MoveBadConfig;
 use crate::optimizer::{OptimizerBinding, ResolvedBinding, resolve_bindings};
+use crate::pack::gencan::phases::{PhaseOutcome, run_phase};
+use crate::pack::gencan::{GencanParams, GencanWorkspace};
+use crate::pack::initial::{SwapState, initial};
+use crate::pack::movebad::MoveBadConfig;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 use crate::target::Target;
 
@@ -74,7 +74,7 @@ impl Default for GencanSettings {
 /// The optimizer bindings and the placement seed stay on the stage for its
 /// whole life and are read afresh on every [`run`](Stage::run) — the seam's
 /// re-entrancy contract: a stage does not consume its own configuration.
-pub struct GencanStage {
+pub struct GenCanStage {
     settings: GencanSettings,
     maxmove_per_type: Vec<usize>,
     cell: Option<SimBox>,
@@ -85,11 +85,10 @@ pub struct GencanStage {
     rng: SmallRng,
 }
 
-impl GencanStage {
-    /// The name this stage reports, in one place: [`Stage::name`] returns
-    /// it and `StepInfo.stage.name` is filled from it, so the two cannot
-    /// drift apart.
-    pub(crate) const NAME: &'static str = "gencan";
+impl GenCanStage {
+    /// The name this stage reports. Same constant as [`super::STAGE_NAME`],
+    /// which the phase step report fills in, so the two cannot drift apart.
+    pub(crate) const NAME: &'static str = super::STAGE_NAME;
 
     pub fn new(
         settings: GencanSettings,
@@ -131,7 +130,7 @@ impl GencanStage {
     }
 }
 
-impl Stage for GencanStage {
+impl Stage for GenCanStage {
     fn name(&self) -> &'static str {
         Self::NAME
     }
@@ -187,7 +186,7 @@ impl Stage for GencanStage {
             let simbox = self.cell.clone().unwrap_or_else(|| sys.simbox.clone());
             // One derivation of the grid's coverage scale, in
             // `initial::coverage_radmax`.
-            crate::initial::install_resolved_cell(sys, &simbox, self.settings.discale);
+            crate::context::grid::install_resolved_cell(sys, &simbox, self.settings.discale);
         }
         // ② The seed's conformers and placements, verbatim.
         if let Some(seed) = &self.seed_placements {
@@ -347,7 +346,7 @@ mod tests {
             seed: 7,
             ..Default::default()
         };
-        let mut stage: Box<dyn Stage> = Box::new(GencanStage::new(
+        let mut stage: Box<dyn Stage> = Box::new(GenCanStage::new(
             settings,
             built.maxmove_per_type.clone(),
             Some(cell),
@@ -458,7 +457,7 @@ mod tests {
             seed: 7,
             ..Default::default()
         };
-        let mut stage = GencanStage::new(
+        let mut stage = GenCanStage::new(
             settings,
             built.maxmove_per_type.clone(),
             Some(cell),

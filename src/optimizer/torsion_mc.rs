@@ -122,7 +122,11 @@ impl Optimizer for TorsionMcOptimizer {
         let coords = crate::template::coord_rows(&xyz);
 
         // Free mask: only free atoms may be torsion-rotated (environment fixed).
-        let free: Vec<bool> = match frame.get("atoms").and_then(|a| a.get_bool("free")) {
+        let free: Vec<bool> = match frame
+            .get("atoms")
+            .and_then(|a| a.get("free"))
+            .and_then(molrs::store::block::Column::as_bool)
+        {
             Some(col) if col.len() == n => col.iter().copied().collect(),
             _ => vec![true; n],
         };

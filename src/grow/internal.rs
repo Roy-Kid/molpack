@@ -20,7 +20,7 @@ use molrs::store::frame::Frame;
 use molrs::system::atomistic::Atomistic;
 use molrs::types::F;
 
-use crate::grow::GrowError;
+use crate::grow_error::GrowError;
 
 /// One atom's placement recipe against three earlier atoms.
 #[derive(Debug, Clone)]

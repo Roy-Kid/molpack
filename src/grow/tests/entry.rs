@@ -166,19 +166,19 @@ fn grow_rejects_atoms_block_missing_z() {
     );
 }
 
-/// Bond `(0, 99)` on a 3-atom frame reports structured `BondOutOfRange`.
+/// Bond row 0 naming atom 99 on a 3-atom frame reports structured `BondOutOfRange`.
 #[test]
 fn grow_rejects_bond_out_of_range() {
     let frame = frame_from_parts(&zigzag_coords(3, 1.53), &[(0, 99)]);
     let err = InternalTree::from_frame(&frame, &BondDistanceWeights::from_exclusion_depth(3))
         .expect_err("out-of-range bond must be refused");
     match err {
-        GrowError::BondOutOfRange { a, b, n } => {
-            assert_eq!(a, 0, "first endpoint from the frame");
-            assert_eq!(b, 99, "second endpoint from the frame");
+        GrowError::BondOutOfRange { row, atom, n } => {
+            assert_eq!(row, 0, "bonds-block row");
+            assert_eq!(atom, 99, "out-of-range endpoint");
             assert_eq!(n, 3, "atom count from the frame");
         }
-        other => panic!("expected GrowError::BondOutOfRange {{ a, b, n }}, got {other:?}"),
+        other => panic!("expected GrowError::BondOutOfRange {{ row, atom, n }}, got {other:?}"),
     }
 }
 
@@ -599,8 +599,9 @@ fn grow_stage_requires_none_guarantees_all() {
 /// The diamond-lattice growth stage declares the same two markers.
 #[test]
 fn lattice_stage_requires_none_guarantees_all() {
+    use crate::grow::lattice::LatticeConfig;
     use crate::grow::lattice::LatticeStage;
-    use crate::{LatticeConfig, Placed, Stage};
+    use crate::{Placed, Stage};
 
     let targets = [Target::new(chain_frame(6, 1.53, true), 2)];
     let stage = LatticeStage::from_targets(&targets, &LatticeConfig::new(TorsionPrior::Uniform), 7)

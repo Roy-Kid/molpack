@@ -12,16 +12,16 @@
 //!   8. Random angles
 //!   9. Phase 2: constraint-only GENCAN per type (reduced x!)
 
-use molrs::spatial::neighbors::CellGrid;
 use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use ndarray::array;
 use std::time::Instant;
 
-use crate::constraints::EvalMode;
 use crate::context::{NONE_IDX, PackContext, RigidView};
-use crate::gencan::{GencanParams, GencanWorkspace, pgencan};
-use crate::movebad::{MoveBadConfig, movebad};
+use crate::eval::EvalMode;
+use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
+use crate::pack::movebad::{MoveBadConfig, movebad};
+use crate::pack::restmol::restmol;
 use crate::random::uniform01;
 
 use rand::Rng;
@@ -124,112 +124,6 @@ pub fn compute_dmax(sys: &mut PackContext) {
         }
         log::debug!("  dmax type {itype}: {:.4}", sys.dmax[itype]);
     }
-}
-
-// ── restmol ────────────────────────────────────────────────────────────────
-
-/// Scoped state override for `restmol`; restores context on drop.
-struct RestmolScope<'a> {
-    sys: &'a mut PackContext,
-    itype: usize,
-    ntotmol: usize,
-    nmols_itype: usize,
-    comptype: Vec<bool>,
-    init1: bool,
-}
-
-impl<'a> RestmolScope<'a> {
-    fn enter(sys: &'a mut PackContext, itype: usize) -> Self {
-        let saved = Self {
-            ntotmol: sys.ntotmol,
-            nmols_itype: sys.nmols[itype],
-            comptype: sys.comptype.clone(),
-            init1: sys.init1,
-            itype,
-            sys,
-        };
-
-        saved.sys.ntotmol = 1;
-        // Only reduce the active type to 1 molecule.
-        // Other types keep their original nmols so compute_f's icart counter advances
-        // correctly past them — preserving the constraint array index alignment.
-        // (Packmol restmol.f90 line 34: only nmols(itype) = 1, others unchanged.)
-        saved.sys.nmols[itype] = 1;
-        for i in 0..saved.sys.ntype_with_fixed {
-            saved.sys.comptype[i] = i == itype;
-        }
-        saved.sys.init1 = true; // constraint-only, no cell list
-
-        saved
-    }
-
-    fn ctx_mut(&mut self) -> &mut PackContext {
-        self.sys
-    }
-}
-
-impl Drop for RestmolScope<'_> {
-    fn drop(&mut self) {
-        self.sys.ntotmol = self.ntotmol;
-        self.sys.nmols[self.itype] = self.nmols_itype;
-        self.sys.comptype.clone_from(&self.comptype);
-        self.sys.init1 = self.init1;
-    }
-}
-
-/// Run a single-molecule GENCAN solve (restmol).
-/// Port of `restmol.f90`.
-///
-/// `ilubar` is the offset in `x` for the COM of this molecule.
-/// Euler angles are at `x[ilubar + ntotmol*3 ..]`.
-///
-/// - `solve = false`: evaluate constraint function only (no optimization).
-/// - `solve = true`: run GENCAN to minimize constraint violations.
-///
-/// On return, `sys.frest` holds the constraint violation for this molecule.
-#[allow(clippy::too_many_arguments)]
-pub fn restmol(
-    itype: usize,
-    ilubar: usize,
-    x: &mut [F],
-    sys: &mut PackContext,
-    precision: F,
-    gencan_maxit: usize,
-    solve: bool,
-    workspace: &mut GencanWorkspace,
-) {
-    let ilugan_offset = sys.ntotmol * 3;
-    let mut xmol = vec![0.0 as F; 6];
-    xmol[0] = x[ilubar];
-    xmol[1] = x[ilubar + 1];
-    xmol[2] = x[ilubar + 2];
-    xmol[3] = x[ilubar + ilugan_offset];
-    xmol[4] = x[ilubar + ilugan_offset + 1];
-    xmol[5] = x[ilubar + ilugan_offset + 2];
-
-    {
-        let mut scope = RestmolScope::enter(sys, itype);
-        let sys = scope.ctx_mut();
-        if !solve {
-            sys.evaluate(&xmol, EvalMode::FOnly, None);
-        } else {
-            let params = GencanParams {
-                maxit: gencan_maxit,
-                maxfc: gencan_maxit * 10,
-                iprint: 0,
-                ..Default::default()
-            };
-            pgencan(&mut xmol, sys, &params, precision, workspace);
-        }
-    }
-
-    x[ilubar] = xmol[0];
-    x[ilubar + 1] = xmol[1];
-    x[ilubar + 2] = xmol[2];
-    x[ilubar + ilugan_offset] = xmol[3];
-    x[ilubar + ilugan_offset + 1] = xmol[4];
-    x[ilubar + ilugan_offset + 2] = xmol[5];
-    // sys.frest retains the value from the restmol compute_f
 }
 
 // ── gencan loop for one type ───────────────────────────────────────────────
@@ -337,7 +231,7 @@ pub fn initial(
 
     // Packmol initial.f90 line 50-51
     sys.scale = 1.0;
-    sys.scale2 = 0.01;
+    sys.scale2 = crate::numerics::DEFAULT_SCALE2;
 
     // ── 1. compute dmax ──────────────────────────────────────────────────────
     log::debug!("[{:.3}s] computing dmax", t0.elapsed().as_secs_f64());
@@ -464,7 +358,7 @@ pub fn initial(
     view.write_xcart(sys);
     let x = view.as_mut_slice();
 
-    let radmax = coverage_radmax(sys);
+    let radmax = crate::context::grid::coverage_radmax(sys);
 
     let mut smin = [1.0e20 as F; 3];
     let mut smax = [-1.0e20 as F; 3];
@@ -552,7 +446,7 @@ pub fn initial(
         )
         .expect("fallback cell must have positive extent on every axis"),
     };
-    install_simbox_and_grid(sys, simbox, radmax, discale, free_atoms);
+    crate::context::grid::install_simbox_and_grid(sys, simbox, radmax, discale, free_atoms);
 
     // ── 7. Random initial point using cm_min/cm_max ───────────────────────────
     // Packmol initial.f90 lines 362-427
@@ -702,190 +596,5 @@ fn random_angle_for_type(itype: usize, axis: usize, sys: &PackContext, rng: &mut
         (center - half_width) + 2.0 * uniform01(rng) * half_width
     } else {
         TWO_PI * uniform01(rng)
-    }
-}
-
-// ── install_simbox_and_grid ────────────────────────────────────────────────
-
-/// Install the resolved simulation box and cell grid on the context and bin
-/// the fixed atoms — stage-② infrastructure shared by [`initial`] and the
-/// solver dispatch (a solver that skips `initial` still needs a populated
-/// grid for the shared-objective evaluation).
-///
-/// Extracted verbatim from `initial` (Packmol initial.f90 lines 272-317);
-/// behavior-preserving.
-pub(crate) fn install_simbox_and_grid(
-    sys: &mut PackContext,
-    simbox: SimBox,
-    radmax: F,
-    discale: F,
-    free_atoms: usize,
-) {
-    sys.simbox = simbox;
-    let periodic = sys.simbox.pbc();
-
-    let cell_side = if radmax > 0.0 {
-        discale * 1.01 * radmax
-    } else {
-        1.0
-    };
-    log::debug!("setting up cell grid (cell_side={cell_side:.4})");
-    // Raw grid resolution: one cell per `cell_side` along each lattice
-    // direction. Sized from plane distances rather than edge lengths, which is
-    // what keeps cells at least `cell_side` wide once the cell is tilted.
-    let raw = CellGrid::for_cutoff(&sys.simbox, cell_side)
-        .celldim()
-        .map(|d| d as usize);
-    // Cap the total cell count. With no spatial constraint the fallback box is
-    // ±`sidemax` (default 1000 Å) wide, which drives the raw grid to ~10⁹ cells
-    // and OOMs `resize_cell_arrays` (each cell costs ~120 B across the cell
-    // arrays). There is no benefit to having far more cells than atoms, so the
-    // budget scales with `ntotat` under a hard ceiling. Coarser cells only slow
-    // the neighbor search — they never change the packing result.
-    let max_total_cells = sys.ntotat.max(1).saturating_mul(64).clamp(1 << 16, 1 << 22);
-    let raw_total = raw[0].saturating_mul(raw[1]).saturating_mul(raw[2]);
-    let shrink = if raw_total > max_total_cells {
-        (raw_total as f64 / max_total_cells as f64).cbrt()
-    } else {
-        1.0
-    };
-    let dims = raw.map(|raw_k| ((raw_k as f64 / shrink).floor() as u32).max(1));
-    sys.grid = CellGrid::with_dims(dims, periodic);
-    log::debug!("celldim={:?}  periodic={:?}", sys.grid.celldim(), periodic);
-
-    sys.resize_cell_arrays();
-
-    // Add fixed atoms to latomfix (Packmol lines 303-318)
-    for icart in free_atoms..sys.ntotat {
-        let pos = sys.xcart[icart];
-        let icell = sys.grid.cell_of(&sys.simbox, pos);
-        if sys.latomfix[icell] == NONE_IDX {
-            sys.fixed_cells.push(icell);
-        }
-        sys.latomnext[icart] = sys.latomfix[icell];
-        sys.latomfix[icell] = icart as u32;
-    }
-}
-
-/// Derive `radmax` and the free-atom count from the context, then install
-/// the resolved cell and its grid — the shared "box and its cell grid"
-/// prelude for every stage that hands `run` an already-resolved [`SimBox`]
-/// (growth, lattice growth, and a GENCAN stage that continues from existing
-/// placements).
-///
-/// The coverage scale is [`coverage_radmax`], the same derivation
-/// [`initial`] uses — there is one answer to "how wide must a cell be", and
-/// both entries into the grid read it from the same place.
-pub(crate) fn install_resolved_cell(sys: &mut PackContext, cell: &SimBox, discale: F) {
-    let radmax = coverage_radmax(sys);
-    let free_atoms = sys.ntotat - sys.nfixedat;
-    install_simbox_and_grid(sys, cell.clone(), radmax, discale, free_atoms);
-}
-
-/// The distance the cell grid has to cover: the largest **diameter** among
-/// the unscaled packing radii (Packmol's `radmax`, `packmol.f90` 532-534).
-///
-/// Two properties, both load-bearing:
-///
-/// - **Diameter, not radius.** The pair kernel interacts out to
-///   `radius_i + radius_j` on radii already multiplied by `discale`, so the
-///   reach is `2 · discale · max(radius_ini)` and the cell side
-///   (`discale · 1.01 · radmax`) covers it with 1% to spare. Sized from the
-///   radius instead, the side is half the reach and a `±1` stencil never
-///   enumerates the pairs in between — the objective then reports a clean
-///   structure that overlaps.
-/// - **`radius_ini`, not `radius`.** `radius` is GENCAN's transient working
-///   copy, rescaled at every phase start, so reading it would size the grid
-///   from whatever the previous stage happened to leave behind.
-pub(crate) fn coverage_radmax(sys: &PackContext) -> F {
-    sys.radius_ini
-        .iter()
-        .copied()
-        .map(|r| 2.0 * r)
-        .fold(0.0 as F, F::max)
-}
-
-#[cfg(test)]
-mod grid_coverage_tests {
-    //! The cell grid must cover the pair kernel's reach.
-    //!
-    //! A `±1` stencil finds every pair closer than one cell side, so the side
-    //! has to be at least the largest interacting distance — `2 · discale ·
-    //! max(radius_ini)`, since the kernel's cutoff is `radius_i + radius_j` on
-    //! radii already scaled by `discale`. A grid sized from the *radius*
-    //! instead of the *diameter* is half that, and the pairs in between are
-    //! not merely found late: they are never enumerated, so the objective
-    //! reports a clean structure that overlaps.
-
-    use super::install_resolved_cell;
-    use crate::objective::compute_f;
-    use crate::{F, PackContext};
-    use molrs::spatial::simbox::SimBox;
-    use molrs::types::F3;
-
-    const DISCALE: F = 1.1;
-
-    /// Two single-atom molecules `dx` apart on the x axis in a 20 Å free box,
-    /// with the working radius already scaled by `discale` (what a phase
-    /// start leaves behind).
-    fn two_atoms(dx: F) -> (PackContext, Vec<F>) {
-        let mut sys = PackContext::new(2, 2, 1);
-        sys.ntype_with_fixed = 1;
-        sys.nmols = vec![2];
-        sys.natoms = vec![1];
-        sys.idfirst = vec![0];
-        sys.comptype = vec![true];
-        sys.coor = vec![[0.0; 3]; 2];
-        sys.radius_ini = vec![1.0; 2];
-        sys.radius = vec![DISCALE; 2];
-        sys.fscale = vec![1.0; 2];
-        sys.ibmol = vec![0, 1];
-        sys.iratom_offsets = vec![0, 0, 0];
-        sys.sync_atom_props();
-
-        let cell = SimBox::cube(20.0, F3::zeros(3), [false; 3]).expect("box");
-        install_resolved_cell(&mut sys, &cell, DISCALE);
-
-        // Placed off the cell boundary so the pair straddles two cell widths
-        // under the under-sized grid.
-        let x = vec![
-            1.1,
-            10.0,
-            10.0,
-            1.1 + dx,
-            10.0,
-            10.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ];
-        (sys, x)
-    }
-
-    #[test]
-    fn an_overlapping_pair_two_cells_apart_is_still_seen() {
-        // Contact is `radius_i + radius_j` = 2.2 Å; 2.15 Å is an overlap, and
-        // it is further apart than the radius-sized cell (1.11 Å), so only a
-        // diameter-sized grid enumerates it.
-        let (mut sys, x) = two_atoms(2.15);
-        assert!(
-            compute_f(&x, &mut sys) > 0.0,
-            "a 2.15 Å pair inside a 2.2 Å contact must be found: the grid has \
-             to cover the kernel's reach, not half of it",
-        );
-    }
-
-    #[test]
-    fn a_pair_beyond_contact_stays_free() {
-        // The complement: coverage is not an excuse to invent a penalty.
-        let (mut sys, x) = two_atoms(2.25);
-        assert_eq!(
-            compute_f(&x, &mut sys),
-            0.0,
-            "2.25 Å is outside the 2.2 Å contact — no pair term is owed",
-        );
     }
 }

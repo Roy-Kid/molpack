@@ -282,7 +282,9 @@ fn write_xyz(
         .frame
         .get("atoms")
         .ok_or("result has no atoms block")?;
-    let elements = atoms.get_string("element");
+    let elements = atoms
+        .get("element")
+        .and_then(molrs::store::block::Column::as_string);
 
     let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
     writeln!(out, "{}", positions.len())?;

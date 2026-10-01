@@ -247,7 +247,8 @@ impl OverlapField {
     /// `p` is a lab-frame position in Å. `excluded` lists same-molecule
     /// template atom indices held at template geometry (sorted). `hard_scale`
     /// is dimensionless: `1.0` is full declared contact (`radius_i + radius_j`);
-    /// the growth driver walks it down by 0.97 per softening rung to
+    /// the growth driver walks it down by
+    /// [`GrowConfig::SOFTEN_RUNG`](crate::grow::config::GrowConfig::SOFTEN_RUNG) per softening rung to
     /// `min_hard_scale` (default 0.8, Auhl's 0.8 × σ floor, where σ is the
     /// excluded-volume / bead diameter) only when a placement would otherwise
     /// dead-end, and reports how often it had to. For a different-molecule

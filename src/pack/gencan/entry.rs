@@ -6,9 +6,9 @@ use crate::entry::result::Placements;
 use crate::entry::setup::CellDecl;
 use crate::entry::{PackSettings, State};
 use crate::error::PackError;
-use crate::gencan::solver::{GencanSettings, GencanStage};
 use crate::handler::{EarlyStopHandler, Handler};
 use crate::optimizer::OptimizerBinding;
+use crate::pack::gencan::solver::{GenCanStage, GencanSettings};
 use crate::pipeline::{EngineSetup, PackEngine, Pipeline, StageFactory};
 use crate::stage::Stage;
 use crate::target::Target;
@@ -201,7 +201,7 @@ impl StageFactory for GenCanPack {
             discale: s.discale(),
             seed: s.seed(),
         };
-        let stage = GencanStage::new(
+        let stage = GenCanStage::new(
             gencan,
             setup.maxmove_per_type.to_vec(),
             setup.cell.clone(),

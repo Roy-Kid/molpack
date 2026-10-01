@@ -37,8 +37,8 @@ use std::fmt;
 
 use molrs::types::F;
 
-use crate::constraints::EvalMode;
 use crate::context::{PackContext, RigidView};
+use crate::eval::EvalMode;
 use crate::numerics::DEFAULT_SCALE2;
 
 /// The shape of the placements a [`PackState`] currently holds.

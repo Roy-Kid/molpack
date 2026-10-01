@@ -26,7 +26,7 @@
 //! commit) drives `retract_depth` and floor-level `force_due`;
 //! `deadends_total` with `rungs_earned` is the cumulative watermark that
 //! `rung_due` reads to earn a softening rung (one rung multiplies the
-//! dimensionless hard-core scale by 0.97). The driver takes at most one
+//! dimensionless hard-core scale by [`GrowConfig::SOFTEN_RUNG`]). The driver takes at most one
 //! rung per round even when two chains earn one in the same round, because
 //! the rung is the driver's global step, not a per-chain one.
 //! [`StageOutcome::degraded`](crate::StageOutcome::degraded) counts
@@ -48,7 +48,8 @@ use molrs::types::F;
 use crate::context::pack_state::evaluate_unscaled;
 use crate::context::{PackState, Placed};
 use crate::error::PackError;
-use crate::grow::config::{GrowConfig, GrowError};
+use crate::grow::GrowError;
+use crate::grow::config::GrowConfig;
 use crate::grow::field::{BlockKind, OverlapField};
 use crate::grow::internal::InternalTree;
 use crate::grow::moves::{
@@ -156,7 +157,7 @@ impl Stage for GrowStage {
         // See `install_resolved_cell` for why `radmax` reads `radius_ini`.
         if let Some((cell, discale)) = &self.cell {
             let sys = state.ctx_mut();
-            crate::initial::install_resolved_cell(sys, cell, *discale);
+            crate::context::grid::install_resolved_cell(sys, cell, *discale);
         }
 
         let (sys, x) = state.rigid_split_mut();
@@ -393,7 +394,7 @@ impl Stage for GrowStage {
                 ) && !rung_this_round
                     && hard_scale > min_hard_scale
                 {
-                    hard_scale = (hard_scale * 0.97).max(min_hard_scale);
+                    hard_scale = (hard_scale * GrowConfig::SOFTEN_RUNG).max(min_hard_scale);
                     rung_this_round = true;
                     chains[c].rungs_earned += 1;
                     degraded += 1;

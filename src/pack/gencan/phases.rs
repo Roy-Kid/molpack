@@ -2,25 +2,24 @@
 //!
 //! Free functions pulled out of the packer main loop (phases A.4.1-A.4.3)
 //! and moved beside the optimizer they drive (engine-entry-split): the
-//! stage ([`super::solver::GencanStage`]) owns the phase loop, these own
-//! one phase and one iteration.
+//! stage owns the phase loop, these own one phase and one iteration.
+//! Step reports use [`super::STAGE_NAME`], the same string the stage reports.
 
 use molrs::types::F;
 use rand::rngs::SmallRng;
 
-use crate::constraints::EvalMode;
 use crate::context::PackContext;
+use crate::eval::EvalMode;
 // The unscaled verdict is a shared primitive owned by the context layer, not
 // by this stage: growth evaluates the same way, and the pipeline layer must
 // not import `gencan/`.
 use crate::context::pack_state::evaluate_unscaled;
-use crate::gencan::solver::GencanStage;
-use crate::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::handler::{Handler, PhaseInfo, PhaseReport, StageInfo, StepInfo};
-use crate::initial::SwapState;
-use crate::movebad::{MoveBadConfig, movebad};
 use crate::numerics::objective_small_floor;
 use crate::optimizer::{ResolvedBinding, run_optimizer_bindings};
+use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
+use crate::pack::initial::SwapState;
+use crate::pack::movebad::{MoveBadConfig, movebad};
 
 /// Outcome of one main-loop iteration inside a packing phase.
 ///
@@ -123,7 +122,7 @@ pub fn run_iteration(
             stage: StageInfo {
                 index: 0,
                 total: 1,
-                name: GencanStage::NAME,
+                name: super::STAGE_NAME,
             },
             loop_idx,
             max_loops,

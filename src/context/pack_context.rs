@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use crate::constraints::{Constraints, EvalMode, EvalOutput};
 use crate::restraint::{AtomRestraint, Restraint};
 use molrs::Element;
 use molrs::spatial::neighbors::CellGrid;
@@ -10,6 +9,7 @@ use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
 use ndarray::array;
 
+pub use super::geometry::GeometryKey;
 use super::work_buffers::WorkBuffers;
 
 /// `flags` bit for a fixed-structure atom inside [`AtomProps`].
@@ -71,23 +71,9 @@ pub struct AtomProps {
 pub const ATOM_PROPS_SIZE: usize = 40;
 const _ATOM_PROPS_IS_40_BYTES: [(); ATOM_PROPS_SIZE] = [(); std::mem::size_of::<AtomProps>()];
 
-/// Identity of the packing geometry — the cell partition plus the lattice it
-/// partitions. Compared by the evaluation cache to decide whether a previous
-/// cell assignment is still valid.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub struct GeometryKey {
-    pub celldim: [u32; 3],
-    pub pbc: [bool; 3],
-    pub h: [F; 9],
-    pub origin: [F; 3],
-}
-
 /// Full runtime context for one packing execution.
 /// All arrays are 0-based; Fortran 1-based arrays are shifted by -1.
 pub struct PackContext {
-    // ---- Constraints facade ----
-    pub constraints: Constraints,
-
     // ---- Atom Cartesian coordinates (updated every function evaluation) ----
     /// Current Cartesian positions: `xcart[icart]` = `[x, y, z]`. Size: ntotat.
     pub xcart: Vec<[F; 3]>,
@@ -305,7 +291,6 @@ impl PackContext {
             "ntotat={ntotat} must fit in u32 (< NONE_IDX)"
         );
         Self {
-            constraints: Constraints,
             xcart: vec![[0.0; 3]; ntotat],
             elements: vec![None; ntotat],
             coor: Vec::new(),
@@ -366,13 +351,6 @@ impl PackContext {
             ncf: 0,
             ncg: 0,
         }
-    }
-
-    /// Unified constraints evaluation entrypoint.
-    #[inline]
-    pub fn evaluate(&mut self, x: &[F], mode: EvalMode, gradient: Option<&mut [F]>) -> EvalOutput {
-        let constraints = self.constraints;
-        constraints.evaluate(x, self, mode, gradient)
     }
 
     /// Resize cell list arrays after ncells is set.

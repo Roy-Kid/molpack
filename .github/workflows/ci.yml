@@ -8,10 +8,18 @@ on:
   workflow_call:
   workflow_dispatch:
 
-# Pin sibling molrs to the same minor line as Cargo.toml / python/pyproject.toml
-# [tool.tox] (0.15). Bump together when raising molcrafts-molrs.
+# Pin the 0.15 minor line named by Cargo.toml / python/pyproject.toml.
+# v0.15.0 is not tagged (MolCrafts/molrs latest tag is v0.14.0) and
+# MolCrafts/molpy@dev still requires molrs >=0.14,<0.15. Until those
+# land, CI checks out the open 0.15 heads:
+#   Roy-Kid/molrs  feat/cgsmiles         9d0ea7d9
+#   Roy-Kid/molpy  ci/narrow-gitignore   724c692
+# Switch the four values back to MolCrafts/* and v0.15.0 when the tag exists.
 env:
-  MOLRS_GIT_REF: v0.15.0
+  MOLRS_GIT_REPOSITORY: Roy-Kid/molrs
+  MOLRS_GIT_REF: feat/cgsmiles
+  MOLPY_GIT_REPOSITORY: Roy-Kid/molpy
+  MOLPY_GIT_REF: ci/narrow-gitignore
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
 
@@ -25,14 +33,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: MolCrafts/molrs
+          repository: ${{ env.MOLRS_GIT_REPOSITORY }}
           ref: ${{ env.MOLRS_GIT_REF }}
           path: molrs
       # `ty check` walks examples/, which import molpy (typecheck group).
       - uses: actions/checkout@v6
         with:
-          repository: MolCrafts/molpy
-          ref: dev
+          repository: ${{ env.MOLPY_GIT_REPOSITORY }}
+          ref: ${{ env.MOLPY_GIT_REF }}
           path: molpy
       - uses: actions/checkout@v6
         with:
@@ -74,7 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: MolCrafts/molrs
+          repository: ${{ env.MOLRS_GIT_REPOSITORY }}
           ref: ${{ env.MOLRS_GIT_REF }}
           path: molrs
       - uses: actions/checkout@v6
@@ -106,13 +114,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: MolCrafts/molrs
+          repository: ${{ env.MOLRS_GIT_REPOSITORY }}
           ref: ${{ env.MOLRS_GIT_REF }}
           path: molrs
       - uses: actions/checkout@v6
         with:
-          repository: MolCrafts/molpy
-          ref: dev
+          repository: ${{ env.MOLPY_GIT_REPOSITORY }}
+          ref: ${{ env.MOLPY_GIT_REF }}
           path: molpy
       - uses: actions/checkout@v6
         with:

@@ -607,7 +607,8 @@ fn report(
     if let Some(elem) = result
         .frame
         .get("atoms")
-        .and_then(|a| a.get_string("element"))
+        .and_then(|a| a.get("element"))
+        .and_then(molrs::store::block::Column::as_string)
     {
         let names: Vec<String> = elem.iter().take(na).map(|s| s.to_string()).collect();
         print_closest_scored(&pos[..na], bonds, &names, na);
@@ -687,8 +688,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let na = frame.get("atoms").and_then(|a| a.nrows()).unwrap_or(0);
     let bonds: Vec<(usize, usize)> = {
         let b = frame.get("bonds").expect("template bonds");
-        let i = b.get_uint("atomi").expect("bonds.atomi");
-        let j = b.get_uint("atomj").expect("bonds.atomj");
+        let i = b
+            .get("atomi")
+            .and_then(molrs::store::block::Column::as_uint)
+            .expect("bonds.atomi");
+        let j = b
+            .get("atomj")
+            .and_then(molrs::store::block::Column::as_uint)
+            .expect("bonds.atomj");
         i.iter()
             .zip(j.iter())
             .map(|(&a, &c)| (a as usize, c as usize))
@@ -696,7 +703,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let m_chain: F = frame
         .get("atoms")
-        .and_then(|a| a.get_string("element"))
+        .and_then(|a| a.get("element"))
+        .and_then(molrs::store::block::Column::as_string)
         .map(|e| {
             e.iter()
                 .filter_map(|s| {
@@ -713,7 +721,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let l = (total_g / density * 1e24).cbrt();
     let tmpl_elem: Vec<String> = frame
         .get("atoms")
-        .and_then(|a| a.get_string("element"))
+        .and_then(|a| a.get("element"))
+        .and_then(molrs::store::block::Column::as_string)
         .map(|e| e.iter().map(|s| s.to_string()).collect())
         .unwrap_or_default();
     let tmpl_pos: Vec<[F; 3]> = frame
@@ -739,7 +748,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let h_idx: Vec<usize> = frame
         .get("atoms")
-        .and_then(|a| a.get_string("element"))
+        .and_then(|a| a.get("element"))
+        .and_then(molrs::store::block::Column::as_string)
         .map(|e| {
             e.iter()
                 .enumerate()

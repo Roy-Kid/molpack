@@ -41,7 +41,7 @@ pub enum PackError {
     /// packing.
     Grow {
         target: usize,
-        source: crate::grow::GrowError,
+        source: crate::grow_error::GrowError,
     },
     /// `with_density` combined with an explicit box or cell — the two are
     /// competing definitions of the same volume.

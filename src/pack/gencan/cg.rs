@@ -1,7 +1,7 @@
 //! Conjugate Gradient inner solver for the Truncated Newton direction.
 //! Exact algorithmic port of `cg` from `gencan.f`.
 
-use crate::constraints::EvalMode;
+use crate::eval::EvalMode;
 use crate::numerics::{near_zero_norm_floor, positive_norm_floor, residual_small_floor};
 use crate::objective::Objective;
 use molrs::types::F;
@@ -62,6 +62,8 @@ impl CgScratch {
 
 pub struct CgResult {
     pub iter: usize,
+    /// Model value at the CG exit. The GENCAN loop keeps `iter` and `inform`.
+    #[allow(dead_code)]
     pub q: F,
     pub inform: i32,
     /// Boundary info returned when `inform == 2` (box boundary reached).

@@ -13,9 +13,10 @@
 //! * `result.rs` — [`State`] and the verbatim placement solution it
 //!   carries, which is what makes one run continuable from another.
 //!
-//! What is deliberately *not* here: the entries themselves — `GenCanPack`
-//! lives with GENCAN (`crate::gencan`), `CbmcGrow` and `LatticeGrow` with
-//! growth (`crate::grow`) — and the lifecycle that drives them, which
+//! What is deliberately *not* here: the entries themselves — [`GenCanPack`](crate::GenCanPack)
+//! lives with the rigid-body family, [`CbmcGrow`](crate::CbmcGrow) and
+//! [`LatticeGrow`](crate::LatticeGrow) with
+//! growth — and the lifecycle that drives them, which
 //! belongs to the type that owns it, [`Pipeline`](crate::Pipeline). This
 //! module names neither: settings and space are read by the lifecycle, they
 //! do not run it. The dependency arrow points one way only.

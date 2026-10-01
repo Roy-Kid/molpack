@@ -79,7 +79,8 @@ impl CbmcGrow {
         self
     }
     /// Cumulative dead ends on a chain before the hard core softens by one rung
-    /// (one rung multiplies the dimensionless hard-core scale by 0.97).
+    /// (one rung multiplies the dimensionless hard-core scale by
+    /// [`GrowConfig::SOFTEN_RUNG`](crate::grow::config::GrowConfig::SOFTEN_RUNG)).
     ///
     /// Forwards to [`GrowConfig::with_soften_after`]. The clock is **cumulative**
     /// dead ends on that chain (`deadends_total` versus the `rungs_earned`
@@ -100,7 +101,8 @@ impl CbmcGrow {
     ///
     /// Forwards to [`GrowConfig::with_min_hard_scale`]. `1.0` is full declared
     /// contact (`radius_i + radius_j`); the ladder walks the scale down by
-    /// 0.97 per rung to this floor (default 0.8, Auhl's 0.8σ floor, where σ
+    /// [`GrowConfig::SOFTEN_RUNG`](crate::grow::config::GrowConfig::SOFTEN_RUNG)
+    /// per rung to this floor (default 0.8, Auhl's 0.8σ floor, where σ
     /// is the excluded-volume / bead diameter).
     pub fn with_min_hard_scale(mut self, scale: F) -> Self {
         self.config = self.config.with_min_hard_scale(scale);
@@ -152,7 +154,8 @@ impl StageFactory for CbmcGrow {
         // the matching cell grid) at the top of its own run.
         let stage = GrowStage::from_targets(setup.targets, &self.config, setup.settings.seed())
             .map_err(|(target, source)| PackError::Grow { target, source })?;
-        let cell = validate_grow_cell(setup.cell.clone(), 0)?;
+        let cell = validate_grow_cell(setup.cell.clone())
+            .map_err(|source| PackError::Grow { target: 0, source })?;
         Ok(vec![Box::new(
             stage.with_resolved_cell(cell, setup.settings.discale()),
         )])

@@ -98,10 +98,10 @@ let pushed = GenCanPack::new()
 // Fixed matrix: freeze the first result, pack new species around it.
 let result = GenCanPack::new()
     .with_seed(42)
-    .run(&[Target::fixed_from(&pushed), solvent], 200)?;
+    .run(&[Target::fixed_from(&pushed.frame), solvent], 200)?;
 ```
 
 `GenCanPack::with_restart(&result)` carries the placement solution over
-verbatim (bitwise — no frame round-trip); `Target::fixed_from(&result)`
-wraps a whole `State` as one fixed target with its coordinates kept
+verbatim (bitwise — no frame round-trip); `Target::fixed_from(&result.frame)`
+wraps that frame as one fixed target with its coordinates kept
 verbatim.

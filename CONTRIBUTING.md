@@ -25,9 +25,9 @@ sibling layout above everything resolves automatically.
 **Version pins:** path molrs / PyPI `molcrafts-molrs` track
 the **0.15.*** minor line (see `Cargo.toml`, `python/pyproject.toml` `[tool.tox]`,
 and `MOLRS_GIT_REF` in `.github/workflows/ci.yml`). Patch may differ; only
-major.minor must match. Keep the sibling molrs clone on that minor line
-(`git checkout v0.15.x` or the matching release branch). The Python wheel
-checks this on ``import molpack`` — a molrs minor mismatch is an
+major.minor must match. `v0.15.0` is not tagged yet; CI checks out the 0.15
+heads named in that workflow. Keep the sibling molrs clone on that minor line.
+The Python wheel checks this on ``import molpack`` — a molrs minor mismatch is an
 ``ImportError``, not a later FFI segfault.
 
 **First-time setup:**

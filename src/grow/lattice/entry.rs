@@ -101,7 +101,8 @@ impl StageFactory for LatticeGrow {
         // the matching cell grid) at the top of its own run.
         let stage = LatticeStage::from_targets(setup.targets, &self.config, setup.settings.seed())
             .map_err(|(target, source)| PackError::Grow { target, source })?;
-        let cell = validate_grow_cell(setup.cell.clone(), 0)?;
+        let cell = validate_grow_cell(setup.cell.clone())
+            .map_err(|source| PackError::Grow { target: 0, source })?;
         Ok(vec![Box::new(
             stage.with_resolved_cell(cell, setup.settings.discale()),
         )])

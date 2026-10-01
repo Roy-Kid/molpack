@@ -267,7 +267,7 @@ Built-ins: [`LammpsLogHandler`](crate::LammpsLogHandler),
 ### Which stage a callback came from
 
 A **stage** is one packing algorithm behind the crate's packing seam — the
-[`Stage`](crate::Stage) trait, whose implementors are `GencanStage`,
+[`Stage`](crate::Stage) trait, whose implementors are `GenCanStage`,
 `GrowStage` and `LatticeStage`; [`extending`](crate::extending) walks through
 writing one. Every `StepInfo` names the stage that emitted it in `info.stage`,
 a [`StageInfo`](crate::handler::StageInfo) with three fields: `index` (0-based
@@ -441,7 +441,7 @@ A [`Target`](crate::Target) describes one molecule type:
 - Which atoms are hydrogens for lattice growth (`with_hydrogens`; default
   element symbol `H`).
 - Optionally built from a previous run's output as one fixed obstacle
-  ([`Target::fixed_from(&result)`](crate::Target::fixed_from)) — the
+  ([`Target::fixed_from`](crate::Target::fixed_from) on `&result.frame`) — the
   chaining primitive for staged packs.
 
 The packing algorithm is *not* a target property: you pick it by picking
@@ -484,7 +484,7 @@ entry and feed its output to the second as a fixed matrix:
 
 ```text
 let grown = CbmcGrow::new(prior).with_density(0.9).run(&[chain], 60)?;
-let full  = GenCanPack::new().run(&[Target::fixed_from(&grown), solvent], 200)?;
+let full  = GenCanPack::new().run(&[Target::fixed_from(&grown.frame), solvent], 200)?;
 ```
 
 Both entries return the same [`State`](crate::State) —

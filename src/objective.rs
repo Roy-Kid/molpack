@@ -1,14 +1,46 @@
 //! Objective function and gradient computation.
 //! Exact port of `computef.f90`, `computeg.f90`, `fparc.f90`, `gparc.f90`.
 
-use crate::constraints::{EvalMode, EvalOutput};
 use crate::context::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat, eulerrmat_derivatives};
+use crate::eval::{EvalMode, EvalOutput};
 use crate::restraint::GroupCtx;
 use molrs::spatial::simbox::Mic;
 use molrs::types::F;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
+
+impl PackContext {
+    /// Unified objective evaluation entrypoint.
+    #[inline]
+    pub fn evaluate(&mut self, x: &[F], mode: EvalMode, gradient: Option<&mut [F]>) -> EvalOutput {
+        let mut f_total = 0.0;
+        match mode {
+            EvalMode::FOnly => {
+                f_total = compute_f(x, self);
+            }
+            EvalMode::GradientOnly => {
+                if let Some(g) = gradient {
+                    compute_g(x, self, g);
+                } else {
+                    debug_assert!(false, "GradientOnly mode requires gradient buffer");
+                }
+            }
+            EvalMode::FAndGradient | EvalMode::RestMol => {
+                if let Some(g) = gradient {
+                    f_total = compute_fg(x, self, g);
+                } else {
+                    debug_assert!(false, "FAndGradient/RestMol mode requires gradient buffer");
+                }
+            }
+        }
+        EvalOutput {
+            f_total,
+            fdist_max: self.fdist,
+            frest_max: self.frest,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 enum ExpandMode {

@@ -1,6 +1,6 @@
 //! Reusable temporary buffers for objective/gradient and movebad paths.
 
-use crate::context::pack_context::GeometryKey;
+use super::geometry::GeometryKey;
 use molrs::types::F;
 
 /// Reusable mutable buffers shared across packing iterations.

@@ -266,7 +266,7 @@ impl PyTarget {
     #[staticmethod]
     fn fixed_from(result: &crate::result::PyState) -> Self {
         Self {
-            inner: molpack::Target::fixed_from(&result.inner),
+            inner: molpack::Target::fixed_from(&result.inner.frame),
         }
     }
 

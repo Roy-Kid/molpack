@@ -432,7 +432,8 @@ mod tests {
     fn hydrogens(frame: &Frame) -> Vec<bool> {
         frame
             .get("atoms")
-            .and_then(|b| b.get_string("element"))
+            .and_then(|b| b.get("element"))
+            .and_then(molrs::store::block::Column::as_string)
             .map(|c| c.iter().map(|e| e.eq_ignore_ascii_case("H")).collect())
             .unwrap_or_default()
     }

@@ -544,7 +544,7 @@ itself — how molecules get from nothing to a non-overlapping arrangement — i
 what the `Stage` seam is for.
 
 A **stage** is one packing algorithm behind four methods. molpack ships three:
-`GencanStage` (rigid-body descent on the shared objective), `GrowStage`
+`GenCanStage` (rigid-body descent on the shared objective), `GrowStage`
 (configurational-bias chain growth) and `LatticeStage` (a self-avoiding walk on
 a diamond lattice). They are peers — no stage reaches into another stage's
 driver — and each is judged afterwards by the same objective, so none of them

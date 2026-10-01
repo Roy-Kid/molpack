@@ -33,23 +33,22 @@ src/
 ├── restraint/          AtomRestraint trait; region.rs (RegionRestraint over molrs Region),
 │                       cell.rs (CellRestraint), collective/, crate-private geometric/ (.inp kernels)
 ├── handler.rs          Handler trait + LogLevel + 4 built-in observers
-├── objective.rs        compute_f / compute_g / compute_fg + Objective impl
+├── objective.rs        compute_f / compute_g / compute_fg + Objective impl + PackContext::evaluate
+├── eval.rs             EvalMode / EvalOutput
+├── outcome.rs          StageOutcome
 ├── context/            PackContext = single owner of mutable packing state
 │   ├── pack_context.rs
 │   ├── pack_state.rs   PackState — context + Placed + RigidView; evaluate_unscaled
 │   ├── rigid_view.rs   RigidView — the 6·ntotmol COM + Euler placement vector
+│   ├── grid.rs         install_resolved_cell / coverage_radmax (diameter)
+│   ├── geometry.rs     GeometryKey — evaluation-cache identity
 │   ├── build.rs        build_context — context + CSR restraint pool from Targets
-│   ├── model.rs        immutable topology + inputs
-│   ├── state.rs        mutable per-iteration state
 │   └── work_buffers.rs scratch arrays (xcart, gxcar, …)
-├── constraints/        EvalMode / EvalOutput facade
-├── gencan/             rigid-body path: entry + bound-constrained optimizer
-│   ├── entry.rs        GenCanPack — the rigid-body engine entry
-│   ├── solver.rs       GencanStage — GENCAN on the Stage seam
-│   ├── phases.rs       run_phase / run_iteration
-│   ├── mod.rs          pgencan / gencan / tn_linesearch
-│   ├── cg.rs           conjugate-gradient inner solve
-│   └── spg.rs          spectral projected gradient fallback
+├── pack/               rigid-body family (crate-private)
+│   ├── gencan/         GenCanPack entry, GenCanStage, pgencan / gencan / linesearch
+│   ├── initial.rs      initial random placement
+│   ├── restmol.rs      single-molecule constraint pre-fit
+│   └── movebad.rs      worst-molecule perturbation heuristic
 ├── stage.rs            Stage seam — the interface every packing algorithm implements
 ├── invariant.rs        Layers (L0–L5 repair-cost ladder) + Invariant trait +
 │                       Violation + RestraintsSatisfied — consumed by combinators.rs::Guarded
@@ -58,16 +57,15 @@ src/
 │   ├── lattice/        LatticeStage — diamond-lattice SAW for melt density
 │   │                   (entry.rs LatticeGrow entry, saw.rs walk,
 │   │                   decorate.rs backbone on sites, config.rs leaf)
-│   ├── config.rs       GrowConfig / GrowError (leaf — no target/entry imports)
+│   ├── config.rs       GrowConfig (leaf — no target/entry imports)
 │   ├── prior.rs        TorsionPrior / AnglePrior + C∞ calibration
 │   ├── internal.rs     template bond graph → internal-coordinate tree
 │   ├── field.rs        OverlapField — cell-listed hard-core / soft-shell probe
 │   ├── driver.rs       GrowStage round loop (seeding, retraction, softening)
 │   └── moves.rs        propose / commit / retract / relax primitives
-├── optimizer/          in-loop conformation optimizers
-├── initial.rs          initial random placement + restmol pre-fit
-├── movebad.rs          worst-molecule perturbation heuristic
-├── euler.rs            Euler angles ↔ rotation matrices
+├── grow_error.rs       GrowError, including lattice-only variants
+├── optimizer/          in-loop conformation optimizers (outside the pack family)
+├── euler.rs            Euler angles ↔ rotation matrices (shared; crate-private)
 ├── assemble.rs         packed coords + targets → topology-complete Frame
 ├── script/             .inp parser + lowering to Targets
 └── bin/molpack/        CLI front-end (cli feature)
@@ -82,16 +80,17 @@ src/
                           │
     ┌────────┬────────┬──┴──────┬──────────┬──────────┐
     ▼        ▼        ▼         ▼          ▼          ▼
-  entry/   target   initial    gencan     movebad    handler
-    │        │                 grow/
-    │        └────────┐         │
-    ▼                 ▼         ▼
-    └───────────► context/PackContext
+  entry/   target    pack/      grow/     handler
+    │        │        (gencan,     (lattice
+    │        │        initial,      is a peer
+    │        │        movebad)      inside)
+    ▼        ▼         │            │
+    └───────────► context/PackContext  (+ grid)
                             │
                             ▼
                        objective.rs   ← hot path
                             │
-                            └── constraints/  (EvalMode facade)
+                            └── eval.rs  (EvalMode / EvalOutput)
 ```
 
 `target` / `template` / `restraint` / `region` are pure data — no driver imports.
@@ -104,7 +103,7 @@ shrank to settings + space + result and imports nothing from `pipeline/` —
 the arrow points one way, `pipeline/` reads `entry/`, never the reverse.
 `objective` is the narrow waist through which all per-atom work flows.
 
-The chain-growth path enters at the same level as `gencan`: a preset's
+The chain-growth path enters at the same level as `pack`: a preset's
 `stages()` ([`StageFactory`](crate::StageFactory)) builds one `Stage` from
 the `stage` seam, [`Pipeline::run`](crate::PackEngine::run) drives it, and
 `grow/` (the `GrowStage`) consumes the same `PackState` and is judged by the
@@ -132,7 +131,7 @@ from the first stage's placements rather than re-placing from scratch. Still
 out of scope: parallel or branching stage graphs (v1 is a linear sequence
 only). For two genuinely independent packs, run each to completion and hand
 the earlier result to the next as a **fixed** obstacle via
-`Target::fixed_from(&result)`.
+`Target::fixed_from(&result.frame)`.
 
 ## Data flow
 
@@ -153,7 +152,7 @@ USER INPUTS                 ─→  Target / PackEngine builders
 
 PER-ITERATION                ─→  evaluate(x, mode, &mut g)
   (inside a stage's own loop —      → expand_molecules: x → xcart
-   GencanStage for the rigid path)  → restraint penalties per atom
+   GenCanStage for the rigid path)  → restraint penalties per atom
   reads f / g via                   → cell list + pair penalties
   &mut dyn Objective                → project gradient back: gxcar → g
                                      returns f_total, fdist, frest
@@ -224,7 +223,7 @@ Every preset's `PackEngine::run` is one line —
 `CbmcGrow::run()` and `LatticeGrow::run()` all resolve to the loop above. It
 lives once, in `src/pipeline/mod.rs`, never duplicated per entry.
 
-### Outer: `GencanStage::run()` (one stage)
+### Outer: `GenCanStage::run()` (one stage)
 
 ```text
 fn run(state, targets, budget, handlers):
@@ -252,7 +251,7 @@ fn run(state, targets, budget, handlers):
 ```
 
 The preamble — box/grid install, seed injection, the `initial()`-vs-push-off
-choice — and the phase loop both live in `GencanStage::run`
+choice — and the phase loop both live in `GenCanStage::run`
 (`src/gencan/solver.rs`); nothing above the stage boundary decides when
 `initial()` (and the `movebad` heuristic it configures) runs. `CbmcGrow`'s
 `GrowStage` (`src/grow/driver.rs`) is a peer stage under the same lifecycle,
@@ -434,7 +433,7 @@ atoms into their regions before pair conflicts matter.
 | Where is the per-atom CSR pool built? | `context/build.rs::build_context` (CSR build loop) |
 | How are `x` ↔ Cartesian coords expanded? | `objective.rs::expand_molecules`, `euler.rs::eulerrmat` |
 | Where is the pair-overlap kernel? | `objective.rs::accumulate_pair_fg_parallel` |
-| What does the initial pre-fit do? | `initial.rs::initial`, `initial.rs::restmol` |
+| What does the initial pre-fit do? | `initial.rs::initial`, `restmol.rs::restmol` |
 | How is precision-based termination tested? | `gencan/mod.rs::packmolprecision` |
 | What does `movebad` do? | `movebad.rs::movebad` |
 | How is torsion MC wired in? | `optimizer/torsion_mc.rs::TorsionMcOptimizer::run`, called from `optimizer/mod.rs::run_optimizer_bindings` |

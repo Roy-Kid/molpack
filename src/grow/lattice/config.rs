@@ -22,6 +22,9 @@ pub(crate) const MAX_BACKTRACK: usize = 20_000;
 /// escape is counted in `degraded` and the run reports honestly).
 pub(crate) const MAX_RESEED: usize = 200;
 
+/// Random lattice sites drawn while looking for a legal seed.
+pub(crate) const SEED_TRIES: usize = 2000;
+
 impl LatticeConfig {
     pub fn new(torsion_prior: TorsionPrior) -> Self {
         Self {

@@ -99,20 +99,20 @@
 //! Precision is fixed at `f64` via `molrs::types::F`.
 
 pub mod assemble;
-pub mod constraints;
 pub mod context;
 pub mod entry;
 pub mod error;
-pub mod euler;
-pub mod gencan;
+pub(crate) mod euler;
+mod eval;
 pub mod grow;
+mod grow_error;
 pub mod handler;
-pub mod initial;
 pub mod invariant;
-pub mod movebad;
 mod numerics;
 pub mod objective;
 pub mod optimizer;
+mod outcome;
+pub(crate) mod pack;
 pub mod pipeline;
 mod random;
 pub mod restraint;
@@ -128,9 +128,8 @@ pub use entry::IntraResidual;
 pub use entry::PackSettings;
 pub use entry::State;
 pub use error::PackError;
-pub use gencan::entry::GenCanPack;
 pub use grow::entry::CbmcGrow;
-pub use grow::lattice::{LatticeConfig, LatticeGrow};
+pub use grow::lattice::LatticeGrow;
 pub use handler::{
     EarlyStopHandler, Handler, LammpsLogHandler, LogLevel, PhaseInfo, PhaseReport, ProgressHandler,
     StepInfo, XYZHandler,
@@ -139,6 +138,7 @@ pub use invariant::{Invariant, Layers, RestraintsSatisfied, Violation};
 pub use molrs::BondDistanceWeights;
 pub use molrs::Element;
 pub use molrs::types::F;
+pub use pack::GenCanPack;
 pub use pipeline::combinators::{OnViolation, Until};
 pub use pipeline::{PackEngine, Pipeline, StageFactory};
 // The in-loop optimizer seam. The trait and its report (molrs core) appear in
@@ -153,8 +153,8 @@ pub use target::{Angle, Axis, CenteringMode, Placement, Target};
 // Custom-objective extension surface. An engine run drives a `dyn Objective`
 // through GENCAN; downstream code that implements a bespoke objective (or wants
 // to evaluate the packing energy/gradient directly) names these at the crate
-// root rather than reaching into the `objective` / `constraints` modules.
-pub use constraints::{Constraints, EvalMode, EvalOutput};
+// root.
+pub use eval::{EvalMode, EvalOutput};
 pub use objective::Objective;
 
 // ────────────────────────────────────────────────────────────────────────────

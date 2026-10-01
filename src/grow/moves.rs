@@ -15,7 +15,7 @@ use rand::rngs::SmallRng;
 
 use crate::context::PackContext;
 use crate::euler::eulerrmat;
-use crate::grow::config::GrowConfig;
+use crate::grow::config::{GrowConfig, crowding_cap};
 use crate::grow::field::{BlockKind, OverlapField, Probe};
 use crate::grow::internal::InternalTree;
 use crate::grow::prior::{AnglePrior, TorsionPrior};
@@ -123,7 +123,7 @@ impl RestraintTable {
     pub(super) fn violated(&self, icart: usize, p: &[F; 3]) -> bool {
         self.data[self.offsets[icart]..self.offsets[icart + 1]]
             .iter()
-            .any(|&r| self.restraints[r].f(p, 1.0, 0.01) > 0.0)
+            .any(|&r| self.restraints[r].f(p, 1.0, crate::numerics::DEFAULT_SCALE2) > 0.0)
     }
 }
 
@@ -215,7 +215,7 @@ pub(super) fn propose(
         SALT_PROPOSE,
     );
     let cfg = &sp.cfg;
-    let cap = 60.0 / cfg.selectivity.max(0.1);
+    let cap = crowding_cap(cfg.selectivity);
 
     let mut trials: Vec<Trial> = Vec::with_capacity(cfg.trials);
     let mut last_err: Option<DeadEnd> = None;
@@ -378,7 +378,7 @@ pub(super) fn commit(
     prop: Proposal,
     hard_scale: F,
 ) -> Result<(), BlockKind> {
-    let cap = 60.0 / sp.cfg.selectivity.max(0.1);
+    let cap = crowding_cap(sp.cfg.selectivity);
     let mut candidates = Vec::with_capacity(1 + prop.alternatives.len());
     candidates.push((prop.atoms, prop.var));
     for t in prop.alternatives {

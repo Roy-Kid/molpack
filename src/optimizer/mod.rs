@@ -10,9 +10,9 @@ use molrs::spatial::simbox::Mic;
 use molrs::store::frame::Frame;
 use molrs::types::F;
 
-use crate::constraints::EvalMode;
 use crate::context::PackContext;
 use crate::euler::eulerrmat;
+use crate::eval::EvalMode;
 use crate::target::centered_coords;
 
 pub mod torsion_mc;
@@ -72,9 +72,8 @@ pub struct OptimizerBinding {
 /// One [`OptimizerBinding`] **borrowed** for the duration of a single run,
 /// with its target names resolved to type indices.
 ///
-/// Public because it appears in the signatures of the public
-/// [`run_iteration`](crate::gencan::phases::run_iteration) /
-/// [`run_phase`](crate::gencan::phases::run_phase) entry points.
+/// It appears in the signatures of the GENCAN phase helpers
+/// `run_iteration` / `run_phase`.
 /// Built by `resolve_bindings` at the start of every run — not constructed
 /// by callers.
 ///

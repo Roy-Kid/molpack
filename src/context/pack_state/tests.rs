@@ -21,8 +21,8 @@ use std::sync::Arc;
 use molrs::types::F;
 
 use super::{PackState, Placed, evaluate_unscaled};
-use crate::constraints::EvalMode;
 use crate::context::{PackContext, RigidView};
+use crate::eval::EvalMode;
 use crate::numerics::DEFAULT_SCALE2;
 use crate::restraint::AtomRestraint;
 use crate::restraint::geometric::InsideBoxRestraint;
