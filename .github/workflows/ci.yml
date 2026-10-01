@@ -2,24 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, dev]
   pull_request:
-    branches: [master, main]
+    branches: [master, dev]
   workflow_call:
   workflow_dispatch:
 
-# Pin the 0.15 minor line named by Cargo.toml / python/pyproject.toml.
-# v0.15.0 is not tagged (MolCrafts/molrs latest tag is v0.14.0) and
-# MolCrafts/molpy@dev still requires molrs >=0.14,<0.15. Until those
-# land, CI checks out the open 0.15 heads:
-#   Roy-Kid/molrs  feat/cgsmiles         9d0ea7d9
-#   Roy-Kid/molpy  ci/narrow-gitignore   724c692
-# Switch the four values back to MolCrafts/* and v0.15.0 when the tag exists.
+# Local builds use the sibling directories. GitHub has two branches, and
+# CI checks out MolCrafts/molrs and MolCrafts/molpy on that same branch.
+# A pull request uses its head branch.
 env:
-  MOLRS_GIT_REPOSITORY: Roy-Kid/molrs
-  MOLRS_GIT_REF: feat/cgsmiles
-  MOLPY_GIT_REPOSITORY: Roy-Kid/molpy
-  MOLPY_GIT_REF: ci/narrow-gitignore
+  MOLRS_GIT_REPOSITORY: MolCrafts/molrs
+  MOLPY_GIT_REPOSITORY: MolCrafts/molpy
+  MOL_GIT_REF: ${{ github.head_ref || github.ref_name }}
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
 
@@ -34,13 +29,13 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: ${{ env.MOLRS_GIT_REPOSITORY }}
-          ref: ${{ env.MOLRS_GIT_REF }}
+          ref: ${{ env.MOL_GIT_REF }}
           path: molrs
       # `ty check` walks examples/, which import molpy (typecheck group).
       - uses: actions/checkout@v6
         with:
           repository: ${{ env.MOLPY_GIT_REPOSITORY }}
-          ref: ${{ env.MOLPY_GIT_REF }}
+          ref: ${{ env.MOL_GIT_REF }}
           path: molpy
       - uses: actions/checkout@v6
         with:
@@ -83,7 +78,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: ${{ env.MOLRS_GIT_REPOSITORY }}
-          ref: ${{ env.MOLRS_GIT_REF }}
+          ref: ${{ env.MOL_GIT_REF }}
           path: molrs
       - uses: actions/checkout@v6
         with:
@@ -115,12 +110,12 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: ${{ env.MOLRS_GIT_REPOSITORY }}
-          ref: ${{ env.MOLRS_GIT_REF }}
+          ref: ${{ env.MOL_GIT_REF }}
           path: molrs
       - uses: actions/checkout@v6
         with:
           repository: ${{ env.MOLPY_GIT_REPOSITORY }}
-          ref: ${{ env.MOLPY_GIT_REF }}
+          ref: ${{ env.MOL_GIT_REF }}
           path: molpy
       - uses: actions/checkout@v6
         with:

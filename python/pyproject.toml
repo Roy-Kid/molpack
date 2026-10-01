@@ -127,7 +127,8 @@ extra-paths = ["examples"]
 
 # Isolated binding tests — prek pre-push + CI call: `tox -c python -e py`
 # Non-editable only: sibling molrs path install + maturin wheel + pytest.
-# Requires ../../molrs on the 0.15.* minor line (CI: MOLRS_GIT_REF in ci.yml).
+# Requires ../../molrs on the 0.15.* minor line.
+# GitHub CI checks out MolCrafts/molrs on the same branch (master or dev).
 [tool.tox]
 requires = ["tox>=4.23"]
 env_list = ["py"]
