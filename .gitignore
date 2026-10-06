@@ -17,7 +17,6 @@ __pycache__/
 .venv/
 dist/
 *.egg-info/
-python/uv.lock
 # pytest-benchmark cache (regenerated on each run)
 .benchmarks/
 
@@ -64,7 +63,6 @@ site/
 
 # Local Claude worktrees (transient)
 .claude/worktrees/
-Cargo.lock
 .tox/
 
 # example outputs

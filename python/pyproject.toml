@@ -132,8 +132,9 @@ extra-paths = ["examples"]
 
 # Isolated binding tests — prek pre-push + CI call: `tox -c python -e py`
 # Non-editable only: sibling molrs path install + maturin wheel + pytest.
-# Requires ../../molrs on the 0.15.* minor line.
-# GitHub CI checks out MolCrafts/molrs on the same branch (master or dev).
+# Requires ../../molrs on the 0.15.* minor line. The hooks and CI both run it
+# in a layout whose ../../molrs is the commit .github/partners.env pins.
+# Both builds are --locked (MATURIN_PEP517_ARGS reaches the molrs wheel).
 [tool.tox]
 requires = ["tox>=4.23"]
 env_list = ["py"]
@@ -170,6 +171,7 @@ pass_env = [
   "SSH_AUTH_SOCK",
   "TERM",
 ]
+set_env = { MATURIN_PEP517_ARGS = "--locked" }
 allowlist_externals = ["maturin"]
 # toxinidir is python/ when config lives here; sibling molrs is ../.. /molrs.
 # Minor-line only: 0.15.* (patch may differ).
@@ -191,7 +193,7 @@ commands_pre = [
     "-c",
     "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,15), v",
   ],
-  ["maturin", "build", "--release", "-o", "{env_tmp_dir}/wheels"],
+  ["maturin", "build", "--release", "--locked", "-o", "{env_tmp_dir}/wheels"],
   [
     "{envpython}",
     "-c",
