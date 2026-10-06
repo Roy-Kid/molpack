@@ -23,8 +23,8 @@ Optional progress and trajectory output are controlled by environment
 variables:
 
 ```bash
-MOLRS_PACK_EXAMPLE_PROGRESS=1 cargo run --release --features io --example pack_mixture
-MOLRS_PACK_EXAMPLE_XYZ=1 cargo run --release --features io --example pack_mixture
+MOLPACK_EXAMPLE_PROGRESS=1 cargo run --release --features io --example pack_mixture
+MOLPACK_EXAMPLE_XYZ=1 cargo run --release --features io --example pack_mixture
 ```
 
 For Packmol-style input files, use the matching [CLI examples](../cli/examples.md).

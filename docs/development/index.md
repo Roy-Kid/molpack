@@ -13,19 +13,21 @@ molpack is a Rust packing engine with three public surfaces:
 - [Architecture](../architecture.md) maps modules, data flow, optimizer loops,
   and the objective-evaluation hot path.
 - [Extending](../extending.md) walks through custom `AtomRestraint`,
-  `Region`, `Handler`, and `Relaxer` implementations.
+  `Region`, and `Handler` implementations, plus binding a custom in-loop
+  optimizer.
 
 ## Validation commands
 
 ```bash
-cargo test -p molcrafts-molpack --lib --tests
-cargo test -p molcrafts-molpack --release --test examples_batch -- --ignored
+cargo test -p molcrafts-molpack --lib --features cli,ff
+cargo test -p molcrafts-molpack --doc --features cli,ff
 cd python
 maturin develop --release
 pytest
 cargo fmt
-cargo clippy -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-The ignored `examples_batch` test runs the canonical Packmol-equivalent
-workloads and is intentionally slower than the fast unit/integration tier.
+Behaviour is tested in `#[cfg(test)]` modules next to the code that owns it;
+molpack has no `tests/` directory, no benchmark suite and no regression
+harness. The whole Rust tier runs in seconds.

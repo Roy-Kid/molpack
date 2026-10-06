@@ -34,6 +34,7 @@ nav = [
     { "Targets" = "python/guide/targets.md" },
     { "Restraints" = "python/guide/restraints.md" },
     { "Packer" = "python/guide/packer.md" },
+    { "Chain Growth" = "python/guide/growth.md" },
     { "Periodic Boundaries" = "python/guide/periodic-boundaries.md" },
     { "Examples" = "python/examples.md" },
     { "API Reference" = "python/api-reference.md" },
@@ -42,7 +43,7 @@ nav = [
     { "Overview" = "rust/index.md" },
     { "Quickstart" = "rust/getting-started.md" },
     { "Restraints and PBC" = "rust/restraints-and-pbc.md" },
-    { "Handlers and Relaxers" = "rust/handlers-relaxers.md" },
+    { "Handlers and Optimizers" = "rust/handlers-optimizers.md" },
     { "Examples" = "rust/examples.md" },
   ] },
   { "Development" = [

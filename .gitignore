@@ -66,3 +66,7 @@ site/
 .claude/worktrees/
 Cargo.lock
 .tox/
+
+# example outputs
+examples/pack_peo/out/
+python/examples/out/

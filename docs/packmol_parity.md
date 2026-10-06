@@ -79,24 +79,23 @@ would silently mis-pack, so the parser rejects them rather than guessing.
 **Determinism**
 
 - Explicit seeds; identical seed values are used for paired Packmol
-  vs molpack runs in the regression suite.
+  vs molpack runs.
 
 ## Verification
 
 ### Batch example validation
 
-`tests/examples_batch.rs` runs all five canonical workloads. Marked
-`#[ignore]` because the run is expensive — invoke explicitly:
+The five canonical workloads ship as runnable programs under `examples/`:
 
 ```bash
-cargo test -p molcrafts-molpack --release --test examples_batch -- --ignored
+cargo run --release --example pack_mixture --features io
 ```
 
-The test asserts:
-
-- atom and molecule counts match the expanded target specs;
-- XYZ output is structurally sound;
-- quantified violation metrics stay within tolerance / precision.
+Each prints the same quantities a parity check needs — atom and molecule
+counts against the expanded target specs, and the violation metrics against
+tolerance / precision. The automated batch harness that used to assert them
+was retired with the rest of the end-to-end suites; the measurement system
+that replaces it is being designed.
 
 ### Violation metrics
 

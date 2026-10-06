@@ -1,53 +1,51 @@
 """molpack — Packmol-grade molecular packing with Python bindings."""
 
-from . import relaxer
 from ._protocols import Handler, Restraint
 from .molpack import (
-    AbovePlaneRestraint,
     Angle,
+    AnglePrior,
     Axis,
-    BelowPlaneRestraint,
+    CbmcGrow,
     CenteringMode,
-    ConflictingPeriodicBoxesError,
     ConstraintsFailedError,
     EmptyMoleculeError,
     ExponentialPlane,
     ExponentialPoint,
     GaussianPlane,
     GaussianPoint,
-    InsideBoxRestraint,
-    InsideSphereRestraint,
+    GenCanPack,
+    IntraResidual,
     InvalidPBCBoxError,
-    LBFGSRelaxer,
+    LatticeGrow,
     MaxIterationsError,
-    Molpack,
     NoTargetsError,
-    OutsideSphereRestraint,
     PackError,
-    PackResult,
+    Pipeline,
     ScriptJob,
+    SelfSeparation,
+    StageInfo,
+    State,
+    StepContext,
     StepInfo,
     TabulatedPlane,
     TabulatedPoint,
     Target,
-    TorsionMcRelaxer,
+    TorsionPrior,
     init_thread_pool,
     load_script,
     num_threads,
     rayon_enabled,
 )
+from .version import MOLRS_MINOR, check_molrs_version, version
 
 __all__ = [
     # Typed values
     "Angle",
     "Axis",
     "CenteringMode",
-    # Restraints
-    "InsideBoxRestraint",
-    "InsideSphereRestraint",
-    "OutsideSphereRestraint",
-    "AbovePlaneRestraint",
-    "BelowPlaneRestraint",
+    # Growth statistics inputs
+    "TorsionPrior",
+    "AnglePrior",
     # Group-level distribution-matching restraints
     "GaussianPlane",
     "GaussianPoint",
@@ -55,14 +53,19 @@ __all__ = [
     "ExponentialPoint",
     "TabulatedPlane",
     "TabulatedPoint",
+    # Group-level separation restraint
+    "SelfSeparation",
     # Core
     "Target",
-    "Molpack",
-    "PackResult",
+    "GenCanPack",
+    "CbmcGrow",
+    "LatticeGrow",
+    "Pipeline",
+    "State",
+    "IntraResidual",
     "StepInfo",
-    # Relaxation-assisted packing (in-loop, per-molecule relaxers)
-    "TorsionMcRelaxer",
-    "LBFGSRelaxer",
+    "StageInfo",
+    "StepContext",
     # Script loader (`.inp` input)
     "ScriptJob",
     "load_script",
@@ -73,8 +76,6 @@ __all__ = [
     # Duck-type protocols
     "Handler",
     "Restraint",
-    # Post-pack whole-system relaxation (LAMMPS via molpy)
-    "relaxer",
     # Errors
     "PackError",
     "ConstraintsFailedError",
@@ -82,5 +83,7 @@ __all__ = [
     "NoTargetsError",
     "EmptyMoleculeError",
     "InvalidPBCBoxError",
-    "ConflictingPeriodicBoxesError",
+    "MOLRS_MINOR",
+    "check_molrs_version",
+    "version",
 ]

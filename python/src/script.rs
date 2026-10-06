@@ -1,8 +1,8 @@
 //! Python binding for the molpack script loader.
 //!
 //! Exposes a single function :func:`load_script` that parses an `.inp`
-//! script and returns a ready-to-run :class:`Molpack` plus target list.
-//! Everything downstream — attaching handlers, running ``pack()``,
+//! script and returns a ready-to-run :class:`GenCanPack` plus target list.
+//! Everything downstream — attaching handlers, running ``run()``,
 //! writing output — stays in Python hands.
 //!
 //! The loader does **not** touch molecule files in Rust. Each
@@ -10,7 +10,7 @@
 //! :mod:`molrs` (``molrs.io.read_pdb`` / ``read_xyz``) but pluggable via the
 //! ``read_frame`` argument. This keeps the PyO3 wheel free of
 //! ``molrs-io`` and lets users plug in their own loader (mdtraj, ASE, …) as
-//! long as it returns a ``molrs.Frame`` / ``molpy.Frame``.
+//! long as it returns a ``molrs.Frame``.
 
 use std::path::PathBuf;
 
@@ -20,8 +20,8 @@ use pyo3::types::PyDict;
 
 use molpack::script::{self, ScriptPlan, StructurePlan};
 
+use crate::entry::PyGenCanPack;
 use crate::helpers::script_error_to_pyerr;
-use crate::packer::PyPacker;
 use crate::target::{PyTarget, target_from_frame};
 
 /// Output of [`load_script`] — four fields bundled as a PyClass so
@@ -29,9 +29,10 @@ use crate::target::{PyTarget, target_from_frame};
 /// tuple-unpacking (``packer, targets, output, nloop = load_script(...)``).
 #[pyclass(name = "ScriptJob", module = "molpack", sequence)]
 pub struct PyScriptJob {
-    /// Packer pre-configured with ``tolerance`` and ``seed`` from the script.
+    /// `GenCanPack` pre-configured with ``tolerance`` / ``seed`` /
+    /// periodic box from the script.
     #[pyo3(get)]
-    pub packer: Py<PyPacker>,
+    pub packer: Py<PyGenCanPack>,
     /// Targets ready to be packed.
     #[pyo3(get)]
     pub targets: Vec<PyTarget>,
@@ -85,8 +86,8 @@ impl PyScriptJob {
 ///     Callable ``(path: str, filetype: str | None) -> Frame`` used to
 ///     load each ``structure`` template. The returned object only needs
 ///     a ``frame["atoms"]`` block exposing ``x`` / ``y`` / ``z`` and an
-///     ``element`` (or ``symbol``) column. Must be a :class:`molrs.Frame` /
-///     ``molpy.Frame``. Defaults to :mod:`molrs`'s ``read_pdb`` /
+///     ``element`` column. Must be a :class:`molrs.Frame` (``molpy.Frame``
+///     is the same class). Defaults to :mod:`molrs`'s ``read_pdb`` /
 ///     ``read_xyz`` dispatched by file extension.
 ///
 /// Returns
@@ -126,12 +127,11 @@ pub fn load_script(
         .map(|sp| build_target(py, sp, plan.filetype.as_deref(), &loader))
         .collect::<PyResult<_>>()?;
 
-    let mut packer = PyPacker::default();
-    packer.tolerance = Some(script_ast.tolerance);
-    packer.seed = script_ast.seed;
-    if let Some(pbc) = script_ast.pbc {
-        packer.periodic_box = Some((pbc.min, pbc.max));
-    }
+    let packer = PyGenCanPack::from_script(
+        Some(script_ast.tolerance),
+        script_ast.seed,
+        script_ast.pbc.map(|pbc| (pbc.min, pbc.max)),
+    );
 
     Ok(PyScriptJob {
         packer: Py::new(py, packer)?,

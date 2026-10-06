@@ -6,17 +6,17 @@
 //! structure protein.pdb
 //!   number 1
 //!   fixed 0. 0. 0. 0. 0. 0.
-//!   center
+//!   centerofmass
 //! end structure
 //! structure water.pdb
-//!   number 1000
+//!   number 16500
 //!   inside sphere 0. 0. 0. 50.
 //! end structure
-//! structure CLA.pdb
+//! structure chloride.pdb
 //!   number 20
 //!   inside sphere 0. 0. 0. 50.
 //! end structure
-//! structure SOD.pdb
+//! structure sodium.pdb
 //!   number 30
 //!   inside sphere 0. 0. 0. 50.
 //! end structure
@@ -24,14 +24,27 @@
 //!
 //! Run with:
 //! ```sh
-//! cargo run -p molrs-pack --example pack_solvprotein --release
+//! cargo run --release --example pack_solvprotein --features io
 //! ```
 
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
-use molpack::{CenteringMode, InsideSphereRestraint, Molpack, ProgressHandler, Target, XYZHandler};
+use molpack::{
+    CenteringMode, F, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target, XYZHandler,
+};
+use std::sync::Arc;
+
 use molrs::io::data::pdb::read_pdb_frame;
+use molrs::spatial::region::Sphere;
+use ndarray::array;
+
+fn inside_sphere(center: [F; 3], radius: F) -> RegionRestraint {
+    RegionRestraint(Arc::new(Sphere::new(
+        array![center[0], center[1], center[2]],
+        radius,
+    )))
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = env_logger::try_init();
@@ -44,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sodium = read_pdb_frame(base.join("sodium.pdb"))?;
     let chloride = read_pdb_frame(base.join("chloride.pdb"))?;
 
-    let sphere = InsideSphereRestraint::new([0.0, 0.0, 0.0], 50.0);
+    let sphere = inside_sphere([0.0, 0.0, 0.0], 50.0);
 
     let protein_target = Target::new(protein, 1)
         .with_name("protein")
@@ -52,29 +65,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .fixed_at([0.0, 0.0, 0.0]);
 
     let water_target = Target::new(water, 16500)
-        .with_restraint(sphere)
+        .with_restraint(sphere.clone())
         .with_name("water");
 
     let sodium_target = Target::new(sodium, 30)
-        .with_restraint(sphere)
+        .with_restraint(sphere.clone())
         .with_name("sodium");
 
     let chloride_target = Target::new(chloride, 20)
         .with_restraint(sphere)
         .with_name("chloride");
 
-    let mut packer = Molpack::new();
-    if std::env::var_os("MOLRS_PACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.with_handler(ProgressHandler::new());
+    let mut packer = GenCanPack::new();
+    if std::env::var_os("MOLPACK_EXAMPLE_PROGRESS").is_some() {
+        packer = packer.with_handler(Box::new(ProgressHandler::new()));
     }
-    if std::env::var_os("MOLRS_PACK_EXAMPLE_XYZ").is_some() {
+    if std::env::var_os("MOLPACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.with_handler(XYZHandler::new(out_dir.join("solvprotein.xyz"), 10));
+        packer = packer.with_handler(Box::new(XYZHandler::new(
+            out_dir.join("solvprotein.xyz"),
+            10,
+        )));
     }
 
     let targets = vec![protein_target, water_target, sodium_target, chloride_target];
-    packer.pack(&targets, 800)?;
+    packer.run(&targets, 800)?;
 
     Ok(())
 }

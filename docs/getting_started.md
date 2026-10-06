@@ -15,32 +15,35 @@ type plus PDB/XYZ I/O.
 
 ## 2. Load or build a template
 
-=== "From a PDB file"
+A **template** is one copy of the molecule you want many of — its atom
+positions and element symbols, in any orientation. molpack takes the template
+as a `molrs.Frame`, the shared MolCrafts container for atomic data, so any
+loader molrs supports will do. Read one from a Protein Data Bank (PDB) file:
 
-    ```python
-    import molrs
+```python
+import molrs
 
-    frame = molrs.io.read_pdb("water.pdb")
-    ```
+frame = molrs.io.read_pdb("water.pdb")
+```
 
-=== "In-memory (no file)"
+Or build one in memory, with no file involved — here a water molecule with the
+oxygen at the origin:
 
-    ```python
-    import molrs
-    import numpy as np
+```python
+import molrs
+import numpy as np
 
-    frame = molrs.Frame.from_dict({
-        "blocks": {
-            "atoms": {
-                "x": np.array([0.00, 0.96, -0.24]),
-                "y": np.array([0.00, 0.00, 0.93]),
-                "z": np.zeros(3),
-                "element": ["O", "H", "H"],
-            }
-        },
-        "meta": {},
-    })
-    ```
+frame = molrs.Frame({
+    "atoms": {
+        "x": np.array([0.00, 0.96, -0.24]),
+        "y": np.array([0.00, 0.00, 0.93]),
+        "z": np.zeros(3),
+        "element": ["O", "H", "H"],
+    }
+})
+```
+
+Coordinates are in ångström (Å) throughout molpack.
 
 ## 3. Define the target
 
@@ -48,12 +51,14 @@ A `Target` is one molecule species plus the number of copies to place. Every
 mobile target needs a spatial restraint:
 
 ```python
-from molpack import InsideBoxRestraint, Target
+import molrs
+from molpack import Target
 
+box = molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])  # a molrs region
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    .with_restraint(box)
 )
 ```
 
@@ -64,13 +69,13 @@ water = (
 ## 4. Pack
 
 ```python
-from molpack import Molpack
+from molpack import GenCanPack
 
 result = (
-    Molpack()
+    GenCanPack()
     .with_tolerance(2.0)
     .with_seed(42)
-    .pack_with_report([water], max_loops=200)
+    .run([water], max_loops=200)
 )
 
 print(result.converged, result.natoms, result.fdist, result.frest)
@@ -84,7 +89,9 @@ packed = result.frame
 | `frest` | Restraint violations |
 | `frame` | Topology-complete packed `molrs.Frame` |
 
-For a frame-only return, use `Molpack().pack([water], max_loops=200)`.
+`GenCanPack` is the rigid-body entry; `CbmcGrow` grows chains instead. Each
+engine runs once — `run()` consumes it, so build a new one per pack. If you
+only want the frame, take `result.frame`.
 
 ## 5. Save
 

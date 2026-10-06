@@ -1,5 +1,5 @@
 name: Feature Request
-description: Propose a new restraint type, region, handler, or API change
+description: Propose a new restraint type, handler, in-loop optimizer, or API change
 labels: ["enhancement"]
 body:
   - type: markdown
@@ -15,10 +15,9 @@ body:
       label: Category
       options:
         - New Restraint type
-        - New Region type
         - New Handler
-        - New Relaxer
-        - API change (Molpack / Target)
+        - New in-loop optimizer
+        - API change (engine entries / Target)
         - Performance
         - Python bindings
         - Documentation

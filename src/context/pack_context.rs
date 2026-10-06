@@ -2,18 +2,15 @@
 
 use std::sync::Arc;
 
-use crate::cell::{cell_ind, icell_to_cell, index_cell};
-use crate::constraints::{Constraints, EvalMode, EvalOutput};
 use crate::restraint::{AtomRestraint, Restraint};
 use molrs::Element;
+use molrs::spatial::neighbors::CellGrid;
+use molrs::spatial::simbox::SimBox;
 use molrs::types::F;
+use ndarray::array;
 
-use super::model::ModelData;
-use super::state::{RuntimeState, RuntimeStateMut};
+pub use super::geometry::GeometryKey;
 use super::work_buffers::WorkBuffers;
-
-/// Index of a restraint assigned to a specific atom.
-pub type RestraintRef = usize;
 
 /// `flags` bit for a fixed-structure atom inside [`AtomProps`].
 pub const ATOM_FLAG_FIXED: u32 = 1 << 0;
@@ -74,46 +71,9 @@ pub struct AtomProps {
 pub const ATOM_PROPS_SIZE: usize = 40;
 const _ATOM_PROPS_IS_40_BYTES: [(); ATOM_PROPS_SIZE] = [(); std::mem::size_of::<AtomProps>()];
 
-/// Neighbor offsets used by `computef.f90` (13 forward neighbors).
-const NEIGHBOR_OFFSETS_F: [(isize, isize, isize); 13] = [
-    (1, 0, 0),
-    (0, 1, 0),
-    (0, 0, 1),
-    (1, -1, 0),
-    (1, 0, -1),
-    (0, 1, -1),
-    (0, 1, 1),
-    (1, 1, 0),
-    (1, 0, 1),
-    (1, -1, -1),
-    (1, -1, 1),
-    (1, 1, -1),
-    (1, 1, 1),
-];
-
-/// Neighbor offsets used by `computeg.f90` (13 forward neighbors, different order).
-const NEIGHBOR_OFFSETS_G: [(isize, isize, isize); 13] = [
-    (1, 0, 0),
-    (0, 1, 0),
-    (0, 0, 1),
-    (0, 1, 1),
-    (0, 1, -1),
-    (1, 1, 0),
-    (1, 0, 1),
-    (1, -1, 0),
-    (1, 0, -1),
-    (1, 1, 1),
-    (1, 1, -1),
-    (1, -1, 1),
-    (1, -1, -1),
-];
-
 /// Full runtime context for one packing execution.
 /// All arrays are 0-based; Fortran 1-based arrays are shifted by -1.
 pub struct PackContext {
-    // ---- Constraints facade ----
-    pub constraints: Constraints,
-
     // ---- Atom Cartesian coordinates (updated every function evaluation) ----
     /// Current Cartesian positions: `xcart[icart]` = `[x, y, z]`. Size: ntotat.
     pub xcart: Vec<[F; 3]>,
@@ -121,7 +81,13 @@ pub struct PackContext {
     pub elements: Vec<Option<Element>>,
 
     // ---- Reference (centered) coordinates ----
-    /// Reference coordinates `coor[idatom]` = `[x, y, z]`. Size: total atoms across all types.
+    /// Reference conformer per **copy**: `coor[icart]` = `[x, y, z]`.
+    ///
+    /// Shares `xcart`'s index space exactly (type-major, copy-major,
+    /// atom-minor, free types then fixed types), so `icart` addresses both.
+    /// Copies of one type start identical; in-loop optimizers
+    /// (module `crate::optimizer`) relax each copy
+    /// independently, after which they diverge. Size: `ntotat`.
     pub coor: Vec<[F; 3]>,
 
     // ---- Radii ----
@@ -178,7 +144,9 @@ pub struct PackContext {
     pub nmols: Vec<usize>,
     /// Number of atoms per type: `natoms[itype]`. 0-based type index.
     pub natoms: Vec<usize>,
-    /// First datum atom index (0-based) for each type: `idfirst[itype]`.
+    /// First atom index (0-based) of each type's first copy: `idfirst[itype]`.
+    /// Base into both [`Self::coor`] and [`Self::xcart`]; copy `imol` of type
+    /// `itype` starts at `idfirst[itype] + imol * natoms[itype]`.
     pub idfirst: Vec<usize>,
     /// Total number of types (free).
     pub ntype: usize,
@@ -206,7 +174,7 @@ pub struct PackContext {
     /// restraints of atom `icart` are in `iratom_data[iratom_offsets[icart]..iratom_offsets[icart+1]]`.
     pub iratom_offsets: Vec<usize>,
     /// Flattened per-atom restraint indices.
-    pub iratom_data: Vec<RestraintRef>,
+    pub iratom_data: Vec<usize>,
     /// Group-level restraints, paired with the (0-based) type they act on:
     /// `(itype, restraint)`. Evaluated once per group in the objective with the
     /// coordinates of all copies of `itype`; the coupled gradient is scattered
@@ -224,15 +192,20 @@ pub struct PackContext {
     pub comptype: Vec<bool>,
 
     // ---- Cell geometry ----
-    pub ncells: [usize; 3],
-    pub cell_length: [F; 3],
-    pub pbc_length: [F; 3],
-    pub pbc_min: [F; 3],
-    /// Per-axis periodicity flags. `pbc_periodic[k] == true` means axis
-    /// `k` wraps in the pair-kernel minimum image and the cell list;
-    /// `false` means the cell list clamps and no wrap is applied. Set
-    /// from restraints that override `AtomRestraint::periodic_box()`.
-    pub pbc_periodic: [bool; 3],
+    /// The packing cell: lattice matrix, origin and per-axis periodicity.
+    ///
+    /// Replaces the axis-aligned `pbc_min` / `pbc_length` pair, so the cell may
+    /// be hexagonal, monoclinic or fully triclinic — the geometry Packmol
+    /// cannot express at all. It is also the single source of truth for the
+    /// minimum image: the pair kernel calls
+    /// [`SimBox::shortest_vector_impl`], which honours `pbc` per axis.
+    pub simbox: SimBox,
+    /// Partition of [`simbox`](Self::simbox) into cells, in fractional space.
+    ///
+    /// Wraps on periodic axes and clamps on non-periodic ones, so an atom
+    /// pushed outside the cell mid-optimisation lands in the nearest edge cell
+    /// instead of on the opposite face.
+    pub grid: CellGrid,
 
     // ---- Linked cell lists ----
     /// `latomfirst[icell]` = first atom index in cell, `NONE_IDX` if empty.
@@ -252,13 +225,25 @@ pub struct PackContext {
     pub fixed_cells: Vec<usize>,
     /// Cells touched during the previous objective/gradient evaluation.
     pub active_cells: Vec<usize>,
-    /// Precomputed 13 forward-neighbor cell indices per cell for `compute_f`.
-    pub neighbor_cells_f: Vec<[usize; 13]>,
-    /// Precomputed 13 forward-neighbor cell indices per cell for `compute_g`.
-    /// The parallel gradient path ([`crate::objective`]) walks this same
-    /// half-stencil — each pair once — accumulating into per-worker scratch
-    /// buffers, so no full 26-neighbor list is needed.
-    pub neighbor_cells_g: Vec<[usize; 13]>,
+    /// Forward-neighbour cells per cell, flattened (CSR): cell `i` owns
+    /// `neighbor_cells[neighbor_start[i]..neighbor_start[i + 1]]`. Read it
+    /// through [`neighbors`](Self::neighbors).
+    ///
+    /// Every unordered pair of adjacent cells appears exactly once across a
+    /// full sweep, so both the objective and the gradient walk this one
+    /// half-stencil and neither needs a full 26-neighbour list.
+    ///
+    /// Storage is variable-length because forwardness is decided by cell
+    /// **index** (`nc > i`), not by a fixed set of 13 offset directions. The
+    /// direction-based scheme Packmol uses double-counts as soon as a periodic
+    /// axis holds two cells — cell 0's `+1` neighbour is cell 1, and cell 1's
+    /// `+1` wraps back to cell 0 — which is common in a thin slab or a
+    /// flat triclinic cell. Per-cell counts then vary from 0 to 26 while the
+    /// total stays at 13 per cell.
+    pub neighbor_cells: Vec<u32>,
+    /// CSR offsets into [`neighbor_cells`](Self::neighbor_cells); length is
+    /// `n_cells + 1`.
+    pub neighbor_start: Vec<u32>,
 
     // ---- State flags ----
     /// If true, skip pair-distance computations (constraints only during init).
@@ -267,10 +252,10 @@ pub struct PackContext {
     pub move_flag: bool,
     /// Run the pair-kernel reductions (`accumulate_pair_f`,
     /// `accumulate_pair_fg`) on rayon. Off by default — parallelism is
-    /// an explicit opt-in via [`Molpack::with_parallel_eval`](crate::Molpack::with_parallel_eval) because the
+    /// an explicit opt-in via [`PackEngine::with_parallel_eval`](crate::PackEngine::with_parallel_eval) because the
     /// crossover is workload-shaped and can't be inferred reliably from
     /// `active_cells.len()`. The flag is stored regardless of the
-    /// `rayon` feature so the `Molpack` API stays the same; when the
+    /// `rayon` feature so the engine API stays the same; when the
     /// feature is off the field is read but the parallel path doesn't
     /// exist and the serial branch runs unconditionally.
     pub parallel_pair_eval: bool,
@@ -289,11 +274,6 @@ pub struct PackContext {
     // ---- Work buffers ----
     pub work: WorkBuffers,
 
-    // ---- Output frame (owned, built incrementally) ----
-    /// Frame that accumulates constant columns (element, mol_id) during init
-    /// and receives position columns at the end of packing.
-    pub frame: molrs::Frame,
-
     // ---- Debug: call counters (zeroed per pgencan call) ----
     ncf: usize,
     ncg: usize,
@@ -302,14 +282,15 @@ pub struct PackContext {
 impl PackContext {
     /// Allocate and zero-initialize all arrays.
     pub fn new(ntotat: usize, ntotmol: usize, ntype: usize) -> Self {
-        let ncells = [1, 1, 1];
-        let ncell_total = ncells[0] * ncells[1] * ncells[2];
+        let simbox =
+            SimBox::cube(1.0, array![0.0, 0.0, 0.0], [false; 3]).expect("unit placeholder cell");
+        let grid = CellGrid::with_dims([1; 3], [false; 3]);
+        let ncell_total = grid.n_cells();
         debug_assert!(
             ntotat < NONE_IDX as usize,
             "ntotat={ntotat} must fit in u32 (< NONE_IDX)"
         );
         Self {
-            constraints: Constraints,
             xcart: vec![[0.0; 3]; ntotat],
             elements: vec![None; ntotat],
             coor: Vec::new(),
@@ -346,11 +327,8 @@ impl PackContext {
             ibmol: vec![0; ntotat],
             fixedatom: vec![false; ntotat],
             comptype: vec![true; ntype],
-            ncells,
-            cell_length: [1.0; 3],
-            pbc_length: [1.0; 3],
-            pbc_min: [0.0; 3],
-            pbc_periodic: [false; 3],
+            simbox,
+            grid,
             latomfirst: vec![NONE_IDX; ncell_total],
             latomnext: vec![NONE_IDX; ntotat],
             latomfix: vec![NONE_IDX; ncell_total],
@@ -359,8 +337,8 @@ impl PackContext {
             empty_cell: vec![true; ncell_total],
             fixed_cells: Vec::new(),
             active_cells: Vec::new(),
-            neighbor_cells_f: vec![[0; 13]; ncell_total],
-            neighbor_cells_g: vec![[0; 13]; ncell_total],
+            neighbor_cells: Vec::new(),
+            neighbor_start: vec![0; ncell_total + 1],
             init1: false,
             move_flag: false,
             parallel_pair_eval: false,
@@ -370,40 +348,14 @@ impl PackContext {
             sizemax: [0.0; 3],
             dmax: vec![0.0; ntype],
             work: WorkBuffers::new(ntotat),
-            frame: molrs::Frame::new(),
             ncf: 0,
             ncg: 0,
         }
     }
 
-    /// Context view for mostly static model data.
-    #[inline]
-    pub fn model(&self) -> ModelData<'_> {
-        ModelData { ctx: self }
-    }
-
-    /// Read-only runtime state view.
-    #[inline]
-    pub fn runtime(&self) -> RuntimeState<'_> {
-        RuntimeState { ctx: self }
-    }
-
-    /// Mutable runtime state view.
-    #[inline]
-    pub fn runtime_mut(&mut self) -> RuntimeStateMut<'_> {
-        RuntimeStateMut { ctx: self }
-    }
-
-    /// Unified constraints evaluation entrypoint.
-    #[inline]
-    pub fn evaluate(&mut self, x: &[F], mode: EvalMode, gradient: Option<&mut [F]>) -> EvalOutput {
-        let constraints = self.constraints;
-        constraints.evaluate(x, self, mode, gradient)
-    }
-
     /// Resize cell list arrays after ncells is set.
     pub fn resize_cell_arrays(&mut self) {
-        let nc = self.ncells[0] * self.ncells[1] * self.ncells[2];
+        let nc = self.grid.n_cells();
         debug_assert!(
             nc < NONE_IDX as usize,
             "ncell_total={nc} must fit in u32 (< NONE_IDX)"
@@ -414,8 +366,6 @@ impl PackContext {
         self.empty_cell = vec![true; nc];
         self.fixed_cells.clear();
         self.active_cells.clear();
-        self.neighbor_cells_f = vec![[0; 13]; nc];
-        self.neighbor_cells_g = vec![[0; 13]; nc];
         self.rebuild_neighbor_cells();
     }
 
@@ -515,6 +465,18 @@ impl PackContext {
         if i < self.atom_props.len() {
             self.atom_props[i].fscale = value;
         }
+    }
+
+    /// Drop the cached Cartesian expansion so the next evaluation rebuilds it.
+    ///
+    /// The cache is keyed on `x` (COM / Euler), `comptype` and the cell
+    /// geometry — **not** on [`coor`](Self::coor). Anything that mutates the
+    /// reference conformers while leaving `x` alone (an in-loop optimizer, say)
+    /// must call this, or the next `evaluate` at the same `x` returns the
+    /// pre-mutation objective and any comparison against it is meaningless.
+    #[inline]
+    pub fn invalidate_geometry_cache(&mut self) {
+        self.work.cached_geometry = None;
     }
 
     /// Toggle atom `i`'s fixed-structure flag and keep the `atom_props`
@@ -683,34 +645,77 @@ impl PackContext {
         self.ncg
     }
 
+    /// Recompute the forward-neighbour table from the cell partition.
+    ///
+    /// Delegates the stencil to [`CellGrid::stencil_forward`], so periodicity,
+    /// small-`celldim` aliasing and deduplication are decided in one place
+    /// rather than re-derived here.
     fn rebuild_neighbor_cells(&mut self) {
-        let (nx, ny, nz) = (self.ncells[0], self.ncells[1], self.ncells[2]);
-        let nc = nx * ny * nz;
+        let nc = self.grid.n_cells();
+        self.neighbor_start.clear();
+        self.neighbor_start.reserve(nc + 1);
+        self.neighbor_cells.clear();
+
+        let mut buf = [0usize; 27];
         for icell in 0..nc {
-            let cell = icell_to_cell(icell, &self.ncells);
-            let (ci, cj, ck) = (cell[0], cell[1], cell[2]);
+            self.neighbor_start.push(self.neighbor_cells.len() as u32);
+            let n = self.grid.stencil_forward(icell, &mut buf);
+            self.neighbor_cells
+                .extend(buf[..n].iter().map(|&c| c as u32));
+        }
+        self.neighbor_start.push(self.neighbor_cells.len() as u32);
+    }
 
-            let mut nbs_f = [0usize; 13];
-            for (idx, &(di, dj, dk)) in NEIGHBOR_OFFSETS_F.iter().enumerate() {
-                let ncell = [
-                    cell_ind(ci as isize + di, nx),
-                    cell_ind(cj as isize + dj, ny),
-                    cell_ind(ck as isize + dk, nz),
-                ];
-                nbs_f[idx] = index_cell(&ncell, &self.ncells);
-            }
-            self.neighbor_cells_f[icell] = nbs_f;
+    /// Forward neighbours of `icell` — see [`neighbor_cells`](Self::neighbor_cells).
+    #[inline(always)]
+    pub fn neighbors(&self, icell: usize) -> &[u32] {
+        let lo = self.neighbor_start[icell] as usize;
+        let hi = self.neighbor_start[icell + 1] as usize;
+        &self.neighbor_cells[lo..hi]
+    }
 
-            let mut nbs_g = [0usize; 13];
-            for (idx, &(di, dj, dk)) in NEIGHBOR_OFFSETS_G.iter().enumerate() {
-                let ncell = [
-                    cell_ind(ci as isize + di, nx),
-                    cell_ind(cj as isize + dj, ny),
-                    cell_ind(ck as isize + dk, nz),
-                ];
-                nbs_g[idx] = index_cell(&ncell, &self.ncells);
-            }
-            self.neighbor_cells_g[icell] = nbs_g;
+    /// Forward neighbours of `icell` copied into a caller-owned buffer.
+    ///
+    /// The serial pair loops mutate the context while walking the neighbour
+    /// list, so they cannot hold a borrow of it. Copying into a stack array
+    /// keeps that allocation-free — the same thing the fixed `[usize; 13]`
+    /// table gave for free when it was `Copy`.
+    #[inline(always)]
+    pub fn copy_neighbors(&self, icell: usize, out: &mut [u32; 27]) -> usize {
+        let nbs = self.neighbors(icell);
+        out[..nbs.len()].copy_from_slice(nbs);
+        nbs.len()
+    }
+
+    /// Number of cells along each lattice direction.
+    #[inline(always)]
+    pub fn ncells(&self) -> [usize; 3] {
+        self.grid.celldim().map(|d| d as usize)
+    }
+
+    /// Compact identity of the packing geometry, for the evaluation cache.
+    ///
+    /// Everything the cell list depends on: the partition and the lattice it
+    /// partitions. Comparing this is what lets a repeated evaluation at the
+    /// same coordinates reuse the previous cell assignment.
+    pub fn geometry_key(&self) -> GeometryKey {
+        let h = self.simbox.h_view();
+        let o = self.simbox.origin_view();
+        GeometryKey {
+            celldim: self.grid.celldim(),
+            pbc: self.grid.pbc(),
+            h: [
+                h[[0, 0]],
+                h[[0, 1]],
+                h[[0, 2]],
+                h[[1, 0]],
+                h[[1, 1]],
+                h[[1, 2]],
+                h[[2, 0]],
+                h[[2, 1]],
+                h[[2, 2]],
+            ],
+            origin: [o[0], o[1], o[2]],
         }
     }
 }
@@ -913,5 +918,335 @@ mod atom_props_tests {
         assert_eq!(sys.n_short_radius, pre_n_short);
         assert_eq!(sys.n_fixed_atoms, 3);
         assert_eq!(sys.n_short_radius, 2);
+    }
+}
+
+#[cfg(test)]
+mod neighbor_table_tests {
+    use super::*;
+
+    fn ctx_with_grid(celldim: [u32; 3], pbc: [bool; 3]) -> PackContext {
+        let mut sys = PackContext::new(1, 1, 1);
+        sys.simbox = SimBox::cube(10.0, array![0.0, 0.0, 0.0], pbc).expect("cell");
+        sys.grid = CellGrid::with_dims(celldim, pbc);
+        sys.resize_cell_arrays();
+        sys
+    }
+
+    /// Every unordered pair of adjacent cells appears exactly once, so the
+    /// table holds 13 entries per cell on a fully periodic grid — the same
+    /// total the fixed 13-offset table carried.
+    #[test]
+    fn periodic_grid_holds_thirteen_forward_neighbours_per_cell() {
+        let sys = ctx_with_grid([4, 4, 4], [true; 3]);
+        let n = sys.grid.n_cells();
+        assert_eq!(sys.neighbor_cells.len(), 13 * n);
+    }
+
+    /// What the move from offset-based to index-based forwardness actually
+    /// changed: the *distribution*. Cell 0 sees all 26 of its neighbours as
+    /// forward, the last cell sees none. Total work is unchanged, but it is no
+    /// longer flat across cells, which is what a rayon-over-cells traversal
+    /// divides up.
+    #[test]
+    fn forward_counts_are_uneven_while_the_total_is_not() {
+        let sys = ctx_with_grid([4, 4, 4], [true; 3]);
+        let counts: Vec<usize> = (0..sys.grid.n_cells())
+            .map(|i| sys.neighbors(i).len())
+            .collect();
+        assert_eq!(counts.iter().sum::<usize>(), 13 * counts.len());
+        assert_eq!(*counts.iter().max().expect("non-empty"), 26);
+        assert_eq!(*counts.iter().min().expect("non-empty"), 0);
+    }
+
+    /// A non-periodic axis has no wrap-around neighbours, so the table is
+    /// smaller than the periodic case rather than padded with far-side cells
+    /// the way an unconditional wrap would leave it.
+    #[test]
+    fn a_non_periodic_axis_drops_its_wrap_neighbours() {
+        let periodic = ctx_with_grid([4, 4, 4], [true; 3]);
+        let confined = ctx_with_grid([4, 4, 4], [true, true, false]);
+        assert!(
+            confined.neighbor_cells.len() < periodic.neighbor_cells.len(),
+            "confining an axis must remove neighbour entries, got {} vs {}",
+            confined.neighbor_cells.len(),
+            periodic.neighbor_cells.len()
+        );
+    }
+
+    /// Two cells on an axis: the aliasing case that double-counted under a
+    /// fixed `{0, +1}` offset set.
+    #[test]
+    fn two_cells_on_an_axis_are_paired_once() {
+        let sys = ctx_with_grid([2, 1, 1], [true; 3]);
+        assert_eq!(sys.neighbors(0), &[1]);
+        assert_eq!(sys.neighbors(1), &[] as &[u32]);
+    }
+}
+
+#[cfg(test)]
+mod geometry_cache_tests {
+    #![allow(clippy::needless_range_loop)]
+    //! Tests for the geometry cache fast path in `compute_f` / `compute_fg` /
+    //! `compute_g`. The cache is hit when the caller evaluates at the same `x`
+    //! (and identical comptype / cell grid) as the previous call — in that case
+    //! the Cartesian expansion and cell-list rebuild are skipped and only the
+    //! pair / constraint kernels re-run on the stored state.
+    //!
+    //! These tests assert the cache path produces bit-identical results to the
+    //! fresh-rebuild path across several call sequences used by the packer.
+
+    use std::sync::Arc;
+
+    use crate::objective::{compute_f, compute_fg};
+    use crate::testutil::inside_box;
+    use crate::{F, PackContext};
+
+    // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
+
+    // ── setup helpers (mirror restraint::geometric::tests::gradient patterns) ──────────────────────
+
+    fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
+        let side = cell_len * cell_n as F;
+        sys.simbox =
+            molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
+                .expect("cell");
+        sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
+        sys.resize_cell_arrays();
+    }
+
+    /// Three single-atom molecules inside a 5³ box with a pair-overlap setup.
+    fn mixed_system() -> (PackContext, Vec<F>) {
+        let mut sys = PackContext::new(3, 3, 1);
+        sys.ntype_with_fixed = 1;
+        sys.nmols = vec![3];
+        sys.natoms = vec![1];
+        sys.idfirst = vec![0];
+        sys.comptype = vec![true];
+        // `coor` holds one reference conformer **per copy**, sharing `xcart`'s
+        // index space — three single-atom copies, so three entries.
+        sys.coor = vec![[0.0, 0.0, 0.0]; 3];
+
+        sys.radius = vec![1.0; 3];
+        sys.radius_ini = vec![1.0; 3];
+        sys.fscale = vec![1.0; 3];
+        sys.ibmol = vec![0, 1, 2];
+        sys.sync_atom_props();
+
+        sys.restraints = vec![Arc::new(inside_box([0.0, 0.0, 0.0], [5.0, 5.0, 5.0]))];
+        sys.iratom_offsets = vec![0, 1, 2, 3];
+        sys.iratom_data = vec![0, 0, 0];
+
+        setup_cells(&mut sys, 1, 10.0);
+
+        // x = [com0(3), com1(3), com2(3), euler0(3), euler1(3), euler2(3)]
+        let x = vec![
+            6.0, 2.0, 2.0, // com0: outside box on +x, forces restraint penalty
+            3.0, 2.0, 2.0, // com1: close to com2, forces pair penalty
+            3.5, 2.5, 2.0, // com2
+            0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 0.2, 0.1, 0.4,
+        ];
+        (sys, x)
+    }
+
+    fn force_cache_miss(sys: &mut PackContext) {
+        sys.work.cached_geometry = None;
+    }
+
+    // ── compute_f cache ────────────────────────────────────────────────────────
+
+    #[test]
+    fn compute_f_cached_path_matches_fresh() {
+        let (mut sys_a, x) = mixed_system();
+        let (mut sys_b, _) = mixed_system();
+
+        // Prime both systems: one cache, one fresh each call.
+        let f_a1 = compute_f(&x, &mut sys_a);
+        let fdist_a1 = sys_a.fdist;
+        let frest_a1 = sys_a.frest;
+
+        force_cache_miss(&mut sys_b);
+        let f_b1 = compute_f(&x, &mut sys_b);
+        let fdist_b1 = sys_b.fdist;
+        let frest_b1 = sys_b.frest;
+
+        assert_eq!(
+            f_a1.to_bits(),
+            f_b1.to_bits(),
+            "compute_f first call must agree bitwise"
+        );
+        assert_eq!(fdist_a1.to_bits(), fdist_b1.to_bits());
+        assert_eq!(frest_a1.to_bits(), frest_b1.to_bits());
+
+        // Second call at same x: a hits cache, b forced miss.
+        let f_a2 = compute_f(&x, &mut sys_a);
+        force_cache_miss(&mut sys_b);
+        let f_b2 = compute_f(&x, &mut sys_b);
+
+        assert_eq!(f_a2.to_bits(), f_b2.to_bits());
+        assert_eq!(f_a2.to_bits(), f_a1.to_bits(), "cache must be pure");
+        assert_eq!(sys_a.fdist.to_bits(), sys_b.fdist.to_bits());
+        assert_eq!(sys_a.frest.to_bits(), sys_b.frest.to_bits());
+    }
+
+    // ── compute_fg cache ───────────────────────────────────────────────────────
+
+    #[test]
+    fn compute_fg_cached_path_matches_fresh() {
+        let (mut sys_a, x) = mixed_system();
+        let (mut sys_b, _) = mixed_system();
+
+        let mut g_a1 = vec![0.0; x.len()];
+        let mut g_b1 = vec![0.0; x.len()];
+        let f_a1 = compute_fg(&x, &mut sys_a, &mut g_a1);
+        force_cache_miss(&mut sys_b);
+        let f_b1 = compute_fg(&x, &mut sys_b, &mut g_b1);
+
+        assert_eq!(f_a1.to_bits(), f_b1.to_bits());
+        for i in 0..x.len() {
+            assert_eq!(
+                g_a1[i].to_bits(),
+                g_b1[i].to_bits(),
+                "compute_fg first call: g[{i}] mismatch {} vs {}",
+                g_a1[i],
+                g_b1[i]
+            );
+        }
+
+        // Second call at same x — a hits cache, b forced miss.
+        let mut g_a2 = vec![0.0; x.len()];
+        let mut g_b2 = vec![0.0; x.len()];
+        let f_a2 = compute_fg(&x, &mut sys_a, &mut g_a2);
+        force_cache_miss(&mut sys_b);
+        let f_b2 = compute_fg(&x, &mut sys_b, &mut g_b2);
+
+        assert_eq!(f_a2.to_bits(), f_b2.to_bits());
+        assert_eq!(f_a2.to_bits(), f_a1.to_bits(), "cache must be pure");
+        for i in 0..x.len() {
+            assert_eq!(g_a2[i].to_bits(), g_b2[i].to_bits());
+            assert_eq!(g_a1[i].to_bits(), g_a2[i].to_bits());
+        }
+    }
+
+    // ── cross-mode cache reuse (compute_fg → compute_f at same x) ──────────────
+
+    #[test]
+    fn compute_f_reuses_compute_fg_geometry() {
+        let (mut sys_a, x) = mixed_system();
+        let (mut sys_b, _) = mixed_system();
+
+        // A: warm with compute_fg then call compute_f — cache hit expected.
+        let mut g_a = vec![0.0; x.len()];
+        let _ = compute_fg(&x, &mut sys_a, &mut g_a);
+        let f_a = compute_f(&x, &mut sys_a);
+
+        // B: always fresh.
+        let mut g_b = vec![0.0; x.len()];
+        force_cache_miss(&mut sys_b);
+        let _ = compute_fg(&x, &mut sys_b, &mut g_b);
+        force_cache_miss(&mut sys_b);
+        let f_b = compute_f(&x, &mut sys_b);
+
+        assert_eq!(f_a.to_bits(), f_b.to_bits());
+        assert_eq!(sys_a.fdist.to_bits(), sys_b.fdist.to_bits());
+        assert_eq!(sys_a.frest.to_bits(), sys_b.frest.to_bits());
+    }
+
+    // ── packer's "unscaled re-evaluation" pattern ─────────────────────────────
+    //
+    // After `pgencan` converges, `packer.rs` swaps `radius := radius_ini` and calls
+    // `compute_f` at the same `x` to measure violations under the true (unscaled)
+    // atomic radii. The cache key intentionally does not include `radius`, so this
+    // pattern hits the cache — verify the result under a radius mutation between
+    // the scaled and unscaled calls is identical to a fresh full evaluation.
+
+    #[test]
+    fn radii_swap_between_fg_and_f_cached_matches_fresh() {
+        let (mut sys_a, x) = mixed_system();
+        let (mut sys_b, _) = mixed_system();
+
+        // Scaled radii (typical during packing: discale=1.2).
+        let scaled: Vec<F> = sys_a.radius_ini.iter().map(|r| r * 1.2).collect();
+        let unscaled = sys_a.radius_ini.clone();
+
+        // --- A: cached path ---
+        sys_a.radius = scaled.clone();
+        sys_a.sync_atom_props();
+        let mut g_a = vec![0.0; x.len()];
+        let _ = compute_fg(&x, &mut sys_a, &mut g_a);
+
+        sys_a.radius = unscaled.clone();
+        sys_a.sync_atom_props();
+        let f_a = compute_f(&x, &mut sys_a);
+
+        // --- B: always rebuild ---
+        sys_b.radius = scaled.clone();
+        sys_b.sync_atom_props();
+        let mut g_b = vec![0.0; x.len()];
+        force_cache_miss(&mut sys_b);
+        let _ = compute_fg(&x, &mut sys_b, &mut g_b);
+
+        sys_b.radius = unscaled.clone();
+        sys_b.sync_atom_props();
+        force_cache_miss(&mut sys_b);
+        let f_b = compute_f(&x, &mut sys_b);
+
+        assert_eq!(f_a.to_bits(), f_b.to_bits());
+        assert_eq!(sys_a.fdist.to_bits(), sys_b.fdist.to_bits());
+        assert_eq!(sys_a.frest.to_bits(), sys_b.frest.to_bits());
+    }
+
+    // ── move_flag path must stay on the slow path ─────────────────────────────
+    //
+    // When `move_flag` is true (during movebad), per-atom `fdist_atom` /
+    // `frest_atom` are accumulated inside the pair / constraint kernels. Running
+    // the cache path a second time would double-count; so cache must be bypassed
+    // whenever `move_flag` is set.
+
+    #[test]
+    fn move_flag_true_bypasses_cache() {
+        let (mut sys, x) = mixed_system();
+
+        // Warm the cache at normal (move_flag=false) state.
+        let _ = compute_f(&x, &mut sys);
+        assert!(sys.work.cached_geometry.is_some());
+
+        // Now turn on move_flag and reset per-atom trackers.
+        sys.move_flag = true;
+        sys.fdist_atom.iter_mut().for_each(|v| *v = 0.0);
+        sys.frest_atom.iter_mut().for_each(|v| *v = 0.0);
+        let _ = compute_f(&x, &mut sys);
+        let fdist_move_a = sys.fdist_atom.clone();
+        let frest_move_a = sys.frest_atom.clone();
+
+        // Fresh context, same sequence, cache forced off each call.
+        let (mut sys2, _) = mixed_system();
+        force_cache_miss(&mut sys2);
+        let _ = compute_f(&x, &mut sys2);
+        sys2.move_flag = true;
+        sys2.fdist_atom.iter_mut().for_each(|v| *v = 0.0);
+        sys2.frest_atom.iter_mut().for_each(|v| *v = 0.0);
+        force_cache_miss(&mut sys2);
+        let _ = compute_f(&x, &mut sys2);
+
+        assert_eq!(
+            fdist_move_a.len(),
+            sys2.fdist_atom.len(),
+            "fdist_atom shape mismatch"
+        );
+        for (i, (&a, &b)) in fdist_move_a.iter().zip(sys2.fdist_atom.iter()).enumerate() {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "fdist_atom[{i}] mismatch under move_flag: {a} vs {b}"
+            );
+        }
+        for (i, (&a, &b)) in frest_move_a.iter().zip(sys2.frest_atom.iter()).enumerate() {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "frest_atom[{i}] mismatch under move_flag: {a} vs {b}"
+            );
+        }
     }
 }

@@ -1,19 +1,25 @@
 //! Python-defined [`Handler`] hooks.
 //!
-//! A Python object attached via [`crate::packer::PyPacker::add_handler`] may
+//! A Python object attached via an entry's ``with_handler`` may
 //! implement any subset of three optional methods:
 //!
 //! ```python
 //! class MyHook:
 //!     def on_start(self, ntotat: int, ntotmol: int) -> None: ...
-//!     def on_step(self, info: StepInfo) -> bool | None: ...   # True → stop
+//!     def on_step(self, info: StepInfo, ctx: StepContext) -> bool | None: ...  # True → stop
 //!     def on_finish(self) -> None: ...
 //! ```
+//!
+//! `on_step` mirrors the Rust trait's `(info, sys)` pair: `ctx` is a borrow
+//! guard over the live packing context, valid only for the duration of the
+//! callback (accessing it afterwards raises `RuntimeError`). Its
+//! `positions` property materialises an owned `(ntotat, 3)` float64 NumPy
+//! array on demand — handlers that never touch it pay nothing.
 //!
 //! Missing methods are silently skipped (matching the Rust trait's default
 //! no-op impls). Exceptions raised inside any method are stashed in
 //! [`helpers::PACK_ERR`][crate::helpers] and trigger early termination;
-//! `Molpack.pack()` re-raises after the loop exits.
+//! the entry's `run()` re-raises after the loop exits.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,8 +28,43 @@ use crate::helpers::stash_err;
 use molpack::F;
 use molpack::context::PackContext;
 use molpack::handler::{Handler, StepInfo};
+use numpy::IntoPyArray;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
+
+// ============================================================================
+// PyStageInfo — which stage of the run a callback came from. Kept nested
+// (unlike `PhaseInfo`, flattened below) because a pipeline's stage identity
+// reads as one thing: `info.stage.index` / `.total` / `.name`.
+// ============================================================================
+
+/// Identifies the stage a callback comes from. A single-stage run reports
+/// ``index == 0`` and ``total == 1``.
+#[pyclass(name = "StageInfo", frozen, skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyStageInfo {
+    /// 0-based index of this stage in the run.
+    #[pyo3(get)]
+    pub index: usize,
+    /// How many stages the run has.
+    #[pyo3(get)]
+    pub total: usize,
+    /// The stage's own name.
+    #[pyo3(get)]
+    pub name: String,
+}
+
+#[pymethods]
+impl PyStageInfo {
+    fn __repr__(&self) -> String {
+        format!(
+            "StageInfo({}, {}/{})",
+            self.name,
+            self.index + 1,
+            self.total
+        )
+    }
+}
 
 // ============================================================================
 // PyStepInfo — read-only snapshot passed to `on_step`. Flattens Rust's
@@ -32,6 +73,9 @@ use pyo3::types::PyAny;
 
 #[pyclass(name = "StepInfo", frozen)]
 pub struct PyStepInfo {
+    /// Which stage of the run this callback came from.
+    #[pyo3(get)]
+    pub stage: PyStageInfo,
     /// 0-based outer-loop iteration within the current phase.
     #[pyo3(get)]
     pub loop_idx: usize,
@@ -54,6 +98,10 @@ pub struct PyStepInfo {
     /// Max restraint violation (0.0 = all restraints satisfied).
     #[pyo3(get)]
     pub frest: F,
+    /// GENCAN objective at the user's radii (Packmol's ``fx``); growth
+    /// reports ``0.0``.
+    #[pyo3(get)]
+    pub f: F,
     /// Improvement from last iteration, as percentage (positive = improving).
     #[pyo3(get)]
     pub improvement_pct: F,
@@ -63,16 +111,16 @@ pub struct PyStepInfo {
     /// Convergence precision target.
     #[pyo3(get)]
     pub precision: F,
-    /// Per-relaxer acceptance rate this iteration, as
-    /// ``[(target_index, rate), ...]``. Empty when no relaxers are
-    /// attached.
-    #[pyo3(get)]
-    pub relaxer_acceptance: Vec<(usize, F)>,
 }
 
 impl PyStepInfo {
     fn from_info(info: &StepInfo) -> Self {
         Self {
+            stage: PyStageInfo {
+                index: info.stage.index,
+                total: info.stage.total,
+                name: info.stage.name.to_owned(),
+            },
             loop_idx: info.loop_idx,
             max_loops: info.max_loops,
             phase: info.phase.phase,
@@ -80,10 +128,10 @@ impl PyStepInfo {
             molecule_type: info.phase.molecule_type,
             fdist: info.fdist,
             frest: info.frest,
+            f: info.f,
             improvement_pct: info.improvement_pct,
             radscale: info.radscale,
             precision: info.precision,
-            relaxer_acceptance: info.relaxer_acceptance.clone(),
         }
     }
 }
@@ -92,7 +140,11 @@ impl PyStepInfo {
 impl PyStepInfo {
     fn __repr__(&self) -> String {
         format!(
-            "StepInfo(phase={}/{}, loop={}/{}, fdist={:.3e}, frest={:.3e}, improvement={:.2}%)",
+            "StepInfo(stage={} {}/{}, phase={}/{}, loop={}/{}, \
+             fdist={:.3e}, frest={:.3e}, improvement={:.2}%)",
+            self.stage.name,
+            self.stage.index + 1,
+            self.stage.total,
             self.phase + 1,
             self.total_phases,
             self.loop_idx + 1,
@@ -110,6 +162,61 @@ impl PyStepInfo {
 // `None` and are silently skipped. `stop_flag` lives behind an atomic
 // because `Handler::should_stop` is `&self` while writes happen via the
 // mutating `on_*` methods.
+
+// PyStepContext — borrow guard over the live `PackContext`, handed to
+// `on_step` and invalidated the moment the callback returns (spec: FFI
+// stale-handle invalidation). Data properties copy on access, so a stashed
+// guard can never dangle — it only errors.
+
+#[pyclass(name = "StepContext", unsendable)]
+pub struct PyStepContext {
+    sys: std::cell::Cell<Option<*const PackContext>>,
+}
+
+impl PyStepContext {
+    fn expired() -> pyo3::PyErr {
+        pyo3::exceptions::PyRuntimeError::new_err(
+            "StepContext expired: it is only valid inside the on_step callback \
+             it was passed to — copy what you need (e.g. ctx.positions) there",
+        )
+    }
+
+    fn live(&self) -> PyResult<&PackContext> {
+        match self.sys.get() {
+            // SAFETY: the pointer is set right before the callback and
+            // cleared right after it returns, on the same thread; while it
+            // is Some the borrow in `Handler::on_step` is still alive.
+            Some(p) => Ok(unsafe { &*p }),
+            None => Err(Self::expired()),
+        }
+    }
+}
+
+#[pymethods]
+impl PyStepContext {
+    /// Owned ``(ntotat, 3)`` float64 array of the live coordinates.
+    /// Atoms the growth solver has not placed yet sit at their sentinel.
+    #[getter]
+    fn positions<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, numpy::PyArray2<f64>>> {
+        Ok(ndarray::Array2::from(self.live()?.xcart.clone()).into_pyarray(py))
+    }
+
+    /// Total atom count of the packing system.
+    #[getter]
+    fn natoms(&self) -> PyResult<usize> {
+        Ok(self.live()?.xcart.len())
+    }
+
+    fn __repr__(&self) -> String {
+        match self.sys.get() {
+            Some(_) => format!(
+                "StepContext(natoms={})",
+                self.live().map(|s| s.xcart.len()).unwrap_or(0)
+            ),
+            None => "StepContext(expired)".to_owned(),
+        }
+    }
+}
 
 pub(crate) struct PyHandlerWrapper {
     on_start: Option<Py<PyAny>>,
@@ -147,7 +254,7 @@ impl Handler for PyHandlerWrapper {
         });
     }
 
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
+    fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
         let Some(m) = &self.on_step else { return };
         Python::attach(|py| {
             let py_info = match Py::new(py, PyStepInfo::from_info(info)) {
@@ -157,7 +264,22 @@ impl Handler for PyHandlerWrapper {
                     return;
                 }
             };
-            match m.bind(py).call1((py_info,)) {
+            let guard = match Py::new(
+                py,
+                PyStepContext {
+                    sys: std::cell::Cell::new(Some(sys as *const PackContext)),
+                },
+            ) {
+                Ok(v) => v,
+                Err(e) => {
+                    self.fail(e);
+                    return;
+                }
+            };
+            let ret = m.bind(py).call1((py_info, guard.clone_ref(py)));
+            // Stale-handle invalidation: the borrow of `sys` ends here.
+            guard.borrow(py).sys.set(None);
+            match ret {
                 // `True` requests early stop; other return values continue.
                 Ok(ret) => {
                     if let Ok(true) = ret.extract::<bool>() {

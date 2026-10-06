@@ -83,9 +83,9 @@ molecule templates, copy counts, geometric restraints, then one packing run.
   <a href="rust/">
     <span>05</span>
     <strong>Rust API</strong>
-    <em>Native Target and Molpack builders inside your crate.</em>
+    <em>Native Target and PackEngine builders inside your crate.</em>
   </a>
-  <a href="rust/handlers-relaxers/">
+  <a href="rust/handlers-optimizers/">
     <span>06</span>
     <strong>Handlers</strong>
     <em>Observe steps, dump trajectories, or stop a run early.</em>
@@ -138,9 +138,9 @@ the writer or analysis code you already use. See the [Python API](python/).
 
 ```python
 water = Target(frame, 100).with_restraint(
-    InsideBoxRestraint([0, 0, 0], [40, 40, 40])
+    molrs.Cuboid([0, 0, 0], [40, 40, 40])
 )
-packed = Molpack().with_seed(42).pack([water])
+packed = GenCanPack().with_seed(42).run([water], max_loops=200).frame
 ```
 
 </article>
@@ -155,9 +155,9 @@ Use the native builder API for applications, services, and tests. See the
 [Rust API](rust/).
 
 ```rust
-let frame = Molpack::new()
+let result = GenCanPack::new()
     .with_seed(42)
-    .pack(&[water], 200)?;
+    .run(&[water], 200)?;
 ```
 
 </article>
@@ -169,7 +169,7 @@ let frame = Molpack::new()
 ### Observe or stop a run
 
 Handlers receive structured events from the packing loop. See
-[Handlers and relaxers](rust/handlers-relaxers/).
+[Handlers and optimizers](rust/handlers-optimizers/).
 
 ```rust
 impl Handler for WatchFdist {
@@ -220,7 +220,7 @@ Dense summary of what the engine and each surface cover.
   </div>
   <div>
     <dt>Rust</dt>
-    <dd>Native builders, handlers, relaxers, and feature-gated IO / FF / rayon.</dd>
+    <dd>Native builders, handlers, in-loop optimizers, and feature-gated IO / FF / rayon.</dd>
   </div>
 </dl>
 
@@ -253,7 +253,7 @@ A compact mirror of the navigation tree for returning users.
   </section>
   <section>
     <h3>Rust</h3>
-    <p>Builders, restraints, PBC, handlers, relaxers, and example programs.</p>
+    <p>Builders, restraints, PBC, handlers, in-loop optimizers, and example programs.</p>
   </section>
   <section>
     <h3>Development</h3>
@@ -284,7 +284,7 @@ A compact mirror of the navigation tree for returning users.
   </a>
   <a href="rust/">
     <strong>Rust</strong>
-    <em>Native builders, handlers, and relaxers.</em>
+    <em>Native builders, handlers, and in-loop optimizers.</em>
   </a>
 </div>
 

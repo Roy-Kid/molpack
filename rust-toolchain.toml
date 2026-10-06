@@ -1,0 +1,5 @@
+# Match the sibling molrs toolchain so the shared ../molrs/target build cache
+# (see .cargo/config.toml) fingerprints against one rustc.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

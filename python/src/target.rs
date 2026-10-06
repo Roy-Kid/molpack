@@ -3,14 +3,14 @@
 //! [`PyTarget`] describes one type of molecule to pack: its template
 //! geometry, topology, and the number of copies.
 //!
-//! The constructor accepts a real molrs/molpy `Frame` (``molrs.Frame`` or
-//! ``molpy.Frame``) carrying an ``"atoms"`` block. The frame crosses the
+//! The constructor accepts a real ``molrs.Frame`` (``molpy.Frame`` is the same
+//! class) carrying an ``"atoms"`` block. The frame crosses the
 //! language boundary **zero-copy** through its stable-FFI capsule (see
 //! [`crate::interop`]) — no dict marshalling, no consumer-side data type. The
 //! full frame, with topology, is handed to the core [`Target`], which owns the
 //! assembly.
 
-use crate::constraint::{extract_collective_restraint, extract_restraint, try_atom_builtin};
+use crate::constraint::{extract_collective_restraint, extract_restraint, try_region};
 use crate::helpers::NpF;
 use crate::types::{PyAngle, PyAxis, PyCenteringMode};
 use molpack::F;
@@ -25,14 +25,11 @@ use pyo3::types::PyAny;
 /// a Rust [`molrs::Frame`] so the core retains its full topology.
 pub(crate) fn target_from_frame(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Target> {
     let rust_frame = crate::interop::owned_frame_from_py(frame)?;
-    let atoms = rust_frame
-        .get("atoms")
-        .ok_or_else(|| PyValueError::new_err(r#"frame must have an "atoms" block"#))?;
-    if atoms.get("x").is_none() {
-        return Err(PyValueError::new_err(
-            r#"atoms block must have "x" / "y" / "z" columns"#,
-        ));
-    }
+    // `Target::new` panics on a frame without float coordinates; answer that
+    // here as a Python error instead of a panic across the boundary.
+    rust_frame
+        .coords()
+        .map_err(|e| PyValueError::new_err(format!("frame has no coordinates: {e}")))?;
     Ok(Target::new(rust_frame, count))
 }
 
@@ -48,8 +45,8 @@ impl PyTarget {
     ///
     /// Parameters
     /// ----------
-    /// frame : molrs.Frame | molpy.Frame
-    ///     A molrs/molpy frame with an ``"atoms"`` block (``x`` / ``y`` / ``z``
+    /// frame : molrs.Frame
+    ///     A frame with an ``"atoms"`` block (``x`` / ``y`` / ``z``
     ///     columns). Resolved zero-copy via its FFI capsule — a plain ``dict``
     ///     is no longer accepted; build a ``molrs.Frame`` first.
     /// count : int
@@ -70,14 +67,22 @@ impl PyTarget {
         }
     }
 
+    /// Override the per-copy total mass (amu) used by
+    /// ``with_density`` when element symbols cannot provide one.
+    fn with_mass(&self, amu: crate::helpers::NpF) -> Self {
+        PyTarget {
+            inner: self.inner.clone().with_mass(amu),
+        }
+    }
+
     /// Attach a restraint to this target — the single unified extension point.
     ///
     /// Accepts:
     ///
-    /// * a built-in **geometric** restraint (:class:`InsideBoxRestraint`,
-    ///   :class:`InsideSphereRestraint`, :class:`OutsideSphereRestraint`,
-    ///   :class:`AbovePlaneRestraint`, :class:`BelowPlaneRestraint`) — its
-    ///   ``f`` / ``fg`` see **one atom** at a time;
+    /// * a molrs **region** (``molrs.Sphere``, ``Cuboid``, ``Parallelepiped``,
+    ///   ``HalfSpace``, ``Cylinder``, ``Ellipsoid``, ``Polyhedron``,
+    ///   ``SphereUnion``, or a ``&`` / ``|`` / ``~`` composition) — lifted
+    ///   through ``RegionRestraint``, so every atom must stay inside it;
     /// * a built-in **distribution** restraint (:class:`GaussianPlane`,
     ///   :class:`GaussianPoint`, :class:`ExponentialPlane`,
     ///   :class:`ExponentialPoint`, :class:`TabulatedPlane`,
@@ -85,14 +90,13 @@ impl PyTarget {
     /// * any object with callable ``f`` / ``fg`` — the duck-typed extension
     ///   point.
     ///
-    /// For the geometric built-ins ``f(x, scale, scale2)`` /
-    /// ``fg(x, scale, scale2)`` see a single atom's ``(x, y, z)``. For the
+    /// A region is evaluated per atom. For the
     /// distribution and custom (duck-typed) restraints,
     /// ``f(coords, scale, scale2)`` / ``fg(coords, scale, scale2)`` see **every
     /// copy's** ``(x, y, z)`` (``coords`` is the full list) and ``fg`` returns
     /// ``(energy, [(gx, gy, gz), ...])`` — one gradient triple per copy.
     fn with_restraint(&self, restraint: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Self> {
-        if let Some(atom_r) = try_atom_builtin(restraint) {
+        if let Some(atom_r) = try_region(restraint)? {
             Ok(PyTarget {
                 inner: self.inner.clone().with_restraint(atom_r),
             })
@@ -102,41 +106,6 @@ impl PyTarget {
                 inner: self.inner.clone().with_collective_restraint(group_r),
             })
         }
-    }
-
-    /// Attach an in-loop geometry relaxer (relaxation-assisted packing).
-    ///
-    /// Accepts either built-in relaxer:
-    ///
-    /// * :class:`TorsionMcRelaxer` — engine-free Monte-Carlo torsion sampling
-    ///   (always available);
-    /// * :class:`LBFGSRelaxer` — force-field L-BFGS minimization (`ff` feature).
-    ///
-    /// Requires ``count == 1`` — every copy shares the reference geometry the
-    /// relaxer rewrites, so a relaxed target packs one molecule.
-    fn with_relaxer(&self, relaxer: &Bound<'_, PyAny>) -> PyResult<Self> {
-        if self.inner.count != 1 {
-            return Err(PyValueError::new_err(format!(
-                "with_relaxer requires count == 1 (all copies share the reference \
-                 geometry the relaxer rewrites), got count = {}",
-                self.inner.count
-            )));
-        }
-        // Torsion-MC relaxer is core (no feature gate).
-        if let Ok(tm) = relaxer.extract::<crate::relaxer::PyTorsionMcRelaxer>() {
-            return Ok(PyTarget {
-                inner: self.inner.clone().with_relaxer(tm.inner),
-            });
-        }
-        #[cfg(feature = "ff")]
-        if let Ok(lb) = relaxer.extract::<crate::relaxer::PyLBFGSRelaxer>() {
-            return Ok(PyTarget {
-                inner: self.inner.clone().with_relaxer(lb.inner),
-            });
-        }
-        Err(PyValueError::new_err(
-            "with_relaxer expects a TorsionMcRelaxer or LBFGSRelaxer",
-        ))
     }
 
     /// Attach a restraint to selected atoms of every copy.
@@ -155,9 +124,149 @@ impl PyTarget {
         })
     }
 
+    /// Set the packing radius for **every atom** of this target.
+    ///
+    /// Packmol's structure-level ``radius``. The packer separates two atoms by
+    /// the sum of their radii; without this every atom uses the global
+    /// ``tolerance / 2``. Van der Waals radii from the source file are not used
+    /// as packing radii.
+    ///
+    /// Raises ``ValueError`` if ``radius`` is not positive.
+    fn with_radius(&self, radius: F) -> PyResult<Self> {
+        check_positive(radius, "packing radius")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_radius(radius),
+        })
+    }
+
+    /// Set the packing radius for selected atoms of every copy.
+    ///
+    /// Packmol's ``radius`` inside an ``atoms ... end atoms`` block.
+    /// ``indices`` are **0-based** (Rust/Python native); a Packmol ``.inp``
+    /// uses 1-based indices, so subtract 1 when porting.
+    ///
+    /// Raises ``ValueError`` if ``radius`` is not positive or an index is out
+    /// of range.
+    fn with_atom_radius(&self, indices: Vec<usize>, radius: F) -> PyResult<Self> {
+        validate_atom_indices(&indices, self.inner.natoms())?;
+        check_positive(radius, "packing radius")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_atom_radius(&indices, radius),
+        })
+    }
+
+    /// Weight this target's atoms in the overlap penalty (Packmol ``fscale``).
+    ///
+    /// The pair term is multiplied by ``fscale_i * fscale_j``, so a value below
+    /// 1 makes a species *softer* without changing the distance it is asked to
+    /// keep. Default ``1.0``.
+    ///
+    /// Raises ``ValueError`` if ``fscale`` is not positive.
+    fn with_fscale(&self, fscale: F) -> PyResult<Self> {
+        check_positive(fscale, "fscale")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_fscale(fscale),
+        })
+    }
+
+    /// Weight selected atoms in the overlap penalty. ``indices`` are **0-based**.
+    fn with_atom_fscale(&self, indices: Vec<usize>, fscale: F) -> PyResult<Self> {
+        validate_atom_indices(&indices, self.inner.natoms())?;
+        check_positive(fscale, "fscale")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_atom_fscale(&indices, fscale),
+        })
+    }
+
+    /// Give this target's atoms a second, shorter penalty radius
+    /// (Packmol ``short_radius``). Must be smaller than the packing radius.
+    fn with_short_radius(&self, short_radius: F) -> PyResult<Self> {
+        check_positive(short_radius, "short radius")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_short_radius(short_radius),
+        })
+    }
+
+    /// Per-atom counterpart of :meth:`with_short_radius`; ``indices`` are
+    /// **0-based**.
+    fn with_atom_short_radius(&self, indices: Vec<usize>, short_radius: F) -> PyResult<Self> {
+        validate_atom_indices(&indices, self.inner.natoms())?;
+        check_positive(short_radius, "short radius")?;
+        Ok(PyTarget {
+            inner: self
+                .inner
+                .clone()
+                .with_atom_short_radius(&indices, short_radius),
+        })
+    }
+
+    /// Weight the short-radius penalty (Packmol ``short_radius_scale``).
+    fn with_short_radius_scale(&self, scale: F) -> PyResult<Self> {
+        check_positive(scale, "short radius scale")?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_short_radius_scale(scale),
+        })
+    }
+
+    /// Per-atom counterpart of :meth:`with_short_radius_scale`; ``indices`` are
+    /// **0-based**.
+    fn with_atom_short_radius_scale(&self, indices: Vec<usize>, scale: F) -> PyResult<Self> {
+        validate_atom_indices(&indices, self.inner.natoms())?;
+        check_positive(scale, "short radius scale")?;
+        Ok(PyTarget {
+            inner: self
+                .inner
+                .clone()
+                .with_atom_short_radius_scale(&indices, scale),
+        })
+    }
+
+    /// Set this target's intramolecular skip table.
+    ///
+    /// Slot 0 is the 1-2 weight; the last slot is the 1-N tail. Default is
+    /// ``[0, 0, 0, 1]`` (depth 3: 1-2/1-3/1-4 exempt). This is not a
+    /// force-field ``special_bonds`` triple.
+    ///
+    /// Fractional weights (Amber 1-4 ``0.5``) are stored here and refused
+    /// later when growth compiles the skip set. All-atom explicit hydrogen
+    /// keeps the default table and shrinks hydrogen via
+    /// :meth:`with_atom_radius`.
+    ///
+    /// Raises ``ValueError`` if the table is empty or a weight is outside
+    /// ``[0, 1]`` or not finite.
+    fn with_special_bonds(&self, table: Vec<NpF>) -> PyResult<Self> {
+        let table = validate_special_bonds(table)?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_special_bonds(table),
+        })
+    }
+
+    /// Name the atoms growth treats as hydrogens (**0-based**), replacing the
+    /// default rule (element symbol ``H``). Lattice growth places hydrogens
+    /// off their backbone neighbour, never on a lattice site; a
+    /// coarse-grained model with no hydrogens passes ``[]``.
+    ///
+    /// Raises ``ValueError`` if an index is out of range.
+    fn with_hydrogens(&self, indices: Vec<usize>) -> PyResult<Self> {
+        validate_atom_indices(&indices, self.inner.natoms())?;
+        Ok(PyTarget {
+            inner: self.inner.clone().with_hydrogens(&indices),
+        })
+    }
+
     fn with_perturb_budget(&self, budget: usize) -> Self {
         PyTarget {
             inner: self.inner.clone().with_perturb_budget(budget),
+        }
+    }
+
+    /// One fixed obstacle target holding a previous pack's entire output,
+    /// coordinates kept verbatim — the named chaining primitive: grow first,
+    /// then pack the next stage around the frozen matrix.
+    #[staticmethod]
+    fn fixed_from(result: &crate::result::PyState) -> Self {
+        Self {
+            inner: molpack::Target::fixed_from(&result.inner.frame),
         }
     }
 
@@ -224,6 +333,11 @@ impl PyTarget {
     }
 
     #[getter]
+    fn special_bonds(&self) -> Vec<F> {
+        self.inner.special_bonds.as_slice().to_vec()
+    }
+
+    #[getter]
     fn is_fixed(&self) -> bool {
         self.inner.fixed_at.is_some()
     }
@@ -247,4 +361,22 @@ fn validate_atom_indices(indices: &[usize], natoms: usize) -> PyResult<()> {
         }
     }
     Ok(())
+}
+
+/// Reject a non-positive per-atom property value with a Python `ValueError`.
+fn check_positive(value: F, what: &str) -> PyResult<()> {
+    if value <= 0.0 || value.is_nan() {
+        return Err(PyValueError::new_err(format!(
+            "{what} must be positive, got {value}"
+        )));
+    }
+    Ok(())
+}
+
+/// Marshal a Python weight list into [`molpack::BondDistanceWeights`].
+///
+/// Rejects empty, non-finite, or out-of-range entries with ``ValueError``.
+/// Fractional weights are legal here; growth refuses them later.
+fn validate_special_bonds(weights: Vec<NpF>) -> PyResult<molpack::BondDistanceWeights> {
+    molpack::BondDistanceWeights::new(weights).map_err(|e| PyValueError::new_err(e.to_string()))
 }

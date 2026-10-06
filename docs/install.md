@@ -33,11 +33,11 @@ Optional features (crate defaults to none enabled):
 | `cli` | `molpack` binary + clap (implies `io`) |
 | `io` | PDB / XYZ / SDF / LAMMPS readers via molrs |
 | `rayon` | Parallel objective evaluation |
-| `ff` | Force-field geometry relaxer (MMFF + L-BFGS) |
+| `ff` | Forwards molrs's force-field module, for binding a force-field optimizer (e.g. `LBFGS`) through `with_optimizer` |
 
 ```toml
 # Cargo.toml — common combinations
-molcrafts-molpack = { version = "0.2", features = ["io", "rayon"] }
+molcrafts-molpack = { version = "0.3", features = ["io", "rayon"] }
 ```
 
 ## Python binding
@@ -54,7 +54,7 @@ out.
 
 ```python
 import molpack
-print(molpack.Molpack)
+print(molpack.GenCanPack)
 ```
 
 !!! note "Pre-built wheels"
@@ -65,7 +65,8 @@ print(molpack.Molpack)
 ## Build from source
 
 When you are modifying the crate or Python binding, check out **molrs** as a
-sibling (path deps resolve `../molrs/molrs`):
+sibling (path deps resolve `../molrs/molrs`). molpack 0.3 builds on the molrs
+**0.15** line — the `v0.15.0` tag or a later 0.15 commit:
 
 ```bash
 # sibling layout

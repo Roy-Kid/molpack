@@ -5,18 +5,22 @@ Import surface:
 ```python
 from molpack import (
     # Core
-    Target, Molpack, PackResult, StepInfo,
+    Target, State, IntraResidual, StepInfo,
+    # Engine entries — one per packing algorithm
+    GenCanPack, CbmcGrow, LatticeGrow,
+    # Multi-stage composition
+    Pipeline,
     # Typed values
     Angle, Axis, CenteringMode,
-    # Geometric (per-atom) restraints
-    InsideBoxRestraint, InsideSphereRestraint, OutsideSphereRestraint,
-    AbovePlaneRestraint, BelowPlaneRestraint,
+    # (geometric restraints are molrs regions — see "molrs regions as restraints")
     # Collective (distribution-matching) restraints
     GaussianPlane, GaussianPoint,
     ExponentialPlane, ExponentialPoint,
     TabulatedPlane, TabulatedPoint,
-    # In-loop relaxers
-    TorsionMcRelaxer, LBFGSRelaxer,
+    # Collective (pairwise separation) restraint
+    SelfSeparation,
+    # Chain-growth priors
+    TorsionPrior, AnglePrior,
     # Script loader (`.inp`)
     ScriptJob, load_script,
     # Parallel evaluation
@@ -30,11 +34,7 @@ from molpack import (
     NoTargetsError,
     EmptyMoleculeError,
     InvalidPBCBoxError,
-    ConflictingPeriodicBoxesError,
 )
-
-# Post-pack whole-system relaxation (optional molpy/LAMMPS backend)
-from molpack.relaxer import LAMMPSRelaxer
 ```
 
 ---
@@ -78,8 +78,8 @@ instances.
 Target(frame, count: int)
 ```
 
-- `frame` — a `molrs.Frame` or `molpy.Frame` with atom columns `"x"`,
-  `"y"`, `"z"`, and `"element"` (or `"symbol"` for `molrs` PDB frames).
+- `frame` — a `molrs.Frame` (`molpy.Frame` is the same class) with atom
+  columns `"x"`, `"y"`, `"z"`, and `"element"`.
   Resolved zero-copy via its FFI capsule; a plain dict is not accepted.
 - `count` — number of copies to produce.
 
@@ -90,15 +90,44 @@ Target(frame, count: int)
   Accepts a geometric built-in, a collective (distribution-matching)
   restraint, or any duck-typed `f`/`fg` object — see [Restraints](#restraints).
 - `.with_atom_restraint(indices: Sequence[int], r)` — 0-based indices.
-- `.with_relaxer(relaxer)` — attach an in-loop geometry relaxer
-  (`TorsionMcRelaxer` or `LBFGSRelaxer`); requires `count == 1`. See
-  [In-loop relaxers](#in-loop-relaxers).
+- `.with_radius(radius: float)` — packing radius for every atom
+  (Packmol `radius`). Raises `ValueError` if not positive.
+- `.with_atom_radius(indices, radius)` — 0-based; all-atom explicit
+  hydrogen keeps the default skip table and uses ~0.85 Å here.
+- `.with_fscale(fscale: float)` / `.with_atom_fscale(indices, fscale)` —
+  overlap-penalty weight (Packmol `fscale`; default 1.0).
+- `.with_short_radius(short_radius: float)` /
+  `.with_atom_short_radius(indices, short_radius)` — second, shorter
+  penalty radius (Packmol `short_radius`).
+- `.with_short_radius_scale(scale: float)` /
+  `.with_atom_short_radius_scale(indices, scale)` — weight of the
+  short-radius penalty.
+- `.with_special_bonds(table: Sequence[float])` — intramolecular skip
+  weights. Slot 0 is 1-2; the last slot is the 1-N tail. Default
+  `[0, 0, 0, 1]` (depth 3). Empty / non-finite / outside `[0, 1]` raise
+  `ValueError`. Fractional `0.5` is stored and refused at
+  `CbmcGrow.run`. This is not a force-field `special_bonds` triple.
+- `.with_hydrogens(indices: Sequence[int])` — the atoms lattice growth
+  treats as hydrogens (0-based), placed off their backbone neighbour rather
+  than on a lattice site. Default: element symbol `H`. Pass `[]` for a
+  coarse-grained model. An out-of-range index raises `ValueError`.
 - `.with_perturb_budget(n: int)` — per-target perturbation budget.
 - `.with_centering(mode: CenteringMode)`.
 - `.with_rotation_bound(axis: Axis, center: Angle, half_width: Angle)`.
 - `.fixed_at(position: [x, y, z])` — pin the target.
 - `.with_orientation((ax, ay, az))` — Euler tuple of `Angle`s; must
   follow `fixed_at`.
+- `.with_mass(amu: float)` — per-copy total mass override for
+  `with_density` when element symbols cannot provide one (CG
+  beads, bare-coordinate targets).
+
+**Static constructor**
+
+- `Target.fixed_from(result: State)` — wrap a previous run's whole
+  output as one fixed obstacle, coordinates kept verbatim. The chaining
+  primitive for staged packs: grow with `CbmcGrow`, then pack the next
+  species around the frozen matrix with `GenCanPack`. See
+  [Engine entries](#engine-entries).
 
 **Properties**
 
@@ -107,64 +136,194 @@ Target(frame, count: int)
 - `.count : int`
 - `.elements : list[str]`
 - `.radii : list[float]`
+- `.special_bonds : list[float]` — intramolecular skip table; default
+  `[0.0, 0.0, 0.0, 1.0]`.
 - `.is_fixed : bool`
 
 ---
 
-## `Molpack`
+## Engine entries
 
-Orchestrator for the three-phase GENCAN optimizer. Zero-arg
-constructor — all tuning is via `with_*` builders.
-
-**Constructor**
+One entry class per packing algorithm; you pick the algorithm by picking
+the entry. All three are immutable builders — every `with_*` returns a new
+instance — and all three expose the same terminal verb:
 
 ```python
-Molpack()
+.run(targets: list[Target], max_loops: int) -> State
+```
+
+`run()` consumes the entry (one engine, one run): a second call on the
+same object raises `RuntimeError`. Raises a typed `PackError` subclass on
+packing failure.
+
+### Shared builders
+
+Available on `GenCanPack` **and** `CbmcGrow`:
+
+- `.with_tolerance(t: float)` — minimum pairwise distance (Å; default 2.0).
+- `.with_precision(p: float)` — convergence threshold (default 0.01).
+- `.with_seed(seed: int)` — deterministic RNG (default Packmol's 1234567).
+- `.with_periodic_box(min: [x,y,z], max: [x,y,z])` — declare a
+  fully-periodic box directly on the entry (Packmol `pbc`); see
+  [Periodic boundaries](guide/periodic-boundaries.md).
+- `.with_density(rho: float)` — size the box from a target mass density
+  (g/cm³) instead of declaring it: `run()` resolves a cubic, fully
+  periodic box holding the total mass of all targets at `rho`. Masses
+  come from element symbols or `Target.with_mass`; an unresolvable mass
+  raises `ValueError`. Mutually exclusive with `.with_periodic_box`.
+- `.with_parallel_eval(enabled: bool)` — rayon-backed pair eval. Raises
+  `RuntimeError` if the wheel lacks the `rayon` feature (fail-fast).
+- `.with_progress(on: bool = True)` — LAMMPS-style screen output
+  (off by default).
+- `.with_handler(handler)` — attach a custom `Handler` (stackable).
+- `.with_global_restraint(r)` — broadcast to every target (stackable).
+
+### `GenCanPack`
+
+Rigid-body placement driven by the three-phase GENCAN optimizer — the
+Packmol algorithm. Zero-arg constructor.
+
+```python
+GenCanPack()
+```
+
+GENCAN-only builders, on top of the shared ones:
+
+- `.with_restart(result: State)` — continue on a previous run's
+  placement solution (the explicit push-off chain): the free copies start
+  exactly where `result` left them, `initial()` is skipped, and the
+  stall-perturbation moves stay off — molecules are pushed apart by
+  rigid-body descent only. The cell travels with the seed; declaring a
+  box, density, or cell on a seeded engine is a named error, and the run's
+  free targets must match the seed's shape.
+- `.with_inner_iterations(n: int)` — GENCAN inner-loop cap (default 20).
+- `.with_init_passes(n: int)` — init compaction passes (0 = auto).
+- `.with_init_box_half_size(h: float)` — init placement bound (default 1000 Å).
+- `.with_perturb(fraction: float, random: bool = False, enabled: bool = True)`
+  — stall-perturbation heuristic: fraction re-sampled per stall, random
+  vs worst-first selection, and the master switch.
+- `.with_avoid_overlap(on: bool = True)` — reject initial random placements
+  overlapping a fixed molecule (Packmol `avoid_overlap`; default True).
+
+### `CbmcGrow`
+
+Configurational-bias chain growth for dense melts — see the
+[Chain growth guide](guide/growth.md). The torsion prior is the one
+mandatory constructor argument, because it decides the chain statistics
+of the product.
+
+```python
+CbmcGrow(torsion_prior: TorsionPrior)
+```
+
+Growth-only builders, on top of the shared ones:
+
+- `.with_trials(k: int)` — torsion candidates per growth step (CBMC
+  `k`; clamped ≥ 1, default 12).
+- `.with_selectivity(beta: float)` — Rosenbluth inverse temperature
+  applied to the soft-shell crowding penalty (clamped ≥ 0, default 2.0).
+- `.with_soft_shell(width: float)` — soft-shell width in Å beyond the
+  hard core: allowed but charged (clamped ≥ 0, default 1.0).
+- `.with_retract(steps: int)` — steps retracted on a dead end; repeated
+  dead ends retract exponentially deeper (clamped ≥ 1, default 10).
+- `.with_relax(every: int, window: int)` — regrow each chain's last
+  `window` steps every `every` rounds; `every=0` disables (default
+  `(25, 6)`). A regrown tail is only kept when its Rosenbluth weight
+  does not degrade.
+- `.with_soften_after(attempts: int)` — cumulative dead ends on one
+  chain before that chain's hard core softens by one rung (×0.97); a
+  successful placement does not reset the count (clamped ≥ 1, default 50).
+  Softening is per chain: a rung on one chain leaves every other chain at
+  full contact.
+- `.with_min_hard_scale(scale: float)` — softening floor, clamped to
+  `[0, 1]` (default 0.8, the classic push-off bound).
+- `.with_angle_prior(prior: AnglePrior)` — placement-angle prior
+  (default `AnglePrior.template()`).
+- `.with_serial(serial: bool = True)` — grow one chain to completion
+  before starting the next.
+- `.with_void_bias(void_bias: bool = True)` — seed chains in empty field
+  cells (cavity seeding).
+
+### `LatticeGrow`
+
+Diamond-lattice growth for melt density and above (see the
+[Chain growth guide](guide/growth.md)): the backbone grows as an on-lattice
+self-avoiding walk with RIS weights, and each backbone atom is then seated on
+the site the walk chose. **A template supplies its topology, not its
+geometry**: the backbone's bond lengths and angles are the lattice's — one
+step throughout, sized from the template's own mean backbone bond and moved a
+percent or two by how the cell divides — and its torsions are exactly the
+trans/gauche± the prior drew. Only hydrogens and side atoms keep the
+template's local geometry. Same mandatory torsion-prior constructor and shared
+builders; one extra knob:
+
+- `.with_occupancy_guard(on: bool = True)` — nearest-neighbour site
+  exclusion (keeps non-bonded pairs at ≥ the 2nd-neighbour distance).
+
+Trees (including branched) are accepted; a cycle raises named
+`RingTemplate` `ValueError`; non-tetrahedral templates stay named
+rejections.
+
+### `Pipeline`
+
+Composes stage objects — `GenCanPack`, `CbmcGrow`, and `LatticeGrow`
+instances — into one multi-algorithm run: grow a chain, then hand it to
+rigid-body descent, in one lifecycle and one `State` rather than two
+separate `run()` calls. See [Composing stages](guide/packer.md#composing-stages)
+for the full walkthrough.
+
+```python
+Pipeline(stages: Sequence[GenCanPack | CbmcGrow | LatticeGrow] | None = None)
 ```
 
 **Builders**
 
-- `.with_tolerance(t: float)` — minimum pairwise distance (Å; default 2.0).
-- `.with_precision(p: float)` — convergence threshold (default 0.01).
-- `.with_inner_iterations(n: int)` — GENCAN inner-loop cap (default 20).
-- `.with_init_passes(n: int)` — init compaction passes (0 = auto).
-- `.with_init_box_half_size(h: float)` — init placement bound (default 1000 Å).
-- `.with_periodic_box(min: [x,y,z], max: [x,y,z])` — declare a
-  fully-periodic box directly on the packer (Packmol `pbc`). Alternative
-  to a periodic `InsideBoxRestraint`; see
-  [Periodic boundaries](guide/periodic-boundaries.md).
-- `.with_perturb_fraction(f: float)` — stall perturbation fraction (default 0.05).
-- `.with_random_perturb(enabled: bool)`.
-- `.with_perturb(enabled: bool)` — master switch (default True).
-- `.with_avoid_overlap(enabled: bool)` — reject initial random placements
-  overlapping a fixed molecule (Packmol `avoid_overlap`; default True).
-- `.with_seed(seed: int)` — deterministic RNG (default 0).
-- `.with_parallel_eval(enabled: bool)` — rayon-backed pair eval. Raises
-  `RuntimeError` if the wheel lacks the `rayon` feature (fail-fast).
-- `.with_lammps_output(enabled: bool)` — enable LAMMPS-style screen output.
-- `.with_log_level(level: str)` — `quiet`, `summary`, `progress`, or `verbose`.
-- `.with_log_frequency(n: int)` — print every `n` outer steps.
-- `.with_progress(enabled: bool)` — compatibility alias for progress output.
-- `.with_handler(handler)` — attach a custom `Handler` (stackable).
-- `.with_xyz_output(path: str, every: int = 1)` — record the packing
-  trajectory to a multi-frame extended-XYZ file (a frame every `every`
-  loops, loop 0 included).
-- `.with_global_restraint(r)` — broadcast to every target (stackable).
+- `.with_stage(stage: GenCanPack | CbmcGrow | LatticeGrow)` — append one
+  more stage; returns a new `Pipeline`.
+- The shared builders — same as [`GenCanPack`](#shared-builders):
+  `.with_tolerance`, `.with_precision`, `.with_seed`,
+  `.with_periodic_box`, `.with_density`, `.with_parallel_eval`,
+  `.with_progress`, `.with_handler`, `.with_global_restraint`. Set these on
+  the `Pipeline`, never on a stage object that goes into one — a stage
+  carrying a non-default shared setting raises `ValueError` naming the
+  stage and the setting.
 
-**Run**
+**Running**
 
 ```python
-.pack(targets: list[Target], max_loops: int = 200) -> molrs.Frame
-.pack_with_report(targets: list[Target], max_loops: int = 200) -> PackResult
+.run(targets: list[Target], max_loops: int) -> State
 ```
 
-Raises a typed `PackError` subclass on failure.
+Each stage's own `.with_handler(...)` callbacks are adopted into the
+pipeline's handler set and fire for every stage in the run, not only the
+one they were attached to. Raises `ValueError` for an empty pipeline, a
+stage-ordering error, or a stage carrying a non-default shared setting
+(each naming the offending stage); raises `TypeError`, listing the three
+supported entries, for any object passed to `Pipeline([...])` or
+`.with_stage(x)` that is not a `GenCanPack`, `CbmcGrow`, or `LatticeGrow`.
+
+### Chaining two entries
+
+An entry's own `run()` never mixes algorithms, and there is no hidden
+fallback between them. Outside `Pipeline` (above), stage it in user code
+instead, in one of two shapes:
+
+```python
+# Push-off: continue the SAME free targets on the grown state.
+grown = CbmcGrow(prior).with_density(0.9).run([chain], max_loops=60)
+pushed = GenCanPack().with_restart(grown).with_seed(7).run([chain], max_loops=60)
+
+# Fixed matrix: freeze the first result, pack new species around it.
+full = GenCanPack().run([Target.fixed_from(grown), solvent], max_loops=200)
+```
 
 ---
 
-## `PackResult`
+## `State`
 
-Read-only output container returned by `pack_with_report()`.
+Frozen outcome of one `run()`. Diagnostics (`frame`, `fdist`, `frest`,
+`converged`, `degraded`, `intra`) live on this object; pass the same
+object to `GenCanPack.with_restart` or `Target.fixed_from` to continue.
 
 **Properties**
 
@@ -175,6 +334,64 @@ Read-only output container returned by `pack_with_report()`.
 - `.converged : bool`
 - `.fdist : float`
 - `.frest : float`
+- `.degraded : int` — how many molecules were placed below the growth
+  solver's own guarantee, one count per demotion. `LatticeGrow` demotes a chain
+  when the walk cannot keep the occupancy guard (no two non-bonded atoms closer
+  than the 2nd lattice neighbour): the chain goes in with site self-avoidance
+  only, or as a forced zigzag. `CbmcGrow` counts each hard-core softening rung
+  the same way. `0` on the GENCAN path, which promises nothing constructively.
+  A non-zero count is the honest reading of a crowded box — those molecules
+  carry the close contacts `fdist` reports, and `converged` is false while it
+  stands.
+- `.intra : IntraResidual` — same-copy scored vs exempted minima (Å,
+  minimum image). Forwards the assembled residual; does not recompute
+  from positions.
+
+### `IntraResidual`
+
+Nested diagnostic on [`State`](#state). Empty class is `+∞`.
+
+- `.scored : float` — minimum same-copy pair distance among pairs the
+  target's skip table scores (Å).
+- `.exempted : float` — minimum same-copy pair distance among pairs the
+  table exempts (Å).
+
+There are no `min_intra_*` aliases.
+
+---
+
+## Chain-growth priors
+
+Inputs to [`CbmcGrow`](#cbmcgrow): the torsion prior is its mandatory
+constructor argument, the angle prior an optional builder. Both are
+geometric data — see the [Chain growth guide](guide/growth.md) for when
+and why each matters.
+
+### `TorsionPrior`
+
+Geometric data only — never a force field. Static constructors:
+
+- `TorsionPrior.uniform()` — uniform on (−π, π]. Freely-rotating-chain
+  statistics (C∞ = 2.0); negative control only, quantitatively wrong for
+  melts.
+- `TorsionPrior.template(kappa: float)` — von-Mises-like spread of
+  concentration `kappa` around the template's own torsion values.
+- `TorsionPrior.states(states: list[tuple[float, float]])` — RIS-style
+  discrete `(angle_rad, weight)` states; weights are normalized at use.
+- `TorsionPrior.three_state_from_c_inf(c_inf: float, theta_rad: float)`
+  — trans/gauche± prior whose trans fraction is solved from a target
+  characteristic ratio. PEO with tetrahedral backbone angles:
+  `TorsionPrior.three_state_from_c_inf(5.5, 1.9106)`.
+
+### `AnglePrior`
+
+- `AnglePrior.template()` — copy bond angles verbatim from the template
+  (the all-atom default).
+- `AnglePrior.wlc(kappa: float)` — discrete worm-like chain with tilt
+  `kappa` (CG persistence control).
+- `AnglePrior.wlc_from_c_inf(c_inf: float)` — WLC tilt calibrated from
+  a target characteristic ratio; assumes uniform torsions.
+  Kremer–Grest melts: `AnglePrior.wlc_from_c_inf(1.76)`.
 
 ---
 
@@ -193,43 +410,66 @@ info.frest
 info.improvement_pct
 info.radscale
 info.precision
-info.relaxer_acceptance  # list[tuple[int, float]]
+info.stage             # StageInfo — which packing algorithm emitted this step
 ```
+
+### `StageInfo`
+
+Read-only triple identifying the stage a step belongs to. Load-bearing
+inside a multi-stage [`Pipeline`](#pipeline); present, with `index = 0` and
+`total = 1`, on every single-entry run too.
+
+- `.index : int` — 0-based position of this stage in the run; monotonic
+  across a multi-stage `Pipeline`.
+- `.total : int` — number of stages in the run.
+- `.name : str` — the stage's own name: `"gencan"`, `"growth"`, or
+  `"lattice"`.
 
 ---
 
 ## Restraints
 
 All restraint classes are immutable. Two families, both attached with
-`target.with_restraint(r)` (or `Molpack.with_global_restraint(r)`):
-**geometric** per-atom region restraints (below) and **collective**
+`target.with_restraint(r)` (or the entry's `with_global_restraint(r)`):
+**molrs regions** lifted to a per-atom penalty (below) and **collective**
 distribution-matching restraints ([next section](#collective-distribution-matching-restraints)).
 
-### Geometric (per-atom) restraints
+### molrs regions as restraints
 
-Their `f`/`fg` see **one atom** at a time — a soft quadratic penalty that
-is zero inside the region and rises outside.
+Any molrs region object attaches as a restraint: `molrs.Sphere`, `Cuboid`,
+`Parallelepiped`, `HalfSpace`, `Cylinder`, `Ellipsoid`, `Polyhedron`,
+`SphereUnion`, or any `&` / `|` / `~` composition of them. The region
+crosses the wheel boundary as a `molrs.RegionRef` capsule (both wheels on
+one molrs minor line) and is lifted to `scale · max(0, distance)²` — a
+soft quadratic penalty on the **atom centre** that is zero inside the
+region and on its boundary. molpack defines no geometric restraint class;
+the shapes, their constructors and their `contains` / `distance` /
+`bounds` queries are documented with molrs. Solver split (the same for
+every region, not inferred from the shape):
 
-### `InsideBoxRestraint(min, max, periodic=(False, False, False))`
+- `GenCanPack` — soft exterior penalty.
+- `CbmcGrow` — hard reject on propose; `force_place` may sit outside.
+- `LatticeGrow` — sites outside the mesh are blocked (Region ∩ lattice), and
+  the backbone atoms **are** those sites, so the mask's guarantee is the
+  molecule's. Hydrogens and side atoms hang off the backbone with the
+  template's local geometry and can reach about a bond length past the
+  surface; author the mesh with that clearance in it if the wall has to hold.
 
-Axis-aligned box. `periodic` is a 3-tuple of booleans declaring per-axis
-periodicity — see [Periodic boundaries](guide/periodic-boundaries.md).
+The region answers its own questions for an `(n, 3)` array: `contains`
+returns `(n,)` bool; `distance` returns `(n,)` Å, negative inside. Together
+they say what the packer was told to enforce:
 
-### `InsideSphereRestraint(center, radius)`
+```python
+cavity = molrs.Polyhedron(molrs.io.read_stl("dendrite.stl"))
+depth = cavity.distance(state.positions)
+print(f"{(depth > 0).sum()} atoms outside, worst {depth.max():.2f} Å")
+```
 
-Closed ball.
-
-### `OutsideSphereRestraint(center, radius)`
-
-Complement of closed ball.
-
-### `AbovePlaneRestraint(normal, distance)`
-
-Half-space $\{\mathbf{x} : \mathbf{n}\cdot\mathbf{x} \ge d\}$.
-
-### `BelowPlaneRestraint(normal, distance)`
-
-Half-space $\{\mathbf{x} : \mathbf{n}\cdot\mathbf{x} \le d\}$.
+A restraint is satisfied to the run's `precision`, not exactly. `frest` is the
+largest per-atom penalty `0.01 · d²`, so `frest < precision` means
+`d < 10·√precision`: the default `precision=1e-2` calls a run converged with an
+atom 1 Å outside, `1e-4` with 0.1 Å. Tighten `with_precision` when the wall is
+the point — and remember the mesh, not the solver, is where clearance belongs.
 
 ### Collective (distribution-matching) restraints
 
@@ -254,78 +494,49 @@ radial distance to a point ($\xi = \lVert\mathbf{x} - \text{center}\rVert$).
 (≥ 2 points) with non-negative `rho` of positive total mass. Invalid
 arguments raise `ValueError` at construction.
 
----
+### Collective (pairwise separation) restraint
 
-## In-loop relaxers
+| Class | Constructor | Meaning |
+|-------|-------------|---------|
+| `SelfSeparation` | `(d_min, strength=1.0)` | no two copies of this species closer than `d_min`, centre to centre |
 
-Relaxation-assisted packing: attach to a `Target` via
-`target.with_relaxer(r)` to reshape a single molecule's reference
-geometry *during* the pack loop. Both require the target's `count == 1`
-(every copy shares the reference geometry the relaxer rewrites). Immutable.
+The anti-clustering restraint. A distribution target says *where* copies
+should be; this says how close two of them may come. The pair term keeps
+atoms from overlapping and then stops caring, and it does not distinguish
+two copies of one species from a copy of each of two — so without this a
+species may pile its copies into one corner.
 
-### `TorsionMcRelaxer(frame)`
+The penalty is silent above `d_min` and grows as $(d_{min} - D)^2$ below it,
+where $D$ is the minimum-image distance between two copies' geometric
+centroids. It is quadratic in the length by which the bound is missed — the
+same shape as a geometric restraint's penalty — so `strength=1.0` weights a
+shortfall like a region lift weights an equal overshoot, and the
+convergence threshold `precision` means the same thing for both.
 
-Monte-Carlo torsion-angle sampling — engine-free and force-field-free.
-Rotatable bonds are detected from the frame's bond topology; proposed
-rotations are accepted against the packer objective (Metropolis).
+Centroids, not atoms: for a compact molecule the centroid stands in for the
+whole, but two long chains can interdigitate with distant centroids. The
+restraint states what it measures.
 
-- `.with_temperature(t: float)` — Metropolis temperature (default 1.0).
-- `.with_steps(n: int)` — MC steps proposed per packing iteration (default 10).
-- `.with_max_delta(rad: float)` — max per-step rotation, radians (default π/6).
-- `.with_self_avoidance(radius: float)` — quadratic overlap penalty on
-  non-bonded intramolecular pairs closer than `2 * radius`; `0.0`
-  disables (default).
+Cost is linear in `count`, not quadratic: the centres are binned into a cell
+grid and only nearby pairs are examined, so the bound stays affordable on a
+melt-sized species.
 
-```python
-from molpack import Target, TorsionMcRelaxer
-
-chain = TorsionMcRelaxer(frame).with_steps(20).with_self_avoidance(1.5)
-target = Target(frame, count=1).with_relaxer(chain)
-```
-
-### `LBFGSRelaxer(forcefield)`  *(requires the `ff` feature)*
-
-Force-field L-BFGS geometry minimization. Built from a
-`molrs.ForceField` / `molpy.ForceField` (zero-copy FFI capsule); the
-potential is compiled lazily against the molecule's frame when packing
-starts.
-
-- `.with_fmax(fmax: float)` — stop when the max per-atom force drops
-  below `fmax` (kcal/mol/Å; default 0.05).
-- `.with_max_steps(max_steps: int)` — L-BFGS iteration cap per
-  relaxation call (default 500).
-
----
-
-## Post-pack relaxation
-
-### `LAMMPSRelaxer` *(from `molpack.relaxer`)*
-
-Whole-system relaxation of a **finished** packed box via LAMMPS — a
-different axis from the in-loop relaxers above. A thin façade over
-`molpy.engine.LAMMPSEngine`, imported **lazily** so `import molpack`
-never requires molpy.
+Feasibility is not checked, and does not need to be. A bound is either met or
+not, so unlike the distribution restraints this one counts toward the restraint
+verdict `frest` and gates convergence: if `count` copies cannot fit at `d_min`,
+the run does not converge and says so — it is never silently relaxed. `d_min`
+and `strength` must be `> 0`; otherwise `ValueError`.
 
 ```python
-LAMMPSRelaxer(
-    ff,                              # a typified molpy ForceField
-    *,
-    executable: str | None = None,   # None auto-detects lmp / lmp_serial / lmp_mpi
-    launcher: list[str] | None = None,   # e.g. ["mpirun", "-np", "8"]
-    pair_style: str = "lj/cut/coul/cut 10.0",
-    atom_style: str = "full",
-    units: str = "real",
-    workdir: str | Path | None = None,
+import molrs
+from molpack import SelfSeparation, Target
+
+ions = (
+    Target(frame, count=27)
+    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(SelfSeparation(10.0))
 )
 ```
-
-- `.minimize(target, **options) -> molrs.Frame` — energy minimisation.
-- `.md(target, **options) -> molrs.Frame` — short MD settle.
-- `.relax(target, **options)` — alias for `minimize` (also `__call__`).
-
-`target` is a `PackResult` (its `.frame` is used) or a bare
-`molrs.Frame` carrying a periodic box; the input is never mutated.
-Raises `ImportError` if `molcrafts-molpy` is not installed.
 
 ---
 
@@ -349,8 +560,9 @@ job = load_script("mix.inp")
 packer, targets, output, nloop = load_script("mix.inp")   # same object
 ```
 
-- `.packer : Molpack` — pre-configured with the script's `tolerance`,
-  `seed`, and any `pbc` box.
+- `.packer : GenCanPack` — pre-configured with the script's `tolerance`,
+  `seed`, and any `pbc` box. `.inp` scripts always lower to the
+  rigid-body entry.
 - `.targets : list[Target]`
 - `.output : pathlib.Path` — resolved output path.
 - `.nloop : int` — outer-loop cap (`nloop` keyword; default 400).
@@ -409,8 +621,10 @@ subclass). Catch the base to handle any packing failure uniformly.
 - `NoTargetsError` — empty target list.
 - `EmptyMoleculeError` — a target has zero atoms.
 - `InvalidPBCBoxError` — periodic box has a non-positive extent.
-- `ConflictingPeriodicBoxesError` — two restraints declared
-  incompatible periodic boxes.
 
 `ValueError` / `TypeError` still surface on Python-side invariants
-(bad atom indices, wrong restraint object, etc.).
+(bad atom indices, wrong restraint object, etc.). Growth and density
+declarations are input contracts, so their failures also raise
+`ValueError`: a target that cannot be grown (no bond graph, < 3 atoms,
+fixed placement, no box), a `with_density` fighting an explicit box, or
+a mass the element symbols cannot resolve.

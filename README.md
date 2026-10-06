@@ -64,39 +64,46 @@ inferred from the `output` extension.
 **Rust**
 
 ```rust
-use molpack::{InsideBoxRestraint, Molpack, Target};
+use std::sync::Arc;
+use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
+use molrs::spatial::region::Cuboid;
+use ndarray::array;
 
 let positions = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
 let radii = [1.52, 1.20, 1.20];
 
 let target = Target::from_coords(&positions, &radii, 100)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint::new([0.0; 3], [40.0; 3], [false; 3]));
+    .with_restraint(RegionRestraint(Arc::new(Cuboid::new(array![0.0, 0.0, 0.0], array![40.0, 40.0, 40.0]))));
 
-// `pack` returns the packed, topology-complete `molrs::Frame`.
-// Every tuning knob has a Packmol-matching default, so `new().pack(...)`
-// is a complete call; `200` is the outer-loop budget.
-let frame = Molpack::new().pack(&[target], 200)?;
-
-// For full diagnostics, use `pack_with_report` → `PackResult`
-// (`frame`, `fdist`, `frest`, `converged`).
-let report = Molpack::new().pack_with_report(&[target], 200)?;
+// You pick the algorithm by picking the entry: `GenCanPack` for rigid-body
+// packing, `CbmcGrow` for chain growth. Both share the `PackEngine` builders
+// and the single terminal verb `run`, which consumes the entry — one engine,
+// one run. Every tuning knob has a Packmol-matching default, so
+// `GenCanPack::new().run(...)` is a complete call; `200` is the outer-loop
+// budget.
+//
+// `run` returns a `State`: the packed, topology-complete `molrs::Frame`
+// in `.frame`, plus `fdist`, `frest`, `converged`, `degraded`.
+let result = GenCanPack::new().run(&[target], 200)?;
+let frame = result.frame;
 ```
 
 **Python**
 
 ```python
 import molrs
-from molpack import InsideBoxRestraint, Molpack, Target
+from molpack import GenCanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
+    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
 )
-frame = Molpack().pack([water], max_loops=200)
+result = GenCanPack().run([water], max_loops=200)
+frame = result.frame
 ```
 
 ## Examples
@@ -116,16 +123,18 @@ The same workloads run through the CLI from their bundled `.inp` scripts,
 e.g. `cargo run --release --features cli --bin molpack -- examples/pack_mixture/mixture.inp`.
 Python equivalents are in [`python/examples/`](./python/examples/).
 
-A measurement harness also lives under `examples/`: `mt_scaling` (parallel
-speed-up-vs-size sweep, needs `--features rayon`).
+`examples/pack_peo` compares the chain-growth solver against the
+rigid-body path on a PEO melt (needs `--features io`).
 
 ## Testing
 
+Behaviour is tested in `#[cfg(test)]` modules next to the code it belongs
+to — molpack has no `tests/` directory and no benchmark suite.
+
 ```bash
-cargo test                                                  # unit + integration
-cargo test --release --test examples_batch -- --ignored     # Packmol regression (all 5 workloads)
-cargo bench --benches                                       # criterion regression benches (no io)
-cd python && maturin develop --release && pytest            # Python wheel
+cargo test --lib --features cli,ff       # the gate: in-module unit tests
+cargo test --doc --features cli,ff       # rustdoc examples
+cd python && maturin develop --release && pytest   # Python wheel
 ```
 
 ## Documentation

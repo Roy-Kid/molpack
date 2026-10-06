@@ -2,15 +2,30 @@ name: CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, dev]
   pull_request:
+    branches: [master, dev]
   workflow_call:
+    inputs:
+      mol_git_ref:
+        description: >-
+          molrs / molpy ref to check out. The publish workflows run on a
+          molpack tag, which names no molrs or molpy ref, so they pass the
+          release tag of the molrs line Cargo.toml pins.
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
 
-# Pin sibling molrs to the same version as Cargo.toml / python/pyproject.toml [tool.tox].
-# Bump together when raising molcrafts-molrs / molcrafts-molpy.
+# Local builds use the sibling directories. GitHub has two branches, and
+# CI checks out MolCrafts/molrs and MolCrafts/molpy on that same branch.
+# A pull request uses its head branch; a caller may name the ref instead.
 env:
-  MOLRS_GIT_REF: v0.12.0
+  MOLRS_GIT_REPOSITORY: MolCrafts/molrs
+  MOLPY_GIT_REPOSITORY: MolCrafts/molpy
+  MOL_GIT_REF: ${{ inputs.mol_git_ref || github.head_ref || github.ref_name }}
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
 
 # Lint: same as prek commit-stage hooks in .pre-commit-config.yaml.
 # Tests: same commands as prek pre-push hooks (no scripts/).
@@ -22,19 +37,28 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: MolCrafts/molrs
-          ref: ${{ env.MOLRS_GIT_REF }}
+          repository: ${{ env.MOLRS_GIT_REPOSITORY }}
+          ref: ${{ env.MOL_GIT_REF }}
           path: molrs
+      # `ty check` walks examples/, which import molpy (typecheck group).
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ env.MOLPY_GIT_REPOSITORY }}
+          ref: ${{ env.MOL_GIT_REF }}
+          path: molpy
       - uses: actions/checkout@v6
         with:
           path: molpack
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      # The committed .cargo/config.toml routes builds into ../molrs/target,
+      # shared with the sibling molrs checkout.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: molpack
-      - uses: astral-sh/setup-uv@v6
+          workspaces: "molpack -> ../molrs/target"
+      - uses: astral-sh/setup-uv@v7
       - name: Rust fmt + clippy (pre-commit parity)
         working-directory: molpack
         run: |
@@ -43,6 +67,10 @@ jobs:
           cargo fmt -- --check
           cargo fmt --manifest-path python/Cargo.toml -- --check
           cargo clippy --all-targets --all-features -- -D warnings
+      - name: No ignored tests (pre-commit parity)
+        working-directory: molpack
+        run: |
+          ! git grep -nE '```[a-z,_]*ignore|#\[ignore' -- src docs examples python/src
       - name: Ruff + ty (pre-commit parity)
         working-directory: molpack
         run: |
@@ -58,56 +86,31 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: MolCrafts/molrs
-          ref: ${{ env.MOLRS_GIT_REF }}
+          repository: ${{ env.MOLRS_GIT_REPOSITORY }}
+          ref: ${{ env.MOL_GIT_REF }}
           path: molrs
       - uses: actions/checkout@v6
         with:
           path: molpack
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      # The committed .cargo/config.toml routes builds into ../molrs/target,
+      # shared with the sibling molrs checkout.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: molpack
-      - name: Cache test data
-        uses: actions/cache@v5
-        with:
-          path: molrs/tests-data
-          key: ${{ runner.os }}-test-data-${{ hashFiles('molrs/scripts/fetch-test-data.sh') }}
-      - name: Fetch test data
-        run: bash scripts/fetch-test-data.sh
-        working-directory: molrs
+          workspaces: "molpack -> ../molrs/target"
       - name: Rust tests
         working-directory: molpack
         run: |
           set -euo pipefail
-          cargo test --features io --lib --tests --examples
-          cargo test --test cli --features cli
+          # Behaviour lives in `#[cfg(test)]` modules next to the code; there is
+          # no tests/ directory (see CLAUDE.md).
+          cargo test --lib --features cli,ff
+          cargo test --doc --features cli,ff
+          # Every other target still has to compile: bin, examples.
+          cargo check --all-targets --features cli,ff
           cargo check --no-default-features
           cargo check --features rayon
-          cargo check --features ff
-          cargo build --benches
-
-  # Packmol regression suite — expensive; master / release / dispatch only.
-  regression:
-    name: packmol regression
-    runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: MolCrafts/molrs
-          ref: ${{ env.MOLRS_GIT_REF }}
-          path: molrs
-      - uses: actions/checkout@v6
-        with:
-          path: molpack
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: molpack
-      - name: Run examples_batch (--ignored)
-        run: cargo test --release --features io --test examples_batch -- --ignored
-        working-directory: molpack
 
   python:
     name: python tests
@@ -115,20 +118,28 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: MolCrafts/molrs
-          ref: ${{ env.MOLRS_GIT_REF }}
+          repository: ${{ env.MOLRS_GIT_REPOSITORY }}
+          ref: ${{ env.MOL_GIT_REF }}
           path: molrs
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ env.MOLPY_GIT_REPOSITORY }}
+          ref: ${{ env.MOL_GIT_REF }}
+          path: molpy
       - uses: actions/checkout@v6
         with:
           path: molpack
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      # The committed .cargo/config.toml routes builds into ../molrs/target,
+      # shared with the sibling molrs checkout.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: molpack
-      - uses: actions/setup-python@v6
+          workspaces: "molpack -> ../molrs/target"
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - name: tox -e py via python dev group (isolated, non-editable)
         working-directory: molpack
         run: uv run --directory python --group dev tox -e py

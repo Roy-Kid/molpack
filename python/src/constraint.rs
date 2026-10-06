@@ -1,19 +1,24 @@
 //! Python wrappers for molecular packing restraints.
 //!
-//! Each built-in geometric restraint is a `#[pyclass]` named `*Restraint` to
-//! mirror the Rust type names. Custom Python-defined restraints are supported via
-//! **duck typing**: any object exposing callable ``f(coords, scale, scale2)`` and
+//! Geometry is a molrs region object (``molrs.Sphere``, ``Cuboid``,
+//! ``Parallelepiped``, ``HalfSpace``, ``Cylinder``, ``Ellipsoid``,
+//! ``Polyhedron``, ``SphereUnion``, or any ``&`` / ``|`` / ``~`` composition);
+//! it reaches this wheel as a ``molrs.RegionRef/<line>`` capsule and is lifted
+//! through [`RegionRestraint`]. molpack defines no geometric restraint class of
+//! its own. Custom Python-defined restraints are supported via **duck typing**:
+//! any object exposing callable ``f(coords, scale, scale2)`` and
 //! ``fg(coords, scale, scale2)`` attributes may be passed to
 //! ``Target.with_restraint``; see [`PyCallableRestraint`] for the group contract.
 
 use std::sync::Arc;
 
 use crate::helpers::{NpF, stash_err};
+use crate::interop::region_from_py;
 use molpack::F;
+use molpack::RegionRestraint;
 use molpack::restraint::{
-    AbovePlaneRestraint, AtomRestraint, BelowPlaneRestraint, ExponentialPlane, ExponentialPoint,
-    GaussianPlane, GaussianPoint, InsideBoxRestraint, InsideSphereRestraint,
-    OutsideSphereRestraint, Restraint, TabulatedPlane, TabulatedPoint,
+    AtomRestraint, ExponentialPlane, ExponentialPoint, GaussianPlane, GaussianPoint, GroupCtx,
+    Restraint, SelfSeparation, TabulatedPlane, TabulatedPoint,
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -50,32 +55,29 @@ impl AtomRestraint for SharedAtomRestraint {
         self.0.name()
     }
     #[inline]
-    fn periodic_box(&self) -> Option<([F; 3], [F; 3], [bool; 3])> {
-        self.0.periodic_box()
+    fn holds_along(&self, shift: [F; 3]) -> bool {
+        self.0.holds_along(shift)
+    }
+    #[inline]
+    fn declared_cell(&self) -> Option<molrs::spatial::simbox::SimBox> {
+        self.0.declared_cell()
     }
 }
 
 // ============================================================================
-// Extractor: try each built-in `#[pyclass]`, else duck-type on `f`/`fg`.
+// Extractor: a molrs region (by capsule), else duck-type on `f`/`fg`.
 // ============================================================================
+
+/// Whether `obj` is a molrs region object: it exports the region capsule.
+fn is_region(obj: &Bound<'_, pyo3::types::PyAny>) -> PyResult<bool> {
+    obj.hasattr("_ffi_regionref_capsule")
+}
 
 pub(crate) fn extract_restraint(
     obj: &Bound<'_, pyo3::types::PyAny>,
 ) -> PyResult<SharedAtomRestraint> {
-    if let Ok(c) = obj.extract::<PyInsideBoxRestraint>() {
-        return Ok(SharedAtomRestraint(Arc::new(c.inner)));
-    }
-    if let Ok(c) = obj.extract::<PyInsideSphereRestraint>() {
-        return Ok(SharedAtomRestraint(Arc::new(c.inner)));
-    }
-    if let Ok(c) = obj.extract::<PyOutsideSphereRestraint>() {
-        return Ok(SharedAtomRestraint(Arc::new(c.inner)));
-    }
-    if let Ok(c) = obj.extract::<PyAbovePlaneRestraint>() {
-        return Ok(SharedAtomRestraint(Arc::new(c.inner)));
-    }
-    if let Ok(c) = obj.extract::<PyBelowPlaneRestraint>() {
-        return Ok(SharedAtomRestraint(Arc::new(c.inner)));
+    if let Some(region) = try_region(obj)? {
+        return Ok(region);
     }
 
     // Duck-typed Python restraint: object with callable `f` and `fg`
@@ -89,37 +91,28 @@ pub(crate) fn extract_restraint(
     }
 
     Err(PyTypeError::new_err(
-        "expected a restraint: one of InsideBoxRestraint / InsideSphereRestraint / \
-         OutsideSphereRestraint / AbovePlaneRestraint / BelowPlaneRestraint, or an \
-         object with callable `f(x, scale, scale2)` and `fg(x, scale, scale2)` methods",
+        "expected a restraint: a molrs region (any object exposing \
+         `_ffi_regionref_capsule()` — molrs.Sphere / Cuboid / Parallelepiped / HalfSpace / \
+         Cylinder / Ellipsoid / Polyhedron / SphereUnion or a `&` / `|` / `~` composition), \
+         or an object with callable `f(x, scale, scale2)` and `fg(x, scale, scale2)` methods",
     ))
 }
 
-/// Try ONLY the built-in geometric per-atom pyclasses (no duck-typing).
+/// The per-atom region lift of `obj` when it is a molrs region, `None`
+/// otherwise (no duck typing).
 ///
-/// Returns `Some(..)` if `obj` is one of the five geometric built-ins
-/// (`InsideBoxRestraint`, `InsideSphereRestraint`, `OutsideSphereRestraint`,
-/// `AbovePlaneRestraint`, `BelowPlaneRestraint`); otherwise `None`. The unified
-/// [`crate::target::PyTarget::with_restraint`] entry point uses this to route a
-/// geometric built-in to the per-atom path and everything else (built-in
-/// distribution restraints + duck-typed objects) to the group path.
-pub(crate) fn try_atom_builtin(obj: &Bound<'_, pyo3::types::PyAny>) -> Option<SharedAtomRestraint> {
-    if let Ok(c) = obj.extract::<PyInsideBoxRestraint>() {
-        return Some(SharedAtomRestraint(Arc::new(c.inner)));
+/// The unified [`crate::target::PyTarget::with_restraint`] entry point uses
+/// this to route a region to the per-atom path and everything else (built-in
+/// distribution restraints + duck-typed objects) to the group path. A region
+/// from another molrs minor line is an error here, never a fall-through.
+pub(crate) fn try_region(
+    obj: &Bound<'_, pyo3::types::PyAny>,
+) -> PyResult<Option<SharedAtomRestraint>> {
+    if !is_region(obj)? {
+        return Ok(None);
     }
-    if let Ok(c) = obj.extract::<PyInsideSphereRestraint>() {
-        return Some(SharedAtomRestraint(Arc::new(c.inner)));
-    }
-    if let Ok(c) = obj.extract::<PyOutsideSphereRestraint>() {
-        return Some(SharedAtomRestraint(Arc::new(c.inner)));
-    }
-    if let Ok(c) = obj.extract::<PyAbovePlaneRestraint>() {
-        return Some(SharedAtomRestraint(Arc::new(c.inner)));
-    }
-    if let Ok(c) = obj.extract::<PyBelowPlaneRestraint>() {
-        return Some(SharedAtomRestraint(Arc::new(c.inner)));
-    }
-    None
+    let region = region_from_py(obj)?;
+    Ok(Some(SharedAtomRestraint(Arc::new(RegionRestraint(region)))))
 }
 
 // PyCallableAtomRestraint — bridge from the Rust `AtomRestraint` trait to a
@@ -205,132 +198,6 @@ impl AtomRestraint for PyCallableAtomRestraint {
 }
 
 // ============================================================================
-// Built-in geometric restraint `#[pyclass]` wrappers. Names match the Rust
-// types (`*Restraint` suffix); parameter order mirrors the Rust constructors.
-// ============================================================================
-
-#[pyclass(name = "InsideBoxRestraint", from_py_object)]
-#[derive(Clone)]
-pub struct PyInsideBoxRestraint {
-    pub(crate) inner: InsideBoxRestraint,
-}
-
-#[pymethods]
-impl PyInsideBoxRestraint {
-    #[new]
-    #[pyo3(signature = (min, max, periodic=(false, false, false)))]
-    fn new(min: [NpF; 3], max: [NpF; 3], periodic: (bool, bool, bool)) -> Self {
-        Self {
-            inner: InsideBoxRestraint::new(min, max, [periodic.0, periodic.1, periodic.2]),
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        let p = self.inner.periodic;
-        format!(
-            "InsideBoxRestraint(min={:?}, max={:?}, periodic=({}, {}, {}))",
-            self.inner.min, self.inner.max, p[0], p[1], p[2],
-        )
-    }
-}
-
-#[pyclass(name = "InsideSphereRestraint", from_py_object)]
-#[derive(Clone)]
-pub struct PyInsideSphereRestraint {
-    pub(crate) inner: InsideSphereRestraint,
-}
-
-#[pymethods]
-impl PyInsideSphereRestraint {
-    #[new]
-    #[pyo3(signature = (center, radius))]
-    fn new(center: [NpF; 3], radius: NpF) -> Self {
-        Self {
-            inner: InsideSphereRestraint::new(center, radius),
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "InsideSphereRestraint(center={:?}, radius={})",
-            self.inner.center, self.inner.radius,
-        )
-    }
-}
-
-#[pyclass(name = "OutsideSphereRestraint", from_py_object)]
-#[derive(Clone)]
-pub struct PyOutsideSphereRestraint {
-    pub(crate) inner: OutsideSphereRestraint,
-}
-
-#[pymethods]
-impl PyOutsideSphereRestraint {
-    #[new]
-    #[pyo3(signature = (center, radius))]
-    fn new(center: [NpF; 3], radius: NpF) -> Self {
-        Self {
-            inner: OutsideSphereRestraint::new(center, radius),
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "OutsideSphereRestraint(center={:?}, radius={})",
-            self.inner.center, self.inner.radius,
-        )
-    }
-}
-
-#[pyclass(name = "AbovePlaneRestraint", from_py_object)]
-#[derive(Clone)]
-pub struct PyAbovePlaneRestraint {
-    pub(crate) inner: AbovePlaneRestraint,
-}
-
-#[pymethods]
-impl PyAbovePlaneRestraint {
-    #[new]
-    #[pyo3(signature = (normal, distance))]
-    fn new(normal: [NpF; 3], distance: NpF) -> Self {
-        Self {
-            inner: AbovePlaneRestraint::new(normal, distance),
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "AbovePlaneRestraint(normal={:?}, distance={})",
-            self.inner.normal, self.inner.distance,
-        )
-    }
-}
-
-#[pyclass(name = "BelowPlaneRestraint", from_py_object)]
-#[derive(Clone)]
-pub struct PyBelowPlaneRestraint {
-    pub(crate) inner: BelowPlaneRestraint,
-}
-
-#[pymethods]
-impl PyBelowPlaneRestraint {
-    #[new]
-    #[pyo3(signature = (normal, distance))]
-    fn new(normal: [NpF; 3], distance: NpF) -> Self {
-        Self {
-            inner: BelowPlaneRestraint::new(normal, distance),
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "BelowPlaneRestraint(normal={:?}, distance={})",
-            self.inner.normal, self.inner.distance,
-        )
-    }
-}
-
-// ============================================================================
 // Collective (group-level) restraints — the `with_collective_restraint` path.
 //
 // Mirror of the per-atom machinery above, one level up: where a [`AtomRestraint`]
@@ -354,12 +221,16 @@ impl std::fmt::Debug for SharedRestraint {
 
 impl Restraint for SharedRestraint {
     #[inline]
-    fn f(&self, coords: &[[F; 3]], scale: F, scale2: F) -> F {
-        self.0.f(coords, scale, scale2)
+    fn f(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>) -> F {
+        self.0.f(coords, ctx)
     }
     #[inline]
-    fn fg(&self, coords: &[[F; 3]], scale: F, scale2: F, grads: &mut [[F; 3]]) -> F {
-        self.0.fg(coords, scale, scale2, grads)
+    fn fg(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
+        self.0.fg(coords, ctx, grads)
+    }
+    #[inline]
+    fn is_bound(&self) -> bool {
+        self.0.is_bound()
     }
     #[inline]
     fn is_parallel_safe(&self) -> bool {
@@ -392,6 +263,9 @@ pub(crate) fn extract_collective_restraint(
     if let Ok(c) = obj.extract::<PyTabulatedPoint>() {
         return Ok(SharedRestraint(Arc::new(c.inner)));
     }
+    if let Ok(c) = obj.extract::<PySelfSeparation>() {
+        return Ok(SharedRestraint(Arc::new(c.inner)));
+    }
 
     // Duck-typed Python collective restraint: callable `f`/`fg` taking the
     // whole group. Bound methods resolved once, like the per-atom path.
@@ -403,9 +277,11 @@ pub(crate) fn extract_collective_restraint(
     }
 
     Err(PyTypeError::new_err(
-        "expected a restraint: a {Gaussian,Exponential,Tabulated}{Plane,Point} \
-         distribution restraint, or an object with callable `f(coords, scale, scale2)` \
-         and `fg(coords, scale, scale2)` methods, where `coords` is every copy's (x, y, z)",
+        "expected a restraint: a molrs region (any object exposing \
+         `_ffi_regionref_capsule()`), a {Gaussian,Exponential,Tabulated}{Plane,Point} \
+         distribution restraint, a SelfSeparation restraint, or an object with callable \
+         `f(coords, scale, scale2)` and `fg(coords, scale, scale2)` methods, where \
+         `coords` is every copy's (x, y, z)",
     ))
 }
 
@@ -430,10 +306,10 @@ impl std::fmt::Debug for PyCallableRestraint {
 }
 
 impl Restraint for PyCallableRestraint {
-    fn f(&self, coords: &[[F; 3]], scale: F, scale2: F) -> F {
+    fn f(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>) -> F {
         Python::attach(|py| {
             let pts: Vec<(F, F, F)> = coords.iter().map(|p| (p[0], p[1], p[2])).collect();
-            match self.f_method.bind(py).call1((pts, scale, scale2)) {
+            match self.f_method.bind(py).call1((pts, ctx.scale, ctx.scale2)) {
                 Ok(res) => res.extract::<F>().unwrap_or_else(|e| {
                     stash_err(e);
                     0.0
@@ -446,10 +322,10 @@ impl Restraint for PyCallableRestraint {
         })
     }
 
-    fn fg(&self, coords: &[[F; 3]], scale: F, scale2: F, grads: &mut [[F; 3]]) -> F {
+    fn fg(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
         Python::attach(|py| {
             let pts: Vec<(F, F, F)> = coords.iter().map(|p| (p[0], p[1], p[2])).collect();
-            match self.fg_method.bind(py).call1((pts, scale, scale2)) {
+            match self.fg_method.bind(py).call1((pts, ctx.scale, ctx.scale2)) {
                 Ok(res) => match res.extract::<(F, Vec<[F; 3]>)>() {
                     Ok((v, g)) => {
                         if g.len() == grads.len() {
@@ -738,6 +614,59 @@ impl PyTabulatedPoint {
 
     fn __repr__(&self) -> String {
         "TabulatedPoint(...)".to_string()
+    }
+}
+
+/// Keep every pair of copies of one species at least ``d_min`` apart, measured
+/// **centre to centre** — the anti-clustering restraint. The compiled Rust
+/// [`SelfSeparation`].
+///
+/// The packer's own pair term only stops molecules overlapping; nothing in it
+/// distinguishes two copies of one species from a copy of each of two, so a
+/// species may pile its copies into one corner. This states the missing bound.
+///
+/// The penalty is silent above ``d_min`` and grows as ``(d_min - D)^2`` below
+/// it, where ``D`` is the minimum-image centre-to-centre distance. Quadratic in
+/// the length by which the bound is missed, like a geometric restraint's
+/// penalty, so it is commensurate with the rest of ``frest``.
+#[pyclass(name = "SelfSeparation", from_py_object)]
+#[derive(Clone)]
+pub struct PySelfSeparation {
+    pub(crate) inner: SelfSeparation,
+}
+
+#[pymethods]
+impl PySelfSeparation {
+    /// Parameters
+    /// ----------
+    /// d_min : float
+    ///     Minimum centre-to-centre distance between two copies (Å); must be > 0.
+    /// strength : float, default 1.0
+    ///     Overall penalty multiplier ``lambda``; ``1.0`` weights a shortfall
+    ///     like a geometric restraint weights an equal overshoot, below ``1.0``
+    ///     makes the bound softer. Must be > 0.
+    #[new]
+    #[pyo3(signature = (d_min, strength = 1.0))]
+    fn new(d_min: NpF, strength: NpF) -> PyResult<Self> {
+        if d_min <= 0.0 {
+            return Err(PyValueError::new_err("SelfSeparation d_min must be > 0"));
+        }
+        if strength <= 0.0 {
+            return Err(PyValueError::new_err("SelfSeparation strength must be > 0"));
+        }
+        Ok(Self {
+            inner: SelfSeparation::new(d_min, strength),
+        })
+    }
+
+    /// The minimum centre-to-centre distance this restraint asks for.
+    #[getter]
+    fn d_min(&self) -> NpF {
+        self.inner.d_min()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("SelfSeparation(d_min={})", self.inner.d_min())
     }
 }
 

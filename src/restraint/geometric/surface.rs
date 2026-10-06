@@ -39,6 +39,10 @@ impl AtomRestraint for AbovePlaneRestraint {
         }
         self.f(pos, scale, scale2)
     }
+
+    fn holds_along(&self, shift: [F; 3]) -> bool {
+        super::plane_repeats_along(self.normal, shift)
+    }
 }
 
 /// Packmol kind 11 — quadratic penalty forcing atom below plane `n·x <= d`.
@@ -72,6 +76,10 @@ impl AtomRestraint for BelowPlaneRestraint {
             g[2] += 2.0 * n[2] * ds;
         }
         self.f(pos, scale, scale2)
+    }
+
+    fn holds_along(&self, shift: [F; 3]) -> bool {
+        super::plane_repeats_along(self.normal, shift)
     }
 }
 
@@ -242,120 +250,6 @@ impl AtomRestraint for OutsideCylinderRestraint {
         g[0] += scale2 * (dfra0 * frbc + dfrb0 * frac + dfrc0 * frab);
         g[1] += scale2 * (dfra1 * frbc + dfrb1 * frac + dfrc1 * frab);
         g[2] += scale2 * (dfra2 * frbc + dfrb2 * frac + dfrc2 * frab);
-        self.f(pos, scale, scale2)
-    }
-}
-
-/// Packmol kind 14 — quadratic penalty above Gaussian surface.
-#[derive(Debug, Clone, Copy)]
-pub struct AboveGaussianRestraint {
-    pub cx: F,
-    pub cy: F,
-    pub sx: F,
-    pub sy: F,
-    pub z0: F,
-    pub height: F,
-}
-
-impl AboveGaussianRestraint {
-    pub fn new(cx: F, cy: F, sx: F, sy: F, z0: F, height: F) -> Self {
-        Self {
-            cx,
-            cy,
-            sx,
-            sy,
-            z0,
-            height,
-        }
-    }
-}
-
-impl AtomRestraint for AboveGaussianRestraint {
-    fn f(&self, pos: &[F; 3], scale: F, _scale2: F) -> F {
-        let (x, y, z) = (pos[0], pos[1], pos[2]);
-        let e1 = -(x - self.cx).powi(2) / (2.0 * self.sx.powi(2));
-        let e2 = -(y - self.cy).powi(2) / (2.0 * self.sy.powi(2));
-        let w = if e1 + e2 <= -50.0 {
-            -(z - self.z0)
-        } else {
-            self.height * (e1 + e2).exp() - (z - self.z0)
-        };
-        let a1 = w.max(0.0);
-        scale * a1 * a1
-    }
-
-    fn fg(&self, pos: &[F; 3], scale: F, scale2: F, g: &mut [F; 3]) -> F {
-        let (x, y, z) = (pos[0], pos[1], pos[2]);
-        let e1 = -(x - self.cx).powi(2) / (2.0 * self.sx.powi(2));
-        let e2 = -(y - self.cy).powi(2) / (2.0 * self.sy.powi(2));
-        let d_raw = if e1 + e2 <= -50.0 {
-            -(z - self.z0)
-        } else {
-            self.height * (e1 + e2).exp() - (z - self.z0)
-        };
-        if d_raw > 0.0 {
-            let d = scale * d_raw;
-            g[0] += -2.0 * d * (x - self.cx) * (d + (z - self.z0)) / self.sx.powi(2);
-            g[1] += -2.0 * d * (y - self.cy) * (d + (z - self.z0)) / self.sy.powi(2);
-            g[2] += -2.0 * d;
-        }
-        self.f(pos, scale, scale2)
-    }
-}
-
-/// Packmol kind 15 — quadratic penalty below Gaussian surface.
-#[derive(Debug, Clone, Copy)]
-pub struct BelowGaussianRestraint {
-    pub cx: F,
-    pub cy: F,
-    pub sx: F,
-    pub sy: F,
-    pub z0: F,
-    pub height: F,
-}
-
-impl BelowGaussianRestraint {
-    pub fn new(cx: F, cy: F, sx: F, sy: F, z0: F, height: F) -> Self {
-        Self {
-            cx,
-            cy,
-            sx,
-            sy,
-            z0,
-            height,
-        }
-    }
-}
-
-impl AtomRestraint for BelowGaussianRestraint {
-    fn f(&self, pos: &[F; 3], scale: F, _scale2: F) -> F {
-        let (x, y, z) = (pos[0], pos[1], pos[2]);
-        let e1 = -(x - self.cx).powi(2) / (2.0 * self.sx.powi(2));
-        let e2 = -(y - self.cy).powi(2) / (2.0 * self.sy.powi(2));
-        let w = if e1 + e2 <= -50.0 {
-            -(z - self.z0)
-        } else {
-            self.height * (e1 + e2).exp() - (z - self.z0)
-        };
-        let a1 = w.min(0.0);
-        scale * a1 * a1
-    }
-
-    fn fg(&self, pos: &[F; 3], scale: F, scale2: F, g: &mut [F; 3]) -> F {
-        let (x, y, z) = (pos[0], pos[1], pos[2]);
-        let e1 = -(x - self.cx).powi(2) / (2.0 * self.sx.powi(2));
-        let e2 = -(y - self.cy).powi(2) / (2.0 * self.sy.powi(2));
-        let d_raw = if e1 + e2 <= -50.0 {
-            -(z - self.z0)
-        } else {
-            self.height * (e1 + e2).exp() - (z - self.z0)
-        };
-        if d_raw < 0.0 {
-            let d = scale * d_raw;
-            g[0] += -2.0 * d * (x - self.cx) * (d + (z - self.z0)) / self.sx.powi(2);
-            g[1] += -2.0 * d * (y - self.cy) * (d + (z - self.z0)) / self.sy.powi(2);
-            g[2] += -2.0 * d;
-        }
         self.f(pos, scale, scale2)
     }
 }

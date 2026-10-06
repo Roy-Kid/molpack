@@ -34,12 +34,15 @@ pub struct Script {
     pub nloop: usize,
     /// Whether to reject initial random placements that overlap a fixed
     /// molecule (`avoid_overlap`, default on). Wired through `Script::build`
-    /// to `Molpack::with_avoid_overlap`.
+    /// to `GenCanPack::with_avoid_overlap`.
     pub avoid_overlap: bool,
     /// Periodic-boundary box (`pbc` keyword). When set, it seeds the
     /// packer's cell grid so the initial ±`sidemax` random placement
     /// never drives `ncells` to anything astronomical.
     pub pbc: Option<PbcSpec>,
+    /// Packing cell declared by lengths and angles (`cell` keyword). Mutually
+    /// exclusive with `pbc` — a box is just a cell with all angles at 90°.
+    pub cell: Option<CellSpec>,
     pub structures: Vec<Structure>,
 }
 
@@ -56,6 +59,18 @@ pub struct PbcSpec {
     pub max: [f64; 3],
 }
 
+/// Packing cell declared at the top level via
+/// `cell a b c alpha beta gamma [pbc x y z]`.
+///
+/// This is the keyword Packmol has no counterpart for: its `pbc` accepts
+/// orthorhombic boundaries only.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellSpec {
+    pub lengths: [f64; 3],
+    pub angles_deg: [f64; 3],
+    pub pbc: [bool; 3],
+}
+
 /// One `structure … end structure` block.
 #[derive(Debug, Clone)]
 pub struct Structure {
@@ -67,6 +82,15 @@ pub struct Structure {
     pub mol_restraints: Vec<RestraintSpec>,
     /// Atom-subset restraints (`atoms … end atoms` blocks).
     pub atom_groups: Vec<AtomGroup>,
+    /// Structure-level `radius`: the packing radius for every atom of every
+    /// copy. `None` leaves the packer's `tolerance / 2` default in place.
+    pub radius: Option<f64>,
+    /// Structure-level `fscale`: the overlap-penalty weight. `None` = `1.0`.
+    pub fscale: Option<f64>,
+    /// Structure-level `short_radius` for the second, shorter-range penalty.
+    pub short_radius: Option<f64>,
+    /// Structure-level `short_radius_scale`, weighting that second penalty.
+    pub short_radius_scale: Option<f64>,
     /// Whether the `center` keyword was present.
     pub center: bool,
     /// Fixed placement: `(position [x,y,z], euler [ex,ey,ez])`.
@@ -79,6 +103,15 @@ pub struct AtomGroup {
     /// Atom indices as written in the script (1-based).
     pub atom_indices: Vec<usize>,
     pub restraints: Vec<RestraintSpec>,
+    /// Atom-specific `radius`, overriding the structure-level one for the
+    /// atoms this group names.
+    pub radius: Option<f64>,
+    /// Atom-specific `fscale`.
+    pub fscale: Option<f64>,
+    /// Atom-specific `short_radius`.
+    pub short_radius: Option<f64>,
+    /// Atom-specific `short_radius_scale`.
+    pub short_radius_scale: Option<f64>,
 }
 
 /// AtomRestraint as it appears in the script, before being mapped to a
@@ -163,6 +196,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
     let mut nloop: Option<usize> = None;
     let mut avoid_overlap = true;
     let mut pbc: Option<PbcSpec> = None;
+    let mut cell: Option<CellSpec> = None;
     let mut structures: Vec<Structure> = Vec::new();
 
     enum State {
@@ -237,6 +271,10 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                     pbc = Some(parse_pbc(&tokens, lineno)?);
                     State::TopLevel
                 }
+                "cell" => {
+                    cell = Some(parse_cell(&tokens, lineno)?);
+                    State::TopLevel
+                }
                 "structure" => {
                     let path = tokens
                         .get(1)
@@ -246,6 +284,10 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                         number: 0,
                         mol_restraints: Vec::new(),
                         atom_groups: Vec::new(),
+                        radius: None,
+                        fscale: None,
+                        short_radius: None,
+                        short_radius_scale: None,
                         center: false,
                         fixed: None,
                     })
@@ -298,6 +340,23 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                     s.mol_restraints.push(r);
                     State::InStructure(s)
                 }
+                "radius" => {
+                    s.radius = Some(parse_positive(&tokens, "radius", lineno)?);
+                    State::InStructure(s)
+                }
+                "fscale" => {
+                    s.fscale = Some(parse_positive(&tokens, "fscale", lineno)?);
+                    State::InStructure(s)
+                }
+                "short_radius" => {
+                    s.short_radius = Some(parse_positive(&tokens, "short_radius", lineno)?);
+                    State::InStructure(s)
+                }
+                "short_radius_scale" => {
+                    s.short_radius_scale =
+                        Some(parse_positive(&tokens, "short_radius_scale", lineno)?);
+                    State::InStructure(s)
+                }
                 "atoms" => {
                     let indices = tokens[1..]
                         .iter()
@@ -314,6 +373,10 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                         group: AtomGroup {
                             atom_indices: indices,
                             restraints: Vec::new(),
+                            radius: None,
+                            fscale: None,
+                            short_radius: None,
+                            short_radius_scale: None,
                         },
                     }
                 }
@@ -367,6 +430,35 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
                         group,
                     }
                 }
+                "radius" => {
+                    group.radius = Some(parse_positive(&tokens, "radius", lineno)?);
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
+                }
+                "fscale" => {
+                    group.fscale = Some(parse_positive(&tokens, "fscale", lineno)?);
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
+                }
+                "short_radius" => {
+                    group.short_radius = Some(parse_positive(&tokens, "short_radius", lineno)?);
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
+                }
+                "short_radius_scale" => {
+                    group.short_radius_scale =
+                        Some(parse_positive(&tokens, "short_radius_scale", lineno)?);
+                    State::InAtoms {
+                        structure: s,
+                        group,
+                    }
+                }
                 _ => {
                     return Err(unknown_keyword(lineno, &keyword, "atoms block"));
                 }
@@ -385,11 +477,10 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
         seed,
         filetype,
         output: output.ok_or(ScriptError::MissingOutput)?,
-        // Packmol default (getinp.f90:537-539): unset `nloop` resolves to
-        // 200 * ntype, where ntype is the number of structure types.
-        nloop: nloop.unwrap_or(200 * structures.len()),
+        nloop: nloop.unwrap_or(crate::GenCanPack::default_max_loops(structures.len())),
         avoid_overlap,
         pbc,
+        cell,
         structures,
     })
 }
@@ -544,6 +635,23 @@ fn parse_plane_above(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, Sc
     Ok(RestraintSpec::AbovePlane { normal, distance })
 }
 
+/// A `<keyword> <positive value>` line. The four per-atom properties
+/// (`radius`, `fscale`, `short_radius`, `short_radius_scale`) all take this
+/// shape, and all are valid both at structure level and inside an
+/// `atoms … end atoms` block — Packmol reads the same keywords in both places
+/// (`app/packmol.f90` lines 317 and 413) and lets the enclosing block decide
+/// which layer applies.
+fn parse_positive(tokens: &[&str], what: &str, lineno: usize) -> Result<f64, ScriptError> {
+    let value = parse_f64(tokens, 1, what, lineno)?;
+    if value <= 0.0 || value.is_nan() {
+        return Err(parse_err(
+            lineno,
+            format!("{what} must be positive, got `{value}`"),
+        ));
+    }
+    Ok(value)
+}
+
 fn parse_plane_below(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, ScriptError> {
     let normal = parse_vec3(tokens, 2, "below plane normal", lineno)?;
     let distance = parse_f64(tokens, 5, "below plane distance", lineno)?;
@@ -553,6 +661,61 @@ fn parse_plane_below(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, Sc
 /// Parse `pbc` in either the 3-value (`pbc X Y Z`) or 6-value
 /// (`pbc X0 Y0 Z0  X1 Y1 Z1`) form — matching packmol `getinp.f90`
 /// lines 175-191.
+/// Parse `cell a b c alpha beta gamma` with an optional trailing
+/// `periodic <x> <y> <z>` (each `yes`/`no`; default periodic on every axis).
+fn parse_cell(tokens: &[&str], lineno: usize) -> Result<CellSpec, ScriptError> {
+    if tokens.len() < 7 {
+        return Err(parse_err(
+            lineno,
+            format!(
+                "`cell` expects 6 values (a b c alpha beta gamma), got {}",
+                tokens.len() - 1
+            ),
+        ));
+    }
+    let lengths = parse_vec3(tokens, 1, "cell lengths", lineno)?;
+    let angles_deg = parse_vec3(tokens, 4, "cell angles", lineno)?;
+    if lengths.iter().any(|&v| v <= 0.0) {
+        return Err(parse_err(
+            lineno,
+            format!("`cell` lengths must be positive; got {lengths:?}"),
+        ));
+    }
+    if angles_deg.iter().any(|&v| v <= 0.0 || v >= 180.0) {
+        return Err(parse_err(
+            lineno,
+            format!("`cell` angles must lie in (0, 180) degrees; got {angles_deg:?}"),
+        ));
+    }
+
+    let mut pbc = [true; 3];
+    if tokens.len() > 7 {
+        if !tokens[7].eq_ignore_ascii_case("periodic") || tokens.len() != 11 {
+            return Err(parse_err(
+                lineno,
+                "`cell` takes an optional trailing `periodic <x> <y> <z>`",
+            ));
+        }
+        for (k, flag) in pbc.iter_mut().enumerate() {
+            *flag = match tokens[8 + k].to_ascii_lowercase().as_str() {
+                "yes" | "true" | "1" => true,
+                "no" | "false" | "0" => false,
+                other => {
+                    return Err(parse_err(
+                        lineno,
+                        format!("`cell periodic` axis {k} expects yes/no, got `{other}`"),
+                    ));
+                }
+            };
+        }
+    }
+    Ok(CellSpec {
+        lengths,
+        angles_deg,
+        pbc,
+    })
+}
+
 fn parse_pbc(tokens: &[&str], lineno: usize) -> Result<PbcSpec, ScriptError> {
     // tokens[0] == "pbc"; the remaining tokens carry the numeric payload.
     match tokens.len() - 1 {

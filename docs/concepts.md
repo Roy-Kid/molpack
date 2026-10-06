@@ -53,17 +53,34 @@ collective restraint sees *every* copy of a species at once and returns a
 single penalty whose gradient is **coupled across the whole group**:
 
 ```text
+pub struct GroupCtx {
+    pub scale: F,             // linear-penalty annealing scale
+    pub scale2: F,            // quadratic-penalty annealing scale
+    pub natoms_per_copy: usize,
+    pub mic: Mic,             // minimum-image convention in force
+}
+
 pub trait Restraint: Send + Sync + std::fmt::Debug {
-    fn f (&self, coords: &[[F; 3]], scale: F, scale2: F) -> F;
-    fn fg(&self, coords: &[[F; 3]], scale: F, scale2: F, grads: &mut [[F; 3]]) -> F;
+    fn f (&self, coords: &[[F; 3]], ctx: GroupCtx) -> F;
+    fn fg(&self, coords: &[[F; 3]], ctx: GroupCtx, grads: &mut [[F; 3]]) -> F;
+    fn is_bound(&self) -> bool { false }
     fn is_parallel_safe(&self) -> bool { true }
     fn name(&self) -> &'static str { std::any::type_name::<Self>() }
 }
 ```
 
-`coords` and `grads` have equal length — one entry per atom in the group.
+`coords` and `grads` have equal length — one entry per atom in the group,
+in the packer's own order: **copy-major, atom-minor**.
 The gradient convention mirrors [`AtomRestraint`](#atomrestraint): `fg` accumulates INTO
 `grads[i]` with `+=`.
+
+`GroupCtx` carries what a group-level term cannot recover from a flat
+coordinate slice: how many atoms make one copy (so `coords` can be cut into
+molecules) and the minimum-image convention (so a term that measures
+distances agrees with the pair loop across a periodic boundary). It is
+captured once per evaluation rather than stored on the restraint — the cell
+is resolved after the targets are lowered, so a restraint that cached a box
+at construction time could cache the wrong one.
 
 ### Why collective?
 
@@ -98,56 +115,126 @@ Attach with `Target::with_collective_restraint(r)`. A `TabulatedPlane`
 with a histogram from a target simulation is the one-line way to drive a
 species toward an experimentally-observed density profile.
 
-## Region
+### Pairwise separation
 
-A [`Region`](crate::Region) is a **geometric predicate** with a signed
-distance function:
+A distribution target says *where* copies should be; it does not say how
+close two of them may come. The packer's own pair term keeps atoms from
+overlapping and then stops caring — and nothing in it distinguishes two
+copies of one species from a copy of each of two. So a species is free to
+pile its copies into one corner as long as they do not interpenetrate.
+
+`SelfSeparation` is the missing statement: *these molecules also keep their
+distance from each other*. It bounds the **centre-to-centre** distance
+between any two copies of one species below by `d_min`, and is silent above
+it:
 
 ```text
-pub trait Region: Send + Sync + std::fmt::Debug {
-    fn contains(&self, x: &[F; 3]) -> bool;
-    fn signed_distance(&self, x: &[F; 3]) -> F;
-    fn signed_distance_grad(&self, x: &[F; 3]) -> [F; 3] { /* default FD */ }
-    fn bounding_box(&self) -> Option<Aabb> { None }
+E = λ · Σ_{c<c'}  (d_min − D)²        for D < d_min,   D = ‖mic(R_c − R_c')‖
+```
+
+where `R_c` is copy `c`'s geometric centroid. It is **quadratic in the length
+by which the bound is missed** — the same shape as a geometric restraint's
+penalty (the `.inp` box kernel is `scale·(overshoot)²`, `RegionRestraint` is `scale·distance²`), and deliberately not
+the pair term's quartic-in-length form. This term reports into `frest`, so it
+has to be commensurate with the other things there: `precision = 0.01` then
+means "within 0.1 Å" for a separation bound exactly as it does for a box wall,
+and that reading does not drift as `d_min` grows.
+
+This is a **local** bound, not a global profile: it does not make a species
+uniform, only un-clustered.
+
+Being local is also what makes it affordable. A double loop over copies would
+cost the same on a converged configuration as on a clumped one — `O(N²)` in the
+number of copies, which at melt scale dominates everything else the objective
+does. `SelfSeparation` instead bins the centres into a `CellGrid` at least
+`d_min` wide and sweeps each cell against itself and its forward neighbours:
+the same partition-and-stencil the packer's own pair loop uses, one level up.
+That is why `GroupCtx` carries the cell. Measured against the double loop, the
+added cost per evaluation falls from 11.8M to 2.6M instructions at 1k copies
+and from ~1.2G to 32M at 10k — linear in the number of copies rather than
+quadratic. Below 64 cells the stencil reaches the whole partition and cannot
+exclude anything, so the sweep falls back to the direct loop.
+
+Because a bound is either met or not — its penalty is exactly zero once it
+holds — `SelfSeparation` declares `is_bound() == true` and its value is folded
+into the restraint verdict `frest`, so it gates convergence like a geometric
+restraint does. A distribution target must not do this: the squared-Wasserstein
+penalty of a finite sample never reaches zero, so a pack reproducing its target
+profile to three decimals would be reported as non-convergent. That is why
+`is_bound` defaults to `false`.
+
+Feasibility is therefore not pre-checked and does not need to be: an impossible
+request simply does not converge, and the run reports it through `frest`.
+
+## Regions (molrs) and their lift
+
+Geometry is not molpack's. A region — a sphere, a box, a triclinic cell, a
+half-space, a cylinder, an ellipsoid, a solid bounded by a watertight
+triangle mesh, a union of spheres around a set of atoms — is a
+[`molrs::spatial::region::Region`], a solid with a signed distance to its
+boundary:
+
+```text
+pub trait Region: Send + Sync + Debug {
+    fn bounds(&self) -> FNx3;                       // 3×2 AABB
+    fn distance(&self, x: &[F; 3]) -> F;           // < 0 inside, > 0 outside
+    fn distance_grad(&self, x: &[F; 3]) -> [F; 3] { /* default FD */ }
+    fn contains_point(&self, x: &[F; 3]) -> bool { self.distance(x) <= 0.0 }
 }
 ```
 
-Regions compose via the zero-cost combinators
-[`And`](crate::And) / [`Or`](crate::Or) / [`Not`](crate::Not), with
-analytic chain-rule gradients (max / min / negate). The
-[`RegionExt`](crate::RegionExt) trait gives every `Region` ergonomic
-`.and(...)` / `.or(...)` / `.not()` methods.
+Every shape describes its inside; outside, shells and voids are the
+compositions `NotRegion` / `AndRegion` / `OrRegion` over
+`Arc<dyn Region + Send + Sync>` (`~`, `&`, `|` in Python). There is no
+"outside sphere" type anywhere — it is `NotRegion(Sphere)`.
 
-Any `Region` lifts to a `Restraint` via
-[`RegionRestraint<R>`](crate::RegionRestraint):
+molpack adds exactly one geometric restraint, the lift of any region to a
+term of the shared objective, [`RegionRestraint`](crate::RegionRestraint):
 
 ```text
-penalty(x) = scale2 * max(0, signed_distance(x))²
+penalty(x) = scale · max(0, distance(x))²
 ```
 
-Use `Region` when you want compositional geometry (intersection /
-union / complement). Use `Restraint` directly when you want a specific
-penalty shape (linear vs quadratic, custom stiffness, multi-atom).
+and one policy object on top of it, [`CellRestraint`](crate::CellRestraint):
+a `Parallelepiped` lift that also *declares* the packing lattice
+([`AtomRestraint::declared_cell`](crate::AtomRestraint::declared_cell)), so a
+triclinic cell is stated once. Use a molrs region for any shape a molecule
+must stay inside; write an `AtomRestraint` when the penalty is not "stay
+inside a region".
 
-## Relaxer
+## In-loop optimizer
 
-A [`Relaxer`](crate::Relaxer) modifies a target's **reference geometry**
-between outer optimizer calls. Use cases: torsion-MC sampling for
-flexible chains, local MD relaxation, gradient descent on bond-angle
-targets.
+Rigid-body packing never changes a molecule's internal shape. An **in-loop
+optimizer** does: it rewrites a copy's **reference geometry** — the conformer
+all of that copy's Cartesian positions are generated from — between outer
+GENCAN calls. Use cases: torsion Monte-Carlo sampling for flexible chains
+(propose a rotation about a rotatable bond, accept it with probability
+`min(1, exp(-ΔE / T))`), or force-field minimisation of a strained conformer.
 
-Two-part design — builder + runner:
+The seam is molrs's `Optimizer` trait, one method over a `Frame`:
 
-- `Relaxer::spawn(&self, frame, ref_coords) -> Box<dyn RelaxerRunner>` is
-  called once at `pack()` entry.
-- `RelaxerRunner::on_iter(&mut self, coords, f_current, evaluate, rng)`
-  runs between movebad and GENCAN each outer iteration; returns
-  `Some(new_coords)` on accept, `None` on reject.
+```text
+pub trait Optimizer: Send + Sync {
+    fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String>;
+}
+```
 
-Relaxers require `count == 1` because all copies share the same
-reference coords.
+An implementation is attached to the *engine*, not the target, by naming which
+targets it applies to:
 
-Built-in: [`TorsionMcRelaxer`](crate::TorsionMcRelaxer) (Metropolis
+- `OptimizeSelect::per_copy(names)` — every copy of every named target,
+  independently. `OptimizeSelect::joint(names)` — all of them as one movable
+  group. `.with_environment(rcut)` adds nearby atoms as frozen context.
+- `GenCanPack::with_optimizer(select, optimizer)` binds the pair. Bindings are
+  resolved by target name once at `run()` entry and fire in the all-type phase
+  only, where the coordinate vector covers every molecule.
+- After each call molpack re-evaluates the packing objective and reverts the
+  conformer if it got worse, so an optimizer cannot damage a pack.
+
+Because each copy is relaxed on its own, copies of one target start identical
+and then diverge — there is no `count == 1` restriction.
+
+Built-in: [`TorsionMcOptimizer`](crate::TorsionMcOptimizer) (Metropolis
 torsion sampling with self-avoidance).
 
 ## Handler
@@ -162,19 +249,157 @@ pub trait Handler: Send {
     fn on_step         (&mut self, info: &StepInfo, sys);   // required
     fn on_phase_start  (&mut self, info: &PhaseInfo)      {}
     fn on_phase_end    (&mut self, info, report: &PhaseReport) {}
-    fn on_inner_iter   (&mut self, iter, f, sys)          {}
+    fn on_stage_start  (&mut self, info: &StageInfo)      {}
+    fn on_stage_end    (&mut self, info: &StageInfo, outcome: &StageOutcome, sys) {}
     fn on_finish       (&mut self, sys: &PackContext)     {}
     fn should_stop     (&self) -> bool                    { false }
 }
 ```
 
 Observer contract: `sys` is always `&PackContext`, never `&mut`.
-Handlers cannot modify packer state — use a `Relaxer` if you need to.
+Handlers cannot modify packer state — bind an in-loop optimizer if you need to.
 
-Built-ins: [`NullHandler`](crate::NullHandler),
+Built-ins: [`LammpsLogHandler`](crate::LammpsLogHandler),
 [`ProgressHandler`](crate::ProgressHandler),
 [`EarlyStopHandler`](crate::EarlyStopHandler),
 [`XYZHandler`](crate::XYZHandler).
+
+### Which stage a callback came from
+
+A **stage** is one packing algorithm behind the crate's packing seam — the
+[`Stage`](crate::Stage) trait, whose implementors are `GenCanStage`,
+`GrowStage` and `LatticeStage`; [`extending`](crate::extending) walks through
+writing one. Every `StepInfo` names the stage that emitted it in `info.stage`,
+a [`StageInfo`](crate::handler::StageInfo) with three fields: `index` (0-based
+position of the stage in the run), `total` (how many stages the run has), and
+`name` (the stage's own [`Stage::name`](crate::Stage::name), e.g. `"gencan"`).
+A run driven by one engine entry has one stage, so it reports `index = 0` and
+`total = 1`.
+
+`on_stage_start` and `on_stage_end` bracket a whole stage the way
+`on_phase_start` / `on_phase_end` bracket one GENCAN phase. Both are provided
+no-ops, and a single-stage run calls neither; they are the seam a caller that
+chains stages itself brackets each stage with. `on_stage_end`'s
+[`StageOutcome`](crate::StageOutcome) deliberately carries no verdict, only
+`converged` and `degraded` (how many times the stage had to relax a
+constructive guarantee). The violation maxima are read off `sys`, the
+post-stage `PackContext` — the same place `on_finish` reads them — so the
+shared objective stays the only ruler.
+
+[`Stage::run`](crate::Stage::run) itself is fallible: it returns
+`Result<StageOutcome, PackError>`, not a bare `StageOutcome`. A stage that
+cannot do its job fails with a named [`PackError`](crate::PackError), never
+by reporting `converged: false` — that flag means only "I ran to completion
+and did not reach my own criterion". A stage that returns `Err` gets no
+`on_stage_end` at all; the run propagates the error instead, on the same path
+as its own validation errors.
+
+## Pipeline
+
+A [`Pipeline`](crate::pipeline::Pipeline) is what actually runs a sequence of
+stages. [`Pipeline::new().with_stage(a).with_stage(b)`](crate::pipeline::Pipeline::with_stage)
+composes as many stages as a run needs, and
+[`Pipeline::single(engine)`](crate::pipeline::Pipeline::single) wraps one
+[`PackEngine`](crate::PackEngine) the same way — which is why every preset's
+`run` is one line, `Pipeline::single(self).run(targets, max_loops)`. There is
+exactly one lifecycle in the crate: a hand-composed pipeline and a preset's own
+run are the same code path, never two implementations that could drift apart.
+
+What a pipeline tracks between stages is the [`Placed`](crate::Placed) marker
+from the Stage explanation above: it starts at `Placed::None`, and after each
+stage returns it advances to whatever that stage's
+[`Guarantees`](crate::Guarantees) declared — never by inspecting what the
+stage actually did. A stage whose [`Requires`](crate::Requires) needs
+`Placed::All` where the marker is still `Placed::None` is a named error,
+[`PackError::StageOrder`](crate::PackError::StageOrder), raised before any
+handler is notified and before any stage runs.
+
+The run's verdict — `fdist`, `frest`, `converged` — is read off the shared
+[`PackContext`](crate::PackContext) after the *last* stage returns, never
+assembled from what the individual stages self-reported: the same one-ruler
+rule the Stage explanation describes for a single algorithm, applied across a
+whole chain. `on_stage_start` / `on_stage_end` bracket each stage in turn, so a
+handler watching a two-stage run sees both brackets fire and `info.stage.index`
+move from `0` to `1` partway through, while `on_start` / `on_finish` still
+bracket only the run as a whole, once.
+
+A stage source handed to `with_stage` may carry handlers and shared settings of
+its own. Its handlers are **adopted** — appended to the pipeline's own set, in
+stage order, so they go on to watch every later stage too. Its
+[`PackSettings`](crate::PackSettings) are **refused** the moment any knob
+differs from the default
+([`PackError::PresetSettingsInsidePipeline`](crate::PackError::PresetSettingsInsidePipeline),
+naming the offending knob): tolerance, precision, seed and the cell are one
+ruler for the whole run, and two stages each bringing their own would leave
+that ruler ambiguous. Declare shared knobs on the `Pipeline` itself instead.
+
+## Invariants and combinators
+
+Composing stages linearly, as above, covers a pipeline whose stages each run
+once. Two situations need more than that: repeating a body of stages until
+some condition holds, and refusing to accept a stage's exit until a property
+of the resulting state has been verified.
+
+An [`Invariant`](crate::Invariant) is a property of a
+[`PackState`](crate::PackState) that is checked *after* a stage has already
+run — never a second algorithm competing with the stage itself:
+
+```text
+pub trait Invariant: Send {
+    fn name(&self) -> &'static str;
+    fn layer(&self) -> Layers;
+    fn check(&self, state: &PackState) -> Vec<Violation>;
+}
+```
+
+`check` reads the shared objective's own verdict off the state (`frest`, for
+the built-in [`RestraintsSatisfied`](crate::RestraintsSatisfied)) and reports
+every broken property as a [`Violation`](crate::Violation) — never a second,
+independently computed metric; that would be exactly the mistake the
+one-ruler rule exists to catch. `layer` names where a violation sits on the
+repair-cost ladder, [`Layers`](crate::Layers): a six-rung bit set ordered from
+the almost-unrepairable down to the cheapest to fix.
+
+- **L0 connectivity** — which atoms are bonded to which; nothing downstream
+  can repair a wrong bond graph, so it is fixed once, when the template is
+  read, and never again.
+- **L1 topological state** — knots, entanglement, catenation; undoing one
+  needs a chain to pass through itself, which no local move or minimizer can
+  do.
+- **L2 chain statistics** — end-to-end distance, radius of gyration,
+  orientation; fixing these means re-growing the chain, reptation-scale
+  motion far beyond a packing run.
+- **L3 density** — density and its homogeneity; repairable only by moving
+  whole molecules between regions, global and slow but mechanical.
+- **L4 local overlaps** — overlaps between neighbouring atoms; the classic
+  push-off, removed by a short descent on the shared objective.
+- **L5 local geometry** — bond lengths and angles; the cheapest rung, fixed
+  for free by the user's own force field in the first steps of minimization.
+
+[`Pipeline::with_repeat(body, until)`](crate::pipeline::Pipeline::with_repeat)
+runs a body of stages repeatedly: [`Until::Passes(n)`](crate::Until::Passes)
+stops after exactly `n` passes (`Passes(0)` contributes no stage at all,
+never a silently clamped single pass), and
+[`Until::Converged`](crate::Until::Converged) stops the first time a pass's
+last stage reports its own convergence. Each pass
+*continues* from where the previous one left off — the same `Placed::All`
+continuation a seeded run uses — rather than packing again from nothing.
+
+[`Pipeline::with_guarded(stage, invariants, on_violation)`](crate::pipeline::Pipeline::with_guarded)
+runs `stage`, then checks every invariant against the state it left.
+[`OnViolation`](crate::OnViolation) answers a broken invariant two ways,
+never a third: `Fail` returns a named
+[`PackError::InvariantViolated`](crate::PackError::InvariantViolated)
+immediately; `Rerun { max }` reruns **the same stage** up to `max` more times
+and, once that budget is spent still broken, reports `converged: false`
+rather than looping forever. `Guarded` never switches to a different
+algorithm to work around a violation — the user picks the packing method,
+and molpack does not guess on their behalf.
+
+Both combinators are themselves [`Stage`](crate::Stage) implementations, so
+`Pipeline` needs no branch for either: chain-checking, handler bracketing and
+the run's final verdict read a `Repeat` or a `Guarded` exactly as they read
+`GenCanPack`.
 
 ## Objective
 
@@ -206,36 +431,64 @@ A [`Target`](crate::Target) describes one molecule type:
 - Input coordinates + centered reference coordinates.
 - Van der Waals radii, element symbols, copy count, name.
 - Its attached restraints (per-target + per-atom-subset).
-- Its attached relaxers.
+- Its attached collective restraints (one penalty over the whole species).
 - Optional fixed placement (Euler + translation).
 - Optional Euler-angle bounds (`with_rotation_bound(Axis, Angle, Angle)`).
+- Optional per-copy mass override (`with_mass`) for density-sized boxes.
+- Intramolecular skip table (`with_special_bonds`; default depth-3
+  `[0, 0, 0, 1]`). All-atom explicit hydrogen keeps that table and
+  shrinks hydrogen via `with_atom_radius`.
+- Which atoms are hydrogens for lattice growth (`with_hydrogens`; default
+  element symbol `H`).
+- Optionally built from a previous run's output as one fixed obstacle
+  ([`Target::fixed_from`](crate::Target::fixed_from) on `&result.frame`) — the
+  chaining primitive for staged packs.
 
-Targets are snapshotted at `pack()` entry — mutating a `Target` after
-passing it to the packer has no effect.
+The packing algorithm is *not* a target property: you pick it by picking
+the engine entry ([`GenCanPack`](crate::GenCanPack) or
+[`CbmcGrow`](crate::CbmcGrow)), and every target in that call is packed
+by it. An unsupported target/entry combination is a named error, never a
+silent fall-back.
 
-## Molpack
+Targets are snapshotted at `run()` entry — mutating a `Target` after
+passing it to an engine has no effect.
 
-[`Molpack`](crate::Molpack) is the builder facade:
+## PackEngine and its entries
+
+[`PackEngine`](crate::PackEngine) is the shared lifecycle: one entry type
+per algorithm, all with the same builders and the same terminal verb.
+[`GenCanPack`](crate::GenCanPack) is rigid-body GENCAN descent;
+[`CbmcGrow`](crate::CbmcGrow) is configurational-bias chain growth.
 
 ```text
-Molpack::new()
+GenCanPack::new()
     .with_log_level(...)
     .with_handler(...)
     .with_global_restraint(...)  // broadcast to every target
-    .with_periodic_box(min, max) // or via periodic InsideBoxRestraint
-    .pack(&[targets], max_loops)
+    .with_periodic_box(min, max)
+    .run(&[targets], max_loops)  // -> State
 ```
 
 Every tuning knob (`with_tolerance`, `with_precision`,
 `with_inner_iterations`, `with_seed`, `with_avoid_overlap`, …) has a
-Packmol-matching default, so `Molpack::new().pack(&targets, max_loops)`
+Packmol-matching default, so `GenCanPack::new().run(&targets, max_loops)`
 is a complete call. You only set a knob to *change* its default — e.g.
 `with_avoid_overlap(false)` to let solvent seed inside a fixed solute
 (on by default), or `with_seed(n)` to pick a different RNG stream (the
 default seed is Packmol's `1_234_567`).
 
-Every setter consumes and returns `self`. `pack` takes `&mut self`
-(handlers are invoked through it).
+Every setter consumes and returns `self`, and so does `run` — an engine
+is one-shot by construction, which is what makes it impossible to lose
+its handler set on a second call. To stage two algorithms, run the first
+entry and feed its output to the second as a fixed matrix:
+
+```text
+let grown = CbmcGrow::new(prior).with_density(0.9).run(&[chain], 60)?;
+let full  = GenCanPack::new().run(&[Target::fixed_from(&grown.frame), solvent], 200)?;
+```
+
+Both entries return the same [`State`](crate::State) —
+`frame`, `fdist`, `frest`, `converged`, `degraded`, `intra`.
 
 ## PackContext
 
@@ -246,23 +499,21 @@ buffers, counters. All optimizer / movebad / handler code paths take
 
 Structure (`molpack/src/context/`):
 
-- `ModelData` — topology and inputs (immutable after init).
-- `RuntimeState` — mutable per-iteration state (x, coor, radius).
 - `WorkBuffers` — scratch arrays (xcart, gxcar, radiuswork).
 
-Users rarely touch `PackContext` directly — it's passed through
-handlers and relaxers. Power users implementing a custom `Objective`
-against synthetic test problems will interact with it.
+Users rarely touch `PackContext` directly — it reaches them through
+handler callbacks and the in-loop optimizer bridge. Power users implementing a
+custom `Objective` against synthetic test problems will interact with it.
 
 ## Scope equivalence law
 
 ```text
-molpack.with_global_restraint(r)
+engine.with_global_restraint(r)
     ≡  for t in targets { t.with_restraint(r.clone()) }
 ```
 
 There is no separate "global-restraint" storage path in `PackContext`.
-The broadcast happens inside `pack()`; each target receives an
+The broadcast happens inside `PackEngine::run()`; each target receives an
 `Arc::clone` of every global restraint (refcount bump, not a deep
 copy).
 

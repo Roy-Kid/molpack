@@ -10,12 +10,14 @@ import os
 from pathlib import Path
 
 import molrs
+import numpy as np
 
 import molpack
 from molpack import Angle, CenteringMode
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE.parent.parent / "examples" / "pack_interface"
+OUT = HERE / "out"
 
 
 def main() -> None:
@@ -26,14 +28,12 @@ def main() -> None:
     water = (
         molpack.Target(water_frame, count=100)
         .with_name("water")
-        .with_restraint(
-            molpack.InsideBoxRestraint([-20.0, 0.0, 0.0], [0.0, 39.0, 39.0])
-        )
+        .with_restraint(molrs.Cuboid([-20.0, 0.0, 0.0], [20.0, 39.0, 39.0]))
     )
     chloroform = (
         molpack.Target(chlor_frame, count=30)
         .with_name("chloroform")
-        .with_restraint(molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [21.0, 39.0, 39.0]))
+        .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [21.0, 39.0, 39.0]))
     )
     t3 = (
         molpack.Target(t3_frame, count=1)
@@ -50,14 +50,34 @@ def main() -> None:
     )
 
     show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
-    packer = molpack.Molpack().with_progress(show_progress)
+    packer = molpack.GenCanPack().with_progress(show_progress)
 
-    result = packer.pack_with_report([water, chloroform, t3], max_loops=400)
+    result = packer.run([water, chloroform, t3], max_loops=400)
 
     print(
         f"converged={result.converged} natoms={result.natoms} "
         f"fdist={result.fdist:.4f} frest={result.frest:.4f}"
     )
+    packed = result.frame
+    if packed.box is None:
+        a = packed["atoms"]
+        packed.box = molrs.Box.from_bounds(
+            np.column_stack(
+                [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
+            ),
+            padding=np.ones(3),
+        )
+    OUT.mkdir(parents=True, exist_ok=True)
+    molrs.io.write_mrec(str(OUT / "pack_interface.mrec"), packed)
+    molrs.io.write_lammps_trajectory(
+        str(OUT / "pack_interface.lammpstrj"),
+        [packed],
+        columns=["id", "element", "mol", "x", "y", "z"],
+    )
+    if "bonds" in packed and packed["bonds"].nrows:
+        molrs.io.write_lammps_dump_local(
+            str(OUT / "pack_interface.dump.local"), [packed]
+        )
 
 
 if __name__ == "__main__":

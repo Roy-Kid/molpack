@@ -6,48 +6,29 @@ you attach. Use periodic boundaries (PBC) when packing for MD input.
 
 ## Enabling PBC
 
-PBC is declared on the `InsideBoxRestraint` via the `periodic` keyword:
+The periodic box is declared on the engine entry (Packmol's `pbc`
+keyword). `with_periodic_box` is a shared builder, so it reads the same on
+`GenCanPack`, `CbmcGrow` and `LatticeGrow`:
 
 ```python
-from molpack import InsideBoxRestraint
+from molpack import GenCanPack
 
-# Fully periodic orthorhombic cell
-box = InsideBoxRestraint(
-    [0.0, 0.0, 0.0],
-    [30.0, 30.0, 30.0],
-    periodic=(True, True, True),
-)
+packer = GenCanPack().with_periodic_box([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
 ```
 
-`periodic` is a 3-tuple of booleans — one per axis. Only orthorhombic
-cells are supported.
+Only orthorhombic cells are supported through this builder; a triclinic
+cell is `with_cell(lengths, angles, pbc)`.
 
-Per-axis PBC is possible — e.g. slab geometry with in-plane PBC and
-open Z:
+A region does not declare periodicity — it only confines. To keep every
+atom centre inside the cell as well, attach a `molrs.Cuboid` with the same
+bounds (or broadcast it with `with_global_restraint`):
 
 ```python
-slab = InsideBoxRestraint(
-    [0.0, 0.0, 0.0],
-    [30.0, 30.0, 100.0],
-    periodic=(True, True, False),
-)
+import molrs
+
+cell = molrs.Cuboid([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])   # origin, lengths
+target = target.with_restraint(cell)
 ```
-
-### Declaring PBC on the packer
-
-For a **fully-periodic** cell you can skip the restraint and declare the
-box directly on the packer (Packmol's `pbc` keyword):
-
-```python
-from molpack import Molpack
-
-packer = Molpack().with_periodic_box([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
-```
-
-This is equivalent to a single `InsideBoxRestraint(..., periodic=(True,
-True, True))` broadcast over the system. Use the restraint form when you
-need per-axis control or a soft confining region; use `with_periodic_box`
-when the cell is simply fully periodic.
 
 ## Semantics
 
@@ -56,53 +37,50 @@ wrapping on the periodic axes, so atoms near opposite faces of the
 cell "see" each other through the periodic images. The `tolerance`
 setting still applies and is checked against the wrapped distance.
 
-Restraints themselves (`InsideBoxRestraint`, `InsideSphereRestraint`,
-…) are evaluated in the **unwrapped** frame — they describe the
-geometric region as defined, regardless of the periodic cell.
-
-## System-wide PBC derivation
-
-At `pack()` time the packer scans every restraint on every target for
-a declared periodic box. The rules are:
-
-- **Zero declarations** — non-periodic run.
-- **One declaration** — its bounds define the system PBC.
-- **Multiple declarations** — they must all agree (same bounds, same
-  per-axis flags). Any mismatch raises `ConflictingPeriodicBoxesError`.
+Regions are evaluated in the **unwrapped** frame — they describe the
+solid as defined, regardless of the periodic cell. The one exception is
+`molrs.SphereUnion` built with a `box`: its spheres are minimum-image on
+the box's periodic axes, so a void computed from beads in a periodic frame
+is periodic too.
 
 ## Errors
 
 A zero-length axis on a periodic box, or `max < min` on any axis,
-raises `InvalidPBCBoxError` at `pack()` time:
+raises `InvalidPBCBoxError` at `run()` time:
 
 ```python
 from molpack import InvalidPBCBoxError
 
 try:
-    packer.pack(...)
+    packer.run(targets, max_loops=200)
 except InvalidPBCBoxError as e:
     ...
 ```
 
-Both typed errors inherit from `molpack.PackError` (which itself is
-a `RuntimeError` subclass) — a blanket `except PackError` catches any
-packing failure.
+The periodic box is declared in exactly one place — on the entry — so there
+is no second declaration to conflict with it. Typed errors inherit from
+`molpack.PackError` (which itself is a `RuntimeError` subclass), so a blanket
+`except PackError` catches any packing failure.
 
 ## Choosing a box
 
-A common pattern: pack into a single periodic `InsideBoxRestraint`
-matching the desired cell. The restraint confines atoms softly and
-simultaneously declares the PBC:
+A common pattern: one periodic cell on the entry, and the same cuboid on
+every target that must stay inside it:
 
 ```python
 cell_min = [0.0, 0.0, 0.0]
-cell_max = [30.0, 30.0, 30.0]
+cell_len = [30.0, 30.0, 30.0]
 
-box = InsideBoxRestraint(cell_min, cell_max, periodic=(True, True, True))
+box = molrs.Cuboid(cell_min, cell_len)
 target = target.with_restraint(box)
 
-result = Molpack().with_seed(42).pack([target], max_loops=200)
+result = (
+    GenCanPack()
+    .with_seed(42)
+    .with_periodic_box(cell_min, [a + b for a, b in zip(cell_min, cell_len)])
+    .run([target], max_loops=200)
+)
 ```
 
-Or broadcast it globally via `Molpack.with_global_restraint(box)` when
-several species share the same cell.
+Or broadcast the cuboid globally via `GenCanPack.with_global_restraint(box)`
+when several species share the same cell.

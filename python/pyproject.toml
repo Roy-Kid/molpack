@@ -4,17 +4,16 @@ build-backend = "maturin"
 
 [project]
 name = "molcrafts-molpack"
-version = "0.2.0"
+version = "0.3.0"
 description = "Python bindings for molpack molecular packing (Packmol port)"
 requires-python = ">=3.12"
 readme = "README.md"
 license = "BSD-3-Clause"
-# Minor-line pins — same major.minor as molrs/molpy; patch may drift.
+# Minor-line pin — same major.minor as molrs; patch may drift.
 dependencies = [
   "numpy>=2.0",
   "typer>=0.12",
-  "molcrafts-molrs>=0.12.0,<0.13",
-  "molcrafts-molpy>=0.12.0,<0.13",
+  "molcrafts-molrs>=0.15.0,<0.16",
 ]
 
 # Installable "extra" carrying the docs-build deps. Unlike the [dependency-groups]
@@ -23,6 +22,11 @@ dependencies = [
 #   pip install "molcrafts-molpack[doc]"
 # That is the build command a Cloudflare Pages Git-integration build should use.
 [project.optional-dependencies]
+# molpy is not imported by molpack; the polymer examples (`pack_peo_*.py`)
+# build their chains with it. Same minor line as molrs, which molpy pins too.
+molpy = [
+  "molcrafts-molpy>=0.15.0,<0.16",
+]
 doc = [
   "zensical>=0.0.53",
   "molcrafts-zensical-theme>=0.2.5",
@@ -38,7 +42,9 @@ typecheck = [
   "ty",
   "typer>=0.12",
   "numpy>=2.0",
-  "molcrafts-molrs>=0.12.0,<0.13",
+  "molcrafts-molrs>=0.15.0,<0.16",
+  # `ty check` walks examples/, several of which build templates with molpy.
+  "molcrafts-molpy>=0.15.0,<0.16",
   # `ty check` walks tests/ which imports pytest.
   "pytest",
 ]
@@ -46,8 +52,7 @@ test = [
   "pytest",
   "typer>=0.12",
   "numpy>=2.0",
-  "molcrafts-molrs>=0.12.0,<0.13",
-  "molcrafts-molpy>=0.12.0,<0.13",
+  "molcrafts-molrs>=0.15.0,<0.16",
 ]
 dev = [
   {include-group = "typecheck"},
@@ -76,7 +81,7 @@ Repository = "https://github.com/MolCrafts/molpack"
 [tool.maturin]
 python-source = "python"
 module-name = "molpack.molpack"
-features = ["pyo3/extension-module", "rayon"]
+features = ["rayon"]
 exclude = [
   "python/molpack/*.so",
   "python/molpack/*.dylib",
@@ -87,9 +92,6 @@ exclude = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = [
-  "integration: end-to-end packing tests, some needing an external engine (LAMMPS via molpy)",
-]
 
 [tool.ruff]
 line-length = 88
@@ -115,16 +117,23 @@ known-first-party = ["molpack"]
 quote-style = "double"
 indent-style = "space"
 
+[tool.uv.sources]
+# Same path and editable flag as molpy. The dev group pulls molpy in, and uv
+# rejects two source rows for molcrafts-molrs that disagree on editable.
+molcrafts-molrs = { path = "../../molrs/molrs-python", editable = true }
+molcrafts-molpy = { path = "../../molpy" }
+
 [tool.ty]
 [tool.ty.environment]
 python-version = "3.12"
-# tests import _common via sys.path.insert at runtime; ty cannot follow dynamic
-# path manipulation, so we declare the examples dir as an extra source root.
+# tests import example scripts via sys.path.insert at runtime; ty cannot follow
+# dynamic path manipulation, so we declare the examples dir as an extra source root.
 extra-paths = ["examples"]
 
 # Isolated binding tests — prek pre-push + CI call: `tox -c python -e py`
 # Non-editable only: sibling molrs path install + maturin wheel + pytest.
-# Requires ../../molrs at workspace version 0.12.0 (CI: MolCrafts/molrs@v0.12.0).
+# Requires ../../molrs on the 0.15.* minor line.
+# GitHub CI checks out MolCrafts/molrs on the same branch (master or dev).
 [tool.tox]
 requires = ["tox>=4.23"]
 env_list = ["py"]
@@ -138,7 +147,6 @@ deps = [
   "pytest",
   "numpy>=2.0",
   "typer>=0.12",
-  "molcrafts-molpy>=0.12.0,<0.13",
 ]
 pass_env = [
   "HOME",
@@ -146,19 +154,30 @@ pass_env = [
   "CARGO_HOME",
   "CARGO_TARGET_DIR",
   "RUSTUP_HOME",
+  # Standard cargo variable, none of ours: passed through so a developer's own
+  # flags (e.g. `-C target-cpu=native` for a bench build) survive tox's clean
+  # env. Nothing in this repo sets it, and LTO no longer rides on the
+  # environment at all — `lto` lives in `[profile.release]` in the manifests,
+  # where tox cannot strip it.
   "RUSTFLAGS",
+  # sccache (CI compile cache) — harmless when unset locally.
+  "RUSTC_WRAPPER",
+  "SCCACHE_GHA_ENABLED",
+  "SCCACHE_PATH",
+  "ACTIONS_RESULTS_URL",
+  "ACTIONS_RUNTIME_TOKEN",
   "MACOSX_DEPLOYMENT_TARGET",
   "SSH_AUTH_SOCK",
   "TERM",
 ]
 allowlist_externals = ["maturin"]
 # toxinidir is python/ when config lives here; sibling molrs is ../.. /molrs.
-# Minor-line only: 0.12.* (patch may differ).
+# Minor-line only: 0.15.* (patch may differ).
 commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import tomllib; from pathlib import Path; p=Path('{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text())['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,12), f'sibling molrs {{v}} not on 0.12.*'",
+    "import tomllib; from pathlib import Path; p=Path('{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text())['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,15), f'sibling molrs {{v}} not on 0.15.*'",
   ],
   [
     "{envpython}",
@@ -170,7 +189,7 @@ commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,12), v",
+    "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,15), v",
   ],
   ["maturin", "build", "--release", "-o", "{env_tmp_dir}/wheels"],
   [

@@ -68,12 +68,12 @@ pub fn read_frame(path: &Path, filetype_hint: Option<&str>) -> Result<Frame, Scr
         }
 
         "lammps_dump" | "lammpstrj" => {
-            let mut frames = molrs::io::trajectory::lammps_dump::read_lammps_dump(path)
-                .map_err(|e| io_err(path, format!("reading LAMMPS dump: {e}")))?;
-            if frames.is_empty() {
-                return Err(io_err(path, "LAMMPS dump contains no frames"));
-            }
-            Ok(frames.swap_remove(0))
+            // The template is the first snapshot; the rest are never read.
+            molrs::io::trajectory::lammps_dump::open_lammps_dump(path)
+                .map_err(|e| io_err(path, format!("opening LAMMPS dump: {e}")))?
+                .read()
+                .map_err(|e| io_err(path, format!("reading LAMMPS dump: {e}")))?
+                .ok_or_else(|| io_err(path, "LAMMPS dump contains no frames"))
         }
 
         "lammps_data" | "data" => molrs::io::data::lammps_data::read_lammps_data(path)
@@ -112,11 +112,68 @@ pub fn write_frame(path: &Path, frame: &Frame) -> Result<(), ScriptError> {
                 .map_err(|e| io_err(path, format!("writing XYZ: {e}")))
         }
 
-        "lammpstrj" => {
-            molrs::io::trajectory::lammps_dump::write_lammps_dump(path, std::slice::from_ref(frame))
-                .map_err(|e| io_err(path, format!("writing LAMMPS dump: {e}")))
-        }
+        "lammpstrj" => molrs::io::trajectory::lammps_dump::write_lammps_dump(
+            path,
+            std::slice::from_ref(frame),
+            None,
+        )
+        .map_err(|e| io_err(path, format!("writing LAMMPS dump: {e}"))),
 
         other => Err(io_err(path, format!("unsupported output format `{other}`"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use molrs::spatial::simbox::SimBox;
+    use molrs::store::block::Block;
+    use molrs::types::F;
+    use ndarray::{Array1, array};
+
+    fn one_atom_at(x: F) -> Frame {
+        let mut atoms = Block::new();
+        atoms
+            .insert("id", Array1::from_vec(vec![1u32]).into_dyn())
+            .unwrap();
+        atoms
+            .insert("x", Array1::from_vec(vec![x]).into_dyn())
+            .unwrap();
+        atoms
+            .insert("y", Array1::from_vec(vec![0.0 as F]).into_dyn())
+            .unwrap();
+        atoms
+            .insert("z", Array1::from_vec(vec![0.0 as F]).into_dyn())
+            .unwrap();
+        let mut frame = Frame::new();
+        frame.insert("atoms", atoms);
+        frame.simbox = Some(SimBox::cube(10.0, array![0.0, 0.0, 0.0], [true; 3]).unwrap());
+        frame
+    }
+
+    /// A multi-frame dump is a template: its first snapshot, nothing else.
+    #[test]
+    fn a_lammps_dump_reads_its_first_frame() {
+        let path =
+            std::env::temp_dir().join(format!("molpack-io-{}.lammpstrj", std::process::id()));
+        molrs::io::trajectory::lammps_dump::write_lammps_dump(
+            &path,
+            &[one_atom_at(1.0), one_atom_at(5.0)],
+            None,
+        )
+        .unwrap();
+        let frame = read_frame(&path, None);
+        let _ = std::fs::remove_file(&path);
+        let x = frame
+            .unwrap()
+            .get("atoms")
+            .unwrap()
+            .get("x")
+            .and_then(molrs::store::block::Column::as_float)
+            .unwrap()
+            .iter()
+            .copied()
+            .collect::<Vec<F>>();
+        assert_eq!(x, [1.0]);
     }
 }

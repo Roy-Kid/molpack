@@ -1,22 +1,24 @@
 //! Script loader: parse molpack's `.inp` input format and turn it into
-//! a configured [`Molpack`](crate::Molpack) plus a list of
+//! a configured [`GenCanPack`](crate::GenCanPack) plus a list of
 //! [`Target`](crate::Target)s.
 //!
 //! Two front-end shapes are supported:
 //!
-//! - **Native (feature `io`)** — [`Script::build`] reads template files
-//!   via molrs-io and returns a ready-to-run [`BuildResult`]:
+//! - **Native (feature `io`)** — `Script::build` reads template files
+//!   via molrs-io and returns a ready-to-run `BuildResult`. Both names
+//!   are compiled only when the `io` feature is on, so they are written
+//!   in plain code font here rather than as cross-references:
 //!
-//!   ```ignore
+//!   ```no_run
 //!   use std::path::Path;
-//!   use molpack::script;
+//!   use molpack::{PackEngine, script};
 //!
 //!   let src = std::fs::read_to_string("mixture.inp")?;
 //!   let script = script::parse(&src)?;
 //!   let built = script.build(Path::new("."))?;
 //!
-//!   let frame = built.packer.pack(&built.targets, built.nloop)?;
-//!   script::write_frame(&built.output, &frame)?;
+//!   let state = built.entry.run(&built.targets, built.nloop)?;
+//!   script::write_frame(&built.output, &state.frame)?;
 //!   # Ok::<(), Box<dyn std::error::Error>>(())
 //!   ```
 //!

@@ -74,24 +74,12 @@ def _read_frame(path: Path) -> Any:
 
 def _write_result(path: Path, result: Any) -> None:
     molrs = _require_molrs()
-    import numpy as np
-
-    frame_dict = result.frame
-    atoms = frame_dict["atoms"]
-    block = molrs.Block()
-    block.insert("element", list(atoms["element"]))
-    block.insert("x", np.asarray(atoms["x"], dtype=np.float64))
-    block.insert("y", np.asarray(atoms["y"], dtype=np.float64))
-    block.insert("z", np.asarray(atoms["z"], dtype=np.float64))
-    frame = molrs.Frame()
-    frame["atoms"] = block
-
     path.parent.mkdir(parents=True, exist_ok=True)
     suffix = path.suffix.lower()
     if suffix == ".pdb":
-        molrs.io.write_pdb(str(path), frame)
+        molrs.io.write_pdb(str(path), result.frame)
     elif suffix == ".xyz":
-        molrs.io.write_xyz(str(path), frame)
+        molrs.io.write_xyz(str(path), result.frame)
     else:
         raise typer.BadParameter(f"unsupported output extension '{suffix}' for {path}")
 
@@ -143,13 +131,10 @@ def info(
     """Print atom counts and bounding box for a structure file."""
     frame = _read_frame(path)
     atoms = frame["atoms"]
-    try:
-        elements = list(atoms.view("element"))
-    except Exception:
-        elements = list(atoms.view("symbol"))
-    xs = list(atoms.view("x"))
-    ys = list(atoms.view("y"))
-    zs = list(atoms.view("z"))
+    elements = list(atoms["element"])
+    xs = list(atoms["x"])
+    ys = list(atoms["y"])
+    zs = list(atoms["z"])
     counts: dict[str, int] = {}
     for el in elements:
         counts[el] = counts.get(el, 0) + 1
@@ -219,7 +204,7 @@ def pack(
     )
 
     try:
-        result = packer.pack_with_report(job.targets, max_loops=effective_max_loops)
+        result = packer.run(job.targets, max_loops=effective_max_loops)
     except PackError as exc:
         typer.echo(f"error: packing failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc

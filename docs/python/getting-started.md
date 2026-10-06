@@ -13,22 +13,19 @@ import molrs
 frame = molrs.io.read_pdb("water.pdb")
 ```
 
-No PDB file? Build a `molrs.Frame` from arrays with `Frame.from_dict`:
+No PDB file? Build a `molrs.Frame` from arrays:
 
 ```python
 import molrs
 import numpy as np
 
-frame = molrs.Frame.from_dict({
-    "blocks": {
-        "atoms": {
-            "x": np.array([0.00,  0.96, -0.24]),
-            "y": np.array([0.00,  0.00,  0.93]),
-            "z": np.zeros(3),
-            "element": ["O", "H", "H"],
-        }
-    },
-    "meta": {},
+frame = molrs.Frame({
+    "atoms": {
+        "x": np.array([0.00,  0.96, -0.24]),
+        "y": np.array([0.00,  0.00,  0.93]),
+        "z": np.zeros(3),
+        "element": ["O", "H", "H"],
+    }
 })
 ```
 
@@ -45,8 +42,8 @@ water = Target(frame, count=100).with_name("water")
 
 Arguments:
 
-- `frame` — a `molrs.Frame` or `molpy.Frame` with columns `"x"`, `"y"`,
-  `"z"`, and `"element"` (or `"symbol"` for molrs PDB frames).
+- `frame` — a `molrs.Frame` (`molpy.Frame` is the same class) with columns
+  `"x"`, `"y"`, `"z"`, and `"element"`.
 - `count` — number of copies to produce.
 
 A display label is optional — attach one via `.with_name("...")`.
@@ -59,16 +56,16 @@ Every target needs at least one restraint — the geometric region it
 should be packed into.
 
 ```python
-from molpack import InsideBoxRestraint
+import molrs
 
 water = water.with_restraint(
-    InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
+    molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])   # origin, lengths
 )
 ```
 
-Five geometric built-in restraints: `InsideBoxRestraint`,
-`InsideSphereRestraint`, `OutsideSphereRestraint`, `AbovePlaneRestraint`,
-`BelowPlaneRestraint` — plus a family of collective
+Any molrs region is a restraint: `Sphere`, `Cuboid`, `Parallelepiped`,
+`HalfSpace`, `Cylinder`, `Ellipsoid`, `Polyhedron`, `SphereUnion`, and
+their `&` / `|` / `~` compositions — plus a family of collective
 distribution-matching restraints. Stack multiple restraints with
 repeated `.with_restraint()` calls — see
 [Restraints](guide/restraints.md).
@@ -76,18 +73,21 @@ repeated `.with_restraint()` calls — see
 ## 4. Pack
 
 ```python
-from molpack import Molpack
+from molpack import GenCanPack
 
-packer = Molpack().with_tolerance(2.0).with_seed(42)
-frame = packer.pack([water], max_loops=200)
+packer = GenCanPack().with_tolerance(2.0).with_seed(42)
+result = packer.run([water], max_loops=200)
+frame = result.frame
 
 print(frame["atoms"].nrows)
 ```
 
-`pack()` returns a ready-to-use `molrs.Frame`. If you need structured
-diagnostics, call `pack_with_report()` instead; it returns a
-`PackResult` with `.converged`, `.fdist`, `.frest`, `.positions`, and
-`.frame`.
+`GenCanPack` is the rigid-body entry — you choose the packing algorithm
+by choosing the entry, and `CbmcGrow` is the chain-growth one. Both have
+the same builders and the same terminal verb, `run()`, which returns a
+`State` with `.frame`, `.converged`, `.fdist`, `.frest`,
+`.positions`, `.degraded`, and `.intra`. An entry runs once: build a
+new one for each pack.
 
 ## 5. Save
 
@@ -100,28 +100,29 @@ import molrs
 molrs.io.write_xyz("packed.xyz", frame)
 ```
 
-Or use `pack_with_report()` and write `result.frame` if you also need
-the diagnostic fields.
+`result.frame` is the same object — keep the `State` around when you
+need the diagnostic fields, or to continue with
+`GenCanPack().with_restart(result)` / `Target.fixed_from(result)`.
 
 ## Full script
 
 ```python
 import molrs
-from molpack import InsideBoxRestraint, Molpack, Target
+from molpack import GenCanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
-frame = (
-    Molpack().with_tolerance(2.0).with_seed(42).pack([water], max_loops=200)
+result = (
+    GenCanPack().with_tolerance(2.0).with_seed(42).run([water], max_loops=200)
 )
 
-print(f"packed {frame['atoms'].nrows} atoms")
+print(f"packed {result.frame['atoms'].nrows} atoms")
 ```
 
 ## Next steps

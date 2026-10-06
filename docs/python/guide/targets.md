@@ -13,15 +13,10 @@ from molpack import Target
 target = Target(frame, count)
 ```
 
-- `frame` — a `molrs.Frame` or `molpy.Frame`, resolved zero-copy via its
-  FFI capsule. Supported sources:
-
-  | Source | Element column |
-  |--------|---------------|
-  | `molrs.io.read_pdb(path)` | `"symbol"` |
-  | `molrs.io.read_xyz(path)` | `"element"` |
-  | `molrs.Frame.from_dict({"blocks": {"atoms": {...}}, "meta": {}})` | `"element"` |
-  | `molpy.Frame` | `"element"` |
+- `frame` — a `molrs.Frame` (`molpy.Frame` is the same class), resolved
+  zero-copy via its FFI capsule. Element symbols come from the `"element"`
+  atom column, which every molrs reader (`molrs.io.read_pdb`,
+  `molrs.io.read_xyz`, …) writes; a frame built in memory must carry it too.
 
 - `count` — number of copies to produce.
 
@@ -31,22 +26,19 @@ A display label is optional:
 target = Target(frame, count).with_name("water")
 ```
 
-Build a frame in memory (no PDB file) with `molrs.Frame.from_dict`:
+Build a frame in memory (no PDB file) with `molrs.Frame`:
 
 ```python
 import molrs
 import numpy as np
 
-frame = molrs.Frame.from_dict({
-    "blocks": {
-        "atoms": {
-            "x": np.array([0.00,  0.96, -0.24]),
-            "y": np.array([0.00,  0.00,  0.93]),
-            "z": np.zeros(3),
-            "element": ["O", "H", "H"],
-        }
-    },
-    "meta": {},
+frame = molrs.Frame({
+    "atoms": {
+        "x": np.array([0.00,  0.96, -0.24]),
+        "y": np.array([0.00,  0.00,  0.93]),
+        "z": np.zeros(3),
+        "element": ["O", "H", "H"],
+    }
 })
 water = Target(frame, count=100).with_name("water")
 ```
@@ -54,12 +46,13 @@ water = Target(frame, count=100).with_name("water")
 ## Read-only properties
 
 ```python
-target.name        # Optional[str]
-target.natoms      # number of template atoms
-target.count       # requested copies
-target.elements    # list[str]
-target.radii       # list[float]
-target.is_fixed    # True if placement is frozen (see below)
+target.name           # Optional[str]
+target.natoms         # number of template atoms
+target.count          # requested copies
+target.elements       # list[str]
+target.radii          # list[float]
+target.special_bonds  # list[float] — intramolecular skip table
+target.is_fixed       # True if placement is frozen (see below)
 ```
 
 All builder methods are **immutable** — they return a new `Target`.
@@ -124,10 +117,10 @@ target = (
 ### All atoms of the target
 
 ```python
-from molpack import InsideBoxRestraint
+import molrs
 
 target = target.with_restraint(
-    InsideBoxRestraint([0, 0, 0], [40, 40, 40])
+    molrs.Cuboid([0, 0, 0], [40, 40, 40])   # a molrs region: origin, lengths
 )
 ```
 
@@ -136,19 +129,17 @@ Stack multiple restraints by calling `.with_restraint()` again:
 ```python
 target = (
     target
-    .with_restraint(InsideBoxRestraint([0, 0, 0], [40, 40, 40]))
-    .with_restraint(OutsideSphereRestraint([20, 20, 20], 5.0))
+    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(~molrs.Sphere([20, 20, 20], 5.0))
 )
 ```
 
 ### A subset of atoms
 
 ```python
-from molpack import AbovePlaneRestraint, BelowPlaneRestraint
-
 target = target.with_atom_restraint(
     [30, 31],                                     # 0-based Rust-native indices
-    BelowPlaneRestraint([0.0, 0.0, 1.0], 2.0),
+    molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 2.0]),   # z <= 2
 )
 ```
 
@@ -157,25 +148,33 @@ target = target.with_atom_restraint(
     convention. If you are porting from a Packmol `.inp` file (which
     uses 1-based indices), subtract 1 at the call site.
 
-## Relaxation-assisted packing
+## Packing radii
 
-Attach an in-loop relaxer to reshape a flexible molecule's reference
-geometry *during* packing — useful for long chains that must fold to
-fit. `with_relaxer` requires `count == 1` (every copy shares the
-reference geometry the relaxer rewrites):
+The packer separates two atoms by the sum of their packing radii;
+without an override every atom uses the global `tolerance / 2`. Van der
+Waals radii from the source file are not used as packing radii.
 
 ```python
-from molpack import Target, TorsionMcRelaxer
-
-chain = TorsionMcRelaxer(frame).with_steps(20).with_self_avoidance(1.5)
-target = Target(frame, count=1).with_relaxer(chain)
+target = target.with_radius(2.0)                    # every atom
+target = target.with_atom_radius(h_indices, 0.85)   # then explicit hydrogen
 ```
 
-Two relaxers ship built in: `TorsionMcRelaxer` (engine-free Monte-Carlo
-torsion sampling, always available) and `LBFGSRelaxer` (force-field
-L-BFGS, `ff` feature). See
-[In-loop relaxers](../api-reference.md#in-loop-relaxers) for their
-options.
+All-atom chains with explicit hydrogen keep the default depth-3 skip
+table and shrink hydrogen here (~0.85 Å). Indices are **0-based**.
+
+## Intramolecular skip table
+
+Atom pairs close along the chain are exempt from the hard core. The
+table is per-target data, not an engine knob:
+
+```python
+target.special_bonds  # [0.0, 0.0, 0.0, 1.0] by default (depth 3)
+cg = target.with_special_bonds([0.0, 0.0, 1.0])  # CG depth 2
+```
+
+Empty, non-finite, or out-of-range weights raise `ValueError`.
+Fractional weights are stored and refused later at `CbmcGrow.run`. See
+[Chain growth](growth.md) for the all-atom vs CG recipe.
 
 ## Per-target solver budget
 

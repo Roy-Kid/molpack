@@ -1,6 +1,6 @@
 [package]
 name = "molpack-python"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.91"
 authors = ["MolCrafts"]
@@ -17,17 +17,18 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.29", features = ["extension-module"] }
 numpy = "0.29"
 ndarray = "0.17"
-molpack = { path = "..", package = "molcrafts-molpack", version = "0.2.0" }
+molpack = { path = "..", package = "molcrafts-molpack", version = "0.3.0" }
 # Same crate (and version) molpack links, so frame types unify across the wheel.
-# The merged `molcrafts-molrs` crate exposes core at its root with default
-# features off (matching molpack's dependency), so the wheel stays io/ff-free.
-molrs = { path = "../../molrs/molrs", package = "molcrafts-molrs", version = "0.12.0", default-features = false }
-# Stable FFI handle layer. molpack resolves molrs/molpy Python objects to
-# `molrs_ffi::{FrameRef, ForceFieldRef}` capsules (zero-copy) instead of dict
-# marshalling — see `src/interop.rs`. Pinned to the same 0.12.0 molrs-python
-# links, so the handle types and the `molrs::Frame` they lend share one layout
-# (path+version managed manually, per project convention).
-molrs-ffi = { path = "../../molrs/molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.12.0" }
+# Defaults off (molrs's default turns on `rayon`); the wheel's own `rayon`
+# feature turns it back on through molpack.
+molrs = { path = "../../molrs/molrs", package = "molcrafts-molrs", version = "0.15", default-features = false }
+# Stable FFI handle layer. molpack resolves molrs Python objects (`Frame`,
+# regions) to `molrs_ffi::{FrameRef, RegionRef}` capsules (zero-copy) instead
+# of dict marshalling — see `src/interop.rs`. Minor-line pinned (minor-line =
+# ABI version): the handle types and the `molrs::Frame` they lend share one
+# layout within a minor line, independent of features (path+version managed
+# manually, per project convention).
+molrs-ffi = { path = "../../molrs/molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.15", default-features = false }
 # Direct rayon dep so the binding can introspect/configure the global pool
 # (`num_threads`, `init_thread_pool`); shares the same process-global pool
 # molpack's parallel evaluator runs on. Gated behind the `rayon` feature.
@@ -36,16 +37,17 @@ rayon = { version = "1.12", optional = true }
 # Standalone package — not a member of any outer workspace.
 [workspace]
 
+# Standalone workspace root: does not inherit the root manifest's release
+# profile, so the keys are restated here — keep the two in step so released
+# wheels get the same optimisation as a local release build.
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+strip = "symbols"
+
 [features]
-# The force-field relaxer (`ff`) is a mandatory part of the wheel — the Python
-# API (`LBFGSRelaxer`, `Target.with_relaxer`) always ships. Build it plain:
-# `maturin develop` / `maturin build` need no extra flags.
-default = ["ff"]
 # Forward the parallel evaluator into the wheel. Enabling this compiles the
 # rayon code paths in molpack (and `molrs/rayon`); without it the binding's
 # `with_parallel_eval(True)` raises instead of silently no-op'ing.
 rayon = ["dep:rayon", "molpack/rayon"]
-# Force-field relaxer: pulls molrs's `ff` module into the wheel (MMFF94/MMFF94s + L-BFGS +
-# the LAMMPS force-field reader / `to_potentials`) and exposes `LBFGSRelaxer` +
-# `Target.with_relaxer` for relaxation-assisted packing.
-ff = ["molpack/ff", "molrs/ff", "molrs-ffi/ff"]

@@ -11,11 +11,13 @@ import os
 from pathlib import Path
 
 import molrs
+import numpy as np
 
 import molpack
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE.parent.parent / "examples" / "pack_bilayer"
+OUT = HERE / "out"
 
 
 def main() -> None:
@@ -25,49 +27,45 @@ def main() -> None:
     water_low = (
         molpack.Target(water_frame, count=50)
         .with_name("water_low")
-        .with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, -10.0], [40.0, 40.0, 0.0])
-        )
+        .with_restraint(molrs.Cuboid([0.0, 0.0, -10.0], [40.0, 40.0, 10.0]))
     )
 
     water_high = (
         molpack.Target(water_frame, count=50)
         .with_name("water_high")
-        .with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 28.0], [40.0, 40.0, 38.0])
-        )
+        .with_restraint(molrs.Cuboid([0.0, 0.0, 28.0], [40.0, 40.0, 10.0]))
     )
 
     lipid_low = (
         molpack.Target(lipid_frame, count=10)
         .with_name("lipid_low")
-        .with_restraint(molpack.InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 14.0]))
+        .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 14.0]))
         # 0-based: Packmol .inp atoms 32/33 → indices 31/32 for tails below z=2
         .with_atom_restraint(
-            [30, 31], molpack.BelowPlaneRestraint([0.0, 0.0, 1.0], 2.0)
+            [30, 31], molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 2.0])
         )
         # Packmol .inp atoms 1/2 → indices 0/1 for heads above z=12
-        .with_atom_restraint([0, 1], molpack.AbovePlaneRestraint([0.0, 0.0, 1.0], 12.0))
+        .with_atom_restraint(
+            [0, 1], ~molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 12.0])
+        )
     )
 
     lipid_high = (
         molpack.Target(lipid_frame, count=10)
         .with_name("lipid_high")
-        .with_restraint(
-            molpack.InsideBoxRestraint([0.0, 0.0, 14.0], [40.0, 40.0, 28.0])
-        )
+        .with_restraint(molrs.Cuboid([0.0, 0.0, 14.0], [40.0, 40.0, 14.0]))
         # heads below z=16
-        .with_atom_restraint([0, 1], molpack.BelowPlaneRestraint([0.0, 0.0, 1.0], 16.0))
+        .with_atom_restraint([0, 1], molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 16.0]))
         # tails above z=26
         .with_atom_restraint(
-            [30, 31], molpack.AbovePlaneRestraint([0.0, 0.0, 1.0], 26.0)
+            [30, 31], ~molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 26.0])
         )
     )
 
     show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
-    packer = molpack.Molpack().with_progress(show_progress)
+    packer = molpack.GenCanPack().with_progress(show_progress)
 
-    result = packer.pack_with_report(
+    result = packer.run(
         [water_low, water_high, lipid_low, lipid_high],
         max_loops=800,
     )
@@ -76,6 +74,24 @@ def main() -> None:
         f"converged={result.converged} natoms={result.natoms} "
         f"fdist={result.fdist:.4f} frest={result.frest:.4f}"
     )
+    packed = result.frame
+    if packed.box is None:
+        a = packed["atoms"]
+        packed.box = molrs.Box.from_bounds(
+            np.column_stack(
+                [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
+            ),
+            padding=np.ones(3),
+        )
+    OUT.mkdir(parents=True, exist_ok=True)
+    molrs.io.write_mrec(str(OUT / "pack_bilayer.mrec"), packed)
+    molrs.io.write_lammps_trajectory(
+        str(OUT / "pack_bilayer.lammpstrj"),
+        [packed],
+        columns=["id", "element", "mol", "x", "y", "z"],
+    )
+    if "bonds" in packed and packed["bonds"].nrows:
+        molrs.io.write_lammps_dump_local(str(OUT / "pack_bilayer.dump.local"), [packed])
 
 
 if __name__ == "__main__":

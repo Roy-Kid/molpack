@@ -27,18 +27,18 @@ pip install molcrafts-molpack
 
 ```python
 import molrs
-from molpack import InsideBoxRestraint, Molpack, Target
+from molpack import GenCanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(InsideBoxRestraint([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
-frame = Molpack().with_seed(42).pack([water], max_loops=200)
+frame = GenCanPack().with_seed(42).run([water], max_loops=200).frame
 ```
 
-`Target` takes a `molrs.Frame` or `molpy.Frame`, resolved zero-copy through
+`Target` takes a `molrs.Frame` (`molpy.Frame` is the same class), resolved zero-copy through
 its FFI capsule.
 
 ## Building from source
@@ -60,10 +60,9 @@ This builds against the local `molpack` Rust crate under `../`.
 import molrs
 from molpack import Target
 
-frame = molrs.Frame.from_dict({
-    "blocks": {"atoms": {"x": [0.0], "y": [0.0], "z": [0.0], "element": ["O"]}},
-    "meta": {},
-})
+frame = molrs.Frame(
+    {"atoms": {"x": [0.0], "y": [0.0], "z": [0.0], "element": ["O"]}}
+)
 target = Target(frame, count=1).with_name("mol")
 print(target)  # Target(natoms=1, count=1, name=Some("mol"))
 ```

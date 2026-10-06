@@ -1,5 +1,6 @@
 //! Reusable temporary buffers for objective/gradient and movebad paths.
 
+use super::geometry::GeometryKey;
 use molrs::types::F;
 
 /// Reusable mutable buffers shared across packing iterations.
@@ -24,6 +25,11 @@ pub struct WorkBuffers {
     /// `comptype` each call (cheap index arithmetic, no trig); persisting the
     /// `Vec` keeps that hot rebuild allocation-free.
     pub mol_descs: Vec<(usize, usize, usize, usize)>,
+    /// Reused `(icart0, len, natoms_per_copy)` span list for the collective
+    /// restraints, rebuilt from the current `comptype` on every evaluation.
+    /// Persisting the `Vec` keeps `accumulate_collective_fg` allocation-free
+    /// on a path GENCAN calls thousands of times.
+    pub collective_spans: Vec<(usize, usize, usize)>,
     /// Temporary radius backup used by movebad/radius scaling paths.
     pub radiuswork: Vec<F>,
     /// Per-molecule score buffer used by flashsort/movebad ranking.
@@ -38,14 +44,9 @@ pub struct WorkBuffers {
     pub cached_comptype: Vec<bool>,
     /// Whether the cached geometry was built in init1 mode.
     pub cached_init1: bool,
-    /// Cell grid signature for the cached geometry.
-    pub cached_ncells: [usize; 3],
-    pub cached_cell_length: [F; 3],
-    pub cached_pbc_min: [F; 3],
-    pub cached_pbc_length: [F; 3],
-    pub cached_pbc_periodic: [bool; 3],
-    /// Whether the cached geometry metadata is valid.
-    pub cached_geometry_valid: bool,
+    /// Geometry the cached cell assignment was built for; `None` invalidates
+    /// the cache.
+    pub cached_geometry: Option<GeometryKey>,
 }
 
 impl WorkBuffers {
@@ -55,6 +56,7 @@ impl WorkBuffers {
             #[cfg(feature = "rayon")]
             grad_partials: Vec::new(),
             mol_descs: Vec::new(),
+            collective_spans: Vec::new(),
             radiuswork: vec![0.0; ntotat],
             fmol: Vec::new(),
             flash_ind: Vec::new(),
@@ -62,70 +64,35 @@ impl WorkBuffers {
             cached_x: Vec::new(),
             cached_comptype: Vec::new(),
             cached_init1: false,
-            cached_ncells: [0; 3],
-            cached_cell_length: [0.0; 3],
-            cached_pbc_min: [0.0; 3],
-            cached_pbc_length: [0.0; 3],
-            cached_pbc_periodic: [false; 3],
-            cached_geometry_valid: false,
+            cached_geometry: None,
         }
     }
 
-    pub fn ensure_atom_capacity(&mut self, ntotat: usize) {
-        if self.gxcar.len() != ntotat {
-            self.gxcar.resize(ntotat, [0.0; 3]);
-        }
-        if self.radiuswork.len() != ntotat {
-            self.radiuswork.resize(ntotat, 0.0);
-        }
-        self.cached_geometry_valid = false;
-    }
-
-    #[allow(clippy::too_many_arguments)]
     pub fn matches_cached_geometry(
         &self,
         x: &[F],
         comptype: &[bool],
         init1: bool,
-        ncells: [usize; 3],
-        cell_length: [F; 3],
-        pbc_min: [F; 3],
-        pbc_length: [F; 3],
-        pbc_periodic: [bool; 3],
+        geometry: GeometryKey,
     ) -> bool {
-        self.cached_geometry_valid
+        self.cached_geometry == Some(geometry)
             && self.cached_init1 == init1
-            && self.cached_ncells == ncells
-            && self.cached_cell_length == cell_length
-            && self.cached_pbc_min == pbc_min
-            && self.cached_pbc_length == pbc_length
-            && self.cached_pbc_periodic == pbc_periodic
             && self.cached_x == x
             && self.cached_comptype == comptype
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn update_cached_geometry(
         &mut self,
         x: &[F],
         comptype: &[bool],
         init1: bool,
-        ncells: [usize; 3],
-        cell_length: [F; 3],
-        pbc_min: [F; 3],
-        pbc_length: [F; 3],
-        pbc_periodic: [bool; 3],
+        geometry: GeometryKey,
     ) {
         self.cached_x.clear();
         self.cached_x.extend_from_slice(x);
         self.cached_comptype.clear();
         self.cached_comptype.extend_from_slice(comptype);
         self.cached_init1 = init1;
-        self.cached_ncells = ncells;
-        self.cached_cell_length = cell_length;
-        self.cached_pbc_min = pbc_min;
-        self.cached_pbc_length = pbc_length;
-        self.cached_pbc_periodic = pbc_periodic;
-        self.cached_geometry_valid = true;
+        self.cached_geometry = Some(geometry);
     }
 }
