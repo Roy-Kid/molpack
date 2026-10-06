@@ -6,15 +6,24 @@ on:
   pull_request:
     branches: [master, dev]
   workflow_call:
+    inputs:
+      mol_git_ref:
+        description: >-
+          molrs / molpy ref to check out. The publish workflows run on a
+          molpack tag, which names no molrs or molpy ref, so they pass the
+          release tag of the molrs line Cargo.toml pins.
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
 
 # Local builds use the sibling directories. GitHub has two branches, and
 # CI checks out MolCrafts/molrs and MolCrafts/molpy on that same branch.
-# A pull request uses its head branch.
+# A pull request uses its head branch; a caller may name the ref instead.
 env:
   MOLRS_GIT_REPOSITORY: MolCrafts/molrs
   MOLPY_GIT_REPOSITORY: MolCrafts/molpy
-  MOL_GIT_REF: ${{ github.head_ref || github.ref_name }}
+  MOL_GIT_REF: ${{ inputs.mol_git_ref || github.head_ref || github.ref_name }}
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
 
