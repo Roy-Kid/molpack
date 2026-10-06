@@ -1,6 +1,6 @@
 //! Python wrappers for molecular packing restraints.
 //!
-//! Geometry is a molrs region object (``molrs.Sphere``, ``Cuboid``,
+//! Geometry is a molrs region object (``molrs.spatial.Sphere``, ``Cuboid``,
 //! ``Parallelepiped``, ``HalfSpace``, ``Cylinder``, ``Ellipsoid``,
 //! ``Polyhedron``, ``SphereUnion``, or any ``&`` / ``|`` / ``~`` composition);
 //! it reaches this wheel as a ``molrs.RegionRef/<line>`` capsule and is lifted
@@ -92,7 +92,7 @@ pub(crate) fn extract_restraint(
 
     Err(PyTypeError::new_err(
         "expected a restraint: a molrs region (any object exposing \
-         `_ffi_regionref_capsule()` — molrs.Sphere / Cuboid / Parallelepiped / HalfSpace / \
+         `_ffi_regionref_capsule()` — molrs.spatial.Sphere / Cuboid / Parallelepiped / HalfSpace / \
          Cylinder / Ellipsoid / Polyhedron / SphereUnion or a `&` / `|` / `~` composition), \
          or an object with callable `f(x, scale, scale2)` and `fg(x, scale, scale2)` methods",
     ))

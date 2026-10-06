@@ -17,7 +17,7 @@ type plus PDB/XYZ I/O.
 
 A **template** is one copy of the molecule you want many of — its atom
 positions and element symbols, in any orientation. molpack takes the template
-as a `molrs.Frame`, the shared MolCrafts container for atomic data, so any
+as a `molrs.store.Frame`, the shared MolCrafts container for atomic data, so any
 loader molrs supports will do. Read one from a Protein Data Bank (PDB) file:
 
 ```python
@@ -33,7 +33,7 @@ oxygen at the origin:
 import molrs
 import numpy as np
 
-frame = molrs.Frame({
+frame = molrs.store.Frame({
     "atoms": {
         "x": np.array([0.00, 0.96, -0.24]),
         "y": np.array([0.00, 0.00, 0.93]),
@@ -54,7 +54,7 @@ mobile target needs a spatial restraint:
 import molrs
 from molpack import Target
 
-box = molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])  # a molrs region
+box = molrs.spatial.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])  # a molrs region
 water = (
     Target(frame, count=100)
     .with_name("water")
@@ -87,7 +87,7 @@ packed = result.frame
 | `converged` | Both objectives fell below the packer precision threshold |
 | `fdist` | Pair-distance (overlap) violations |
 | `frest` | Restraint violations |
-| `frame` | Topology-complete packed `molrs.Frame` |
+| `frame` | Topology-complete packed `molrs.store.Frame` |
 
 `GenCanPack` is the rigid-body entry; `CbmcGrow` grows chains instead. Each
 engine runs once — `run()` consumes it, so build a new one per pack. If you

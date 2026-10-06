@@ -50,7 +50,7 @@ For notebooks and pipelines (Python 3.12+):
 pip install molcrafts-molpack
 ```
 
-`molcrafts-molrs` is installed as a dependency and provides `molrs.Frame` plus
+`molcrafts-molrs` is installed as a dependency and provides `molrs.store.Frame` plus
 PDB / XYZ readers. The wheel itself is I/O-free — pass frames in, get frames
 out.
 

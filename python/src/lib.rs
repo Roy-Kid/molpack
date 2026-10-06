@@ -15,7 +15,7 @@
 //! | `StageInfo`      | [`PyStageInfo`]      | Which stage a callback came from   |
 //! | `StepContext`    | [`PyStepContext`]    | Callback-scoped live-context guard |
 //!
-//! Geometric restraints are molrs region objects (`molrs.Sphere`, `Cuboid`,
+//! Geometric restraints are molrs region objects (`molrs.spatial.Sphere`, `Cuboid`,
 //! `Parallelepiped`, `HalfSpace`, `Cylinder`, `Ellipsoid`, `Polyhedron`,
 //! `SphereUnion`, or a `&` / `|` / `~` composition), resolved through their
 //! `molrs.RegionRef/<line>` capsule and lifted by `RegionRestraint` — this

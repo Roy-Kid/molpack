@@ -37,7 +37,7 @@ class CenteringMode:
 # ---------------------------------------------------------------------------
 # Restraints
 #
-# Geometry is a molrs region (``molrs.Sphere``, ``Cuboid``, ``Parallelepiped``,
+# Geometry is a molrs region (``molrs.spatial.Sphere``, ``Cuboid``, ``Parallelepiped``,
 # ``HalfSpace``, ``Cylinder``, ``Ellipsoid``, ``Polyhedron``, ``SphereUnion``,
 # or a ``&`` / ``|`` / ``~`` composition); molpack lifts it to "stay inside".
 # There is no molpack geometric restraint class.
@@ -309,13 +309,13 @@ class State:
         residual; does not recompute from positions."""
     @property
     def frame(self) -> Any:
-        """Topology-complete ``molrs.Frame``, ready to use directly.
+        """Topology-complete ``molrs.store.Frame``, ready to use directly.
 
         Replays each target's source-frame topology (bonds/angles/dihedrals/
         impropers, with indices offset per copy) onto the packed coordinates,
         regenerates ``id`` / ``mol_id``, and stamps ``frame.box`` from the
         periodic box (if one was declared via ``with_periodic_box``). Returns a
-        genuine ``molrs.Frame`` (built via the user's installed ``molrs``),
+        genuine ``molrs.store.Frame`` (built via the user's installed ``molrs``),
         which is ``molpy.Frame`` too — there is one Frame class. Falls
         back to a coordinates-only ``atoms`` block for ``.inp`` script packing.
         Force fields are out of scope — merge them separately.

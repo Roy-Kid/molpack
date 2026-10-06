@@ -27,38 +27,40 @@ def main() -> None:
     water_low = (
         molpack.Target(water_frame, count=50)
         .with_name("water_low")
-        .with_restraint(molrs.Cuboid([0.0, 0.0, -10.0], [40.0, 40.0, 10.0]))
+        .with_restraint(molrs.spatial.Cuboid([0.0, 0.0, -10.0], [40.0, 40.0, 10.0]))
     )
 
     water_high = (
         molpack.Target(water_frame, count=50)
         .with_name("water_high")
-        .with_restraint(molrs.Cuboid([0.0, 0.0, 28.0], [40.0, 40.0, 10.0]))
+        .with_restraint(molrs.spatial.Cuboid([0.0, 0.0, 28.0], [40.0, 40.0, 10.0]))
     )
 
     lipid_low = (
         molpack.Target(lipid_frame, count=10)
         .with_name("lipid_low")
-        .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 14.0]))
+        .with_restraint(molrs.spatial.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 14.0]))
         # 0-based: Packmol .inp atoms 32/33 → indices 31/32 for tails below z=2
         .with_atom_restraint(
-            [30, 31], molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 2.0])
+            [30, 31], molrs.spatial.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 2.0])
         )
         # Packmol .inp atoms 1/2 → indices 0/1 for heads above z=12
         .with_atom_restraint(
-            [0, 1], ~molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 12.0])
+            [0, 1], ~molrs.spatial.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 12.0])
         )
     )
 
     lipid_high = (
         molpack.Target(lipid_frame, count=10)
         .with_name("lipid_high")
-        .with_restraint(molrs.Cuboid([0.0, 0.0, 14.0], [40.0, 40.0, 14.0]))
+        .with_restraint(molrs.spatial.Cuboid([0.0, 0.0, 14.0], [40.0, 40.0, 14.0]))
         # heads below z=16
-        .with_atom_restraint([0, 1], molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 16.0]))
+        .with_atom_restraint(
+            [0, 1], molrs.spatial.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 16.0])
+        )
         # tails above z=26
         .with_atom_restraint(
-            [30, 31], ~molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 26.0])
+            [30, 31], ~molrs.spatial.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 26.0])
         )
     )
 
@@ -77,7 +79,7 @@ def main() -> None:
     packed = result.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.Box.from_bounds(
+        packed.box = molrs.spatial.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),

@@ -20,7 +20,7 @@ import molpy as mp
 import molrs
 import numpy as np
 from molpy.conformer import Conformer
-from molrs import Atomistic
+from molrs.system import Atomistic
 
 import molpack
 
@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> None:
     packed = pack_mix(n, arm_length, n_linear, n_star, density, seed).frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.Box.from_bounds(
+        packed.box = molrs.spatial.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),

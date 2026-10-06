@@ -10,7 +10,7 @@
 //! ``molrs.io.read_frame`` (format from the script's ``filetype`` or the
 //! file name) but pluggable via the ``read_frame`` argument. This keeps the
 //! PyO3 wheel free of ``molrs-io`` and lets users plug in their own loader
-//! (mdtraj, ASE, …) as long as it returns a ``molrs.Frame``.
+//! (mdtraj, ASE, …) as long as it returns a ``molrs.store.Frame``.
 
 use std::path::PathBuf;
 
@@ -85,7 +85,7 @@ impl PyScriptJob {
 ///     Callable ``(path: str, filetype: str | None) -> Frame`` used to
 ///     load each ``structure`` template. The returned object only needs
 ///     a ``frame["atoms"]`` block exposing ``x`` / ``y`` / ``z`` and an
-///     ``element`` column. Must be a :class:`molrs.Frame` (``molpy.Frame``
+///     ``element`` column. Must be a :class:`molrs.store.Frame` (``molpy.Frame``
 ///     is the same class). Defaults to ``molrs.io.read_frame``, which
 ///     picks the format from ``filetype`` or the file name.
 ///

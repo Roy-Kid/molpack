@@ -5,7 +5,7 @@ LJ units. Every atom that appears in ``Bonds`` is the polymer; everything
 else is solvent and is dropped — the void is what the solvent occupied.
 
 The region is built from the atoms, in memory, with no mesh: one sphere per
-polymer bead of radius ``bead radius + probe radius`` (``molrs.SphereUnion``,
+polymer bead of radius ``bead radius + probe radius`` (``molrs.spatial.SphereUnion``,
 minimum image on the box's periodic axes) is the solvent-accessible volume,
 and ``~polymer`` is the space a PEO atom centre may occupy. ``LatticeGrow``
 walks Region ∩ lattice, so the chains thread the solvent channels by
@@ -33,7 +33,7 @@ import molpy as mp
 import molrs
 import numpy as np
 from molpy.conformer import Conformer
-from molrs import Atomistic
+from molrs.system import Atomistic
 
 import molpack
 
@@ -98,8 +98,10 @@ def void_region(frame, sigma: float = SIGMA_A, probe: float = PROBE_A):
     centers = select_polymer(frame) * sigma
     h = np.asarray(frame.box.h) * sigma
     origin = np.asarray(frame.box.origin) * sigma
-    box = molrs.Box(h, origin, np.asarray(frame.box.pbc))
-    polymer = molrs.SphereUnion(centers, BEAD_RADIUS_SIGMA * sigma + probe, box=box)
+    box = molrs.spatial.Box(h, origin, np.asarray(frame.box.pbc))
+    polymer = molrs.spatial.SphereUnion(
+        centers, BEAD_RADIUS_SIGMA * sigma + probe, box=box
+    )
     return ~polymer, box
 
 

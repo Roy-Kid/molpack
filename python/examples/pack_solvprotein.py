@@ -27,7 +27,7 @@ def main() -> None:
     sodium_frame = molrs.io.read_pdb(str(DATA / "sodium.pdb"))
     chloride_frame = molrs.io.read_pdb(str(DATA / "chloride.pdb"))
 
-    sphere = molrs.Sphere([0.0, 0.0, 0.0], 50.0)
+    sphere = molrs.spatial.Sphere([0.0, 0.0, 0.0], 50.0)
 
     protein = (
         molpack.Target(protein_frame, count=1)
@@ -66,7 +66,7 @@ def main() -> None:
     packed = result.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.Box.from_bounds(
+        packed.box = molrs.spatial.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),

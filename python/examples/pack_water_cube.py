@@ -1,6 +1,6 @@
 """Pack 100 water molecules into a 30x30x30 cubic box.
 
-Minimal example — builds the template with ``molrs.Frame`` (no PDB
+Minimal example — builds the template with ``molrs.store.Frame`` (no PDB
 file), so it needs ``molcrafts-molrs`` but no structure files on disk.
 """
 
@@ -18,7 +18,7 @@ OUT = Path(__file__).resolve().parent / "out"
 
 def main() -> None:
     # Water geometry: O at origin, two Hs 0.96 Å away.
-    frame = molrs.Frame(
+    frame = molrs.store.Frame(
         {
             "atoms": {
                 "x": np.array([0.0, 0.9572, -0.2400], dtype=np.float64),
@@ -32,7 +32,7 @@ def main() -> None:
     water = (
         molpack.Target(frame, count=100)
         .with_name("water")
-        .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
+        .with_restraint(molrs.spatial.Cuboid([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
     )
 
     packer = molpack.GenCanPack()
@@ -46,7 +46,7 @@ def main() -> None:
     packed = result.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.Box.from_bounds(
+        packed.box = molrs.spatial.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),

@@ -138,7 +138,7 @@ the writer or analysis code you already use. See the [Python API](python/).
 
 ```python
 water = Target(frame, 100).with_restraint(
-    molrs.Cuboid([0, 0, 0], [40, 40, 40])
+    molrs.spatial.Cuboid([0, 0, 0], [40, 40, 40])
 )
 packed = GenCanPack().with_seed(42).run([water], max_loops=200).frame
 ```

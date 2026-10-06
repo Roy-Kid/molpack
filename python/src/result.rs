@@ -1,7 +1,7 @@
 //! Python wrapper for the pack result.
 //!
 //! [`PyState`] is returned by every engine entry's ``run()``
-//! (`GenCanPack`, `CbmcGrow`): the packed ``molrs.Frame`` plus structured
+//! (`GenCanPack`, `CbmcGrow`): the packed ``molrs.store.Frame`` plus structured
 //! diagnostics (`converged` / `fdist` / `frest` / `degraded` / `intra`).
 
 use molpack::State;
@@ -39,7 +39,7 @@ impl PyIntraResidual {
 #[pyclass(name = "State", from_py_object)]
 pub struct PyState {
     pub(crate) inner: State,
-    /// The Python ``molrs.Frame`` exported once at pack time.
+    /// The Python ``molrs.store.Frame`` exported once at pack time.
     pub(crate) py_frame: Py<PyAny>,
 }
 
@@ -64,7 +64,7 @@ impl PyState {
             .into_pyarray(py)
     }
 
-    /// Packed ``molrs.Frame`` (same object every access).
+    /// Packed ``molrs.store.Frame`` (same object every access).
     ///
     /// Topology is replayed onto the packed coordinates. A periodic cell is
     /// present only if the engine declared one (``with_periodic_box``);

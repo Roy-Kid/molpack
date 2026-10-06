@@ -28,12 +28,12 @@ def main() -> None:
     water = (
         molpack.Target(water_frame, count=100)
         .with_name("water")
-        .with_restraint(molrs.Cuboid([-20.0, 0.0, 0.0], [20.0, 39.0, 39.0]))
+        .with_restraint(molrs.spatial.Cuboid([-20.0, 0.0, 0.0], [20.0, 39.0, 39.0]))
     )
     chloroform = (
         molpack.Target(chlor_frame, count=30)
         .with_name("chloroform")
-        .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [21.0, 39.0, 39.0]))
+        .with_restraint(molrs.spatial.Cuboid([0.0, 0.0, 0.0], [21.0, 39.0, 39.0]))
     )
     t3 = (
         molpack.Target(t3_frame, count=1)
@@ -61,7 +61,7 @@ def main() -> None:
     packed = result.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.Box.from_bounds(
+        packed.box = molrs.spatial.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),

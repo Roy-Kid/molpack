@@ -13,13 +13,13 @@ import molrs
 frame = molrs.io.read_pdb("water.pdb")
 ```
 
-No PDB file? Build a `molrs.Frame` from arrays:
+No PDB file? Build a `molrs.store.Frame` from arrays:
 
 ```python
 import molrs
 import numpy as np
 
-frame = molrs.Frame({
+frame = molrs.store.Frame({
     "atoms": {
         "x": np.array([0.00,  0.96, -0.24]),
         "y": np.array([0.00,  0.00,  0.93]),
@@ -42,7 +42,7 @@ water = Target(frame, count=100).with_name("water")
 
 Arguments:
 
-- `frame` — a `molrs.Frame` (`molpy.Frame` is the same class) with columns
+- `frame` — a `molrs.store.Frame` (`molpy.Frame` is the same class) with columns
   `"x"`, `"y"`, `"z"`, and `"element"`.
 - `count` — number of copies to produce.
 
@@ -59,7 +59,7 @@ should be packed into.
 import molrs
 
 water = water.with_restraint(
-    molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])   # origin, lengths
+    molrs.spatial.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])   # origin, lengths
 )
 ```
 
@@ -115,7 +115,7 @@ frame = molrs.io.read_pdb("water.pdb")
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    .with_restraint(molrs.spatial.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
 result = (

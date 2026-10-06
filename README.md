@@ -99,7 +99,7 @@ frame = molrs.io.read_pdb("water.pdb")
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(molrs.spatial.Cuboid([0, 0, 0], [40, 40, 40]))
 )
 result = GenCanPack().run([water], max_loops=200)
 frame = result.frame

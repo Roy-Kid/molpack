@@ -33,7 +33,7 @@ from molpack import (
 AVOGADRO = 6.02214076e23
 
 
-def _chain_frame(n: int, bond: float = 1.53, bonds: bool = True) -> molrs.Frame:
+def _chain_frame(n: int, bond: float = 1.53, bonds: bool = True) -> molrs.store.Frame:
     """Planar zigzag bead chain with tetrahedral (109.5°) angles — the Rust
     suite's ``chain_frame`` fixture. ``bonds=False`` drops the bonds block:
     the "bare coordinates" shape a grow target must reject by name."""
@@ -54,7 +54,7 @@ def _chain_frame(n: int, bond: float = 1.53, bonds: bool = True) -> molrs.Frame:
             "atomi": np.arange(0, n - 1, dtype=np.uint64),
             "atomj": np.arange(1, n, dtype=np.uint64),
         }
-    return molrs.Frame(blocks)
+    return molrs.store.Frame(blocks)
 
 
 def _grow() -> CbmcGrow:

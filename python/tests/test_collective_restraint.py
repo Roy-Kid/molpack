@@ -18,8 +18,8 @@ BOX_LO = [0.0, 0.0, 0.0]
 BOX_HI = [12.0, 12.0, 40.0]
 
 
-def _ion_frame() -> molrs.Frame:
-    return molrs.Frame(
+def _ion_frame() -> molrs.store.Frame:
+    return molrs.store.Frame(
         {
             "atoms": {
                 "x": np.array([0.0]),
@@ -170,7 +170,7 @@ class TestCallContract:
 
         target = (
             molpack.Target(_ion_frame(), count=count)
-            .with_restraint(molrs.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
+            .with_restraint(molrs.spatial.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
             .with_restraint(Recorder())
         )
         _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=20)
@@ -193,7 +193,7 @@ class TestErrorPropagation:
 
         target = (
             molpack.Target(_ion_frame(), count=60)
-            .with_restraint(molrs.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
+            .with_restraint(molrs.spatial.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
             .with_restraint(Explodes())
         )
         with pytest.raises(ValueError, match="boom from collective"):
@@ -209,7 +209,7 @@ class TestErrorPropagation:
 
         target = (
             molpack.Target(_ion_frame(), count=60)
-            .with_restraint(molrs.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
+            .with_restraint(molrs.spatial.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
             .with_restraint(WrongLen())
         )
         with pytest.raises(TypeError, match="gradients for"):
@@ -228,7 +228,7 @@ class TestSelfSeparation:
         target = (
             molpack.Target(_ion_frame(), count=self.N)
             .with_name("NA")
-            .with_restraint(molrs.Cuboid(*self.BOX))
+            .with_restraint(molrs.spatial.Cuboid(*self.BOX))
         )
         if separate:
             target = target.with_restraint(molpack.SelfSeparation(self.D_MIN))
@@ -249,7 +249,7 @@ class TestSelfSeparation:
         target = (
             molpack.Target(_ion_frame(), count=self.N)
             .with_name("NA")
-            .with_restraint(molrs.Cuboid(*self.BOX))
+            .with_restraint(molrs.spatial.Cuboid(*self.BOX))
             .with_restraint(molpack.SelfSeparation(30.0))
         )
         result = _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=40)
@@ -263,7 +263,7 @@ class TestSelfSeparation:
         target = (
             molpack.Target(_ion_frame(), count=20)
             .with_name("NA")
-            .with_restraint(molrs.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
+            .with_restraint(molrs.spatial.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
             .with_restraint(MeanTether([0.0, 0.0, 1.0], 20.0, 100.0))
             .with_restraint(molpack.SelfSeparation(4.0))
         )

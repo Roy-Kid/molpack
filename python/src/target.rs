@@ -3,7 +3,7 @@
 //! [`PyTarget`] describes one type of molecule to pack: its template
 //! geometry, topology, and the number of copies.
 //!
-//! The constructor accepts a real ``molrs.Frame`` (``molpy.Frame`` is the same
+//! The constructor accepts a real ``molrs.store.Frame`` (``molpy.Frame`` is the same
 //! class) carrying an ``"atoms"`` block. The frame crosses the
 //! language boundary **zero-copy** through its stable-FFI capsule (see
 //! [`crate::interop`]) — no dict marshalling, no consumer-side data type. The
@@ -44,10 +44,10 @@ impl PyTarget {
     ///
     /// Parameters
     /// ----------
-    /// frame : molrs.Frame
+    /// frame : molrs.store.Frame
     ///     A frame with an ``"atoms"`` block (``x`` / ``y`` / ``z``
     ///     columns). Resolved zero-copy via its FFI capsule — a plain ``dict``
-    ///     is no longer accepted; build a ``molrs.Frame`` first.
+    ///     is no longer accepted; build a ``molrs.store.Frame`` first.
     /// count : int
     ///     Number of copies to pack.
     ///
@@ -78,7 +78,7 @@ impl PyTarget {
     ///
     /// Accepts:
     ///
-    /// * a molrs **region** (``molrs.Sphere``, ``Cuboid``, ``Parallelepiped``,
+    /// * a molrs **region** (``molrs.spatial.Sphere``, ``Cuboid``, ``Parallelepiped``,
     ///   ``HalfSpace``, ``Cylinder``, ``Ellipsoid``, ``Polyhedron``,
     ///   ``SphereUnion``, or a ``&`` / ``|`` / ``~`` composition) — lifted
     ///   through ``RegionRestraint``, so every atom must stay inside it;

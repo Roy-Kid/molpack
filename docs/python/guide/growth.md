@@ -73,7 +73,7 @@ grown = CbmcGrow(prior).with_density(0.5).with_seed(42).run([peo], max_loops=60)
 
 # Same cell for stage two — read it off the grown frame, or declare the
 # lengths you sized the melt to.
-cell = molrs.Cuboid([0.0, 0.0, 0.0], [l, l, l])
+cell = molrs.spatial.Cuboid([0.0, 0.0, 0.0], [l, l, l])
 
 result = (
     GenCanPack()
@@ -114,10 +114,10 @@ python python/examples/pack_peo_void.py frame.data 4 4 42
 
 `pack_peo_mix.py` puts two topologies in **one** `LatticeGrow.run` (linear
 `Target` + 4-arm star `Target`, density-sized box). `pack_peo_mesh.py` is
-the mesh-cavity scene: attach a `molrs.Polyhedron` read from STL and grow
+the mesh-cavity scene: attach a `molrs.spatial.Polyhedron` read from STL and grow
 with `LatticeGrow` — diamond sites outside the mesh are blocked
 (Region ∩ lattice). `pack_peo_void.py` is the same grow through
-`~molrs.SphereUnion`, the solvent-accessible void of a bead-spring frame.
+`~molrs.spatial.SphereUnion`, the solvent-accessible void of a bead-spring frame.
 
 ## The torsion prior is load-bearing
 

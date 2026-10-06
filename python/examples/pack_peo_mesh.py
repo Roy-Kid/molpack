@@ -6,7 +6,7 @@ forking three times into 29 branches, 8732 triangles, authored for a
 at ≈1.03 g/cm³, PEO melt density.
 The region is molrs's: ``molrs.io.read_stl`` reads the mesh,
 ``TriMesh.scaled`` maps the file to whatever ``edge`` you ask for, and
-``molrs.Polyhedron`` is the solid it bounds. ``Target.with_restraint``
+``molrs.spatial.Polyhedron`` is the solid it bounds. ``Target.with_restraint``
 confines the chains to it, and ``LatticeGrow`` at 2.0 Å walks
 Region ∩ lattice — diamond sites outside the mesh are blocked.
 
@@ -45,7 +45,7 @@ import molpy as mp
 import molrs
 import numpy as np
 from molpy.conformer import Conformer
-from molrs import Atomistic
+from molrs.system import Atomistic
 
 import molpack
 
@@ -93,7 +93,7 @@ def pack_mesh(
     scale: float = 1.0,
 ) -> molpack.State:
     frame = make_linear(n, seed=seed).to_frame()
-    cavity = molrs.Polyhedron(molrs.io.read_stl(str(stl_path)).scaled(scale))
+    cavity = molrs.spatial.Polyhedron(molrs.io.read_stl(str(stl_path)).scaled(scale))
     target = (
         molpack.Target(frame, n_mol)
         .with_name("lin-PEO")
@@ -139,7 +139,7 @@ def main(argv: list[str] | None = None) -> None:
     packed = state.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.Box.from_bounds(
+        packed.box = molrs.spatial.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),
