@@ -9,16 +9,16 @@ permissions:
   contents: write
   id-token: write
 
-# The molrs release tag of the line Cargo.toml pins (`version = "0.15"`).
+# The molrs release tag of the line Cargo.toml pins (`version = "0.16"`).
 # `jobs.ci.with` cannot read `env`, so the tag is spelled there too.
 env:
-  MOLRS_GIT_REF: v0.15.0
+  MOLRS_GIT_REF: v0.16.0
 
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
     with:
-      mol_git_ref: v0.15.0
+      mol_git_ref: v0.16.0
 
   publish:
     needs: ci

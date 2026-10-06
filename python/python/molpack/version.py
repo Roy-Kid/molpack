@@ -13,11 +13,11 @@ from importlib.metadata import version as _pkg_version
 try:
     version = _pkg_version("molcrafts-molpack")
 except PackageNotFoundError:
-    version = "0.3.0"
+    version = "0.4.0"
 
 # Keep in lockstep with ``python/pyproject.toml`` (``molcrafts-molrs>=X.Y,<X.Y+1``)
-# and ``MOLRS_GIT_REF`` in ``.github/workflows/ci.yml``.
-MOLRS_MINOR: tuple[int, int] = (0, 15)
+# and ``MOLRS_GIT_REF`` in ``.github/workflows/publish-{crate,pypi}.yml``.
+MOLRS_MINOR: tuple[int, int] = (0, 16)
 
 
 def _minor_tuple(ver: str) -> tuple[int, int]:

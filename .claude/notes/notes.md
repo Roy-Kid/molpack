@@ -10,6 +10,14 @@ Format per entry:
 **How to apply:** <when / where this kicks in>
 ```
 
+## 2026-10-06 — 0.4.0 发布线：molrs 0.16（未发布）
+
+molpack 0.4.0 跟随 molrs **0.16** 小版本线（molpack 小版本随 molrs 小版本各升一级：0.3 ↔ 0.15，0.4 ↔ 0.16）。按 0.3.0 条目的清单同步改了 `Cargo.toml`（`version = "0.16"`）、`python/Cargo.toml`（molrs + molrs-ffi `0.16`，molpack `0.4.0`）、`pyproject.toml`（`molcrafts-molrs>=0.16.0,<0.17`；`[molpy]` extra 与 typecheck 组 `molcrafts-molpy>=0.16.0,<0.17`；tox 的两处 `(0,16)` 断言）、`version.py::MOLRS_MINOR = (0, 16)`、两个发布工作流的 `MOLRS_GIT_REF` / `mol_git_ref` = `v0.16.0`。路径仍是仓库相对的 `../molrs/molrs`（CI 布局）。
+molrs 0.16 的破坏性变更（力场 IR 协议：`CompileError`、`register_kernel*` 返回 `Result`、typifier `Match.links`、`Style::category() -> &str`、谐振 K 不再减半、角度改度；`molrs.md` 不再导出 `LJCut`/`Potential`/`Potentials`）都不触及 molpack：molpack 不构造力场、不编译势函数，`ff` 只是透传 `molrs/ff`（文档只按名字提到 `LBFGS`，0.16 仍在 `molrs::optimize`）；Rust 与 Python 两侧都无需改代码。已在 CI 布局下对 molrs `ir/p-registry` @ 2bb03675（版本改为 0.16.0 的导出副本）验证：lib 382 + doc 23 测试、clippy `--all-features`、`--no-default-features` / `rayon` 检查、fmt 全绿；wheel 测试 148 通过（molrs 0.16.0 wheel + molpack 0.4.0 wheel，Python 3.12）。
+Python 端 relaxer：维持 0.3.0 条目的裁决——in-loop 优化器的 Python 绑定仍是待设计项，`feat/subset-optimizer` 的 `molpack.relaxer` / `SoftOptimizer` 不移植。
+**Why:** molrs 0.16 改了力场 IR 与 ABI 线（capsule 名带 `/0.16`），两个 wheel 必须同一小版本线。
+**How to apply:** `v0.16.0` 标签在 molrs 远端还不存在（molrs 0.16 未发布、对应提交也未推送）；发布 molpack 0.4.0 之前先确认 molrs 打出 `v0.16.0`，否则发布工作流检出失败。本地验证用 CI 布局：sibling `molrs/` 是 0.16.0 版本的 molrs 源码树。
+
 ## 2026-10-06 — 0.3.0 发布线：molrs 0.15.0 标签；feat/subset-optimizer 由优化器接缝取代
 
 molpack 0.3.0 对 molrs **v0.15.0 发布标签**构建（不是 molrs dev）。发布工作流（`publish-crate.yml` / `publish-pypi.yml`）检出 `v0.15.0`；`ci.yml` 在 `workflow_call` 上接 `mol_git_ref` 输入，发布时传 `v0.15.0`。molpy 不是运行时依赖，只给 `pack_peo_*.py` 用：`[molpy]` extra 钉 `molcrafts-molpy>=0.15.0,<0.16`。

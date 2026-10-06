@@ -23,7 +23,7 @@ The root `Cargo.toml` uses a path dependency on `../molrs/molrs`. With the
 sibling layout above everything resolves automatically.
 
 **Version pins:** a local build uses the sibling checkouts (`../molrs`, and
-`../molpy` for the Python tests). The version fields name the **0.15.***
+`../molpy` for the Python tests). The version fields name the **0.16.***
 minor line (see `Cargo.toml` and `python/pyproject.toml`). On GitHub, CI
 checks out `MolCrafts/molrs` and `MolCrafts/molpy` on the same branch:
 `master` or `dev`.

@@ -10,10 +10,10 @@ permissions:
   contents: read
   id-token: write
 
-# The molrs release tag of the line Cargo.toml pins (`version = "0.15"`);
+# The molrs release tag of the line Cargo.toml pins (`version = "0.16"`);
 # the same tag publish-crate.yml builds and tests against.
 env:
-  MOLRS_GIT_REF: v0.15.0
+  MOLRS_GIT_REF: v0.16.0
 
 # Build matrix produces one wheel per OS per supported Python (3.12, 3.13),
 # matching `requires-python = ">=3.12"` in pyproject.toml. Linux + macOS only;

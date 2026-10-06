@@ -22,7 +22,7 @@ molpack — no hand-placed coordinates.
 | `pack_peo_void.py`    | —                 | linear PEO through the solvent-accessible void of a bead-spring frame (`~molrs.SphereUnion`) |
 
 Install molpack once; the `molrs` dependency comes with it. The
-`pack_peo_*.py` scenes also need molpy, on the same 0.15 line — the `molpy`
+`pack_peo_*.py` scenes also need molpy, on the same 0.16 line — the `molpy`
 extra pins it:
 
 ```bash

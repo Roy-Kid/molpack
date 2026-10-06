@@ -1,6 +1,6 @@
 [package]
 name = "molcrafts-molpack"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.91"
 authors = ["MolCrafts"]
@@ -28,7 +28,7 @@ name = "molpack"
 # root), while `io` and `ff` are opt-in via the molpack features below. molrs's
 # own default is just `rayon`; it is switched off here so parallelism stays
 # molpack's own opt-in (the `rayon` feature below) and wasm / Pyodide builds work.
-molrs = { path = "../molrs/molrs", version = "0.15", package = "molcrafts-molrs", default-features = false }
+molrs = { path = "../molrs/molrs", version = "0.16", package = "molcrafts-molrs", default-features = false }
 rand = "0.10"
 ndarray = "0.17"
 log = "0.4"
