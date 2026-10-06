@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           path: molpack
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Build wheel
@@ -72,7 +72,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           path: molpack
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Build wheel
