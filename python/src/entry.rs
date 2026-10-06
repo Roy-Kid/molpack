@@ -21,15 +21,15 @@ use molpack::{
 };
 use pyo3::prelude::*;
 
-use crate::constraint::extract_restraint;
+use crate::errors::{pack_error_to_pyerr, take_err};
 use crate::grow::{PyAnglePrior, PyTorsionPrior};
 use crate::handler::PyHandlerWrapper;
-use crate::helpers::{pack_error_to_pyerr, take_err};
 use crate::parallel::rayon_compiled;
+use crate::restraint::extract_restraint;
 use crate::result::PyState;
 use crate::target::PyTarget;
 
-type F = molpack::F;
+use molrs::op::types::F;
 
 /// Shared entry knobs mirrored on the Python side; the Rust entry is built
 /// at `run()` time.
@@ -485,14 +485,14 @@ impl PyGenCanPack {
 #[pyclass(name = "CbmcGrow")]
 pub struct PyCbmcGrow {
     shared: SharedKnobs,
-    prior: molpack::grow::prior::TorsionPrior,
+    prior: molpack::grow::TorsionPrior,
     trials: Option<usize>,
     retract: Option<usize>,
     relax: Option<(usize, usize)>,
     selectivity: Option<F>,
     soften_after: Option<usize>,
     min_hard_scale: Option<F>,
-    angle_prior: Option<molpack::grow::prior::AnglePrior>,
+    angle_prior: Option<molpack::grow::AnglePrior>,
     soft_shell: Option<F>,
     serial: bool,
     void_bias: bool,
@@ -597,7 +597,7 @@ entry_pymethods!(PyCbmcGrow {
 #[pyclass(name = "LatticeGrow")]
 pub struct PyLatticeGrow {
     shared: SharedKnobs,
-    prior: molpack::grow::prior::TorsionPrior,
+    prior: molpack::grow::TorsionPrior,
     occupancy_guard: Option<bool>,
 }
 

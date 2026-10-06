@@ -442,7 +442,7 @@ fn lattice_grow_rejects_degree_gt_4() {
 #[test]
 fn lattice_grow_empty_region_is_named() {
     use crate::LatticeGrow;
-    use molrs::spatial::mesh::TriMesh;
+    use molrs::spatial::TriMesh;
     use molrs::spatial::region::Polyhedron;
     let cube = Polyhedron::new(TriMesh::from_triangles(&cube_tris([100.0; 3], [101.0; 3])))
         .expect("far cube");
@@ -520,7 +520,7 @@ fn grow_and_push_off_are_deterministic_for_a_seed() {
 #[test]
 fn grow_stage_two_targets_keep_distinct_tables() {
     use crate::grow::driver::GrowStage;
-    use molrs::spatial::simbox::SimBox;
+    use molrs::spatial::SimBox;
     use ndarray::array;
 
     let coords: Vec<[F; 3]> = (0..5).map(|i| [i as F, 0.0, 0.0]).collect();

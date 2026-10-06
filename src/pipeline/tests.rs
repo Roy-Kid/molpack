@@ -26,16 +26,17 @@
 //! Everything is deterministic by construction — fixed seeds, no wall clock, no
 //! filesystem, no network, no third-party oracle.
 
+use crate::EngineSetup;
 use crate::grow::TorsionPrior;
 use crate::handler::{PhaseInfo, StageInfo};
-use crate::pipeline::EngineSetup;
 use crate::testutil::{chain_frame, inside_box};
 use crate::{
-    Budget, CbmcGrow, F, GenCanPack, Guarantees, Handler, Invariant, Layers, OnViolation,
-    PackContext, PackEngine, PackError, PackSettings, PackState, Pipeline, Placed, Requires,
+    Budget, CbmcGrow, GenCanPack, Guarantees, Handler, Invariant, Layers, OnViolation, PackContext,
+    PackEngine, PackError, PackSettings, PackState, Pipeline, Placed, Requires,
     RestraintsSatisfied, Stage, StageFactory, StageOutcome, State, StepInfo, Target, Until,
     Violation,
 };
+use molrs::op::types::F;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 

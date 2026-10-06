@@ -129,7 +129,10 @@ fn run(src: &str, base_dir: &std::path::Path, parallel: bool) -> Result<(), Scri
     }
 
     let frame = entry.run(&targets, nloop)?.frame;
-    script::write_frame(&output, &frame)?;
+    molrs::io::write_frame(&output, &frame, None).map_err(|e| ScriptError::Io {
+        path: output.clone(),
+        message: format!("writing output: {e}"),
+    })?;
     println!("Output written to: {}", output.display());
 
     Ok(())

@@ -10,11 +10,10 @@
 //! full frame, with topology, is handed to the core [`Target`], which owns the
 //! assembly.
 
-use crate::constraint::{extract_collective_restraint, extract_restraint, try_region};
-use crate::helpers::NpF;
+use crate::restraint::{extract_collective_restraint, extract_restraint, try_region};
 use crate::types::{PyAngle, PyAxis, PyCenteringMode};
-use molpack::F;
-use molpack::target::Target;
+use molpack::Target;
+use molrs::op::types::F;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
@@ -22,7 +21,7 @@ use pyo3::types::PyAny;
 /// Build a [`Target`] from any frame-like Python object plus a copy count.
 ///
 /// Shared by [`PyTarget::new`] and the script loader. The frame is converted to
-/// a Rust [`molrs::Frame`] so the core retains its full topology.
+/// a Rust [`molrs::store::Frame`] so the core retains its full topology.
 pub(crate) fn target_from_frame(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Target> {
     let rust_frame = crate::interop::owned_frame_from_py(frame)?;
     // `Target::new` panics on a frame without float coordinates; answer that
@@ -69,7 +68,7 @@ impl PyTarget {
 
     /// Override the per-copy total mass (amu) used by
     /// ``with_density`` when element symbols cannot provide one.
-    fn with_mass(&self, amu: crate::helpers::NpF) -> Self {
+    fn with_mass(&self, amu: F) -> Self {
         PyTarget {
             inner: self.inner.clone().with_mass(amu),
         }
@@ -234,7 +233,7 @@ impl PyTarget {
     ///
     /// Raises ``ValueError`` if the table is empty or a weight is outside
     /// ``[0, 1]`` or not finite.
-    fn with_special_bonds(&self, table: Vec<NpF>) -> PyResult<Self> {
+    fn with_special_bonds(&self, table: Vec<F>) -> PyResult<Self> {
         let table = validate_special_bonds(table)?;
         Ok(PyTarget {
             inner: self.inner.clone().with_special_bonds(table),
@@ -286,7 +285,7 @@ impl PyTarget {
         }
     }
 
-    fn fixed_at(&self, position: [NpF; 3]) -> Self {
+    fn fixed_at(&self, position: [F; 3]) -> Self {
         PyTarget {
             inner: self.inner.clone().fixed_at(position),
         }
@@ -373,10 +372,11 @@ fn check_positive(value: F, what: &str) -> PyResult<()> {
     Ok(())
 }
 
-/// Marshal a Python weight list into [`molpack::BondDistanceWeights`].
+/// Marshal a Python weight list into [`molrs::system::BondDistanceWeights`].
 ///
 /// Rejects empty, non-finite, or out-of-range entries with ``ValueError``.
 /// Fractional weights are legal here; growth refuses them later.
-fn validate_special_bonds(weights: Vec<NpF>) -> PyResult<molpack::BondDistanceWeights> {
-    molpack::BondDistanceWeights::new(weights).map_err(|e| PyValueError::new_err(e.to_string()))
+fn validate_special_bonds(weights: Vec<F>) -> PyResult<molrs::system::BondDistanceWeights> {
+    molrs::system::BondDistanceWeights::new(weights)
+        .map_err(|e| PyValueError::new_err(e.to_string()))
 }

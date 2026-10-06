@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::error::PackError;
+use crate::PackError;
 
 /// Errors produced by the script module — from parsing, file loading, or
 /// the downstream `pack()` call invoked by a script-driven run.

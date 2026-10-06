@@ -9,10 +9,11 @@
 
 use std::sync::Arc;
 
-use molrs::types::F;
+use molrs::op::types::F;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
+use crate::AtomRestraint;
 use crate::context::PackContext;
 use crate::euler::eulerrmat;
 use crate::grow::config::{GrowConfig, crowding_cap};
@@ -20,7 +21,6 @@ use crate::grow::field::{BlockKind, OverlapField, Probe};
 use crate::grow::internal::InternalTree;
 use crate::grow::prior::{AnglePrior, TorsionPrior};
 use crate::random::uniform01;
-use crate::restraint::AtomRestraint;
 
 pub(super) const TWO_PI: F = std::f64::consts::TAU as F;
 
@@ -126,7 +126,7 @@ impl RestraintTable {
     pub(super) fn violated(&self, icart: usize, p: &[F; 3]) -> bool {
         self.data[self.offsets[icart]..self.offsets[icart + 1]]
             .iter()
-            .any(|&r| self.restraints[r].f(p, 1.0, crate::numerics::DEFAULT_SCALE2) > 0.0)
+            .any(|&r| self.restraints[r].f(p, 1.0, crate::context::DEFAULT_SCALE2) > 0.0)
     }
 }
 
@@ -142,10 +142,6 @@ pub(super) fn stream(seed: u64, mol: u64, stage: u64, visit: u64, salt: u64) -> 
     SmallRng::seed_from_u64(z ^ (z >> 31))
 }
 
-pub(super) fn uniform(rng: &mut SmallRng) -> F {
-    uniform01(rng)
-}
-
 /// Seed-anchor draw. Uniform over the box by default; with
 /// [`GrowConfig::with_void_bias`] the anchor comes from a uniformly chosen
 /// *empty* field cell (cavity seeding), falling back to uniform when no cell
@@ -159,7 +155,12 @@ fn draw_anchor(
     rng: &mut SmallRng,
 ) -> [F; 3] {
     if cfg.void_bias {
-        let u = [uniform(rng), uniform(rng), uniform(rng), uniform(rng)];
+        let u = [
+            uniform01(rng),
+            uniform01(rng),
+            uniform01(rng),
+            uniform01(rng),
+        ];
         return field.empty_cell_point(u).unwrap_or([
             origin[0] + u[1] * lengths[0],
             origin[1] + u[2] * lengths[1],
@@ -167,9 +168,9 @@ fn draw_anchor(
         ]);
     }
     [
-        origin[0] + uniform(rng) * lengths[0],
-        origin[1] + uniform(rng) * lengths[1],
-        origin[2] + uniform(rng) * lengths[2],
+        origin[0] + uniform01(rng) * lengths[0],
+        origin[1] + uniform01(rng) * lengths[1],
+        origin[2] + uniform01(rng) * lengths[2],
     ]
 }
 
@@ -227,9 +228,9 @@ pub(super) fn propose(
         for _ in 0..cfg.trials {
             let anchor = draw_anchor(cfg, field, origin, lengths, &mut rng);
             let (v1, v2, v3) = eulerrmat(
-                uniform(&mut rng) * TWO_PI,
-                uniform(&mut rng) * TWO_PI,
-                uniform(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
             );
             let rot = [
                 [v1[0], v2[0], v3[0]],
@@ -304,7 +305,7 @@ pub(super) fn propose(
         .map(|t| (-beta * (t.penalty - u_min)).exp())
         .collect();
     let total: F = weights.iter().sum();
-    let mut ticket = uniform(&mut rng) * total;
+    let mut ticket = uniform01(&mut rng) * total;
     let mut chosen = trials.len() - 1;
     for (i, w) in weights.iter().enumerate() {
         if ticket < *w {
@@ -492,9 +493,9 @@ pub(super) fn force_place(
         let (atoms, var): (Vec<PlacedAtom>, Option<F>) = if chain.stage == 0 {
             let anchor = draw_anchor(&sp.cfg, field, origin, lengths, &mut rng);
             let (v1, v2, v3) = eulerrmat(
-                uniform(&mut rng) * TWO_PI,
-                uniform(&mut rng) * TWO_PI,
-                uniform(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
             );
             let rot = [
                 [v1[0], v2[0], v3[0]],

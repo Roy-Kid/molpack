@@ -5,9 +5,10 @@
 //! Two front-end shapes are supported:
 //!
 //! - **Native (feature `io`)** — `Script::build` reads template files
-//!   via molrs-io and returns a ready-to-run `BuildResult`. Both names
-//!   are compiled only when the `io` feature is on, so they are written
-//!   in plain code font here rather than as cross-references:
+//!   with `molrs::io::read_frame` and returns a ready-to-run `BuildResult`;
+//!   the packed frame goes out through `molrs::io::write_frame`. These
+//!   names are compiled only when the `io` feature is on, so they are
+//!   written in plain code font here rather than as cross-references:
 //!
 //!   ```no_run
 //!   use std::path::Path;
@@ -18,7 +19,7 @@
 //!   let built = script.build(Path::new("."))?;
 //!
 //!   let state = built.entry.run(&built.targets, built.nloop)?;
-//!   script::write_frame(&built.output, &state.frame)?;
+//!   molrs::io::write_frame(&built.output, &state.frame, None)?;
 //!   # Ok::<(), Box<dyn std::error::Error>>(())
 //!   ```
 //!
@@ -36,14 +37,10 @@
 
 mod build;
 mod error;
-#[cfg(feature = "io")]
-mod io;
 mod parser;
 
 #[cfg(feature = "io")]
 pub use build::BuildResult;
 pub use build::{ScriptPlan, StructurePlan};
 pub use error::ScriptError;
-#[cfg(feature = "io")]
-pub use io::{read_frame, write_frame};
 pub use parser::{AtomGroup, PbcSpec, RestraintSpec, Script, Structure, parse};

@@ -1,9 +1,8 @@
 //! Handler trait and built-in handlers for packing progress callbacks.
 
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
-use std::io::BufWriter;
-use std::path::PathBuf;
+use molrs::op::types::F;
+use molrs::spatial::SimBox;
+
 use std::time::Instant;
 
 use crate::context::PackContext;
@@ -101,7 +100,7 @@ pub struct StepInfo {
     pub loop_idx: usize,
     /// GENCAN: maximum loops for this phase. Growth: the caller's `max_loops`
     /// verbatim — *not* the driver's round cap, which is `max_loops × (the
-    /// longest chain's steps + 1)`; see [`grow::driver`](crate::grow::driver).
+    /// longest chain's steps + 1)`; see the growth driver (`grow/driver.rs`).
     pub max_loops: usize,
     /// Current phase info.
     pub phase: PhaseInfo,
@@ -119,7 +118,7 @@ pub struct StepInfo {
     /// 1.0). Growth: the dimensionless hard-core scale — the factor multiplying
     /// the pair contact distance a placement must clear (`1.0` = full declared
     /// contact) — which starts at 1.0 and steps down by
-    /// [`GrowConfig::SOFTEN_RUNG`](crate::grow::config::GrowConfig::SOFTEN_RUNG) to the
+    /// [`GrowConfig::SOFTEN_RUNG`](crate::grow::GrowConfig::SOFTEN_RUNG) to the
     /// floor set by
     /// [`GrowConfig::with_min_hard_scale`](crate::grow::GrowConfig::with_min_hard_scale).
     pub radscale: F,
@@ -136,7 +135,7 @@ pub trait Handler: Send {
     fn on_start(&mut self, _ntotat: usize, _ntotmol: usize) {}
 
     /// Called once after initialization completes, with valid `xcart` positions.
-    /// Use this to write the initial conformation (e.g. [`XYZHandler`]).
+    /// Use this to write the initial conformation (e.g. `XYZHandler`).
     fn on_initialized(&mut self, _sys: &PackContext) {}
 
     /// Called after each outer optimization loop iteration.
@@ -185,27 +184,33 @@ pub trait Handler: Send {
 
 // ── XYZHandler ────────────────────────────────────────────────────────────────
 
-/// Writes packing snapshots as a multi-frame XYZ trajectory.
+/// Writes packing snapshots as a multi-frame extended XYZ trajectory.
 ///
 /// Writes a frame on every `every`-th step (starting from step 0).
-/// No automatic initial or final writes.
+/// No automatic initial or final writes. Each snapshot is an `atoms` block
+/// (`element`, `x`/`y`/`z`, 1-based `mol_id`) with the step in the frame's
+/// `step` meta key, written by molrs's extended XYZ writer
+/// (`molrs::io::data::xyz::write_xyz_frame`); molpack keeps no XYZ format
+/// code of its own. Needs the `io` feature.
+#[cfg(feature = "io")]
 pub struct XYZHandler {
-    path: PathBuf,
+    path: std::path::PathBuf,
     /// Write every `n` steps (must be >= 1).
     every: usize,
-    file: Option<BufWriter<std::fs::File>>,
+    file: Option<std::io::BufWriter<std::fs::File>>,
     /// Global molecule ID per atom, 1-based like the final frame's `mol_id`
     /// (constant across all frames).
-    mol_ids: Vec<usize>,
+    mol_ids: Vec<molrs::op::types::Idx>,
 }
 
+#[cfg(feature = "io")]
 impl XYZHandler {
     /// Create a new XYZ trajectory handler.
     ///
     /// `every` controls writing frequency: a frame is written on every step
     /// where `loop_idx % every == 0` (step 0 is always included).
     /// `every` must be >= 1.
-    pub fn new(path: impl Into<PathBuf>, every: usize) -> Self {
+    pub fn new(path: impl Into<std::path::PathBuf>, every: usize) -> Self {
         assert!(every >= 1, "every must be >= 1");
         Self {
             path: path.into(),
@@ -219,42 +224,54 @@ impl XYZHandler {
         if self.file.is_some() {
             return;
         }
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&self.path)
-        {
-            Ok(f) => self.file = Some(BufWriter::new(f)),
+        match std::fs::File::create(&self.path) {
+            Ok(f) => self.file = Some(std::io::BufWriter::new(f)),
             Err(e) => log::warn!("XYZHandler: cannot open {}: {e}", self.path.display()),
         }
     }
 
-    fn write_frame(&mut self, comment: &str, sys: &PackContext) {
-        self.open();
-        let Some(ref mut w) = self.file else { return };
-        use std::io::Write;
-        let nat = sys.xcart.len();
-        let _ = writeln!(w, "{nat}");
-        let _ = writeln!(w, "Properties=species:S:1:pos:R:3:mol:I:1  {comment}");
-        for (icart, pos) in sys.xcart.iter().enumerate() {
-            let elem = sys
-                .elements
-                .get(icart)
+    /// The snapshot as a frame: one `atoms` row per entry of `xcart`.
+    fn snapshot(&self, step: usize, sys: &PackContext) -> molrs::store::Frame {
+        use ndarray::Array1;
+        let n = sys.xcart.len();
+        let axis = |k: usize| Array1::from_iter(sys.xcart.iter().map(|p| p[k])).into_dyn();
+        let element = Array1::from_iter((0..n).map(|i| {
+            sys.elements
+                .get(i)
                 .and_then(|e| *e)
-                .map(|e| e.symbol())
-                .unwrap_or("X");
-            let mol_id = self.mol_ids.get(icart).copied().unwrap_or(0);
-            let _ = writeln!(
-                w,
-                "{elem}  {:.6}  {:.6}  {:.6}  {mol_id}",
-                pos[0], pos[1], pos[2]
-            );
+                .map_or("X", |e| e.symbol())
+                .to_string()
+        }));
+        let mol_id = Array1::from_iter((0..n).map(|i| self.mol_ids.get(i).copied().unwrap_or(0)));
+        let mut atoms = molrs::store::Block::new();
+        for (key, col) in [("x", axis(0)), ("y", axis(1)), ("z", axis(2))] {
+            atoms.insert(key, col).expect("one row per atom");
         }
-        let _ = w.flush();
+        atoms
+            .insert("element", element.into_dyn())
+            .expect("one row per atom");
+        atoms
+            .insert("mol_id", mol_id.into_dyn())
+            .expect("one row per atom");
+        let mut frame = molrs::store::Frame::new();
+        frame.insert("atoms", atoms);
+        frame.meta.insert("step", step as u64);
+        frame
+    }
+
+    fn write_snapshot(&mut self, step: usize, sys: &PackContext) {
+        self.open();
+        let frame = self.snapshot(step, sys);
+        let Some(ref mut w) = self.file else { return };
+        let written = molrs::io::data::xyz::write_xyz_frame(w, &frame)
+            .and_then(|()| std::io::Write::flush(w));
+        if let Err(e) = written {
+            log::warn!("XYZHandler: writing {}: {e}", self.path.display());
+        }
     }
 }
 
+#[cfg(feature = "io")]
 impl Handler for XYZHandler {
     fn on_initialized(&mut self, sys: &PackContext) {
         self.mol_ids = mol_ids(sys);
@@ -262,16 +279,17 @@ impl Handler for XYZHandler {
 
     fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
         if info.loop_idx.is_multiple_of(self.every) {
-            self.write_frame(&format!("step {}", info.loop_idx), sys);
+            self.write_snapshot(info.loop_idx, sys);
         }
     }
 }
 
 /// Per-atom global molecule ID in `xcart` order (for each type, each copy,
 /// each atom), 1-based — the numbering the assembled frame's `mol_id` uses.
-fn mol_ids(sys: &PackContext) -> Vec<usize> {
+#[cfg(feature = "io")]
+fn mol_ids(sys: &PackContext) -> Vec<molrs::op::types::Idx> {
     let mut ids = Vec::with_capacity(sys.ntotat);
-    let mut mol = 0usize;
+    let mut mol: molrs::op::types::Idx = 0;
     for itype in 0..sys.ntype_with_fixed {
         for _ in 0..sys.nmols[itype] {
             mol += 1;

@@ -10,6 +10,21 @@ Format per entry:
 **How to apply:** <when / where this kicks in>
 ```
 
+## 2026-10-07 — 0.4.0：模块单一职责重构（wave K），对 molrs `ir/p-registry` @ 64afcf90
+
+每个模块一个职责；molpack 不重复 molrs；每个公开符号只有一条路径；删别名、重复、死代码与兼容垫片（审计 `molnex/.claude/specs/module-responsibility-audit-2026-10-06.md` §4 K1–K11 与裁决 10）。
+- **molrs 0.16 单一路径**：`molrs::store::{Frame, Block, Column, BlockDtype}`、`molrs::system::{Topology, BondDistanceWeights, Element, Atomistic, Atom, TopologyError}`、`molrs::spatial::{SimBox, Mic, BoxKind, TriMesh}`、`molrs::op::types::{F, Idx, …}`；`SoftLbfgs` → `LBFGS::new(Arc::new(SoftSpec::from_frame(..).potential(None)), …)`（`SoftSpec` 在 `molrs::ff::potential::soft`）。
+- **K1** 删 `src/script/io.rs`（`molpack::script::{read_frame, write_frame}`）：`Script::build` 与 CLI 走 `molrs::io::{read_frame, write_frame}`；wheel 的默认加载器就是 `molrs.io.read_frame`。格式表只在 molrs（CLI 因此多读写 MOL2/GRO/CIF/POSCAR/XSF/cube/inpcrd/LAMMPS data 写出）。
+- **K2** `XYZHandler` 改为 `io` 门控，快照拼成 Frame（`element`/`x,y,z`/`mol_id`，meta `step`）交给 `molrs::io::data::xyz::write_xyz_frame`；文件格式变为 molrs 的 extended XYZ（`step=N Properties=species:S:1:pos:R:3:mol_id:I:1`）。
+- **K3** `assemble::topology_frame` 改为每个目标 `Frame::replicate` 后 `Frame::concat`，删掉手写的端点偏移与 `row_bases`。**K4** `molrs::units::constants::AVOGADRO`。**K5** 平面重复判断问 `HalfSpace::new(n, 0)?.repeats_along(s)`。
+- **K6** grow 内坐标用 `op::vec3::{angle, dihedral}` + `op::rigid::nerf`（逐位等同旧实现）；集体约束法向用 `op::vec3::normalize`（Python 绑定同一判据）；`TorsionMcOptimizer` 的 `recenter_free` 用 `op::superpose::centroid`，退化键判据用 `normalize`。**裁决 10 保留**：`.inp` 几何约束核（`restraint/geometric`，逐位复现 Packmol `comprest`/`gwalls`）、金刚石晶格行走（`grow/lattice/saw`）、独立 RNG 流（`random.rs`）、模板中心的求和顺序（`target::geometric_center`）——各自文档写明原因。
+- **K7** 删根上的 molrs 再导出（`F`、`Element`、`BondDistanceWeights`、`Optimizer`、`OptReport`）与 `prelude`。**K8** 只剩三个公开命名空间：`context`（布局常量、`AtomProps`、`WorkBuffers`、`GeometryKey`）、`grow`（`GrowConfig`、`GrowError`、`LatticeConfig`、`TorsionPrior`、`AnglePrior`）、`script`；其余模块私有，根上一条路径（新增根导出 `StageInfo`、`EngineSetup`、`Restraint`、`GroupCtx` 与六个集体约束）。原模块文档中面向用户的内容移到 `Pipeline` / `Stage` / `Invariant` / `AtomRestraint` 的类型文档。
+- **K9** `compute_f/fg/g` 改 `pub(crate)`；删 `PackContext` 的固有 `evaluate`（唯一入口 `Objective::evaluate`）、`EvalMode::RestMol`、`grow::moves::uniform`。顺手删死代码：`GencanParams::{iprint, ncomp}`、`GencanResult::{fcnt, gcnt, cgcnt}`、`CgResult::{q, iter}`、`OverlapField.n_placed` 字段、`InternalTree.n_atoms` 字段（测试访问器改为推导并 `cfg(test)`）、`ATOM_PROPS_SIZE`（改 `const _: () = assert!(..)`）。
+- **K10** 唯一版本闸门是扩展导入时的 `interop::check_abi`：删 `molpack/version.py`（`MOLRS_MINOR`、`check_molrs_version`）及其测试；`molpack.version` 由 `__init__.py` 读 wheel 元数据。唯一 CLI 是 Rust `molpack` 二进制（README 与 `docs/cli/` 呈现的就是它：`molpack mixture.inp` / stdin）；删 Python `molpack.cli`（typer 的 `molpack pack|info|version`，语法不同）、`[project.scripts]` 与 `typer` 依赖。
+- **K11** 解散 `numerics.rs`：`objective_small_floor` ≡ `residual_small_floor` 合为 `pack/gencan` 的 `small_floor`，其余 floor 也归 GENCAN，`numeric_controls` 归 `search.rs`，`DEFAULT_SCALE2` 归 `context/pack_context.rs`；`grow_error.rs` → `grow/error.rs`；Python `helpers.rs` → `errors.rs`（删 `NpF = f64`，用 `molrs::op::types::F`），`constraint.rs` → `restraint.rs`（`tests/test_constraint.py` → `test_restraint.py`）；删 `ff` 透传特性——唯一用户是一个测试，改为 molrs dev-dependency 带 `ff`；门禁命令 `--features cli,ff` → `--features cli`。
+**Why:** 所有者规则（2026-10-06）：每模块一职，molpack 用 molrs 的 API，不复制。
+**How to apply:** 升 molrs 小版本的清单去掉 `version.py::MOLRS_MINOR`（文件已删；取代 0.3.0 条目中的这一项）。逐位对拍：对同一 molrs 导出，path-only 基线（a383ff6 + 路径改写）与重构版在 CLI `mixture`/`bilayer`/`interface`/`solvprotein`、`pack_peo grow`/`lattice`、`pack_adsorption`、`pack_translocation` 上输出逐字节一致；lib 381（少的是随 `script/io.rs` 删除的读 dump 测试）+ doc 22（少的是 `prelude` 的）、clippy `--all-features -D warnings`、`--no-default-features`/`rayon`/`io` 检查、rustdoc 零警告、fmt 全绿；wheel 测试 144 通过（少的 4 个是 `test_version.py`）。
+
 ## 2026-10-06 — 0.4.0 发布线：molrs 0.16（未发布）
 
 molpack 0.4.0 跟随 molrs **0.16** 小版本线（molpack 小版本随 molrs 小版本各升一级：0.3 ↔ 0.15，0.4 ↔ 0.16）。按 0.3.0 条目的清单同步改了 `Cargo.toml`（`version = "0.16"`）、`python/Cargo.toml`（molrs + molrs-ffi `0.16`，molpack `0.4.0`）、`pyproject.toml`（`molcrafts-molrs>=0.16.0,<0.17`；`[molpy]` extra 与 typecheck 组 `molcrafts-molpy>=0.16.0,<0.17`；tox 的两处 `(0,16)` 断言）、`version.py::MOLRS_MINOR = (0, 16)`、两个发布工作流的 `MOLRS_GIT_REF` / `mol_git_ref` = `v0.16.0`。路径仍是仓库相对的 `../molrs/molrs`（CI 布局）。

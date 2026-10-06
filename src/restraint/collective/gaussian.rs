@@ -4,7 +4,7 @@
 //! both geometries; only ξ and its gradient (supplied by [`geometry`](super::geometry))
 //! differ.
 
-use molrs::types::F;
+use molrs::op::types::F;
 
 use super::engine::probit;
 use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg, unit};

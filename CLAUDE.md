@@ -6,8 +6,8 @@ mol_project:
   build:
     install: "cargo build --all-targets"
     check: "cargo fmt -- --check && cargo fmt --manifest-path python/Cargo.toml -- --check && cargo clippy --all-targets --all-features -- -D warnings && uv run --directory python --group typecheck ruff format --check python tests examples && uv run --directory python --group typecheck ruff check python tests examples && uv run --directory python --group typecheck ty check python tests examples"
-    test: "cargo test -p molcrafts-molpack --lib --features cli,ff,rayon"
-    test_single: "cargo test -p molcrafts-molpack --lib --features cli,ff,rayon -- {path}"
+    test: "cargo test -p molcrafts-molpack --lib --features cli,rayon"
+    test_single: "cargo test -p molcrafts-molpack --lib --features cli,rayon -- {path}"
   arch:
     style: layered
     rules_section: "## Law (never violated)"
@@ -17,7 +17,7 @@ mol_project:
     required: true
   ci:
     config: .github/workflows/ci.yml
-    local: "cargo test --lib --features cli,ff && cargo test --doc --features cli,ff && cargo check --all-targets --features cli,ff && cargo check --no-default-features && cargo check --features rayon && uv run --directory python --group dev tox -e py"
+    local: "cargo test --lib --features cli && cargo test --doc --features cli && cargo check --all-targets --features cli && cargo check --no-default-features && cargo check --features rayon && uv run --directory python --group dev tox -e py"
   notes_path: .claude/notes/notes.md
   specs_path: .claude/specs/
 ---

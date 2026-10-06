@@ -27,9 +27,10 @@ use std::fs::create_dir_all;
 use std::path::PathBuf;
 
 use molpack::{
-    Angle, CenteringMode, F, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target,
+    Angle, CenteringMode, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target,
     XYZHandler,
 };
+use molrs::op::types::F;
 use std::sync::Arc;
 
 use molrs::io::data::pdb::read_pdb_frame;

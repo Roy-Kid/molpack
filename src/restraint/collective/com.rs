@@ -20,7 +20,7 @@
 //! masses are genuinely absent for coarse-grained beads and for targets built
 //! from bare coordinates.
 
-use molrs::types::F;
+use molrs::op::types::F;
 
 /// Geometric centroid of every copy: `R_c = (1/m) Σ_{i∈c} r_i`.
 ///

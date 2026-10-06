@@ -5,17 +5,18 @@
 //! stage owns the phase loop, these own one phase and one iteration.
 //! Step reports use [`super::STAGE_NAME`], the same string the stage reports.
 
-use molrs::types::F;
+use molrs::op::types::F;
 use rand::rngs::SmallRng;
 
+use crate::Objective;
 use crate::context::PackContext;
 use crate::eval::EvalMode;
 // The unscaled verdict is a shared primitive owned by the context layer, not
 // by this stage: growth evaluates the same way, and the pipeline layer must
 // not import `gencan/`.
+use super::small_floor;
 use crate::context::pack_state::evaluate_unscaled;
 use crate::handler::{Handler, PhaseInfo, PhaseReport, StageInfo, StepInfo};
-use crate::numerics::objective_small_floor;
 use crate::optimizer::{ResolvedBinding, run_optimizer_bindings};
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::pack::initial::SwapState;
@@ -105,7 +106,7 @@ pub fn run_iteration(
     // Packmol line 846: if(flast>0) fimp = -100*(fx-flast)/flast
     let mut fimp = if *flast > 0.0 {
         -100.0 * (fx_unscaled - *flast) / *flast
-    } else if fx_unscaled < objective_small_floor() {
+    } else if fx_unscaled < small_floor() {
         100.0 // already converged
     } else {
         F::INFINITY

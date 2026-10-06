@@ -4,14 +4,14 @@
 //! its two peers (`gencan/entry.rs`, `grow/entry.rs`): the algorithm in one
 //! file, the entry that selects it in another.
 
+use crate::Handler;
+use crate::PackError;
+use crate::Stage;
+use crate::Target;
 use crate::entry::{PackSettings, State};
-use crate::error::PackError;
 use crate::grow::prior::TorsionPrior;
 use crate::grow::{GrowError, validate_grow_cell};
-use crate::handler::Handler;
 use crate::pipeline::{EngineSetup, PackEngine, Pipeline, StageFactory};
-use crate::stage::Stage;
-use crate::target::Target;
 
 use super::LatticeStage;
 use super::config::LatticeConfig;

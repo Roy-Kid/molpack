@@ -15,7 +15,8 @@
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
-use molpack::{F, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target, XYZHandler};
+use molpack::{GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target, XYZHandler};
+use molrs::op::types::F;
 use std::sync::Arc;
 
 use molrs::io::data::pdb::read_pdb_frame;

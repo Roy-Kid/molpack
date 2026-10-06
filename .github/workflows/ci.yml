@@ -105,10 +105,10 @@ jobs:
           set -euo pipefail
           # Behaviour lives in `#[cfg(test)]` modules next to the code; there is
           # no tests/ directory (see CLAUDE.md).
-          cargo test --lib --features cli,ff
-          cargo test --doc --features cli,ff
+          cargo test --lib --features cli
+          cargo test --doc --features cli
           # Every other target still has to compile: bin, examples.
-          cargo check --all-targets --features cli,ff
+          cargo check --all-targets --features cli
           cargo check --no-default-features
           cargo check --features rayon
 

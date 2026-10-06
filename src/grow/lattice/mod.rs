@@ -22,9 +22,9 @@
 //! residual contacts are reported honestly and belong to the seeded GENCAN
 //! push-off (`GenCanPack::with_restart`), never hidden.
 
-pub mod config;
+mod config;
 pub(crate) mod decorate;
-pub mod entry;
+mod entry;
 pub(crate) mod saw;
 
 pub use config::LatticeConfig;
@@ -33,21 +33,21 @@ pub use entry::LatticeGrow;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::spatial::SimBox;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
+use crate::AtomRestraint;
+use crate::PackError;
+use crate::Target;
 use crate::context::pack_state::evaluate_unscaled;
 use crate::context::{PackState, Placed};
-use crate::error::PackError;
 use crate::grow::GrowError;
 use crate::grow::internal::InternalTree;
 use crate::grow::prior::TorsionPrior;
 use crate::handler::{Handler, PhaseInfo, StageInfo, StepInfo};
-use crate::restraint::AtomRestraint;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
-use crate::target::Target;
 
 use decorate::{Backbone, analyze_backbone, decorate_chain};
 use saw::{DiamondLattice, RisWeights, SawField, forced_zigzag, grow_walk};
@@ -68,7 +68,7 @@ fn blocked_sites(lat: &DiamondLattice, restraints: &[Arc<dyn AtomRestraint>]) ->
             let x = lat.to_continuum(p);
             restraints
                 .iter()
-                .any(|r| r.f(&x, 1.0, crate::numerics::DEFAULT_SCALE2) > 0.0)
+                .any(|r| r.f(&x, 1.0, crate::context::DEFAULT_SCALE2) > 0.0)
         })
         .collect()
 }

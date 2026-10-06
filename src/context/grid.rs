@@ -5,9 +5,9 @@
 //! same box and the same coverage. Living here keeps those stages from
 //! depending on the rigid-body driver.
 
+use molrs::op::types::F;
+use molrs::spatial::SimBox;
 use molrs::spatial::neighbors::CellGrid;
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
 
 use crate::context::{NONE_IDX, PackContext};
 
@@ -109,10 +109,11 @@ mod tests {
     //! reports a clean structure that overlaps.
 
     use super::install_resolved_cell;
+    use crate::PackContext;
     use crate::objective::compute_f;
-    use crate::{F, PackContext};
-    use molrs::spatial::simbox::SimBox;
-    use molrs::types::F3;
+    use molrs::op::types::F;
+    use molrs::op::types::F3;
+    use molrs::spatial::SimBox;
 
     const DISCALE: F = 1.1;
 

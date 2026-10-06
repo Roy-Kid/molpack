@@ -52,9 +52,9 @@ repos:
         name: rust tests (CI parity)
         language: system
         entry: >-
-          sh -c 'cargo test --lib --features cli,ff
-          && cargo test --doc --features cli,ff
-          && cargo check --all-targets --features cli,ff
+          sh -c 'cargo test --lib --features cli
+          && cargo test --doc --features cli
+          && cargo check --all-targets --features cli
           && cargo check --no-default-features
           && cargo check --features rayon'
         pass_filenames: false

@@ -1,46 +1,14 @@
 //! Objective function and gradient computation.
 //! Exact port of `computef.f90`, `computeg.f90`, `fparc.f90`, `gparc.f90`.
 
+use crate::GroupCtx;
 use crate::context::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat, eulerrmat_derivatives};
 use crate::eval::{EvalMode, EvalOutput};
-use crate::restraint::GroupCtx;
-use molrs::spatial::simbox::Mic;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::spatial::Mic;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
-
-impl PackContext {
-    /// Unified objective evaluation entrypoint.
-    #[inline]
-    pub fn evaluate(&mut self, x: &[F], mode: EvalMode, gradient: Option<&mut [F]>) -> EvalOutput {
-        let mut f_total = 0.0;
-        match mode {
-            EvalMode::FOnly => {
-                f_total = compute_f(x, self);
-            }
-            EvalMode::GradientOnly => {
-                if let Some(g) = gradient {
-                    compute_g(x, self, g);
-                } else {
-                    debug_assert!(false, "GradientOnly mode requires gradient buffer");
-                }
-            }
-            EvalMode::FAndGradient | EvalMode::RestMol => {
-                if let Some(g) = gradient {
-                    f_total = compute_fg(x, self, g);
-                } else {
-                    debug_assert!(false, "FAndGradient/RestMol mode requires gradient buffer");
-                }
-            }
-        }
-        EvalOutput {
-            f_total,
-            fdist_max: self.fdist,
-            frest_max: self.frest,
-        }
-    }
-}
 
 #[derive(Clone, Copy)]
 enum ExpandMode {
@@ -163,7 +131,7 @@ impl AtomHotState {
 /// The packer hits this path on every outer iteration when it re-evaluates at
 /// unscaled radii after `pgencan` returns, since radius mutation does not
 /// invalidate the cache key.
-pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
+pub(crate) fn compute_f(x: &[F], sys: &mut PackContext) -> F {
     sys.debug_assert_atom_props_sync();
     sys.increment_ncf();
     sys.fdist = 0.0;
@@ -205,7 +173,7 @@ pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
 ///
 /// Takes the geometry-cache fast path when `x` and the cell grid match the
 /// last expansion — the Cartesian rebuild and linked-cell rebuild are skipped.
-pub fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
+pub(crate) fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
     sys.debug_assert_atom_props_sync();
     sys.increment_ncf();
     sys.increment_ncg();
@@ -408,7 +376,7 @@ fn fparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstan
 
 /// Compute gradient `g` from current system state.
 /// Port of `computeg.f90`.
-pub fn compute_g(x: &[F], sys: &mut PackContext, g: &mut [F]) {
+pub(crate) fn compute_g(x: &[F], sys: &mut PackContext, g: &mut [F]) {
     sys.debug_assert_atom_props_sync();
     sys.increment_ncg();
     // Zero Cartesian gradient
@@ -1548,7 +1516,31 @@ pub trait Objective {
 impl Objective for PackContext {
     #[inline]
     fn evaluate(&mut self, x: &[F], mode: EvalMode, gradient: Option<&mut [F]>) -> EvalOutput {
-        PackContext::evaluate(self, x, mode, gradient)
+        let mut f_total = 0.0;
+        match mode {
+            EvalMode::FOnly => {
+                f_total = compute_f(x, self);
+            }
+            EvalMode::GradientOnly => {
+                if let Some(g) = gradient {
+                    compute_g(x, self, g);
+                } else {
+                    debug_assert!(false, "GradientOnly mode requires gradient buffer");
+                }
+            }
+            EvalMode::FAndGradient => {
+                if let Some(g) = gradient {
+                    f_total = compute_fg(x, self, g);
+                } else {
+                    debug_assert!(false, "FAndGradient mode requires gradient buffer");
+                }
+            }
+        }
+        EvalOutput {
+            f_total,
+            fdist_max: self.fdist,
+            frest_max: self.frest,
+        }
     }
 
     #[inline]
@@ -1682,8 +1674,9 @@ mod objective_trait_tests {
 /// of relying on a size heuristic.
 #[cfg(all(test, feature = "rayon"))]
 mod parallel_equivalence_tests {
+    use crate::PackContext;
     use crate::objective::{compute_f, compute_fg};
-    use crate::{F, PackContext};
+    use molrs::op::types::F;
 
     /// A synthetic water-in-a-box context: enough molecules that the
     /// parallel reduce actually splits the pair loop.
@@ -1718,12 +1711,11 @@ mod parallel_equivalence_tests {
         let pad: F = 3.0;
         let side = box_side + 2.0 * pad;
         let origin = [-pad, -pad, -pad];
-        let mut origin_arr = molrs::types::F3::zeros(3);
+        let mut origin_arr = molrs::op::types::F3::zeros(3);
         for k in 0..3 {
             origin_arr[k] = origin[k];
         }
-        sys.simbox =
-            molrs::spatial::simbox::SimBox::cube(side, origin_arr, [false; 3]).expect("cell");
+        sys.simbox = molrs::spatial::SimBox::cube(side, origin_arr, [false; 3]).expect("cell");
         let cell_side: F = 2.0;
         sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, cell_side);
         sys.resize_cell_arrays();
@@ -1843,8 +1835,9 @@ mod parallel_equivalence_tests {
 /// must not be allowed to lie on its own image.
 #[cfg(test)]
 mod self_image_tests {
+    use crate::PackContext;
     use crate::objective::compute_f;
-    use crate::{F, PackContext};
+    use molrs::op::types::F;
 
     /// One rigid copy with conformer `coor` (centred at the origin), its COM
     /// at the centre of a `side` Å cube, radii 1 Å (contact at 2 Å).
@@ -1868,8 +1861,8 @@ mod self_image_tests {
         }
         sys.iratom_offsets = vec![0; na + 1];
         sys.iratom_data.clear();
-        let origin = molrs::types::F3::zeros(3);
-        sys.simbox = molrs::spatial::simbox::SimBox::cube(side, origin, [pbc; 3]).expect("cell");
+        let origin = molrs::op::types::F3::zeros(3);
+        sys.simbox = molrs::spatial::SimBox::cube(side, origin, [pbc; 3]).expect("cell");
         sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, 2.0);
         sys.resize_cell_arrays();
         sys.sizemin = [0.0; 3];

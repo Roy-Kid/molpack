@@ -26,10 +26,11 @@
 
 use molpack::grow::{GrowConfig, TorsionPrior};
 use molpack::{
-    CbmcGrow, F, GenCanPack, Handler, LatticeGrow, PackContext, PackEngine, State, StepInfo, Target,
+    CbmcGrow, GenCanPack, Handler, LatticeGrow, PackContext, PackEngine, State, StepInfo, Target,
 };
-use molrs::store::block::Block;
-use molrs::store::frame::Frame;
+use molrs::op::types::F;
+use molrs::store::Block;
+use molrs::store::Frame;
 use ndarray::Array1;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -608,7 +609,7 @@ fn report(
         .frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::block::Column::as_string)
+        .and_then(molrs::store::Column::as_string)
     {
         let names: Vec<String> = elem.iter().take(na).map(|s| s.to_string()).collect();
         print_closest_scored(&pos[..na], bonds, &names, na);
@@ -690,11 +691,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let b = frame.get("bonds").expect("template bonds");
         let i = b
             .get("atomi")
-            .and_then(molrs::store::block::Column::as_uint)
+            .and_then(molrs::store::Column::as_uint)
             .expect("bonds.atomi");
         let j = b
             .get("atomj")
-            .and_then(molrs::store::block::Column::as_uint)
+            .and_then(molrs::store::Column::as_uint)
             .expect("bonds.atomj");
         i.iter()
             .zip(j.iter())
@@ -704,12 +705,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let m_chain: F = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::block::Column::as_string)
+        .and_then(molrs::store::Column::as_string)
         .map(|e| {
             e.iter()
                 .filter_map(|s| {
                     use std::str::FromStr;
-                    molpack::Element::from_str(s.trim())
+                    molrs::system::Element::from_str(s.trim())
                         .ok()
                         .map(|el| el.atomic_mass() as F)
                 })
@@ -722,7 +723,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tmpl_elem: Vec<String> = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::block::Column::as_string)
+        .and_then(molrs::store::Column::as_string)
         .map(|e| e.iter().map(|s| s.to_string()).collect())
         .unwrap_or_default();
     let tmpl_pos: Vec<[F; 3]> = frame
@@ -749,7 +750,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let h_idx: Vec<usize> = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::block::Column::as_string)
+        .and_then(molrs::store::Column::as_string)
         .map(|e| {
             e.iter()
                 .enumerate()

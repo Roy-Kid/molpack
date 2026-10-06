@@ -4,9 +4,8 @@
 //! (`GenCanPack`, `CbmcGrow`): the packed ``molrs.Frame`` plus structured
 //! diagnostics (`converged` / `fdist` / `frest` / `degraded` / `intra`).
 
-use crate::helpers::NpF;
-use molpack::F;
 use molpack::State;
+use molrs::op::types::F;
 use numpy::IntoPyArray;
 use numpy::PyArray2;
 use pyo3::prelude::*;
@@ -57,7 +56,7 @@ impl Clone for PyState {
 impl PyState {
     /// Packed atom positions as a numpy array of shape ``(N, 3)``.
     #[getter]
-    fn positions<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<NpF>> {
+    fn positions<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<F>> {
         self.inner
             .frame
             .coords()
@@ -83,7 +82,7 @@ impl PyState {
             .frame
             .get("atoms")
             .and_then(|atoms| atoms.get(molrs::store::keys::ELEMENT))
-            .and_then(molrs::store::block::Column::as_string)
+            .and_then(molrs::store::Column::as_string)
             .map(|column| column.iter().cloned().collect())
             .ok_or_else(|| {
                 pyo3::exceptions::PyKeyError::new_err("the packed frame has no element column")

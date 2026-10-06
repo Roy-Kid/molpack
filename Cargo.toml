@@ -24,10 +24,10 @@ name = "molpack"
 # `cargo publish` to resolve against the crates.io registry.
 #
 # Library-required. The merged `molcrafts-molrs` crate exposes its former member
-# crates as feature-gated modules: `core` is always on (re-exported at the crate
-# root), while `io` and `ff` are opt-in via the molpack features below. molrs's
-# own default is just `rayon`; it is switched off here so parallelism stays
-# molpack's own opt-in (the `rayon` feature below) and wasm / Pyodide builds work.
+# crates as feature-gated modules: `core` is always on, while `io` is opt-in via
+# the molpack feature below. molrs's own default is just `rayon`; it is
+# switched off here so parallelism stays molpack's own opt-in (the `rayon`
+# feature below) and wasm / Pyodide builds work.
 molrs = { path = "../molrs/molrs", version = "0.16", package = "molcrafts-molrs", default-features = false }
 rand = "0.10"
 ndarray = "0.17"
@@ -48,14 +48,14 @@ rayon = ["dep:rayon", "molrs/rayon"]
 io = ["molrs/io"]
 # Enables the `molpack` binary.
 cli = ["dep:clap", "io"]
-# Forwards molrs's `ff` module (force fields and the optimizers built on them)
-# for callers who bind one through `GenCanPack::with_optimizer`. molpack itself
-# compiles nothing extra: the in-loop optimizer seam is always on.
-ff = ["molrs/ff"]
 
 [dev-dependencies]
 # Used by the example programs under `examples/`.
 env_logger = "0.11"
+# The optimizer-seam tests bind a real molrs force-field optimizer (`LBFGS` over
+# `ff::potential::soft::SoftSpec`); a caller does the same on its own molrs
+# dependency, so the library itself has no `ff` feature.
+molrs = { path = "../molrs/molrs", version = "0.16", package = "molcrafts-molrs", default-features = false, features = ["ff"] }
 
 [[bin]]
 name = "molpack"

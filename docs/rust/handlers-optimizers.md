@@ -20,6 +20,9 @@ opt in.
 
 ## Built-in handlers
 
+`XYZHandler` needs the `io` feature: it writes each snapshot through molrs's
+extended XYZ writer.
+
 ```rust
 use molpack::{EarlyStopHandler, GenCanPack, PackEngine, XYZHandler};
 
@@ -69,7 +72,7 @@ Two further callbacks bracket a whole stage, the way `on_phase_start` /
 `on_phase_end` bracket one GENCAN phase:
 
 ```rust
-use molpack::handler::StageInfo;
+use molpack::StageInfo;
 use molpack::{Handler, PackContext, StageOutcome, StepInfo};
 
 struct WatchStages;
@@ -121,5 +124,5 @@ Each copy is relaxed on its own, so copies of one target start identical and
 then diverge. After each call molpack re-evaluates the packing objective and
 reverts the conformer if it got worse. `OptimizeSelect::joint` relaxes all
 selected copies as one group. Any molrs `Optimizer` fits the same slot; binding
-a force-field one such as `LBFGS` needs molrs's `ff` module (molpack's `ff`
-feature forwards it).
+a force-field one such as `LBFGS` needs molrs's `ff` module (enable it on your
+own `molcrafts-molrs` dependency; molpack has no `ff` feature).

@@ -1,59 +1,6 @@
-//! What a caller may demand of a packed state, and how expensive a defect is
-//! to repair.
-//!
-//! An [`Invariant`] answers one question about a [`PackState`] — "is this
-//! property still true?" — and, when it is not, says which atoms are involved
-//! ([`Violation`]) and which rung of the repair-cost ladder the defect sits on
-//! ([`Layers`]). The consumer is
-//! [`Guarded`](crate::pipeline::combinators::OnViolation): it reruns the same
-//! stage or fails by name, and the layer is what its error reports.
-//!
-//! # The repair-cost ladder
-//!
-//! Structural defects in a packed configuration are not equally expensive to
-//! repair. The crate orders them as a six-rung ladder, cheapest to fix at the
-//! bottom:
-//!
-//! | Rung | Defect | Why it sits there |
-//! |---|---|---|
-//! | **L0** | Connectivity — which atoms are bonded to which | Nothing downstream can repair a wrong bond graph; it is decided when the template is read and never again. |
-//! | **L1** | Topological state — knots, entanglement, catenation | Undoing a knot needs a chain to pass through itself; no local move and no minimizer reaches it. |
-//! | **L2** | Large-scale chain statistics — end-to-end distance, radius of gyration, orientation | Fixing these means re-growing a chain: reptation-scale motion, far beyond a packing run. |
-//! | **L3** | Density and its homogeneity | Repairable only by moving whole molecules between regions — global, slow, but mechanical. |
-//! | **L4** | Local overlaps between neighbours | The classic push-off: a short descent on the shared objective removes them. |
-//! | **L5** | Bond lengths and angles | The cheapest of all — the user's force field fixes these in the first steps of minimization. |
-//!
-//! The ladder is prose in [`stage`](crate::stage) no longer: it is [`Layers`],
-//! a bit set, and it lives here because [`Invariant::layer`] is its only
-//! reader. A stage's own declarations ([`Requires`](crate::Requires) /
-//! [`Guarantees`](crate::Guarantees)) are still about placement shape and
-//! acquire no rung.
-//!
-//! # One ruler
-//!
-//! An invariant reads the **shared objective's** verdict off the state — the
-//! numbers the context owns after a stage returns — never a second metric of
-//! its own. [`RestraintsSatisfied`] therefore compares `frest`, the largest
-//! restraint violation the objective computed, against its tolerance; it does
-//! not re-derive restraint residuals, because two rulers for one quantity is
-//! exactly what the seam exists to prevent.
-//!
-//! **Known limit.** `frest_atom` — the per-atom attribution
-//! [`RestraintsSatisfied`] names its atoms from — is written only while
-//! `movebad` is picking the worst molecules (`src/movebad.rs`); the
-//! end-of-stage evaluation fills `frest` and leaves it alone. A live run can
-//! therefore report a violation whose `atoms` list is empty. That is the
-//! honest answer: the alternative is a second restraint metric computed here.
-//!
-//! # Writing your own
-//!
-//! Same shape as [`AtomRestraint`](crate::AtomRestraint) and molrs's
-//! [`Region`](molrs::spatial::region::Region): implement the `pub trait` on
-//! your own `pub struct` and hand it to
-//! [`Pipeline::with_guarded`](crate::Pipeline::with_guarded) in a
-//! `Vec<Box<dyn Invariant>>`. No wrapper enum, no registry.
+//! Run invariants: [`Invariant`](crate::Invariant) and its documentation.
 
-use molrs::types::F;
+use molrs::op::types::F;
 
 use crate::context::PackState;
 
@@ -121,6 +68,61 @@ impl Layers {
 /// A property of a packed state a caller can demand, and a guard enforce.
 ///
 /// `Send`, like [`Stage`](crate::Stage): a run may move across threads.
+///
+/// What a caller may demand of a packed state, and how expensive a defect is
+/// to repair.
+///
+/// An [`Invariant`] answers one question about a [`PackState`] — "is this
+/// property still true?" — and, when it is not, says which atoms are involved
+/// ([`Violation`]) and which rung of the repair-cost ladder the defect sits on
+/// ([`Layers`]). The consumer is
+/// [`Guarded`](crate::OnViolation): it reruns the same
+/// stage or fails by name, and the layer is what its error reports.
+///
+/// # The repair-cost ladder
+///
+/// Structural defects in a packed configuration are not equally expensive to
+/// repair. The crate orders them as a six-rung ladder, cheapest to fix at the
+/// bottom:
+///
+/// | Rung | Defect | Why it sits there |
+/// |---|---|---|
+/// | **L0** | Connectivity — which atoms are bonded to which | Nothing downstream can repair a wrong bond graph; it is decided when the template is read and never again. |
+/// | **L1** | Topological state — knots, entanglement, catenation | Undoing a knot needs a chain to pass through itself; no local move and no minimizer reaches it. |
+/// | **L2** | Large-scale chain statistics — end-to-end distance, radius of gyration, orientation | Fixing these means re-growing a chain: reptation-scale motion, far beyond a packing run. |
+/// | **L3** | Density and its homogeneity | Repairable only by moving whole molecules between regions — global, slow, but mechanical. |
+/// | **L4** | Local overlaps between neighbours | The classic push-off: a short descent on the shared objective removes them. |
+/// | **L5** | Bond lengths and angles | The cheapest of all — the user's force field fixes these in the first steps of minimization. |
+///
+/// The ladder is prose on [`Stage`](crate::Stage) no longer: it is [`Layers`],
+/// a bit set, and it lives here because [`Invariant::layer`] is its only
+/// reader. A stage's own declarations ([`Requires`](crate::Requires) /
+/// [`Guarantees`](crate::Guarantees)) are still about placement shape and
+/// acquire no rung.
+///
+/// # One ruler
+///
+/// An invariant reads the **shared objective's** verdict off the state — the
+/// numbers the context owns after a stage returns — never a second metric of
+/// its own. [`RestraintsSatisfied`] therefore compares `frest`, the largest
+/// restraint violation the objective computed, against its tolerance; it does
+/// not re-derive restraint residuals, because two rulers for one quantity is
+/// exactly what the seam exists to prevent.
+///
+/// **Known limit.** `frest_atom` — the per-atom attribution
+/// [`RestraintsSatisfied`] names its atoms from — is written only while
+/// `movebad` is picking the worst molecules (`src/movebad.rs`); the
+/// end-of-stage evaluation fills `frest` and leaves it alone. A live run can
+/// therefore report a violation whose `atoms` list is empty. That is the
+/// honest answer: the alternative is a second restraint metric computed here.
+///
+/// # Writing your own
+///
+/// Same shape as [`AtomRestraint`](crate::AtomRestraint) and molrs's
+/// [`Region`](molrs::spatial::region::Region): implement the `pub trait` on
+/// your own `pub struct` and hand it to
+/// [`Pipeline::with_guarded`](crate::Pipeline::with_guarded) in a
+/// `Vec<Box<dyn Invariant>>`. No wrapper enum, no registry.
 pub trait Invariant: Send {
     /// Short identifier for reports and for
     /// [`PackError::InvariantViolated`](crate::PackError::InvariantViolated).
@@ -229,7 +231,8 @@ mod tests {
     //! cargo test -p molcrafts-molpack --lib
     //! ```
 
-    use crate::{F, Invariant, Layers, PackContext, PackState, RestraintsSatisfied};
+    use crate::{Invariant, Layers, PackContext, PackState, RestraintsSatisfied};
+    use molrs::op::types::F;
 
     // ── the ladder, in rung order ─────────────────────────────────────────────
 

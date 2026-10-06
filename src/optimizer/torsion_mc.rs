@@ -6,18 +6,18 @@
 use std::collections::HashSet;
 use std::f64::consts::PI;
 
-use molrs::op::rigid;
+use molrs::op::superpose::centroid;
+use molrs::op::types::F;
+use molrs::op::{rigid, vec3};
 use molrs::optimize::{OptReport, Optimizer};
 use molrs::perceive::rotatable::{RotatableBond, atom_id_to_index};
-use molrs::store::frame::Frame;
-use molrs::system::atomistic::Atomistic;
-use molrs::types::F;
-use molrs::{BondDistanceWeights, Topology};
+use molrs::store::Frame;
+use molrs::system::Atomistic;
+use molrs::system::{BondDistanceWeights, Topology};
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-use crate::numerics::near_zero_norm_floor;
 use crate::random::uniform01_core;
 
 /// Monte-Carlo torsion-angle optimizer for flexible molecules.
@@ -125,7 +125,7 @@ impl Optimizer for TorsionMcOptimizer {
         let free: Vec<bool> = match frame
             .get("atoms")
             .and_then(|a| a.get("free"))
-            .and_then(molrs::store::block::Column::as_bool)
+            .and_then(molrs::store::Column::as_bool)
         {
             Some(col) if col.len() == n => col.iter().copied().collect(),
             _ => vec![true; n],
@@ -223,11 +223,12 @@ fn self_avoidance_penalty(coords: &[[F; 3]], radius: F, excluded: &HashSet<(usiz
 }
 
 /// Rotate the downstream side of `bond` by `angle` radians about the `j → k`
-/// axis. A degenerate bond (coincident ends) is left alone.
+/// axis. A degenerate bond (ends closer than molrs's
+/// `MIN_DIRECTION_LENGTH`, so not a direction) is left alone.
 fn rotate_around_bond(coords: &mut [[F; 3]], bond: &RotatableBond, angle: F) {
     let (j, k) = (coords[bond.j], coords[bond.k]);
-    let axis = [k[0] - j[0], k[1] - j[1], k[2] - j[2]];
-    if (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt() < near_zero_norm_floor() {
+    let axis = vec3::sub(k, j);
+    if vec3::normalize(axis).is_none() {
         return;
     }
     let Some(rotation) = rigid::axis_angle(axis, angle) else {
@@ -239,23 +240,18 @@ fn rotate_around_bond(coords: &mut [[F; 3]], bond: &RotatableBond, angle: F) {
     }
 }
 
+/// Shift the free atoms so their centroid (molrs's
+/// [`centroid`](molrs::op::superpose::centroid), unit weights) sits at the
+/// origin. No free atom: nothing moves.
 fn recenter_free(coords: &mut [[F; 3]], free: &[bool]) {
-    let mut n = 0.0 as F;
-    let mut c = [0.0 as F; 3];
-    for (i, p) in coords.iter().enumerate() {
-        if free[i] {
-            c[0] += p[0];
-            c[1] += p[1];
-            c[2] += p[2];
-            n += 1.0;
-        }
-    }
-    if n < 1.0 {
+    let points: Vec<[F; 3]> = coords
+        .iter()
+        .zip(free)
+        .filter_map(|(p, &f)| f.then_some(*p))
+        .collect();
+    let Some(c) = centroid(&points, &vec![1.0; points.len()]) else {
         return;
-    }
-    c[0] /= n;
-    c[1] /= n;
-    c[2] /= n;
+    };
     for (i, p) in coords.iter_mut().enumerate() {
         if free[i] {
             p[0] -= c[0];

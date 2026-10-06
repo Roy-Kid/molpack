@@ -1,13 +1,13 @@
 //! Coarse-grain geometry, synthesized in process — no data files, no `io`.
 //!
-//! Every species is built as a `molrs::Frame` (an `atoms` block, plus a `bonds`
+//! Every species is built as a `molrs::store::Frame` (an `atoms` block, plus a `bonds`
 //! block for the chain) so targets come from [`Target::new`] and carry their
 //! topology into the packed result.
 
-use molpack::F;
-use molrs::store::block::Block;
-use molrs::store::frame::Frame;
-use molrs::system::atomistic::Atomistic;
+use molrs::op::types::F;
+use molrs::store::Block;
+use molrs::store::Frame;
+use molrs::system::Atomistic;
 use ndarray::Array1;
 
 /// Bead label for a chain backbone site.

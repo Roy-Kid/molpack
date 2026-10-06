@@ -18,16 +18,16 @@
 //!
 //! Missing methods are silently skipped (matching the Rust trait's default
 //! no-op impls). Exceptions raised inside any method are stashed in
-//! [`helpers::PACK_ERR`][crate::helpers] and trigger early termination;
+//! [`errors::PACK_ERR`][crate::errors] and trigger early termination;
 //! the entry's `run()` re-raises after the loop exits.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::helpers::stash_err;
-use molpack::F;
-use molpack::context::PackContext;
-use molpack::handler::{Handler, StepInfo};
+use crate::errors::stash_err;
+use molpack::PackContext;
+use molpack::{Handler, StepInfo};
+use molrs::op::types::F;
 use numpy::IntoPyArray;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;

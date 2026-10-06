@@ -1,12 +1,12 @@
 //! GENCAN loop and the projected-gradient helpers it owns.
 
-use molrs::types::F;
+use molrs::op::types::F;
 
 use super::linesearch::tn_linesearch;
+use super::positive_norm_floor;
 use super::{GencanParams, GencanResult, GencanWorkspace, cg, spg};
+use crate::Objective;
 use crate::eval::EvalMode;
-use crate::numerics::{numeric_controls, positive_norm_floor};
-use crate::objective::Objective;
 
 /// Main GENCAN loop.
 /// Port of `gencan.f` subroutine with Packmol-specific additions.
@@ -67,15 +67,11 @@ pub fn gencan(
             f,
             gpsupn: 0.0,
             iter: 0,
-            fcnt,
-            gcnt: 0,
-            cgcnt: 0,
             inform: 0,
         };
     }
     fcnt += 1;
     let mut gcnt = 1usize;
-    let mut cgcnt = 0usize;
 
     // Compute xnorm
     let mut xnorm = x.iter().map(|xi| xi * xi).sum::<F>().sqrt();
@@ -273,7 +269,6 @@ pub fn gencan(
                 cg_scratch,
                 obj,
             );
-            cgcnt += cg_res.iter;
 
             // Compute maximum feasible step along d (packmol gencan.f lines 2204-2225).
             let mut amax = INFABS;
@@ -434,9 +429,6 @@ pub fn gencan(
         f,
         gpsupn,
         iter,
-        fcnt,
-        gcnt,
-        cgcnt,
         inform,
     }
 }
@@ -489,4 +481,30 @@ fn gp_ieee_signal(gpsupn: F, cgepsf: F, cgepsi: F, cggpnf: F) -> (F, F) {
 fn compute_cgeps(gpsupn: F, acgeps: F, bcgeps: F, cgepsf: F, cgepsi: F) -> F {
     let cgeps = (10.0 as F).powf(acgeps * gpsupn.log10() + bcgeps);
     cgeps.clamp(cgepsf, cgepsi)
+}
+
+/// Packmol's finite-difference step and "same point" thresholds.
+#[derive(Clone, Copy)]
+struct NumericControls {
+    steabs: F,
+    sterel: F,
+    epsabs: F,
+    epsrel: F,
+}
+
+#[inline]
+fn numeric_controls() -> NumericControls {
+    // Packmol calibrates these constants for double precision, which is the
+    // active precision here (`F = molrs::op::types::F = f64`). The `.max(eps)`
+    // floors are a defensive lower bound on each finite-difference / "same
+    // point" threshold; under f64 they are no-ops (every literal already sits
+    // well above `f64::EPSILON`), but they keep the thresholds meaningful if
+    // `F` is ever narrowed.
+    let eps = F::EPSILON;
+    NumericControls {
+        steabs: (1.0e-10 as F).max(eps),
+        sterel: (1.0e-7 as F).max(eps.sqrt()),
+        epsabs: (1.0e-20 as F).max(eps * eps),
+        epsrel: (1.0e-10 as F).max(eps),
+    }
 }

@@ -15,7 +15,7 @@ This page covers four things, in order:
 
 ```text
 src/
-├── lib.rs              public re-exports + rustdoc chapters
+├── lib.rs              the public surface (one path per item) + rustdoc chapters
 ├── pipeline/           the lifecycle body — the only one in the crate
 │   ├── mod.rs          Pipeline + the five-part run() (validate → space/state →
 │   │                   chain check → run each stage → assemble)
@@ -33,7 +33,8 @@ src/
 ├── restraint/          AtomRestraint trait; region.rs (RegionRestraint over molrs Region),
 │                       cell.rs (CellRestraint), collective/, crate-private geometric/ (.inp kernels)
 ├── handler.rs          Handler trait + LogLevel + 4 built-in observers
-├── objective.rs        compute_f / compute_g / compute_fg + Objective impl + PackContext::evaluate
+├── objective.rs        Objective trait + its PackContext impl over the crate-private
+│                       compute_f / compute_g / compute_fg
 ├── eval.rs             EvalMode / EvalOutput
 ├── outcome.rs          StageOutcome
 ├── context/            PackContext = single owner of mutable packing state
@@ -62,10 +63,11 @@ src/
 │   ├── internal.rs     template bond graph → internal-coordinate tree
 │   ├── field.rs        OverlapField — cell-listed hard-core / soft-shell probe
 │   ├── driver.rs       GrowStage round loop (seeding, retraction, softening)
-│   └── moves.rs        propose / commit / retract / relax primitives
-├── grow_error.rs       GrowError, including lattice-only variants
+│   ├── moves.rs        propose / commit / retract / relax primitives
+│   └── error.rs        GrowError, including lattice-only variants
 ├── optimizer/          in-loop conformation optimizers (outside the pack family)
 ├── euler.rs            Euler angles ↔ rotation matrices (shared; crate-private)
+├── random.rs           molpack's own RNG streams (kept for bit parity)
 ├── assemble.rs         packed coords + targets → topology-complete Frame
 ├── script/             .inp parser + lowering to Targets
 └── bin/molpack/        CLI front-end (cli feature)
@@ -96,7 +98,7 @@ src/
 `target` / `template` / `restraint` / `region` are pure data — no driver imports.
 `template.rs` owns `coord_rows` (Å) and `rotatable_bonds` (an unclassed
 bond is a rotatable single bond — for growth and the torsion optimizer alike).
-Bond graphs are `molrs::Topology`;
+Bond graphs are `molrs::system::Topology`;
 molpack does not ship a parallel Topology type.
 `pipeline/` is the only module that imports everything else; `entry/`
 shrank to settings + space + result and imports nothing from `pipeline/` —
@@ -124,7 +126,7 @@ how many times it had to relax a constructive guarantee. The run's
 `fdist` / `frest` verdict is read off the state afterwards, so no
 algorithm grades its own paper.
 
-A [`Pipeline`](crate::pipeline::Pipeline) composes several stages behind one
+A [`Pipeline`](crate::Pipeline) composes several stages behind one
 call — `Pipeline::new().with_stage(CbmcGrow::new(prior)).with_stage(GenCanPack::new()).run(..)`
 runs chain growth, then rigid-body push-off, in one lifecycle, continuing
 from the first stage's placements rather than re-placing from scratch. Still
@@ -323,7 +325,7 @@ Each leaf step calls `sys.evaluate(x, mode, &mut g)` — the hot path.
 
 ## Hot path: objective evaluation
 
-`PackContext::evaluate` is invoked O(10³–10⁴) times per `run()`.
+`Objective::evaluate` on `PackContext` is invoked O(10³–10⁴) times per `run()`.
 Performance lives here.
 
 ```text
@@ -331,7 +333,6 @@ evaluate(x, mode, g) dispatches by mode:
     FOnly        → compute_f
     GradientOnly → compute_g
     FAndGradient → compute_fg
-    RestMol      → compute_fg (init phase, pair kernel skipped)
 ```
 
 `compute_fg` is the canonical path — it does five steps:

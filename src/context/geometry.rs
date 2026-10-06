@@ -3,7 +3,7 @@
 //! The packing context builds a key and the work buffers store it. This
 //! module imports neither, so those two do not import each other for the key.
 
-use molrs::types::F;
+use molrs::op::types::F;
 
 /// Identity of the packing geometry — the cell partition plus the lattice it
 /// partitions. Compared by the evaluation cache to decide whether a previous

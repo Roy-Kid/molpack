@@ -8,15 +8,15 @@
 
 use std::sync::Arc;
 
-use molrs::Element;
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::spatial::SimBox;
+use molrs::system::Element;
 use ndarray::array;
 
-use crate::error::PackError;
-use crate::restraint::AtomRestraint;
+use crate::AtomRestraint;
+use crate::PackError;
+use crate::Target;
 use crate::restraint::cell::{simbox_from_lengths_angles, simbox_from_matrix};
-use crate::target::Target;
 
 pub(crate) type PeriodicSpec = ([F; 3], [F; 3], [bool; 3]);
 
@@ -176,7 +176,7 @@ pub(crate) fn resolve_pack_space(
             };
             total_amu += per_copy * t.count.max(1) as F;
         }
-        let l = (total_amu / (rho * 6.022_140_76e23) * 1e24).cbrt();
+        let l = (total_amu / (rho * molrs::units::constants::AVOGADRO) * 1e24).cbrt();
         Some(([0.0; 3], [l, l, l], [true; 3]))
     } else {
         None
@@ -341,7 +341,7 @@ mod region_under_wrap_tests {
 
     use std::sync::Arc;
 
-    use crate::restraint::AtomRestraint;
+    use crate::AtomRestraint;
     use crate::{GenCanPack, PackEngine, PackError, RegionRestraint, Target};
     use molrs::spatial::region::{AndRegion, Cuboid, HalfSpace, NotRegion, Region, Sphere};
     use ndarray::array;
@@ -437,8 +437,8 @@ mod broadcast_tests {
     use std::sync::Arc;
 
     use super::broadcast_global_restraints;
+    use crate::AtomRestraint;
     use crate::Target;
-    use crate::restraint::AtomRestraint;
     use crate::restraint::geometric::InsideCubeRestraint;
 
     fn one_atom(name: &str) -> Target {

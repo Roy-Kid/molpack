@@ -31,14 +31,14 @@ use pyo3::prelude::*;
 
 mod interop;
 
-mod helpers;
-use helpers::register_errors;
+mod errors;
+use errors::register_errors;
 
 mod types;
 use types::{PyAngle, PyAxis, PyCenteringMode};
 
-mod constraint;
-use constraint::{
+mod restraint;
+use restraint::{
     PyExponentialPlane, PyExponentialPoint, PyGaussianPlane, PyGaussianPoint, PySelfSeparation,
     PyTabulatedPlane, PyTabulatedPoint,
 };

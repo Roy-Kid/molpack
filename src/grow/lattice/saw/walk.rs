@@ -1,7 +1,7 @@
 //! Tree embeddings on the diamond lattice: the guarded walk and the
 //! last-resort zigzag. Both score a side-branch continuation the same way.
 
-use molrs::types::F;
+use molrs::op::types::F;
 use rand::rngs::SmallRng;
 
 use super::super::config::SEED_TRIES;

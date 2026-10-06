@@ -1,9 +1,9 @@
 //! Coarse-grain geometry for the translocation system, synthesized in process.
 
-use molpack::F;
-use molrs::store::block::Block;
-use molrs::store::frame::Frame;
-use molrs::system::atomistic::Atomistic;
+use molrs::op::types::F;
+use molrs::store::Block;
+use molrs::store::Frame;
+use molrs::system::Atomistic;
 use ndarray::Array1;
 
 pub const MEMBRANE: &str = "Au";

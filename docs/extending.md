@@ -17,7 +17,7 @@ well.
 ### Step 1 — define the struct
 
 ```rust
-use molrs::types::F;
+use molrs::op::types::F;
 # use molpack::AtomRestraint;
 
 #[derive(Debug, Clone, Copy)]
@@ -41,7 +41,7 @@ pub struct PlaneTether {
 ### Step 2 — implement `AtomRestraint`
 
 ```rust
-# use molrs::types::F;
+# use molrs::op::types::F;
 # use molpack::AtomRestraint;
 # #[derive(Debug)]
 # pub struct PlaneTether { pub normal: [F; 3], pub offset: F, pub k: F }
@@ -80,7 +80,7 @@ Three contracts that all restraints must obey:
 ### Step 3 — write a gradient test
 
 ```no_run
-# use molrs::types::F;
+# use molrs::op::types::F;
 # use molpack::AtomRestraint;
 # #[derive(Debug)] pub struct PlaneTether { pub normal: [F; 3], pub offset: F, pub k: F }
 # impl AtomRestraint for PlaneTether {
@@ -112,7 +112,7 @@ kinks).
 ### Step 4 — use it
 
 ```no_run
-# use molrs::types::F;
+# use molrs::op::types::F;
 # use molpack::AtomRestraint;
 # #[derive(Debug, Clone, Copy)] pub struct PlaneTether { pub normal: [F; 3], pub offset: F, pub k: F }
 # impl AtomRestraint for PlaneTether {
@@ -194,7 +194,7 @@ apex at origin, axis along +z, half-angle 30°.
 
 ```rust
 use molrs::spatial::region::Region;
-use molrs::types::{F, FNx3};
+use molrs::op::types::{F, FNx3};
 use ndarray::Array2;
 
 #[derive(Debug, Clone, Copy)]
@@ -235,7 +235,7 @@ impl Region for Cone {
 
 ```no_run
 # use molrs::spatial::region::Region;
-# use molrs::types::{F, FNx3};
+# use molrs::op::types::{F, FNx3};
 # use ndarray::Array2;
 # #[derive(Debug, Clone, Copy)]
 # pub struct Cone { pub apex: [F; 3], pub axis: [F; 3], pub half_angle_cos: F }
@@ -271,7 +271,7 @@ For hot-path use, override `distance_grad` analytically. The cone above:
 
 ```rust
 # use molrs::spatial::region::Region;
-# use molrs::types::{F, FNx3};
+# use molrs::op::types::{F, FNx3};
 # use ndarray::Array2;
 # #[derive(Debug, Clone, Copy)]
 # pub struct Cone { pub apex: [F; 3], pub axis: [F; 3], pub half_angle_cos: F }
@@ -308,7 +308,8 @@ objective evolution.
 ```no_run
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use molpack::{F, Handler, PackContext, StepInfo};
+use molpack::{Handler, PackContext, StepInfo};
+use molrs::op::types::F;
 
 pub struct CsvHandler { writer: BufWriter<File> }
 
@@ -385,7 +386,8 @@ drops into the same slot.
 
 The trait, its molpack implementation, and the `GenCanPack::with_optimizer`
 binder are always compiled. Binding a molrs force-field optimizer such as
-`LBFGS` needs molrs's `ff` module, which molpack's `ff` feature forwards.
+`LBFGS` needs molrs's `ff` module: turn on `ff` in your own `molcrafts-molrs`
+dependency (molpack has no `ff` feature of its own).
 
 ![Flexible chains packed inside a spherical cavity](assets/images/paper-confinement-sphere.png)
 
@@ -414,9 +416,9 @@ Two conventions the packer relies on:
   every atom is free.
 
 ```rust
-use molrs::Frame;
+use molrs::store::Frame;
 use molrs::optimize::{OptReport, Optimizer};
-use molrs::types::{F, FNx3};
+use molrs::op::types::{F, FNx3};
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 
@@ -507,7 +509,7 @@ atom within `rcut` ångström as frozen context, so a chain folds against its
 real neighbours rather than empty space.
 
 ```no_run
-# use molrs::{Frame, optimize::{OptReport, Optimizer}, types::F};
+# use molrs::{store::Frame, optimize::{OptReport, Optimizer}, op::types::F};
 # struct JiggleOptimizer;
 # impl JiggleOptimizer { fn new(_: usize, _: F, _: u64) -> Self { Self } }
 # impl Optimizer for JiggleOptimizer {
@@ -654,10 +656,8 @@ score.
 ### A minimal stage
 
 ```rust
-use molpack::{
-    Budget, F, Guarantees, Handler, PackError, PackState, Placed, Requires, Stage, StageOutcome,
-    Target,
-};
+use molpack::{Budget, Guarantees, Handler, PackError, PackState, Placed, Requires, Stage, StageOutcome, Target};
+use molrs::op::types::F;
 
 /// Nudges every molecule by a fixed offset. Not useful — just the smallest
 /// thing that is still a stage.
@@ -711,19 +711,19 @@ impl Stage for ShakeStage {
 
 A stage does not run itself. The lifecycle around it — validation, restraint
 broadcast, context construction, handler bracketing, the lab-frame rebuild,
-frame assembly — lives in exactly one place: [`Pipeline`](crate::pipeline::Pipeline)'s
+frame assembly — lives in exactly one place: [`Pipeline`](crate::Pipeline)'s
 [`run`](crate::PackEngine::run), reached through the
 [`PackEngine`](crate::PackEngine) trait. An **entry** is a type that plugs into
 that lifecycle by implementing [`StageFactory`](crate::StageFactory); its
 `stages` method is the one thing an entry must supply: the stage(s) it drives,
-built from the run's resolved [`EngineSetup`](crate::pipeline::EngineSetup).
+built from the run's resolved [`EngineSetup`](crate::EngineSetup).
 `PackEngine` then adds the shared `with_*` builders plus a one-line `run` that
 hands the entry to the lifecycle as its sole stage source
 (`Pipeline::single(self).run(targets, max_loops)`) — the same code path a
 hand-composed pipeline runs, not a second implementation to keep in step.
 
 ```rust
-# struct ShakeStage { step: [molpack::F; 3] }
+# struct ShakeStage { step: [molrs::op::types::F; 3] }
 # impl molpack::Stage for ShakeStage {
 #     fn name(&self) -> &'static str { "shake" }
 #     fn requires(&self) -> molpack::Requires { molpack::Requires::new(molpack::Placed::All) }
@@ -734,8 +734,9 @@ hand-composed pipeline runs, not a second implementation to keep in step.
 #         Ok(molpack::StageOutcome::new(true, 0))
 #     }
 # }
-use molpack::pipeline::EngineSetup;
-use molpack::{F, Handler, PackEngine, PackError, PackSettings, Pipeline, Stage, StageFactory};
+use molpack::EngineSetup;
+use molpack::{Handler, PackEngine, PackError, PackSettings, Pipeline, Stage, StageFactory};
+use molrs::op::types::F;
 
 pub struct ShakePack {
     settings: PackSettings,
@@ -799,8 +800,8 @@ skip `initial()` and continue from what is already there.
 
 A single-entry `run` is `Pipeline::single(self)` under the hood, so the same
 lifecycle also runs a hand-built sequence of stages directly, with no entry
-type of your own. [`Pipeline::new`](crate::pipeline::Pipeline::new) builds an
-empty pipeline; [`with_stage`](crate::pipeline::Pipeline::with_stage) appends
+type of your own. [`Pipeline::new`](crate::Pipeline::new) builds an
+empty pipeline; [`with_stage`](crate::Pipeline::with_stage) appends
 one factory at a time — a chain grower feeding a rigid-body packer, for
 example:
 
@@ -836,8 +837,8 @@ once. Two situations need more than that: repeating a body of stages until
 some condition is met, and refusing to accept a stage's exit until a property
 of the resulting state has been verified. molpack answers both with an
 [`Invariant`](crate::Invariant) trait plus two `Stage` combinators,
-[`Pipeline::with_repeat`](crate::pipeline::Pipeline::with_repeat) and
-[`Pipeline::with_guarded`](crate::pipeline::Pipeline::with_guarded).
+[`Pipeline::with_repeat`](crate::Pipeline::with_repeat) and
+[`Pipeline::with_guarded`](crate::Pipeline::with_guarded).
 
 An [`Invariant`](crate::Invariant) is a property of a
 [`PackState`](crate::PackState) a caller can demand — "restraints are
@@ -896,7 +897,7 @@ Two combinators build on `Invariant`, and are themselves
 chain-checking, handler bracketing and the run's final verdict read them
 exactly as they read `GenCanPack`.
 
-- [`with_repeat(body, until)`](crate::pipeline::Pipeline::with_repeat) runs a
+- [`with_repeat(body, until)`](crate::Pipeline::with_repeat) runs a
   `Vec<Box<dyn StageFactory>>` body repeatedly:
   [`Until::Passes(n)`](crate::Until::Passes) stops after exactly `n` passes
   (`Passes(0)` contributes **no stage at all**, never a silently clamped
@@ -908,7 +909,7 @@ exactly as they read `GenCanPack`.
   run uses, so `Repeat` around a chain-growth stage feeding a rigid-body one
   is a real "connect, then refine, then connect again" recipe rather than `n`
   independent packs.
-- [`with_guarded(stage, invariants, on_violation)`](crate::pipeline::Pipeline::with_guarded)
+- [`with_guarded(stage, invariants, on_violation)`](crate::Pipeline::with_guarded)
   runs `stage`, then checks every invariant against the state it left. On the
   first broken one, [`OnViolation`](crate::OnViolation) has exactly two
   answers, never a third: `Fail` returns

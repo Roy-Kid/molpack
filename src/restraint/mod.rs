@@ -1,12 +1,8 @@
 //! `AtomRestraint` trait and the soft penalties of molecular packing.
 //!
-//! Geometry is not described here. A region — a sphere, a box, a cell, a
-//! mesh-bounded solid, a union of spheres, or any `&` / `|` / `~` composition
-//! of them — is a molrs [`Region`](molrs::spatial::region::Region), and the
-//! one public geometric restraint is [`RegionRestraint`]: stay inside that
-//! region. [`CellRestraint`] is the same lift over a primitive cell plus the
-//! lattice declaration the packer needs. User extensions `impl AtomRestraint`
-//! for penalties that are not "stay inside a region".
+//! Every public item here is re-exported at the crate root (one path per
+//! item); the contracts a restraint implementer must keep are on
+//! [`AtomRestraint`] itself.
 //!
 //! The `.inp` grammar's `inside box` / `outside sphere` / `above plane` …
 //! keywords lower onto crate-private kernels in `geometric/` whose value and
@@ -14,28 +10,36 @@
 //! branch (see `docs/packmol_parity.md`). They are the script layer's
 //! implementation, not a second public vocabulary for shapes.
 //!
-//! **Gradient convention**: `AtomRestraint::fg` accumulates INTO `g` with `+=`.
-//! Do not overwrite; many restraints may contribute to the same atom.
-//!
-//! **Two-scale contract** (Packmol convention): linear penalties
-//! (box / cube / plane, kinds 2/3/6/7/10/11) use `scale`; quadratic penalties
-//! (sphere / ellipsoid / cylinder / gaussian, kinds 4/5/8/9/12/13/14/15) use
-//! `scale2`. [`RegionRestraint`] is distance-quadratic and therefore in the
-//! first class: it consumes `scale`. Each `impl AtomRestraint` decides
-//! internally which to consume.
-//!
 //! Direction-3 rule: all molpack extension points
 //! follow `pub trait X` + N concrete pub structs that `impl X`; user-defined
 //! structs `impl X` the same way. No `Builtin*` prefix, no wrapper, no builder.
 
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::spatial::SimBox;
 
 // ============================================================================
 // Trait
 // ============================================================================
 
 /// Soft-penalty restraint evaluated per atom during packing.
+///
+/// Geometry is not described by this trait. A region — a sphere, a box, a
+/// cell, a mesh-bounded solid, a union of spheres, or any `&` / `|` / `~`
+/// composition of them — is a molrs [`Region`](molrs::spatial::region::Region),
+/// and the one public geometric restraint is [`RegionRestraint`]: stay inside
+/// that region. [`CellRestraint`] is the same lift over a primitive cell plus
+/// the lattice declaration the packer needs. User extensions `impl
+/// AtomRestraint` for penalties that are not "stay inside a region".
+///
+/// **Gradient convention**: `fg` accumulates INTO `g` with `+=`. Do not
+/// overwrite; many restraints may contribute to the same atom.
+///
+/// **Two-scale contract** (Packmol convention): linear penalties
+/// (box / cube / plane, kinds 2/3/6/7/10/11) use `scale`; quadratic penalties
+/// (sphere / ellipsoid / cylinder / gaussian, kinds 4/5/8/9/12/13/14/15) use
+/// `scale2`. [`RegionRestraint`] is distance-quadratic and therefore in the
+/// first class: it consumes `scale`. Each implementation decides internally
+/// which to consume.
 ///
 /// - `f` — value only (line-search interpolation)
 /// - `fg` — fused value + gradient; gradient accumulates INTO `g` with `+=`

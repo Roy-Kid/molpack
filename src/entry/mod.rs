@@ -27,14 +27,14 @@ pub(crate) mod setup;
 pub(crate) use result::positions_in_target_order;
 pub use result::{IntraResidual, State};
 
-use molrs::types::F;
+use molrs::op::types::F;
 
-use crate::handler::LogLevel;
+use crate::LogLevel;
 use setup::{CellDecl, PeriodicSpec};
 
 /// Built-in screen logging: detail level + print cadence.
 #[derive(Debug, Clone, Copy)]
-pub struct LogSpec {
+pub(crate) struct LogSpec {
     pub(crate) level: LogLevel,
     pub(crate) frequency: usize,
 }
@@ -63,7 +63,7 @@ pub struct PackSettings {
     pub(crate) density: Option<F>,
     pub(crate) cell: Option<CellDecl>,
     pub(crate) log: LogSpec,
-    pub(crate) global_restraints: Vec<std::sync::Arc<dyn crate::restraint::AtomRestraint>>,
+    pub(crate) global_restraints: Vec<std::sync::Arc<dyn crate::AtomRestraint>>,
 }
 
 impl PackSettings {

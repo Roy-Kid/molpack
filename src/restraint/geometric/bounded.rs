@@ -4,8 +4,8 @@
 //! `impl AtomRestraint` resolves the trait through the unchanged
 //! `crate::restraint` path.
 
-use crate::restraint::AtomRestraint;
-use molrs::types::F;
+use crate::AtomRestraint;
+use molrs::op::types::F;
 
 /// Packmol kind 2 — quadratic penalty forcing atom inside axis-aligned cube.
 #[derive(Debug, Clone, Copy)]

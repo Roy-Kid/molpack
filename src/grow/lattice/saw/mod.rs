@@ -9,10 +9,17 @@
 //! back. Sterics: with the occupancy guard on, a site may be taken only when
 //! none of its four lattice neighbours holds a non-bonded atom, which keeps
 //! every non-bonded pair at ≥ the 2nd-neighbour distance (`a/√2`).
+//!
+//! Kept here rather than built on molrs's `builder::SelfAvoidingWalk` on
+//! purpose (module-responsibility ruling 10): the walk draws from molpack's
+//! own counter-based RNG streams in a fixed order, scores continuations with
+//! the RIS weights and the occupancy guard above, and is pinned bit for bit by
+//! the lattice-growth goldens. A different walker — even a correct one —
+//! consumes the streams differently and moves every grown coordinate.
 
 use std::collections::{HashMap, HashSet};
 
-use molrs::types::F;
+use molrs::op::types::F;
 use rand::rngs::SmallRng;
 
 use crate::random::uniform01;

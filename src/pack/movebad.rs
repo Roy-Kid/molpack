@@ -1,12 +1,13 @@
 //! movebad heuristic and flashsort.
 //! Port of `heuristics.f90` and `flashsort.f90`.
 
+use crate::Objective;
 use crate::context::PackContext;
 use crate::eval::EvalMode;
 use crate::pack::gencan::GencanWorkspace;
 use crate::pack::restmol::restmol;
 use crate::random::uniform01;
-use molrs::types::F;
+use molrs::op::types::F;
 use rand::Rng;
 
 pub struct MoveBadConfig<'a> {

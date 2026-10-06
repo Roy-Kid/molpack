@@ -21,13 +21,13 @@
 
 use std::sync::OnceLock;
 
+use crate::Handler;
+use crate::Invariant;
+use crate::PackError;
+use crate::PackSettings;
+use crate::Target;
 use crate::context::{PackState, Placed};
-use crate::entry::PackSettings;
-use crate::error::PackError;
-use crate::handler::Handler;
-use crate::invariant::Invariant;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
-use crate::target::Target;
 
 use super::engine::{EngineSetup, StageFactory};
 

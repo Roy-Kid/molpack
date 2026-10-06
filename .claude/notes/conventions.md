@@ -15,10 +15,14 @@ harness-layout rows.
 | Feature | Pulls in |
 |---|---|
 | `default` | nothing |
-| `io` | `molrs/io` (PDB / XYZ / SDF / LAMMPS readers) |
+| `io` | `molrs/io` (`molrs::io::{read_frame, write_frame}` for `Script::build` and the CLI) |
 | `cli` | `clap` + `io` (the `molpack` binary) |
 | `rayon` | `rayon` + `molrs/rayon` (parallel evaluation) |
-| `ff` | `molrs/ff` — a forward for callers binding a force-field optimizer; the in-loop `Optimizer` seam itself is always on |
+
+There is no `ff` feature: the in-loop `Optimizer` seam is always on, and a
+caller binding a molrs force-field optimizer (`LBFGS` over a `Potential`)
+enables `ff` on its own molrs dependency. molpack's tests do the same through
+a molrs dev-dependency with `ff` on.
 
 The Python wheel is built **without** `io` — the wheel relies on the user's
 `molrs` Python package for frame loading, then builds targets from the loaded
@@ -56,10 +60,10 @@ frame (the PyO3 `target_from_frame` helper) and lowers scripts with
   `src/grow/tests/{internal,field,prior,entry}.rs`, `src/target.rs` +
   `src/script/build.rs` (the four per-atom properties, API side and `.inp`
   side), `src/context/build.rs` (what context construction refuses).
-- `cargo test -p molcrafts-molpack --lib --features cli,ff,rayon` — the gate,
+- `cargo test -p molcrafts-molpack --lib --features cli,rayon` — the gate,
   must always be green (`mol_project.build.test`); seconds, not minutes. A
   single test: append `-- <name filter>` (`build.test_single`).
-- `cargo test --doc --features cli,ff` — the rustdoc examples, part of the same
+- `cargo test --doc --features cli` — the rustdoc examples, part of the same
   tier. That feature set is the one doctests are written for: a snippet that
   needs `io` or `ff` is a plain `no_run` block, with any setup on hidden `#`
   lines.
@@ -84,7 +88,7 @@ frame (the PyO3 `target_from_frame` helper) and lowers scripts with
 
 Template geometry is read with `molrs::Frame::coords` (Å); the crate-root leaf
 `src/template.rs` holds only `coord_rows` (array → `[x, y, z]` rows) and the
-rotatable-bond policy. Bond graphs are `molrs::Topology`; molpack does not re-export that type.
+rotatable-bond policy. Bond graphs are `molrs::system::Topology`; molpack does not re-export that type.
 
 Skills and agents come from the `mol` plugin (`molcrafts-harness`); the repo
 carries no project-local `.claude/skills/` or `.claude/agents/` (the former
@@ -99,8 +103,8 @@ workspace/
 ```
 
 The root `Cargo.toml` uses a single path dep on `../molrs/molrs` (the unified
-`molcrafts-molrs` crate); `core` is always-on, while `io` and `ff` are pulled in
-through the matching molpack features above.
+`molcrafts-molrs` crate); `core` is always-on, while `io` is pulled in
+through the matching molpack feature above.
 
 **Build cache:** the committed `.cargo/config.toml` routes every build (root
 workspace and `python/`) into `../molrs/target`, shared with the sibling molrs
@@ -111,7 +115,6 @@ rustc. CI caches that dir and runs sccache.
 **molrs ABI line** (the rule itself is law P10): molpack exchanges `molrs_ffi`
 handle capsules with the installed `molcrafts-molrs` wheel; both must embed the
 same molrs **major.minor** (minor line = ABI version — see molrs
-`docs/interop.md`). Gates: `molpack/version.py` (wheel metadata, at
-`import molpack`), `interop::check_abi` (`molrs._ffi_abi_token()`, at extension
-init), and the versioned capsule names (`molrs.FrameRef/<line>`, `molrs.RegionRef/<line>`) from
-`molrs_ffi::abi`.
+`docs/interop.md`). Gates: `interop::check_abi` (`molrs._ffi_abi_token()`, at
+extension init — the one import-time version check) and the versioned capsule
+names (`molrs.FrameRef/<line>`, `molrs.RegionRef/<line>`) from `molrs_ffi::abi`.

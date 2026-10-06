@@ -1,4 +1,4 @@
-use molrs::types::F;
+use molrs::op::types::F;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -41,7 +41,7 @@ pub enum PackError {
     /// packing.
     Grow {
         target: usize,
-        source: crate::grow_error::GrowError,
+        source: crate::grow::GrowError,
     },
     /// `with_density` combined with an explicit box or cell — the two are
     /// competing definitions of the same volume.

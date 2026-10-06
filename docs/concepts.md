@@ -46,7 +46,7 @@ instance field.
 
 ## CollectiveRestraint
 
-A [`CollectiveRestraint`](crate::restraint::Restraint) is a
+A [`CollectiveRestraint`](crate::Restraint) is a
 **group-level** penalty — unlike [`AtomRestraint`](#atomrestraint), which sees one atom
 at a time and contributes an independent external field Σᵢ U(xᵢ), a
 collective restraint sees *every* copy of a species at once and returns a
@@ -261,8 +261,9 @@ Handlers cannot modify packer state — bind an in-loop optimizer if you need to
 
 Built-ins: [`LammpsLogHandler`](crate::LammpsLogHandler),
 [`ProgressHandler`](crate::ProgressHandler),
-[`EarlyStopHandler`](crate::EarlyStopHandler),
-[`XYZHandler`](crate::XYZHandler).
+[`EarlyStopHandler`](crate::EarlyStopHandler), and — with the `io`
+feature — `XYZHandler` (an extended XYZ trajectory written by molrs's XYZ
+writer).
 
 ### Which stage a callback came from
 
@@ -270,7 +271,7 @@ A **stage** is one packing algorithm behind the crate's packing seam — the
 [`Stage`](crate::Stage) trait, whose implementors are `GenCanStage`,
 `GrowStage` and `LatticeStage`; [`extending`](crate::extending) walks through
 writing one. Every `StepInfo` names the stage that emitted it in `info.stage`,
-a [`StageInfo`](crate::handler::StageInfo) with three fields: `index` (0-based
+a [`StageInfo`](crate::StageInfo) with three fields: `index` (0-based
 position of the stage in the run), `total` (how many stages the run has), and
 `name` (the stage's own [`Stage::name`](crate::Stage::name), e.g. `"gencan"`).
 A run driven by one engine entry has one stage, so it reports `index = 0` and
@@ -296,10 +297,10 @@ as its own validation errors.
 
 ## Pipeline
 
-A [`Pipeline`](crate::pipeline::Pipeline) is what actually runs a sequence of
-stages. [`Pipeline::new().with_stage(a).with_stage(b)`](crate::pipeline::Pipeline::with_stage)
+A [`Pipeline`](crate::Pipeline) is what actually runs a sequence of
+stages. [`Pipeline::new().with_stage(a).with_stage(b)`](crate::Pipeline::with_stage)
 composes as many stages as a run needs, and
-[`Pipeline::single(engine)`](crate::pipeline::Pipeline::single) wraps one
+[`Pipeline::single(engine)`](crate::Pipeline::single) wraps one
 [`PackEngine`](crate::PackEngine) the same way — which is why every preset's
 `run` is one line, `Pipeline::single(self).run(targets, max_loops)`. There is
 exactly one lifecycle in the crate: a hand-composed pipeline and a preset's own
@@ -376,7 +377,7 @@ the almost-unrepairable down to the cheapest to fix.
 - **L5 local geometry** — bond lengths and angles; the cheapest rung, fixed
   for free by the user's own force field in the first steps of minimization.
 
-[`Pipeline::with_repeat(body, until)`](crate::pipeline::Pipeline::with_repeat)
+[`Pipeline::with_repeat(body, until)`](crate::Pipeline::with_repeat)
 runs a body of stages repeatedly: [`Until::Passes(n)`](crate::Until::Passes)
 stops after exactly `n` passes (`Passes(0)` contributes no stage at all,
 never a silently clamped single pass), and
@@ -385,7 +386,7 @@ last stage reports its own convergence. Each pass
 *continues* from where the previous one left off — the same `Placed::All`
 continuation a seeded run uses — rather than packing again from nothing.
 
-[`Pipeline::with_guarded(stage, invariants, on_violation)`](crate::pipeline::Pipeline::with_guarded)
+[`Pipeline::with_guarded(stage, invariants, on_violation)`](crate::Pipeline::with_guarded)
 runs `stage`, then checks every invariant against the state it left.
 [`OnViolation`](crate::OnViolation) answers a broken invariant two ways,
 never a third: `Fail` returns a named
@@ -403,7 +404,7 @@ the run's final verdict read a `Repeat` or a `Guarded` exactly as they read
 
 ## Objective
 
-The [`Objective`](crate::objective::Objective) trait abstracts over
+The [`Objective`](crate::Objective) trait abstracts over
 what GENCAN sees. `PackContext` implements it; synthetic test
 objectives (Rosenbrock / Booth / Beale) can implement it to exercise
 the optimizer in isolation.

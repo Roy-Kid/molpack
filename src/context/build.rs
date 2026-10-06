@@ -6,11 +6,11 @@
 //! shares one context construction; callable more than once — chained
 //! entries build one context per stage.
 
-use molrs::Element;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::system::Element;
 
+use crate::PackError;
 use crate::context::PackContext;
-use crate::error::PackError;
 use crate::euler::{compcart, eulerfixed};
 use crate::target::{CenteringMode, Target};
 
@@ -331,8 +331,9 @@ mod short_radius_tests {
     //! by target and atom index, never silently.
 
     use super::{ContextKnobs, build_context};
-    use crate::error::PackError;
-    use crate::{F, Target};
+    use crate::PackError;
+    use crate::Target;
+    use molrs::op::types::F;
 
     fn knobs() -> ContextKnobs {
         ContextKnobs {

@@ -3,7 +3,7 @@
 //! A leaf: the objective implements the call, and the context stores the
 //! maxima. This module reaches into neither.
 
-use molrs::types::F;
+use molrs::op::types::F;
 
 /// Evaluation mode for the shared objective.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,8 +14,6 @@ pub enum EvalMode {
     GradientOnly,
     /// Function + gradient.
     FAndGradient,
-    /// Restmol mode (same compute path as F+G, semantically explicit for callers).
-    RestMol,
 }
 
 /// Unified evaluation output.

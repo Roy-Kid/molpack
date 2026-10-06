@@ -1,16 +1,16 @@
 //! `CbmcGrow` — the continuum configurational-bias chain-growth entry.
 
+use crate::Handler;
+use crate::PackError;
+use crate::Stage;
+use crate::Target;
 use crate::entry::{PackSettings, State};
-use crate::error::PackError;
 use crate::grow::GrowStage;
 use crate::grow::config::GrowConfig;
 use crate::grow::prior::{AnglePrior, TorsionPrior};
 use crate::grow::validate_grow_cell;
-use crate::handler::Handler;
 use crate::pipeline::{EngineSetup, PackEngine, Pipeline, StageFactory};
-use crate::stage::Stage;
-use crate::target::Target;
-use molrs::types::F;
+use molrs::op::types::F;
 
 /// Configurational-bias chain growth (CBMC-style constructive packing) as
 /// its own entry.

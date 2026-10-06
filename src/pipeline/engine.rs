@@ -17,15 +17,15 @@
 //! [`EngineSetup`] lives here because both its producer (the lifecycle) and
 //! its only consumer ([`StageFactory::stages`]) do: one fact, one home.
 
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::spatial::SimBox;
 
+use crate::PackError;
+use crate::Stage;
+use crate::Target;
 use crate::entry::setup::CellDecl;
 use crate::entry::{PackSettings, State};
-use crate::error::PackError;
 use crate::handler::{Handler, LogLevel};
-use crate::stage::Stage;
-use crate::target::Target;
 
 /// Everything the lifecycle resolved before handing control to the stages:
 /// the run's shared settings, the targets (post-broadcast), the space, and
@@ -194,7 +194,7 @@ pub trait PackEngine: StageFactory + Sized {
         self
     }
     /// Broadcast a restraint to every target at run time.
-    fn with_global_restraint(mut self, r: impl crate::restraint::AtomRestraint + 'static) -> Self {
+    fn with_global_restraint(mut self, r: impl crate::AtomRestraint + 'static) -> Self {
         self.settings_mut()
             .global_restraints
             .push(std::sync::Arc::new(r));

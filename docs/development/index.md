@@ -19,8 +19,8 @@ molpack is a Rust packing engine with three public surfaces:
 ## Validation commands
 
 ```bash
-cargo test -p molcrafts-molpack --lib --features cli,ff
-cargo test -p molcrafts-molpack --doc --features cli,ff
+cargo test -p molcrafts-molpack --lib --features cli
+cargo test -p molcrafts-molpack --doc --features cli
 cd python
 maturin develop --release
 pytest

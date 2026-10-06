@@ -31,9 +31,11 @@ Optional features (crate defaults to none enabled):
 | Feature | Purpose |
 |---|---|
 | `cli` | `molpack` binary + clap (implies `io`) |
-| `io` | PDB / XYZ / SDF / LAMMPS readers via molrs |
+| `io` | Template reading / output writing via `molrs::io::{read_frame, write_frame}`, and `XYZHandler` |
 | `rayon` | Parallel objective evaluation |
-| `ff` | Forwards molrs's force-field module, for binding a force-field optimizer (e.g. `LBFGS`) through `with_optimizer` |
+
+A force-field optimizer bound through `with_optimizer` (e.g. molrs's `LBFGS`)
+needs molrs's `ff` feature; enable it on your own `molcrafts-molrs` dependency.
 
 ```toml
 # Cargo.toml — common combinations

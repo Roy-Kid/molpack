@@ -12,11 +12,12 @@
 //!   8. Random angles
 //!   9. Phase 2: constraint-only GENCAN per type (reduced x!)
 
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::spatial::SimBox;
 use ndarray::array;
 use std::time::Instant;
 
+use crate::Objective;
 use crate::context::{NONE_IDX, PackContext, RigidView};
 use crate::eval::EvalMode;
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
@@ -154,7 +155,6 @@ fn init_loop_one_type(
     let params = GencanParams {
         maxit: gencan_maxit,
         maxfc: gencan_maxit * 10,
-        iprint: 0,
         ..Default::default()
     };
 
@@ -231,7 +231,7 @@ pub fn initial(
 
     // Packmol initial.f90 line 50-51
     sys.scale = 1.0;
-    sys.scale2 = crate::numerics::DEFAULT_SCALE2;
+    sys.scale2 = crate::context::DEFAULT_SCALE2;
 
     // ── 1. compute dmax ──────────────────────────────────────────────────────
     log::debug!("[{:.3}s] computing dmax", t0.elapsed().as_secs_f64());

@@ -30,12 +30,13 @@
 //! InternalTree BFS projected onto not-H atoms (linear is the `d = 2`
 //! degeneracy).
 
-use molrs::store::frame::Frame;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::store::Frame;
 
 use crate::grow::GrowError;
-use crate::grow::internal::{InternalTree, cross, dihedral, dot, norm, sub, wrap_pi};
+use crate::grow::internal::{InternalTree, wrap_pi};
 use crate::grow::lattice::saw::DiamondLattice;
+use molrs::op::vec3::{cross, dihedral, dot, norm, sub};
 
 /// The template's heavy-atom tree, InternalTree BFS order, plus decoration
 /// hooks (one per InternalTree variable, on a backbone site).
@@ -423,9 +424,9 @@ pub(crate) fn decorate_chain(
 #[allow(clippy::needless_range_loop)]
 mod tests {
     use super::*;
-    use molrs::BondDistanceWeights;
+    use molrs::system::BondDistanceWeights;
 
-    use molrs::store::frame::Frame;
+    use molrs::store::Frame;
     use ndarray::Array1;
 
     /// The all-atom default hydrogen flags, from the `element` column.
@@ -433,7 +434,7 @@ mod tests {
         frame
             .get("atoms")
             .and_then(|b| b.get("element"))
-            .and_then(molrs::store::block::Column::as_string)
+            .and_then(molrs::store::Column::as_string)
             .map(|c| c.iter().map(|e| e.eq_ignore_ascii_case("H")).collect())
             .unwrap_or_default()
     }

@@ -63,7 +63,7 @@
 
 use crate::context::PackContext;
 use crate::euler::{compcart, eulerrmat};
-use molrs::types::F;
+use molrs::op::types::F;
 
 /// The rigid placement vector of one run: three COM plus three Euler values
 /// per free molecule, in the flat layout documented at module level.
@@ -312,7 +312,8 @@ mod tests {
 
     use crate::context::RigidView as ContextRigidView;
     use crate::euler::{compcart, eulerrmat};
-    use crate::{F, PackContext, RigidView};
+    use crate::{PackContext, RigidView};
+    use molrs::op::types::F;
 
     /// The crate-root re-export and the `context` path name one type, not two.
     /// Compile-time only.

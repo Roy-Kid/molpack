@@ -13,9 +13,9 @@
 
 use super::*;
 
+use crate::AtomRestraint;
 use crate::context::PackContext;
 use crate::handler::{Handler, StepInfo};
-use crate::restraint::AtomRestraint;
 
 /// A restraint that refuses every point, so every growth attempt is a dead end.
 #[derive(Debug)]

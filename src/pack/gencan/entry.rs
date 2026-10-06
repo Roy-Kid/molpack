@@ -1,17 +1,17 @@
 //! `GenCanPack` — the rigid-body GENCAN packing entry.
 
-use molrs::types::F;
+use molrs::op::types::F;
 
+use crate::PackError;
+use crate::Stage;
+use crate::Target;
 use crate::entry::result::Placements;
 use crate::entry::setup::CellDecl;
 use crate::entry::{PackSettings, State};
-use crate::error::PackError;
 use crate::handler::{EarlyStopHandler, Handler};
 use crate::optimizer::OptimizerBinding;
 use crate::pack::gencan::solver::{GenCanStage, GencanSettings};
 use crate::pipeline::{EngineSetup, PackEngine, Pipeline, StageFactory};
-use crate::stage::Stage;
-use crate::target::Target;
 
 /// Rigid-body packing via the GENCAN bound-constrained optimizer
 /// (Birgin & Martínez) — the Packmol algorithm as its own entry.
@@ -237,7 +237,7 @@ impl PackEngine for GenCanPack {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::target::Target;
+    use crate::Target;
 
     /// The entry lifecycle is deterministic: same targets, same seed,
     /// bit-identical positions and verdict. (Bitwise parity against the

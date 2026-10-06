@@ -66,96 +66,97 @@
 //!
 //! ## Public surface at a glance
 //!
+//! Every public item has exactly one path. The crate root carries the
+//! vocabulary below; three namespaces carry the rest — [`context`] (the
+//! per-atom layout a custom objective or handler reads off a
+//! [`PackContext`]), [`grow`] (growth configuration and priors) and
+//! [`script`] (the `.inp` loader). molrs types (`Frame`, `SimBox`, regions,
+//! the [`molrs::optimize::Optimizer`] trait, `F`) are named at their molrs
+//! home; molpack does not re-export them.
+//!
 //! | Category | Items |
 //! |---|---|
 //! | Engine entries | [`PackEngine`], [`GenCanPack`], [`CbmcGrow`], [`LatticeGrow`], [`LogLevel`] |
-//! | Run lifecycle | [`Pipeline`], [`StageFactory`], [`pipeline::EngineSetup`], [`State`], [`IntraResidual`] |
+//! | Run lifecycle | [`Pipeline`], [`StageFactory`], [`EngineSetup`], [`State`], [`IntraResidual`] |
 //! | Stage combinators (Rust-only) | [`Until`], [`OnViolation`], [`Invariant`], [`Layers`], [`Violation`], [`RestraintsSatisfied`] |
-//! | Shared settings + space | [`PackSettings`] (`entry`) |
-//! | Target  | [`Target`], [`CenteringMode`] |
-//! | Rigid placement vector | [`RigidView`] |
+//! | Shared settings + space | [`PackSettings`] |
+//! | Target  | [`Target`], [`CenteringMode`], [`Angle`], [`Axis`], [`Placement`] |
+//! | Run state | [`PackContext`], [`RigidView`] |
 //! | Stage seam (Rust-only) | [`Stage`], [`Requires`], [`Guarantees`], [`StageOutcome`], [`Budget`], [`PackState`], [`Placed`] |
-//! | AtomRestraint trait + the region lift | [`AtomRestraint`], [`RegionRestraint`] (over [`molrs::spatial::region::Region`]), [`CellRestraint`] |
-//! | Handler trait + built-ins | [`Handler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], [`XYZHandler`], [`StepInfo`], [`handler::StageInfo`], [`PhaseInfo`], [`PhaseReport`] |
-//! | In-loop optimizer | [`OptimizeSelect`], [`OptimizeMode`], [`GenCanPack::with_optimizer`], [`TorsionMcOptimizer`], and molrs's [`Optimizer`] trait |
+//! | Per-atom restraints | [`AtomRestraint`], [`RegionRestraint`] (over [`molrs::spatial::region::Region`]), [`CellRestraint`] |
+//! | Group restraints | [`Restraint`], [`GroupCtx`], [`GaussianPlane`], [`GaussianPoint`], [`ExponentialPlane`], [`ExponentialPoint`], [`TabulatedPlane`], [`TabulatedPoint`], [`SelfSeparation`] |
+//! | Handler trait + built-ins | [`Handler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], `XYZHandler` (feature `io`), [`StepInfo`], [`StageInfo`], [`PhaseInfo`], [`PhaseReport`] |
+//! | Objective | [`Objective`], [`EvalMode`], [`EvalOutput`] |
+//! | In-loop optimizer | [`OptimizeSelect`], [`OptimizeMode`], [`GenCanPack::with_optimizer`], [`TorsionMcOptimizer`], over molrs's [`molrs::optimize::Optimizer`] trait |
 //! | Errors | [`PackError`] |
 //!
 //! ## Feature flags
 //!
 //! - `rayon` — opt into the parallel evaluator (also forwards to `molrs`'s
 //!   `rayon`).
-//! - `io` — pull in molrs's `io` module so `script::Script::build` can read
-//!   Protein Data Bank (PDB) / structure-data-file (SDF) / XYZ / LAMMPS files
-//!   directly and hand back a `script::BuildResult`. PyO3 / WASM / embedding
-//!   hosts that bring their own loader leave this off and use
-//!   [`script::Script::lower`] with [`script::StructurePlan::apply`] instead.
-//! - `cli` — build the `molpack` binary and its integration tests (pulls in
-//!   `clap` and implies `io`).
-//! - `ff` — forward molrs's `ff` module (force fields and the optimizers
-//!   built on them) for callers who bind one through
-//!   [`GenCanPack::with_optimizer`]. molpack compiles nothing extra under it:
-//!   the in-loop optimizer seam itself is always on.
+//! - `io` — pull in molrs's `io` module so `script::Script::build` reads the
+//!   template files through `molrs::io::read_frame` (PDB, XYZ, SDF/MOL,
+//!   LAMMPS, and every other format that function knows) and hands back a
+//!   `script::BuildResult`, and so `XYZHandler` can write its trajectory
+//!   through molrs's extended XYZ writer. PyO3 / WASM / embedding hosts that
+//!   bring their own loader leave this off and use [`script::Script::lower`]
+//!   with [`script::StructurePlan::apply`] instead.
+//! - `cli` — build the `molpack` binary (pulls in `clap` and implies `io`).
 //!
-//! Precision is fixed at `f64` via `molrs::types::F`.
+//! A force-field optimizer bound through [`GenCanPack::with_optimizer`]
+//! (molrs's `LBFGS` over a `Potential`) needs molrs's `ff` feature, which the
+//! caller turns on in its own molrs dependency; molpack has no `ff` feature.
+//!
+//! Precision is fixed at `f64` via `molrs::op::types::F`.
 
-pub mod assemble;
+mod assemble;
 pub mod context;
-pub mod entry;
-pub mod error;
-pub(crate) mod euler;
+mod entry;
+mod error;
+mod euler;
 mod eval;
 pub mod grow;
-mod grow_error;
-pub mod handler;
-pub mod invariant;
-mod numerics;
-pub mod objective;
-pub mod optimizer;
+mod handler;
+mod invariant;
+mod objective;
+mod optimizer;
 mod outcome;
-pub(crate) mod pack;
-pub mod pipeline;
+mod pack;
+mod pipeline;
 mod random;
-pub mod restraint;
+mod restraint;
 pub mod script;
-pub mod stage;
-pub mod target;
+mod stage;
+mod target;
 mod template;
 #[cfg(test)]
 mod testutil;
 
-pub use context::{PackContext, PackState, Placed, RigidView};
-pub use entry::IntraResidual;
-pub use entry::PackSettings;
-pub use entry::State;
+pub use context::pack_context::PackContext;
+pub use context::pack_state::{PackState, Placed};
+pub use context::rigid_view::RigidView;
+pub use entry::{IntraResidual, PackSettings, State};
 pub use error::PackError;
+pub use eval::{EvalMode, EvalOutput};
 pub use grow::entry::CbmcGrow;
 pub use grow::lattice::LatticeGrow;
+#[cfg(feature = "io")]
+pub use handler::XYZHandler;
 pub use handler::{
     EarlyStopHandler, Handler, LammpsLogHandler, LogLevel, PhaseInfo, PhaseReport, ProgressHandler,
-    StepInfo, XYZHandler,
+    StageInfo, StepInfo,
 };
 pub use invariant::{Invariant, Layers, RestraintsSatisfied, Violation};
-pub use molrs::BondDistanceWeights;
-pub use molrs::Element;
-pub use molrs::types::F;
-pub use pack::GenCanPack;
-pub use pipeline::combinators::{OnViolation, Until};
-pub use pipeline::{PackEngine, Pipeline, StageFactory};
-// The in-loop optimizer seam. The trait and its report (molrs core) appear in
-// molpack's own signatures (`with_optimizer`); concrete force-field optimizers
-// (`LBFGS`, `Potential`) stay at their molrs home.
-pub use molrs::optimize::{OptReport, Optimizer};
+pub use objective::Objective;
 pub use optimizer::{OptimizeMode, OptimizeSelect, TorsionMcOptimizer};
-pub use restraint::{AtomRestraint, CellRestraint, RegionRestraint};
+pub use pack::GenCanPack;
+pub use pipeline::{EngineSetup, OnViolation, PackEngine, Pipeline, StageFactory, Until};
+pub use restraint::{
+    AtomRestraint, CellRestraint, ExponentialPlane, ExponentialPoint, GaussianPlane, GaussianPoint,
+    GroupCtx, RegionRestraint, Restraint, SelfSeparation, TabulatedPlane, TabulatedPoint,
+};
 pub use stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 pub use target::{Angle, Axis, CenteringMode, Placement, Target};
-
-// Custom-objective extension surface. An engine run drives a `dyn Objective`
-// through GENCAN; downstream code that implements a bespoke objective (or wants
-// to evaluate the packing energy/gradient directly) names these at the crate
-// root.
-pub use eval::{EvalMode, EvalOutput};
-pub use objective::Objective;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Documentation modules (rustdoc-only; no runtime items).
@@ -174,61 +175,3 @@ pub mod architecture {}
 
 #[doc = include_str!("../docs/extending.md")]
 pub mod extending {}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Prelude — bulk re-export of the vocabulary a typical packing script needs.
-// ────────────────────────────────────────────────────────────────────────────
-
-/// Bulk re-export of the items a typical packing script needs.
-///
-/// ```no_run
-/// use std::sync::Arc;
-/// use molpack::prelude::*;
-/// use molrs::spatial::region::Cuboid;
-/// use ndarray::array;
-///
-/// let cube = Cuboid::new(array![0.0, 0.0, 0.0], array![10.0, 10.0, 10.0]);
-/// let target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 10)
-///     .with_restraint(RegionRestraint(Arc::new(cube)));
-/// let result = GenCanPack::new().run(&[target], 100)?;
-/// # Ok::<(), molpack::PackError>(())
-/// ```
-///
-/// The crate root still re-exports everything for direct `use molpack::T`
-/// access; the prelude exists to avoid a 20-line `use` block at the top of
-/// every example.
-pub mod prelude {
-    pub use crate::{
-        // Target + centering + angle / axis / placement
-        Angle,
-        // AtomRestraint trait + the molrs region lift + the cell
-        AtomRestraint,
-        Axis,
-        CbmcGrow,
-        CellRestraint,
-        CenteringMode,
-        // Handlers
-        EarlyStopHandler,
-        GenCanPack,
-        Handler,
-        // Core builder + result + error
-        LammpsLogHandler,
-        LogLevel,
-        // In-loop optimizer seam
-        OptimizeMode,
-        OptimizeSelect,
-        Optimizer,
-        PackEngine,
-        PackError,
-        PhaseInfo,
-        PhaseReport,
-        Placement,
-        ProgressHandler,
-        RegionRestraint,
-        State,
-        StepInfo,
-        Target,
-        TorsionMcOptimizer,
-        XYZHandler,
-    };
-}

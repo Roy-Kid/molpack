@@ -58,9 +58,10 @@ mod analysis;
 mod geometry;
 
 use molpack::{
-    CenteringMode, F, GenCanPack, OptimizeSelect, PackEngine, ProgressHandler, RegionRestraint,
+    CenteringMode, GenCanPack, OptimizeSelect, PackEngine, ProgressHandler, RegionRestraint,
     Target, TorsionMcOptimizer,
 };
+use molrs::op::types::F;
 use std::sync::Arc;
 
 use molrs::spatial::region::{Cuboid, HalfSpace, NotRegion};
@@ -284,7 +285,7 @@ fn write_xyz(
         .ok_or("result has no atoms block")?;
     let elements = atoms
         .get("element")
-        .and_then(molrs::store::block::Column::as_string);
+        .and_then(molrs::store::Column::as_string);
 
     let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
     writeln!(out, "{}", positions.len())?;

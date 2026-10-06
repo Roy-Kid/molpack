@@ -16,7 +16,7 @@
 //! — coupled across the whole group, with fixed point `empirical distribution =
 //! target`.
 
-use molrs::types::F;
+use molrs::op::types::F;
 
 /// Value of the Wasserstein penalty for `xi` against the target whose quantile
 /// function is `quantile`. `O(N log N)` (the sort).

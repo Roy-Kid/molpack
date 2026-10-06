@@ -16,9 +16,9 @@
 //! Insertion and removal are both O(1) amortised — the growth driver retracts
 //! and regrows constantly, so removal cannot be a rebuild.
 
+use molrs::op::types::F;
 use molrs::spatial::neighbors::CellGrid;
-use molrs::spatial::simbox::{Mic, SimBox};
-use molrs::types::F;
+use molrs::spatial::{Mic, SimBox};
 
 /// A placed-atom field over an orthorhombic, optionally periodic box.
 ///
@@ -53,7 +53,6 @@ pub struct OverlapField {
     radius: Vec<F>,
     mol_of: Vec<u32>,
     atom_of: Vec<u32>,
-    n_placed: usize,
     /// Per cell: number of placed slots.
     cell_count: Vec<u32>,
     /// Flat indices of currently empty cells, unordered (swap-remove).
@@ -123,18 +122,20 @@ impl OverlapField {
             radius,
             mol_of,
             atom_of,
-            n_placed: 0,
             cell_count: vec![0; ncells],
             empty_cells: (0..ncells as u32).collect(),
             empty_pos: (0..ncells as i32).collect(),
         }
     }
 
+    /// How many slots are placed (test bookkeeping check).
+    #[cfg(test)]
     pub fn n_placed(&self) -> usize {
-        self.n_placed
+        self.cell_of.iter().filter(|&&c| c >= 0).count()
     }
 
     /// Position of a placed slot, wrapped into the box.
+    #[cfg(test)]
     pub fn position(&self, slot: usize) -> [F; 3] {
         self.pos[slot]
     }
@@ -173,7 +174,6 @@ impl OverlapField {
         self.next[slot] = self.head[cell];
         self.head[cell] = slot as i32;
         self.cell_of[slot] = cell as i32;
-        self.n_placed += 1;
         self.cell_count[cell] += 1;
         if self.cell_count[cell] == 1 {
             let i = self.empty_pos[cell] as usize;
@@ -208,7 +208,6 @@ impl OverlapField {
         }
         self.next[slot] = -1;
         self.cell_of[slot] = -1;
-        self.n_placed -= 1;
         self.cell_count[cell] -= 1;
         if self.cell_count[cell] == 0 {
             self.empty_pos[cell] = self.empty_cells.len() as i32;

@@ -4,8 +4,9 @@
 //! Placement and the bad-move heuristic both call this. It calls neither
 //! of them.
 
-use molrs::types::F;
+use molrs::op::types::F;
 
+use crate::Objective;
 use crate::context::PackContext;
 use crate::eval::EvalMode;
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
@@ -98,7 +99,6 @@ pub fn restmol(
             let params = GencanParams {
                 maxit: gencan_maxit,
                 maxfc: gencan_maxit * 10,
-                iprint: 0,
                 ..Default::default()
             };
             pgencan(&mut xmol, sys, &params, precision, workspace);

@@ -4,13 +4,13 @@
 //! Crate-root leaf over molrs only. Coordinates are in Å (the crate's length
 //! unit, as carried by the frame — nothing is converted).
 
+use molrs::op::types::{F, FNx3};
 use molrs::perceive::rotatable::{
     RotatableBond, UnknownBondPolicy, detect_rotatable_bonds_with_downstream,
 };
-use molrs::system::atomistic::Atomistic;
-use molrs::types::{F, FNx3};
+use molrs::system::Atomistic;
 
-/// Coordinate rows of an `N × 3` array (as `molrs::Frame::coords` returns it), in
+/// Coordinate rows of an `N × 3` array (as `molrs::store::Frame::coords` returns it), in
 /// the array's row order — the `[x, y, z]` triples molpack's placement code
 /// works in.
 pub(crate) fn coord_rows(xyz: &FNx3) -> Vec<[F; 3]> {
@@ -38,7 +38,7 @@ mod rotatable_tests {
 
     use super::rotatable_bonds;
     use crate::testutil::{chain_frame, chain_graph};
-    use molrs::system::atomistic::Atomistic;
+    use molrs::system::Atomistic;
     use ndarray::Array1;
 
     /// A frame carrying connectivity but no `bond_type` column — a PDB `CONECT`

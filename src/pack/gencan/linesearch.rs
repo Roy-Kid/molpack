@@ -1,9 +1,9 @@
 //! Truncated-Newton line search (`tnls` in Packmol `gencan.f`).
 
-use molrs::types::F;
+use molrs::op::types::F;
 
+use crate::Objective;
 use crate::eval::EvalMode;
-use crate::objective::Objective;
 
 /// Truncated-Newton line search result.
 pub(super) struct LsResult {

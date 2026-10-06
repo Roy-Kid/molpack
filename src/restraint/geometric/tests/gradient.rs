@@ -3,16 +3,16 @@
 
 use std::sync::Arc;
 
-use crate::F;
+use crate::AtomRestraint;
 use crate::PackContext;
 use crate::objective::{compute_f, compute_fg, compute_g};
-use crate::restraint::AtomRestraint;
 use crate::restraint::geometric::{
     AbovePlaneRestraint, BelowPlaneRestraint, InsideBoxRestraint, InsideCubeRestraint,
     InsideCylinderRestraint, InsideEllipsoidRestraint, InsideSphereRestraint, OutsideBoxRestraint,
     OutsideCubeRestraint, OutsideCylinderRestraint, OutsideEllipsoidRestraint,
     OutsideSphereRestraint,
 };
+use molrs::op::types::F;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ fn single_atom_system(nmol: usize) -> PackContext {
 
 fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
     let side = cell_len * cell_n as F;
-    sys.simbox = molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
+    sys.simbox = molrs::spatial::SimBox::cube(side, molrs::op::types::F3::zeros(3), [false; 3])
         .expect("cell");
     sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
     sys.resize_cell_arrays();
@@ -625,7 +625,7 @@ fn fused_function_and_gradient_matches_separate_evaluation() {
 
 #[test]
 fn collective_restraint_gradient_matches_finite_difference_through_the_objective() {
-    use crate::restraint::GaussianPlane;
+    use crate::GaussianPlane;
 
     // Five monatomic molecules strung along z, biased toward a Gaussian
     // profile about the plane z = 0. The gradient of a distribution-matching
@@ -678,7 +678,7 @@ fn collective_restraint_gradient_matches_finite_difference_through_the_objective
 // multi-atom copies deliberately.
 #[test]
 fn self_separation_gradient_matches_finite_difference_through_the_objective() {
-    use crate::restraint::SelfSeparation;
+    use crate::SelfSeparation;
 
     let nmol = 3;
     let natoms = 3;
@@ -741,7 +741,7 @@ fn self_separation_gradient_matches_finite_difference_through_the_objective() {
 
 #[test]
 fn an_inactive_species_contributes_no_collective_gradient() {
-    use crate::restraint::GaussianPlane;
+    use crate::GaussianPlane;
 
     let nmol = 4;
     let mut sys = single_atom_system(nmol);
@@ -782,7 +782,7 @@ fn an_inactive_species_contributes_no_collective_gradient() {
 
 /// Three monatomic copies strung along x at `spacing`, with `SelfSeparation`.
 fn separation_system(spacing: F, d_min: F) -> (PackContext, Vec<F>) {
-    use crate::restraint::SelfSeparation;
+    use crate::SelfSeparation;
 
     let nmol = 3;
     let mut sys = single_atom_system(nmol);
@@ -845,7 +845,7 @@ fn a_distribution_restraint_stays_out_of_the_verdict() {
     // The asymmetry that makes the above safe: a Wasserstein penalty is always
     // positive for a finite sample, so if it counted toward `frest` no pack
     // carrying one could ever converge.
-    use crate::restraint::GaussianPlane;
+    use crate::GaussianPlane;
 
     let nmol = 4;
     let mut sys = single_atom_system(nmol);

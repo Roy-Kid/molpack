@@ -7,21 +7,20 @@
 //!
 //! The loader does **not** touch molecule files in Rust. Each
 //! ``structure``'s template is read on the Python side, defaulting to
-//! :mod:`molrs` (``molrs.io.read_pdb`` / ``read_xyz``) but pluggable via the
-//! ``read_frame`` argument. This keeps the PyO3 wheel free of
-//! ``molrs-io`` and lets users plug in their own loader (mdtraj, ASE, …) as
-//! long as it returns a ``molrs.Frame``.
+//! ``molrs.io.read_frame`` (format from the script's ``filetype`` or the
+//! file name) but pluggable via the ``read_frame`` argument. This keeps the
+//! PyO3 wheel free of ``molrs-io`` and lets users plug in their own loader
+//! (mdtraj, ASE, …) as long as it returns a ``molrs.Frame``.
 
 use std::path::PathBuf;
 
-use pyo3::exceptions::{PyImportError, PyOSError, PyValueError};
+use pyo3::exceptions::{PyImportError, PyOSError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 
 use molpack::script::{self, ScriptPlan, StructurePlan};
 
 use crate::entry::PyGenCanPack;
-use crate::helpers::script_error_to_pyerr;
+use crate::errors::script_error_to_pyerr;
 use crate::target::{PyTarget, target_from_frame};
 
 /// Output of [`load_script`] — four fields bundled as a PyClass so
@@ -87,8 +86,8 @@ impl PyScriptJob {
 ///     load each ``structure`` template. The returned object only needs
 ///     a ``frame["atoms"]`` block exposing ``x`` / ``y`` / ``z`` and an
 ///     ``element`` column. Must be a :class:`molrs.Frame` (``molpy.Frame``
-///     is the same class). Defaults to :mod:`molrs`'s ``read_pdb`` /
-///     ``read_xyz`` dispatched by file extension.
+///     is the same class). Defaults to ``molrs.io.read_frame``, which
+///     picks the format from ``filetype`` or the file name.
 ///
 /// Returns
 /// -------
@@ -159,39 +158,15 @@ fn build_target(
     })
 }
 
-/// Build a default loader: import :mod:`molrs` and dispatch on the
-/// file extension or the script's ``filetype`` keyword.
+/// The default loader: ``molrs.io.read_frame(path, format)``.
 ///
-/// Returns a Python callable; failures (e.g. ``molrs`` not installed)
-/// surface as :class:`ImportError` from the script-loading site.
+/// Failures (e.g. ``molrs`` not installed) surface as :class:`ImportError`
+/// from the script-loading site.
 fn default_molrs_loader(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let molrs = py.import("molrs").map_err(|e| {
         PyImportError::new_err(format!(
             "loading template files needs `molcrafts-molrs` (or pass read_frame=...): {e}"
         ))
     })?;
-
-    let globals = PyDict::new(py);
-    globals.set_item("molrs", molrs)?;
-
-    let code = pyo3::ffi::c_str!(
-        r#"
-def _loader(path, filetype):
-    fmt = (filetype or '').lower() or path.rsplit('.', 1)[-1].lower()
-    if fmt == 'pdb':
-        return molrs.io.read_pdb(path)
-    if fmt == 'xyz':
-        return molrs.io.read_xyz(path)
-    raise ValueError(
-        f"default loader handles .pdb / .xyz only - pass read_frame=... for {fmt!r}"
-    )
-"#
-    );
-    py.run(code, Some(&globals), None)
-        .map_err(|e| PyValueError::new_err(format!("failed to build default frame loader: {e}")))?;
-
-    let loader = globals.get_item("_loader")?.ok_or_else(|| {
-        PyValueError::new_err("internal error: _loader missing from default-loader globals")
-    })?;
-    Ok(loader.unbind())
+    Ok(molrs.getattr("io")?.getattr("read_frame")?.unbind())
 }

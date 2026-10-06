@@ -290,7 +290,8 @@ impl Script {
     ///
     /// Available when the `io` feature is on; equivalent to calling
     /// [`Script::lower`] then loading each structure file with
-    /// [`super::io::read_frame`] and applying its [`StructurePlan`].
+    /// `molrs::io::read_frame` (the script's `filetype`, else the file
+    /// name, picks the format) and applying its [`StructurePlan`].
     pub fn build(&self, base_dir: &Path) -> Result<BuildResult, ScriptError> {
         let plan = self.lower(base_dir)?;
         let filetype = plan.filetype.as_deref();
@@ -298,7 +299,11 @@ impl Script {
             .structures
             .iter()
             .map(|sp| -> Result<Target, ScriptError> {
-                let frame = super::io::read_frame(&sp.filepath, filetype)?;
+                let frame =
+                    molrs::io::read_frame(&sp.filepath, filetype).map_err(|e| ScriptError::Io {
+                        path: sp.filepath.clone(),
+                        message: format!("reading template: {e}"),
+                    })?;
                 Ok(sp.apply(Target::new(frame, sp.number)))
             })
             .collect::<Result<_, _>>()?;

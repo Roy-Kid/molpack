@@ -3,13 +3,13 @@
 use std::sync::Arc;
 
 use crate::restraint::{AtomRestraint, Restraint};
-use molrs::Element;
+use molrs::op::types::F;
+use molrs::spatial::SimBox;
 use molrs::spatial::neighbors::CellGrid;
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::system::Element;
 use ndarray::array;
 
-pub use super::geometry::GeometryKey;
+use super::geometry::GeometryKey;
 use super::work_buffers::WorkBuffers;
 
 /// `flags` bit for a fixed-structure atom inside [`AtomProps`].
@@ -58,18 +58,25 @@ pub struct AtomProps {
     pub flags: u32,
     /// 8-byte alignment padding. Private so the struct's size remains a
     /// layout detail: flipping `F` or adding fields recomputes size at
-    /// compile time (see [`ATOM_PROPS_SIZE`] below) without churning the
+    /// compile time (see the size assertion below) without churning the
     /// public API.
     _padding: u32,
 }
 
-/// Compile-time assertion that [`AtomProps`] stays 40 bytes (`F = f64`).
-/// Shrinking it again without noticing would regress the pair-kernel
-/// cache-line budget; growing it past 48 bytes would cost an extra
-/// fetch per atom visit. The check is always compiled (not
-/// `#[cfg(test)]`) so release builds catch layout drift too.
-pub const ATOM_PROPS_SIZE: usize = 40;
-const _ATOM_PROPS_IS_40_BYTES: [(); ATOM_PROPS_SIZE] = [(); std::mem::size_of::<AtomProps>()];
+// Compile-time assertion that `AtomProps` stays 40 bytes (`F = f64`).
+// Shrinking it again without noticing would regress the pair-kernel
+// cache-line budget; growing it past 48 bytes would cost an extra
+// fetch per atom visit. The check is always compiled (not
+// `#[cfg(test)]`) so release builds catch layout drift too.
+const _: () = assert!(
+    std::mem::size_of::<AtomProps>() == 40,
+    "AtomProps must stay 40 bytes"
+);
+
+/// Default quadratic-penalty scale (`scale2`) applied when no caller override
+/// is supplied — the packer seeds [`PackContext`] with it, and post-pack
+/// validation scores penalties on the same scale.
+pub(crate) const DEFAULT_SCALE2: F = 0.01;
 
 /// Full runtime context for one packing execution.
 /// All arrays are 0-based; Fortran 1-based arrays are shifted by -1.
@@ -343,7 +350,7 @@ impl PackContext {
             move_flag: false,
             parallel_pair_eval: false,
             scale: 1.0,
-            scale2: crate::numerics::DEFAULT_SCALE2,
+            scale2: DEFAULT_SCALE2,
             sizemin: [0.0; 3],
             sizemax: [0.0; 3],
             dmax: vec![0.0; ntype],
@@ -739,11 +746,10 @@ mod atom_props_tests {
 
     #[test]
     fn atom_props_size_is_40_bytes_on_f64() {
-        // Runtime echo of the compile-time `_ATOM_PROPS_IS_40_BYTES`
-        // assertion — cheap and also readable as failing test output.
+        // Runtime echo of the compile-time size assertion — cheap and also
+        // readable as failing test output.
         assert_eq!(std::mem::size_of::<AtomProps>(), 40);
         assert_eq!(std::mem::align_of::<AtomProps>(), 8);
-        assert_eq!(ATOM_PROPS_SIZE, 40);
     }
 
     #[test]
@@ -998,9 +1004,10 @@ mod geometry_cache_tests {
 
     use std::sync::Arc;
 
+    use crate::PackContext;
     use crate::objective::{compute_f, compute_fg};
     use crate::testutil::inside_box;
-    use crate::{F, PackContext};
+    use molrs::op::types::F;
 
     // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
 
@@ -1008,9 +1015,8 @@ mod geometry_cache_tests {
 
     fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
         let side = cell_len * cell_n as F;
-        sys.simbox =
-            molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
-                .expect("cell");
+        sys.simbox = molrs::spatial::SimBox::cube(side, molrs::op::types::F3::zeros(3), [false; 3])
+            .expect("cell");
         sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
         sys.resize_cell_arrays();
     }

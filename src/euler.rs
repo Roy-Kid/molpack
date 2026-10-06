@@ -5,7 +5,7 @@
 //!   gama  = rotation about z-axis
 //!   teta  = rotation about x-axis
 
-use molrs::types::F;
+use molrs::op::types::F;
 /// Compute rotation matrix columns from Euler angles.
 /// Port of Fortran `eulerrmat`.
 ///
@@ -109,8 +109,8 @@ mod tests {
     //! Tests for Euler angle functions: eulerrmat, compcart, eulerfixed,
     //! eulerrmat_derivatives.
 
-    use crate::F;
     use crate::euler::{compcart, eulerfixed, eulerrmat, eulerrmat_derivatives};
+    use molrs::op::types::F;
 
     const TOL: F = 1e-6;
     const PI: F = std::f64::consts::PI as F;

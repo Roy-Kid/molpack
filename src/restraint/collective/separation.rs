@@ -8,9 +8,9 @@
 //! interpenetrate. This term is the missing statement: *these molecules also
 //! keep their distance from each other*.
 
+use molrs::op::types::F;
 use molrs::spatial::neighbors::CellGrid;
-use molrs::spatial::simbox::{Mic, SimBox};
-use molrs::types::F;
+use molrs::spatial::{Mic, SimBox};
 
 use super::com;
 use super::{GroupCtx, Restraint};
@@ -59,7 +59,7 @@ use super::{GroupCtx, Restraint};
 ///
 /// ```
 /// # use molpack::Target;
-/// # use molpack::restraint::SelfSeparation;
+/// # use molpack::SelfSeparation;
 /// // 50 ions that must stay 12 Å apart from one another.
 /// let ions = Target::from_coords(&[[0.0; 3]], &[1.5], 50)
 ///     .with_collective_restraint(SelfSeparation::new(12.0, 1.0));
@@ -290,10 +290,10 @@ fn partition(cell: &SimBox, d_min: F, nsites: usize) -> CellGrid {
 mod tests {
     use super::super::testutil::{assert_fd_grad_in, rng_uniform};
     use super::*;
-    use molrs::spatial::simbox::SimBox;
+    use molrs::spatial::SimBox;
 
     fn cube(side: F, periodic: bool) -> SimBox {
-        SimBox::cube(side, molrs::types::F3::zeros(3), [periodic; 3]).expect("test box")
+        SimBox::cube(side, molrs::op::types::F3::zeros(3), [periodic; 3]).expect("test box")
     }
 
     /// A context whose minimum image and partition come from the *same* box —

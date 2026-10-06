@@ -18,13 +18,14 @@
 
 use std::sync::Arc;
 
-use molrs::types::F;
+use molrs::op::types::F;
 
 use super::{PackState, Placed, evaluate_unscaled};
+use crate::AtomRestraint;
+use crate::Objective;
+use crate::context::DEFAULT_SCALE2;
 use crate::context::{PackContext, RigidView};
 use crate::eval::EvalMode;
-use crate::numerics::DEFAULT_SCALE2;
-use crate::restraint::AtomRestraint;
 use crate::restraint::geometric::InsideBoxRestraint;
 
 // ── the shared fixture ─────────────────────────────────────────────────────
@@ -124,7 +125,7 @@ fn six_dimers() -> (PackContext, Vec<F>) {
     ctx.sizemin = [0.0; 3];
     ctx.sizemax = [BOX; 3];
 
-    ctx.simbox = molrs::spatial::simbox::SimBox::cube(BOX, molrs::types::F3::zeros(3), [false; 3])
+    ctx.simbox = molrs::spatial::SimBox::cube(BOX, molrs::op::types::F3::zeros(3), [false; 3])
         .expect("cubic packing cell");
     ctx.grid = molrs::spatial::neighbors::CellGrid::with_dims([2; 3], [false; 3]);
     ctx.resize_cell_arrays();

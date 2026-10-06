@@ -1,11 +1,10 @@
-//! Shared helpers for the molpack PyO3 bindings.
+//! Error mapping for the molpack PyO3 bindings: the typed `PackError`
+//! exception hierarchy, the Rust → Python error conversions, and the slot
+//! that carries a Python exception raised inside a Rust-invoked callback.
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use std::sync::Mutex;
-
-/// Numpy float type matching molpack's `F = f64`.
-pub type NpF = f64;
 
 // ── Typed exception hierarchy ──────────────────────────────────────────────
 //

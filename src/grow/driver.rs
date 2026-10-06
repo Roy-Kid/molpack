@@ -41,23 +41,23 @@
 //! force-completed exactly as on a handler abort, each forced placement counted
 //! in `degraded`, and the outcome is `converged == false`.
 
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::spatial::SimBox;
 
+use crate::PackError;
+use crate::Target;
 use crate::context::pack_state::evaluate_unscaled;
 use crate::context::{PackState, Placed};
-use crate::error::PackError;
 use crate::grow::GrowError;
 use crate::grow::config::GrowConfig;
 use crate::grow::field::{BlockKind, OverlapField};
-use crate::grow::internal::InternalTree;
 use crate::grow::moves::{
     Chain, DeadEnd, Proposal, RestraintTable, SALT_SHUFFLE, Species, commit, force_place, propose,
-    relax, retract, stream, uniform,
+    relax, retract, stream,
 };
 use crate::handler::{Handler, PhaseInfo, StageInfo, StepInfo};
+use crate::random::uniform01;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
-use crate::target::Target;
 
 /// The chain-growth stage. Built from the Grow targets before the first
 /// [`run`](Stage::run); the targets handed to `run` must be the same objects.
@@ -108,7 +108,8 @@ impl GrowStage {
 
     /// The compiled internal-coordinate tree of species `i` (the `i`-th
     /// target passed to [`from_targets`](Self::from_targets)).
-    pub fn tree(&self, i: usize) -> &InternalTree {
+    #[cfg(test)]
+    pub fn tree(&self, i: usize) -> &crate::grow::internal::InternalTree {
         &self.species[i].tree
     }
 
@@ -268,7 +269,7 @@ impl Stage for GrowStage {
             if !serial {
                 let mut rng = stream(self.seed, u64::MAX, round, 0, SALT_SHUFFLE);
                 for i in (1..order.len()).rev() {
-                    let j = (uniform(&mut rng) * (i + 1) as F) as usize;
+                    let j = (uniform01(&mut rng) * (i + 1) as F) as usize;
                     order.swap(i, j.min(i));
                 }
             }

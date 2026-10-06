@@ -2,11 +2,11 @@
 //! carries, the intra-molecular residual [`IntraResidual`], and the
 //! coordinate reordering that assembles the frame in target-declared order.
 
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::spatial::SimBox;
 
+use crate::Target;
 use crate::context::RigidView;
-use crate::target::Target;
 
 /// The solver-native placement solution for the FREE copies, captured
 /// verbatim at the end of a run: the run's [`RigidView`] (the packed
@@ -38,7 +38,7 @@ pub(crate) struct Placements {
 ///
 /// Classification is driven by each target's
 /// [`Target::special_bonds`]. This type does not pick an exclusion depth.
-/// Analogous per-target table: [`crate::grow::internal::InternalTree::from_frame`].
+/// Analogous per-target table: the growth tree built by `InternalTree::from_frame`.
 #[derive(Debug, Clone, Copy)]
 pub struct IntraResidual {
     /// Minimum same-copy pair distance among pairs the table scores (Å).
@@ -53,7 +53,7 @@ enum IntraSkip {
     Identity,
     /// `Topology::from_frame` `NotFound` / `Validation`: omit the target.
     Omit,
-    /// Per-atom skip lists from [`molrs::Topology::exclusions`] (sorted,
+    /// Per-atom skip lists from [`molrs::system::Topology::exclusions`] (sorted,
     /// root-inclusive).
     Partners(Vec<Vec<usize>>),
 }
@@ -66,7 +66,7 @@ impl IntraResidual {
     /// Spec 05 reads `Target.special_bonds` (no longer broadcasts depth 3).
     ///
     /// A missing template or a zero-edge bond graph is identity exemption
-    /// only (`i == j` skipped; every `i != j` scored). [`molrs::Topology::from_frame`]
+    /// only (`i == j` skipped; every `i != j` scored). [`molrs::system::Topology::from_frame`]
     /// errors `NotFound` and `Validation` omit that target — neither class is
     /// updated — so a broken 1-2 is not reported as scored.
     pub fn from_targets(targets: &[Target], positions: &[[F; 3]], simbox: &SimBox) -> Self {
@@ -84,7 +84,7 @@ impl IntraResidual {
             let span = ncopy * n;
             let skip = match target.template.as_ref() {
                 None => IntraSkip::Identity,
-                Some(frame) => match molrs::Topology::from_frame(frame) {
+                Some(frame) => match molrs::system::Topology::from_frame(frame) {
                     Ok(topo) if topo.n_bonds() == 0 => IntraSkip::Identity,
                     Ok(topo) => IntraSkip::Partners(topo.exclusions(table)),
                     Err(_) => IntraSkip::Omit,
@@ -135,7 +135,7 @@ impl IntraResidual {
 /// `Placements` snapshot, not the public [`Self::frame`] — reconstructing
 /// COM from the assembled frame would lose bitwise continuity.
 ///
-/// The `frame` is built by [`crate::assemble::assemble_frame`]: every
+/// The `frame` is built by molpack's frame assembly (`assemble_frame`): every
 /// template replayed onto the packed coordinates, topology included.
 /// Intra-molecular residual distances on [`Self::intra`] are in Å.
 #[derive(Debug, Clone)]
@@ -143,7 +143,7 @@ pub struct State {
     /// The packed system: an `atoms` block with `id` and `mol_id` (both
     /// 1-based, unsigned), `x` / `y` / `z` (Å) and each template's carried
     /// columns, plus the templates' relation blocks and the resolved cell.
-    pub frame: molrs::Frame,
+    pub frame: molrs::store::Frame,
     /// The verbatim placement solution, for cross-entry seeding
     /// (`GenCanPack::with_restart`).
     pub(crate) placements: Placements,
@@ -151,7 +151,7 @@ pub struct State {
     pub fdist: F,
     /// Intra-molecular residual (Å, minimum image): scored vs exempted
     /// same-copy minima. `Pipeline::assemble` reads each target's
-    /// [`crate::target::Target::special_bonds`].
+    /// [`crate::Target::special_bonds`].
     pub intra: IntraResidual,
     /// Maximum constraint violation at termination.
     pub frest: F,
@@ -215,12 +215,12 @@ pub(crate) fn positions_in_target_order(
 #[cfg(test)]
 mod tests {
     use super::IntraResidual;
-    use crate::target::Target;
+    use crate::Target;
     use crate::testutil::{chain_bonds, frame_from_parts};
-    use molrs::BondDistanceWeights;
-    use molrs::spatial::simbox::SimBox;
+    use molrs::spatial::SimBox;
+    use molrs::system::BondDistanceWeights;
 
-    use molrs::types::F;
+    use molrs::op::types::F;
     use ndarray::array;
 
     fn along_x(n: usize) -> Vec<[F; 3]> {

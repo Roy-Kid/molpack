@@ -52,12 +52,11 @@ cat mixture.inp | molpack
 | Addition | Description |
 |---|---|
 | `avoid_overlap <no\|false\|0>` | Disable the default fixed-solute initial-placement guard. Leave it on unless you need to reproduce a less guarded initialization. |
-| `filetype sdf` | Read SDF/MOL inputs. Read-only. |
-| `filetype lammps_dump` | Read LAMMPS dump inputs and write `.lammpstrj` outputs. |
-| `filetype lammps_data` | Read LAMMPS data inputs. Read-only. |
+| `filetype <format>` | Any format `molrs::io::read_frame` reads (`sdf`, `mol2`, `gro`, `cif`, `lammps_data`, `lammps_dump`, …), named or by extension. |
 
-Unknown top-level keywords are rejected instead of ignored. Output format is
-inferred from the `output` extension.
+Unknown top-level keywords are rejected instead of ignored. Files are read and
+written through `molrs::io::{read_frame, write_frame}`; the output format is
+inferred from the `output` file name.
 
 ## Quick start
 
@@ -83,7 +82,7 @@ let target = Target::from_coords(&positions, &radii, 100)
 // `GenCanPack::new().run(...)` is a complete call; `200` is the outer-loop
 // budget.
 //
-// `run` returns a `State`: the packed, topology-complete `molrs::Frame`
+// `run` returns a `State`: the packed, topology-complete `molrs::store::Frame`
 // in `.frame`, plus `fdist`, `frest`, `converged`, `degraded`.
 let result = GenCanPack::new().run(&[target], 200)?;
 let frame = result.frame;
@@ -132,8 +131,8 @@ Behaviour is tested in `#[cfg(test)]` modules next to the code it belongs
 to — molpack has no `tests/` directory and no benchmark suite.
 
 ```bash
-cargo test --lib --features cli,ff       # the gate: in-module unit tests
-cargo test --doc --features cli,ff       # rustdoc examples
+cargo test --lib --features cli       # the gate: in-module unit tests
+cargo test --doc --features cli       # rustdoc examples
 cd python && maturin develop --release && pytest   # Python wheel
 ```
 

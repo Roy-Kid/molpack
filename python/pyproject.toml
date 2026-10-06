@@ -12,7 +12,6 @@ license = "BSD-3-Clause"
 # Minor-line pin — same major.minor as molrs; patch may drift.
 dependencies = [
   "numpy>=2.0",
-  "typer>=0.12",
   "molcrafts-molrs>=0.16.0,<0.17",
 ]
 
@@ -40,7 +39,6 @@ doc = [
 typecheck = [
   "ruff",
   "ty",
-  "typer>=0.12",
   "numpy>=2.0",
   "molcrafts-molrs>=0.16.0,<0.17",
   # `ty check` walks examples/, several of which build templates with molpy.
@@ -50,7 +48,6 @@ typecheck = [
 ]
 test = [
   "pytest",
-  "typer>=0.12",
   "numpy>=2.0",
   "molcrafts-molrs>=0.16.0,<0.17",
 ]
@@ -70,9 +67,6 @@ doc = [
   # The molcrafts docs theme (zensical.toml sets `theme.name = "molcrafts"`).
   "molcrafts-zensical-theme>=0.2.5",
 ]
-
-[project.scripts]
-molpack = "molpack.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/MolCrafts/molpack"
@@ -146,7 +140,6 @@ deps = [
   "maturin>=1.0,<2.0",
   "pytest",
   "numpy>=2.0",
-  "typer>=0.12",
 ]
 pass_env = [
   "HOME",

@@ -1,8 +1,8 @@
 //! Python wrappers for cross-cutting typed values: `Angle`, `Axis`,
 //! `CenteringMode`. All three mirror the Rust types defined in
-//! `molpack::target` 1:1.
+//! the molpack crate root 1:1.
 
-use molpack::target::{Angle, Axis, CenteringMode};
+use molpack::{Angle, Axis, CenteringMode};
 use pyo3::prelude::*;
 
 // ── Angle ──────────────────────────────────────────────────────────────────

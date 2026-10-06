@@ -50,9 +50,9 @@ prek pre-push and CI run the **same** commands (no project `scripts/` wrappers):
 ```bash
 # Rust — same as CI "rust tests" job. Behaviour lives in `#[cfg(test)]`
 # modules next to the code; there is no tests/ directory.
-cargo test --lib --features cli,ff
-cargo test --doc --features cli,ff
-cargo check --all-targets --features cli,ff      # bin + examples must compile
+cargo test --lib --features cli
+cargo test --doc --features cli
+cargo check --all-targets --features cli      # bin + examples must compile
 cargo check --no-default-features && cargo check --features rayon
 
 # Python — tox isolated env (tox itself from python/ dependency-group dev)

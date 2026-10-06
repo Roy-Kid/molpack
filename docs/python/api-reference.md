@@ -545,8 +545,9 @@ ions = (
 ### `load_script(path, *, read_frame=None) -> ScriptJob`
 
 Parse and lower a Packmol-compatible `.inp` script. Template files are
-read on the Python side (defaulting to `molrs.io.read_pdb` / `read_xyz` by
-extension), so the wheel stays free of `molrs-io`. Pass `read_frame`
+read on the Python side (defaulting to `molrs.io.read_frame`, which picks the
+format from the script's `filetype` or the file name), so the wheel stays free
+of `molrs-io`. Pass `read_frame`
 — a callable `(path, filetype) -> molrs.Frame` — to plug in another
 loader (mdtraj, ASE, …).
 

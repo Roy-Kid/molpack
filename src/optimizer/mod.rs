@@ -1,23 +1,25 @@
 //! In-loop geometry optimizers driven by [`molrs::optimize::Optimizer`].
 //!
-//! Callers construct a molrs optimizer (`LBFGS`, or
-//! `SoftLbfgs::new(SoftSpec::from_frame(..), ..)` for the soft overlap +
-//! 1-2 / 1-3 objective — both need the `ff` feature — or molpack's
+//! Callers construct a molrs optimizer (`LBFGS` over a force-field potential,
+//! e.g. `LBFGS::new(Arc::new(SoftSpec::from_frame(..).potential(None)), ..)`
+//! for the soft overlap + 1-2 / 1-3 objective — both live in molrs's `ff`
+//! module, which the caller enables on its own molrs dependency — or molpack's
 //! [`TorsionMcOptimizer`]) and bind it with
 //! [`GenCanPack::with_optimizer`](crate::GenCanPack::with_optimizer) plus an
 //! [`OptimizeSelect`] that names which components to assemble each call.
 
+use molrs::op::types::F;
 use molrs::optimize::{Optimizer, set_free_mask};
-use molrs::spatial::simbox::Mic;
-use molrs::store::frame::Frame;
-use molrs::types::F;
+use molrs::spatial::Mic;
+use molrs::store::Frame;
 
+use crate::Objective;
 use crate::context::PackContext;
 use crate::euler::eulerrmat;
 use crate::eval::EvalMode;
 use crate::target::centered_coords;
 
-pub mod torsion_mc;
+mod torsion_mc;
 pub use torsion_mc::TorsionMcOptimizer;
 
 /// How selected components are optimized.
@@ -66,7 +68,7 @@ impl OptimizeSelect {
 }
 
 /// One bound optimizer + selection, stored on [`crate::GenCanPack`].
-pub struct OptimizerBinding {
+pub(crate) struct OptimizerBinding {
     pub select: OptimizeSelect,
     pub optimizer: Box<dyn Optimizer>,
 }
@@ -84,7 +86,7 @@ pub struct OptimizerBinding {
 /// stage's own configuration and must still be there on the next run, so a
 /// run may resolve them but never take them. Cloning is not the alternative
 /// — [`Optimizer`] is a trait object with no `Clone` bound.
-pub struct ResolvedBinding<'a> {
+pub(crate) struct ResolvedBinding<'a> {
     pub select: &'a OptimizeSelect,
     pub type_indices: Vec<usize>,
     pub optimizer: &'a mut dyn Optimizer,
@@ -340,7 +342,7 @@ fn environment_atoms(
 
 #[cfg(test)]
 mod tests {
-    use molrs::spatial::simbox::SimBox;
+    use molrs::spatial::SimBox;
     use ndarray::array;
 
     use super::*;
@@ -444,15 +446,15 @@ mod tests {
     /// molrs's soft-overlap L-BFGS bound jointly over two species, in a box
     /// crowded enough that the all-type phase iterates: it is called, the
     /// non-harm gate keeps it from worsening the pack, and the pack converges.
-    #[cfg(feature = "ff")]
     #[test]
     fn joint_soft_lbfgs_over_two_species_converges() {
-        use molrs::optimize::{SoftLbfgs, SoftSpec};
+        use molrs::ff::potential::soft::SoftSpec;
+        use molrs::optimize::LBFGS;
 
         use crate::{GenCanPack, PackEngine, Target};
 
         /// Counts the calls it forwards to the wrapped optimizer.
-        struct Counted(SoftLbfgs, std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        struct Counted(LBFGS, std::sync::Arc<std::sync::atomic::AtomicUsize>);
         impl Optimizer for Counted {
             fn run(&mut self, frame: &mut Frame) -> Result<molrs::optimize::OptReport, String> {
                 self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -468,7 +470,13 @@ mod tests {
             .with_name("water")
             .with_restraint(cube());
         // A coordinates-only group has no bonds: a pure soft-overlap push.
-        let soft = SoftLbfgs::new(SoftSpec::from_frame(&Frame::new()), 0.05, 200, 0.2, 8);
+        let soft = LBFGS::new(
+            std::sync::Arc::new(SoftSpec::from_frame(&Frame::new()).potential(None)),
+            0.05,
+            200,
+            0.2,
+            8,
+        );
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let state = GenCanPack::new()
             .with_tolerance(2.0)

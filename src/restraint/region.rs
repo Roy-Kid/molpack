@@ -7,8 +7,8 @@
 
 use std::sync::Arc;
 
+use molrs::op::types::F;
 use molrs::spatial::region::Region;
-use molrs::types::F;
 
 use super::AtomRestraint;
 
@@ -23,7 +23,7 @@ use super::AtomRestraint;
 /// `2 · scale · distance · ∇distance`, the region's outward direction.
 /// The penalty is quadratic in the length by which the boundary is missed,
 /// so it consumes `scale` like the `.inp` box and plane kernels (the
-/// two-scale contract in [`super`]): `precision = 0.01` reads as "within
+/// two-scale contract on [`AtomRestraint`](crate::AtomRestraint)): `precision = 0.01` reads as "within
 /// 0.1 Å" of any region, and a `Cuboid` reproduces the box kernel's value.
 ///
 /// The region is shared: `Arc<dyn Region + Send + Sync>` is what molrs's
@@ -35,7 +35,7 @@ use super::AtomRestraint;
 /// ```
 /// use std::sync::Arc;
 /// use molpack::RegionRestraint;
-/// use molpack::restraint::AtomRestraint;
+/// use molpack::AtomRestraint;
 /// use molrs::spatial::region::Sphere;
 /// use ndarray::array;
 ///

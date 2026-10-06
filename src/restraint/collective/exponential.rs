@@ -8,7 +8,7 @@
 //! Because the quantiles are non-negative, both members place the densest copies
 //! at the plane/centre (`ξ = 0`) and thin them out with decay length `λ`.
 
-use molrs::types::F;
+use molrs::op::types::F;
 
 use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg, unit};
 use super::{GroupCtx, Restraint};

@@ -36,7 +36,7 @@ let natoms = result.natoms();
 println!("packed {natoms} atoms");
 ```
 
-`run()` returns a `State`. The packed `molrs::Frame` is its `frame`
+`run()` returns a `State`. The packed `molrs::store::Frame` is its `frame`
 field, alongside the convergence diagnostics:
 
 ```rust

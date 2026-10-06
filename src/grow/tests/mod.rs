@@ -32,15 +32,14 @@ use crate::testutil::{chain_bonds, frame_from_parts, zigzag_coords};
 
 use crate::grow::{GrowConfig, GrowError, TorsionPrior};
 
-use crate::{
-    CbmcGrow, F, GenCanPack, IntraResidual, PackEngine, PackError, RegionRestraint, Target,
-};
+use crate::{CbmcGrow, GenCanPack, IntraResidual, PackEngine, PackError, RegionRestraint, Target};
+use molrs::op::types::F;
 
-use molrs::BondDistanceWeights;
+use molrs::system::BondDistanceWeights;
 
-use molrs::store::block::Block;
+use molrs::store::Block;
 
-use molrs::store::frame::Frame;
+use molrs::store::Frame;
 
 use ndarray::Array1;
 
@@ -50,7 +49,7 @@ use rand::{RngExt, SeedableRng};
 
 use std::sync::Arc;
 
-/// Zigzag bead chain as a `molrs::Frame` (see [`zigzag_coords`] /
+/// Zigzag bead chain as a `molrs::store::Frame` (see [`zigzag_coords`] /
 /// [`frame_from_parts`]).
 fn chain_frame(n: usize, bond_len: F, with_bonds: bool) -> Frame {
     let bonds = if with_bonds {

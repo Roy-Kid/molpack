@@ -16,15 +16,15 @@
 //! new `*_xi`/`*_scatter` pair plus its two `*_match_*` wrappers, reused by every
 //! distribution.
 
-use molrs::types::F;
+use molrs::op::types::F;
 
 use super::engine::{wasserstein_grad, wasserstein_value};
 
-/// Validate / normalise a non-zero direction; panics on a zero vector.
+/// Validate / normalise a plane normal through molrs's
+/// [`normalize`](molrs::op::vec3::normalize); panics when it is not a
+/// direction (zero, shorter than `MIN_DIRECTION_LENGTH`, or non-finite).
 pub(super) fn unit(normal: [F; 3]) -> [F; 3] {
-    let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-    assert!(norm > 0.0, "normal must be non-zero");
-    [normal[0] / norm, normal[1] / norm, normal[2] / norm]
+    molrs::op::vec3::normalize(normal).expect("normal must be non-zero")
 }
 
 // --------------------------------------------------------------------- plane

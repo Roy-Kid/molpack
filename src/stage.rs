@@ -1,79 +1,81 @@
-//! The packing-stage seam.
-//!
-//! [`PackEngine::run`](crate::PackEngine::run) is five stages; the middle
-//! two — initial state and the iteration driver — are *the algorithm*, and
-//! everything around them (target lowering, `PackContext` construction,
-//! frame assembly) is shared infrastructure. A [`Stage`] is one
-//! interchangeable implementation of that middle: it receives the run's
-//! [`PackState`], drives it towards a feasible configuration, and declares
-//! what it needed on the way in and what it promises on the way out.
-//!
-//! Every algorithm in this crate is a peer on this seam — a stage never
-//! reaches into another stage's driver, and the verdict on a run always
-//! comes from the shared objective evaluated on the final state, never from
-//! a stage's own bookkeeping.
-//!
-//! **Rust-only:** this module ([`Stage`], [`Requires`], [`Guarantees`],
-//! [`StageOutcome`], [`Budget`]) is deliberately not mirrored in the Python
-//! wheel — Python picks the algorithm by picking the entry (`GenCanPack` /
-//! `CbmcGrow` / `LatticeGrow`), and implementing a custom stage is a
-//! Rust-level extension point.
-//!
-//! # The repair-cost ladder
-//!
-//! Structural defects are not equally expensive to repair, and the crate
-//! orders them as a six-rung ladder L0–L5. The ladder is a **type**, and it
-//! lives with its only reader: [`Layers`](crate::invariant::Layers), next to
-//! [`Invariant::layer`](crate::Invariant::layer). Nothing here branches on a
-//! rung — this seam's declarations ([`Requires`] / [`Guarantees`]) are about
-//! placement shape — so the table and the rung names are documented there,
-//! once.
-//!
-//! **The rule the ladder exists for: a stage is responsible only for the
-//! layers it declares.** A stage that promises nothing about chain
-//! statistics has not failed when they are poor; a stage that promises no
-//! overlaps has failed when overlaps remain. A caller composes a run by
-//! stacking stages until every rung it cares about is owned by someone, and
-//! guards the ones that matter with
-//! [`Pipeline::with_guarded`](crate::Pipeline::with_guarded).
-//!
-//! # Where the verdict lives
-//!
-//! The two violation maxima the shared objective produces — the largest
-//! inter-molecular contact violation and the largest restraint violation,
-//! the pair [`State`](crate::State) reports — are **authoritative
-//! on the state after [`Stage::run`] returns**, where the context owns them
-//! as its own fields. [`StageOutcome`] carries no verdict: a stage reports
-//! only what it alone knows (whether it hit its own convergence criterion,
-//! and how many times it had to relax a constructive guarantee). A handler
-//! that wants the numbers reads them off the context in
-//! [`Handler::on_stage_end`], which is handed the state precisely so that no
-//! stage can self-report a verdict the shared ruler would disagree with.
-//!
-//! # What this seam deliberately does not have
-//!
-//! * **No `validate` hook.** Not one implementor in this crate would
-//!   override it: the rigid-body path validates its targets from its entry,
-//!   and both growth paths validate their cell from theirs. A pre-flight
-//!   hook nobody implements is a step a caller can forget plus a concept
-//!   nobody pays for. The seam is exactly four methods.
-//! * **No layer type of its own.** The ladder is
-//!   [`Layers`](crate::invariant::Layers), owned by the module that reads it.
+//! The packing-stage seam: [`Stage`](crate::Stage) and its documentation.
 
+use crate::Handler;
+use crate::PackError;
 use crate::context::{PackState, Placed};
-use crate::error::PackError;
-use crate::handler::Handler;
 
+use crate::Target;
 pub use crate::outcome::StageOutcome;
-use crate::target::Target;
-use molrs::types::F;
+use molrs::op::types::F;
 
 /// One packing algorithm, selected by picking its engine entry
 /// ([`GenCanPack`](crate::GenCanPack), [`CbmcGrow`](crate::CbmcGrow),
 /// [`LatticeGrow`](crate::LatticeGrow)).
+///
+/// The packing-stage seam.
+///
+/// [`PackEngine::run`](crate::PackEngine::run) is five stages; the middle
+/// two — initial state and the iteration driver — are *the algorithm*, and
+/// everything around them (target lowering, `PackContext` construction,
+/// frame assembly) is shared infrastructure. A [`Stage`] is one
+/// interchangeable implementation of that middle: it receives the run's
+/// [`PackState`], drives it towards a feasible configuration, and declares
+/// what it needed on the way in and what it promises on the way out.
+///
+/// Every algorithm in this crate is a peer on this seam — a stage never
+/// reaches into another stage's driver, and the verdict on a run always
+/// comes from the shared objective evaluated on the final state, never from
+/// a stage's own bookkeeping.
+///
+/// **Rust-only:** this module ([`Stage`], [`Requires`], [`Guarantees`],
+/// [`StageOutcome`], [`Budget`]) is deliberately not mirrored in the Python
+/// wheel — Python picks the algorithm by picking the entry (`GenCanPack` /
+/// `CbmcGrow` / `LatticeGrow`), and implementing a custom stage is a
+/// Rust-level extension point.
+///
+/// # The repair-cost ladder
+///
+/// Structural defects are not equally expensive to repair, and the crate
+/// orders them as a six-rung ladder L0–L5. The ladder is a **type**, and it
+/// lives with its only reader: [`Layers`](crate::Layers), next to
+/// [`Invariant::layer`](crate::Invariant::layer). Nothing here branches on a
+/// rung — this seam's declarations ([`Requires`] / [`Guarantees`]) are about
+/// placement shape — so the table and the rung names are documented there,
+/// once.
+///
+/// **The rule the ladder exists for: a stage is responsible only for the
+/// layers it declares.** A stage that promises nothing about chain
+/// statistics has not failed when they are poor; a stage that promises no
+/// overlaps has failed when overlaps remain. A caller composes a run by
+/// stacking stages until every rung it cares about is owned by someone, and
+/// guards the ones that matter with
+/// [`Pipeline::with_guarded`](crate::Pipeline::with_guarded).
+///
+/// # Where the verdict lives
+///
+/// The two violation maxima the shared objective produces — the largest
+/// inter-molecular contact violation and the largest restraint violation,
+/// the pair [`State`](crate::State) reports — are **authoritative
+/// on the state after [`Stage::run`] returns**, where the context owns them
+/// as its own fields. [`StageOutcome`] carries no verdict: a stage reports
+/// only what it alone knows (whether it hit its own convergence criterion,
+/// and how many times it had to relax a constructive guarantee). A handler
+/// that wants the numbers reads them off the context in
+/// [`Handler::on_stage_end`], which is handed the state precisely so that no
+/// stage can self-report a verdict the shared ruler would disagree with.
+///
+/// # What this seam deliberately does not have
+///
+/// * **No `validate` hook.** Not one implementor in this crate would
+///   override it: the rigid-body path validates its targets from its entry,
+///   and both growth paths validate their cell from theirs. A pre-flight
+///   hook nobody implements is a step a caller can forget plus a concept
+///   nobody pays for. The seam is exactly four methods.
+/// * **No layer type of its own.** The ladder is
+///   [`Layers`](crate::Layers), owned by the module that reads it.
 pub trait Stage: Send {
     /// Short identifier for logs and reports. The same string a
-    /// [`StageInfo`](crate::handler::StageInfo) carries to handlers.
+    /// [`StageInfo`](crate::StageInfo) carries to handlers.
     fn name(&self) -> &'static str;
 
     /// What the state must already hold for this stage to run.
@@ -183,7 +185,7 @@ pub struct Budget {
     /// Outer-iteration allowance. The GENCAN path reads this as its loop
     /// count; growth reads it as an allowance of *passes over a chain*, so its
     /// round loop is capped at `max_loops × (the longest species' n_steps + 1)`
-    /// rounds — see [`grow::driver`](crate::grow::driver). Serial growth
+    /// rounds — see the growth driver (`grow/driver.rs`). Serial growth
     /// scheduling advances only one chain per round
     /// ([`GrowConfig::with_serial`](crate::grow::GrowConfig::with_serial)), so
     /// finishing every chain then needs `max_loops ≥ n_chains`.
@@ -227,7 +229,7 @@ mod tests {
     //! cargo test -p molcrafts-molpack --lib
     //! ```
 
-    use crate::handler::StageInfo;
+    use crate::StageInfo;
     use crate::{
         Budget, Guarantees, Handler, PackContext, PackError, PackState, Placed, Requires, Stage,
         StageOutcome, StepInfo, Target,

@@ -10,7 +10,7 @@
 //! Soundness: both wheels link the same `molcrafts-molrs-ffi` and the same
 //! always-on `molcrafts-molrs` core, whose `Frame` / `Block` / `SimBox` layout
 //! is feature-independent. So a handle minted by molrs-python (built with the
-//! `full` feature set) and the `molrs::Frame` it lends are layout-identical to
+//! `full` feature set) and the `molrs::store::Frame` it lends are layout-identical to
 //! what molpack (built `ff`-only) sees across the extension boundary.
 //!
 //! The version contract is **minor-line = ABI version** (`molrs_ffi::abi`):
@@ -30,16 +30,16 @@
 
 use std::sync::Arc;
 
-use molrs::Frame;
+use molrs::spatial::SimBox;
 use molrs::spatial::region::Region;
-use molrs::spatial::simbox::SimBox;
+use molrs::store::Frame;
 use molrs_ffi::{FfiError, FrameRef, RegionRef};
 use ndarray::Array1;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyCapsule, PyModule};
 
-use molpack::F;
+use molrs::op::types::F;
 
 /// Map a molrs-ffi handle error into a Python exception.
 fn ffi_err(e: FfiError) -> PyErr {

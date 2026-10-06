@@ -16,11 +16,11 @@
 
 use std::collections::HashMap;
 
-use molrs::store::frame::Frame;
-use molrs::system::atomistic::Atomistic;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::store::Frame;
+use molrs::system::Atomistic;
 
-use crate::grow_error::GrowError;
+use crate::grow::GrowError;
 
 /// One atom's placement recipe against three earlier atoms.
 #[derive(Debug, Clone)]
@@ -43,7 +43,6 @@ pub struct Site {
 /// A template molecule rewritten as a growable internal-coordinate tree.
 #[derive(Debug, Clone)]
 pub struct InternalTree {
-    n_atoms: usize,
     /// The three atoms placed as one rigid seed, in placement order.
     seed: [usize; 3],
     /// Seed geometry in the template frame, centred on `seed[0]`.
@@ -68,13 +67,13 @@ impl InternalTree {
     /// Decompose a template frame using `weights` as the intramolecular skip
     /// table. A non-0/1 weight is [`GrowError::NonBinarySpecialBond`] before
     /// exclusions are compiled. The all-atom convention is
-    /// [`molrs::BondDistanceWeights::from_exclusion_depth`]`(3)`.
+    /// [`molrs::system::BondDistanceWeights::from_exclusion_depth`]`(3)`.
     ///
     /// Coordinates are in Å. The frame must carry an `atoms` block with
     /// `x`/`y`/`z` and a connected acyclic bond graph of at least 3 atoms.
     pub fn from_frame(
         frame: &Frame,
-        weights: &molrs::BondDistanceWeights,
+        weights: &molrs::system::BondDistanceWeights,
     ) -> Result<Self, GrowError> {
         if let Some((index, weight)) = super::config::binary_violation(weights) {
             return Err(GrowError::NonBinarySpecialBond { index, weight });
@@ -130,7 +129,7 @@ impl InternalTree {
                 .ok_or(GrowError::NoReference(i))?;
 
             let bond = norm(sub(xyz[i], xyz[p]));
-            let angle = angle_at(xyz[g], xyz[p], xyz[i]);
+            let angle = angle(xyz[g], xyz[p], xyz[i]);
             let torsion = dihedral(xyz[gg], xyz[g], xyz[p], xyz[i]);
 
             let key = (p.min(g), p.max(g));
@@ -196,7 +195,6 @@ impl InternalTree {
             .collect();
 
         Ok(Self {
-            n_atoms: n,
             seed,
             seed_local,
             sites,
@@ -207,8 +205,10 @@ impl InternalTree {
         })
     }
 
+    /// Atoms in the tree: the three-atom seed plus one site per other atom.
+    #[cfg(test)]
     pub fn n_atoms(&self) -> usize {
-        self.n_atoms
+        3 + self.sites.len()
     }
     pub fn n_steps(&self) -> usize {
         self.steps.len()
@@ -226,7 +226,7 @@ impl InternalTree {
     /// Same-molecule partners of `atom` within this tree's exclusion depth,
     /// ascending and **including `atom` itself** — the skip set the overlap
     /// field expects, since an atom must not be scored against its own
-    /// position. Produced by [`molrs::Topology::exclusions`].
+    /// position. Produced by [`molrs::system::Topology::exclusions`].
     pub fn exclusions(&self, atom: usize) -> &[u32] {
         &self.exclusions[atom]
     }
@@ -345,7 +345,7 @@ pub(crate) fn rotatable_bond_keys(graph: &Atomistic) -> std::collections::HashSe
 /// One endpoint of a longest shortest-path in the graph — a chain end for a
 /// linear polymer, so growth runs along the backbone instead of starting in
 /// the middle and having to grow two ways at once.
-fn diameter_endpoint(topo: &molrs::Topology) -> usize {
+fn diameter_endpoint(topo: &molrs::system::Topology) -> usize {
     // The farthest atom from `from`; ties go to the lowest index.
     let far = |from: usize| -> usize {
         let dist = topo.distances(from);
@@ -354,7 +354,11 @@ fn diameter_endpoint(topo: &molrs::Topology) -> usize {
     far(far(0))
 }
 
-fn bfs_order(topo: &molrs::Topology, root: usize, n: usize) -> (Vec<usize>, Vec<Option<usize>>) {
+fn bfs_order(
+    topo: &molrs::system::Topology,
+    root: usize,
+    n: usize,
+) -> (Vec<usize>, Vec<Option<usize>>) {
     let mut parent: Vec<Option<usize>> = vec![None; n];
     let mut seen = vec![false; n];
     let mut order = Vec::with_capacity(n);
@@ -377,7 +381,7 @@ fn bfs_order(topo: &molrs::Topology, root: usize, n: usize) -> (Vec<usize>, Vec<
 
 /// A placed neighbour of `at`, preferring its BFS parent, never `exclude`.
 fn pick_ref(
-    topo: &molrs::Topology,
+    topo: &molrs::system::Topology,
     placed: &[bool],
     at: usize,
     exclude: usize,
@@ -396,55 +400,10 @@ fn pick_ref(
 
 // ── geometry ───────────────────────────────────────────────────────────────
 
-pub(crate) use molrs::op::vec3::{cross, dot, norm, sub};
-
-#[inline]
-fn unit(a: [F; 3]) -> [F; 3] {
-    let n = norm(a).max(crate::numerics::near_zero_norm_floor());
-    [a[0] / n, a[1] / n, a[2] / n]
-}
-
-fn angle_at(a: [F; 3], vertex: [F; 3], c: [F; 3]) -> F {
-    let u = unit(sub(a, vertex));
-    let v = unit(sub(c, vertex));
-    dot(u, v).clamp(-1.0, 1.0).acos()
-}
-
-/// Dihedral `a-b-c-d`, in `(-π, π]`.
-pub(crate) fn dihedral(a: [F; 3], b: [F; 3], c: [F; 3], d: [F; 3]) -> F {
-    let b1 = sub(b, a);
-    let b2 = sub(c, b);
-    let b3 = sub(d, c);
-    let n1 = cross(b1, b2);
-    let n2 = cross(b2, b3);
-    let m1 = cross(n1, unit(b2));
-    let x = dot(n1, n2);
-    let y = dot(m1, n2);
-    let d = (-y).atan2(x);
-    // atan2 can return exactly -π on planar input with a signed zero;
-    // fold it onto +π so the documented (-π, π] range holds everywhere.
-    if d == -(std::f64::consts::PI as F) {
-        std::f64::consts::PI as F
-    } else {
-        d
-    }
-}
-
-/// Natural-extension reference frame: place `d` given `a-b-c` and `(bond,
-/// angle, torsion)`, the exact inverse of [`dihedral`] / [`angle_at`].
-pub(crate) fn nerf(a: [F; 3], b: [F; 3], c: [F; 3], bond: F, angle: F, torsion: F) -> [F; 3] {
-    let bc = unit(sub(c, b));
-    let n = unit(cross(sub(b, a), bc));
-    let m = cross(n, bc);
-    let (st, ct) = angle.sin_cos();
-    let (sp, cp) = torsion.sin_cos();
-    let d2 = [-bond * ct, bond * st * cp, bond * st * sp];
-    [
-        c[0] + bc[0] * d2[0] + m[0] * d2[1] + n[0] * d2[2],
-        c[1] + bc[1] * d2[0] + m[1] * d2[1] + n[1] * d2[2],
-        c[2] + bc[2] * d2[0] + m[2] * d2[1] + n[2] * d2[2],
-    ]
-}
+// Internal coordinates are molrs's: `op::vec3::{angle, dihedral}` read them
+// off a template and `op::rigid::nerf` is their exact inverse.
+use molrs::op::rigid::nerf;
+use molrs::op::vec3::{angle, cross, dihedral, norm, sub};
 
 /// Wrap an angle (radians) into `(-π, π]`.
 #[inline]

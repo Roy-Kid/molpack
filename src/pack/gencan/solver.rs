@@ -4,22 +4,22 @@
 //! lifecycle the growth stages implement, judged by
 //! the same shared-objective ruler, selected by the same seam.
 
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::spatial::SimBox;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
+use crate::Handler;
+use crate::PackError;
+use crate::Target;
 use crate::context::{PackState, Placed, RigidView};
 use crate::entry::result::Placements;
-use crate::error::PackError;
-use crate::handler::Handler;
 use crate::optimizer::{OptimizerBinding, ResolvedBinding, resolve_bindings};
 use crate::pack::gencan::phases::{PhaseOutcome, run_phase};
 use crate::pack::gencan::{GencanParams, GencanWorkspace};
 use crate::pack::initial::{SwapState, initial};
 use crate::pack::movebad::MoveBadConfig;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
-use crate::target::Target;
 
 /// GENCAN-only knobs (engine-entry-split: these live on `GenCanPack`, never
 /// on the shared settings — they mean nothing to a growth entry).
@@ -246,7 +246,6 @@ impl Stage for GenCanStage {
         let gencan_params = GencanParams {
             maxit: self.settings.inner_iterations,
             maxfc: self.settings.inner_iterations * 10,
-            iprint: 0,
             ..Default::default()
         };
 
@@ -310,7 +309,7 @@ impl Stage for GenCanStage {
 
 #[cfg(test)]
 mod tests {
-    use molrs::spatial::simbox::SimBox;
+    use molrs::spatial::SimBox;
     use ndarray::Array1;
 
     use super::*;
@@ -402,8 +401,8 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
+        use crate::OptimizeSelect;
         use crate::PackState;
-        use crate::optimizer::OptimizeSelect;
         use crate::restraint::geometric::InsideBoxRestraint;
 
         /// An optimizer that only counts its calls and leaves the frame
@@ -416,7 +415,7 @@ mod tests {
         impl molrs::optimize::Optimizer for CountingOptimizer {
             fn run(
                 &mut self,
-                _frame: &mut molrs::store::frame::Frame,
+                _frame: &mut molrs::store::Frame,
             ) -> Result<molrs::optimize::OptReport, String> {
                 self.calls.fetch_add(1, Ordering::Relaxed);
                 Ok(molrs::optimize::OptReport {

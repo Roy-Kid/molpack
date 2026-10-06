@@ -55,10 +55,13 @@ Feature flags:
 
 | Feature | Enables |
 |---|---|
-| `io` | PDB, XYZ, SDF, and LAMMPS readers through `molrs_io`. |
+| `io` | Template reading and output writing through `molrs::io::{read_frame, write_frame}`, and `XYZHandler`. |
 | `cli` | The `molpack` binary plus `io`. |
 | `rayon` | Parallel objective evaluation. |
-| `ff` | Forwards molrs's force-field module, for binding a force-field optimizer through `with_optimizer`. |
+
+molpack has no `ff` feature: a force-field optimizer bound through
+`with_optimizer` (molrs's `LBFGS`) needs molrs's `ff` feature on your own
+`molcrafts-molrs` dependency.
 
 ## Pages
 

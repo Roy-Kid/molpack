@@ -1,5 +1,7 @@
 """molpack — Packmol-grade molecular packing with Python bindings."""
 
+from importlib.metadata import version as _dist_version
+
 from ._protocols import Handler, Restraint
 from .molpack import (
     Angle,
@@ -36,7 +38,11 @@ from .molpack import (
     num_threads,
     rayon_enabled,
 )
-from .version import MOLRS_MINOR, check_molrs_version, version
+
+# The installed wheel's version. The molrs compatibility check is the
+# extension's import-time ABI handshake (`interop::check_abi`), which runs
+# when `.molpack` is imported above.
+version: str = _dist_version("molcrafts-molpack")
 
 __all__ = [
     # Typed values
@@ -83,7 +89,5 @@ __all__ = [
     "NoTargetsError",
     "EmptyMoleculeError",
     "InvalidPBCBoxError",
-    "MOLRS_MINOR",
-    "check_molrs_version",
     "version",
 ]

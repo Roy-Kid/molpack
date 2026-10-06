@@ -12,14 +12,14 @@
 
 use std::sync::Arc;
 
-use crate::helpers::{NpF, stash_err};
+use crate::errors::stash_err;
 use crate::interop::region_from_py;
-use molpack::F;
 use molpack::RegionRestraint;
-use molpack::restraint::{
+use molpack::{
     AtomRestraint, ExponentialPlane, ExponentialPoint, GaussianPlane, GaussianPoint, GroupCtx,
     Restraint, SelfSeparation, TabulatedPlane, TabulatedPoint,
 };
+use molrs::op::types::F;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
@@ -59,7 +59,7 @@ impl AtomRestraint for SharedAtomRestraint {
         self.0.holds_along(shift)
     }
     #[inline]
-    fn declared_cell(&self) -> Option<molrs::spatial::simbox::SimBox> {
+    fn declared_cell(&self) -> Option<molrs::spatial::SimBox> {
         self.0.declared_cell()
     }
 }
@@ -393,12 +393,11 @@ impl PyGaussianPlane {
     ///     Target Gaussian standard deviation (Å); must be > 0.
     #[new]
     #[pyo3(signature = (normal, offset, strength, mu, sigma))]
-    fn new(normal: [NpF; 3], offset: NpF, strength: NpF, mu: NpF, sigma: NpF) -> PyResult<Self> {
+    fn new(normal: [F; 3], offset: F, strength: F, mu: F, sigma: F) -> PyResult<Self> {
         if sigma <= 0.0 {
             return Err(PyValueError::new_err("GaussianPlane sigma must be > 0"));
         }
-        let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-        if norm <= 0.0 {
+        if molrs::op::vec3::normalize(normal).is_none() {
             return Err(PyValueError::new_err(
                 "GaussianPlane normal must be non-zero",
             ));
@@ -437,7 +436,7 @@ impl PyGaussianPoint {
     ///     Target shell thickness (Å); must be > 0.
     #[new]
     #[pyo3(signature = (center, strength, mu, sigma))]
-    fn new(center: [NpF; 3], strength: NpF, mu: NpF, sigma: NpF) -> PyResult<Self> {
+    fn new(center: [F; 3], strength: F, mu: F, sigma: F) -> PyResult<Self> {
         if sigma <= 0.0 {
             return Err(PyValueError::new_err("GaussianPoint sigma must be > 0"));
         }
@@ -476,12 +475,11 @@ impl PyExponentialPlane {
     ///     Exponential decay length (Å); must be > 0.
     #[new]
     #[pyo3(signature = (normal, offset, strength, lambda_))]
-    fn new(normal: [NpF; 3], offset: NpF, strength: NpF, lambda_: NpF) -> PyResult<Self> {
+    fn new(normal: [F; 3], offset: F, strength: F, lambda_: F) -> PyResult<Self> {
         if lambda_ <= 0.0 {
             return Err(PyValueError::new_err("ExponentialPlane lambda must be > 0"));
         }
-        let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-        if norm <= 0.0 {
+        if molrs::op::vec3::normalize(normal).is_none() {
             return Err(PyValueError::new_err(
                 "ExponentialPlane normal must be non-zero",
             ));
@@ -518,7 +516,7 @@ impl PyExponentialPoint {
     ///     Radial decay length (Å); must be > 0.
     #[new]
     #[pyo3(signature = (center, strength, lambda_))]
-    fn new(center: [NpF; 3], strength: NpF, lambda_: NpF) -> PyResult<Self> {
+    fn new(center: [F; 3], strength: F, lambda_: F) -> PyResult<Self> {
         if lambda_ <= 0.0 {
             return Err(PyValueError::new_err("ExponentialPoint lambda must be > 0"));
         }
@@ -558,16 +556,9 @@ impl PyTabulatedPlane {
     ///     Target density at each ``xs`` (>= 0, positive total mass).
     #[new]
     #[pyo3(signature = (normal, offset, strength, xs, rho))]
-    fn new(
-        normal: [NpF; 3],
-        offset: NpF,
-        strength: NpF,
-        xs: Vec<NpF>,
-        rho: Vec<NpF>,
-    ) -> PyResult<Self> {
+    fn new(normal: [F; 3], offset: F, strength: F, xs: Vec<F>, rho: Vec<F>) -> PyResult<Self> {
         validate_grid(&xs, &rho)?;
-        let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-        if norm <= 0.0 {
+        if molrs::op::vec3::normalize(normal).is_none() {
             return Err(PyValueError::new_err(
                 "TabulatedPlane normal must be non-zero",
             ));
@@ -605,7 +596,7 @@ impl PyTabulatedPoint {
     ///     Target radial density at each ``xs`` (>= 0, positive total mass).
     #[new]
     #[pyo3(signature = (center, strength, xs, rho))]
-    fn new(center: [NpF; 3], strength: NpF, xs: Vec<NpF>, rho: Vec<NpF>) -> PyResult<Self> {
+    fn new(center: [F; 3], strength: F, xs: Vec<F>, rho: Vec<F>) -> PyResult<Self> {
         validate_grid(&xs, &rho)?;
         Ok(Self {
             inner: TabulatedPoint::new(center, strength, &xs, &rho),
@@ -647,7 +638,7 @@ impl PySelfSeparation {
     ///     makes the bound softer. Must be > 0.
     #[new]
     #[pyo3(signature = (d_min, strength = 1.0))]
-    fn new(d_min: NpF, strength: NpF) -> PyResult<Self> {
+    fn new(d_min: F, strength: F) -> PyResult<Self> {
         if d_min <= 0.0 {
             return Err(PyValueError::new_err("SelfSeparation d_min must be > 0"));
         }
@@ -661,7 +652,7 @@ impl PySelfSeparation {
 
     /// The minimum centre-to-centre distance this restraint asks for.
     #[getter]
-    fn d_min(&self) -> NpF {
+    fn d_min(&self) -> F {
         self.inner.d_min()
     }
 
@@ -672,7 +663,7 @@ impl PySelfSeparation {
 
 /// Validate a tabulated target grid before handing it to the Rust constructor
 /// (which would otherwise panic). Mirrors `Quantile::from_grid`'s contract.
-fn validate_grid(xs: &[NpF], rho: &[NpF]) -> PyResult<()> {
+fn validate_grid(xs: &[F], rho: &[F]) -> PyResult<()> {
     if xs.len() < 2 {
         return Err(PyValueError::new_err(
             "tabulated grid needs at least 2 points",
@@ -687,7 +678,7 @@ fn validate_grid(xs: &[NpF], rho: &[NpF]) -> PyResult<()> {
     if rho.iter().any(|&r| r < 0.0) {
         return Err(PyValueError::new_err("rho must be >= 0"));
     }
-    if rho.iter().sum::<NpF>() <= 0.0 {
+    if rho.iter().sum::<F>() <= 0.0 {
         return Err(PyValueError::new_err("rho must have positive total mass"));
     }
     Ok(())

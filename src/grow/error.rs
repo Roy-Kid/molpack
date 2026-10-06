@@ -8,7 +8,7 @@
 
 use std::fmt;
 
-use molrs::types::F;
+use molrs::op::types::F;
 
 /// Why a target cannot be grown.
 ///
@@ -36,7 +36,7 @@ pub enum GrowError {
         column: &'static str,
     },
     /// A bond row names an atom outside the template. The fields are
-    /// [`molrs::system::topology::TopologyError::EndpointOutOfRange`].
+    /// [`molrs::system::TopologyError::EndpointOutOfRange`].
     BondOutOfRange {
         /// 0-based row of the bonds block.
         row: usize,

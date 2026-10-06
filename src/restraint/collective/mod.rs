@@ -1,7 +1,7 @@
 //! Collective (group-level) restraints — penalties that see **every copy of a
 //! species at once**.
 //!
-//! Where a per-atom [`AtomRestraint`](crate::restraint::AtomRestraint) sees one atom at a
+//! Where a per-atom [`AtomRestraint`](crate::AtomRestraint) sees one atom at a
 //! time and contributes an independent external field `∑ᵢ U(xᵢ)`, a
 //! [`Restraint`] sees *every* copy of a species at once and returns a
 //! single penalty whose gradient is **coupled across the whole group**.
@@ -51,13 +51,13 @@
 //! that measures distances agrees with the pair loop across a periodic
 //! boundary).
 //!
-//! **Gradient convention** mirrors [`AtomRestraint`](crate::restraint::AtomRestraint):
+//! **Gradient convention** mirrors [`AtomRestraint`](crate::AtomRestraint):
 //! `fg` accumulates `∂L/∂coords[i]` INTO `grads[i]` with `+=`. `coords` and
 //! `grads` have equal length, one entry per atom in the group, in the packer's
 //! own order: **copy-major, atom-minor**.
 
-use molrs::spatial::simbox::{Mic, SimBox};
-use molrs::types::F;
+use molrs::op::types::F;
+use molrs::spatial::{Mic, SimBox};
 
 // ============================================================================
 // Evaluation context
@@ -101,7 +101,7 @@ pub struct GroupCtx<'a> {
 
 /// Group-level penalty over all copies of one species.
 ///
-/// Unlike [`AtomRestraint`](crate::restraint::AtomRestraint), which is evaluated once
+/// Unlike [`AtomRestraint`](crate::AtomRestraint), which is evaluated once
 /// per atom with only that atom's coordinate, a `Restraint` is
 /// evaluated once per group with the coordinates of *all* copies. Its gradient
 /// may therefore couple every particle to every other — exactly what a
@@ -163,8 +163,8 @@ pub use tabulated::{TabulatedPlane, TabulatedPoint};
 #[cfg(test)]
 pub(super) mod testutil {
     use super::{GroupCtx, Restraint};
-    use molrs::spatial::simbox::{Mic, SimBox};
-    use molrs::types::F;
+    use molrs::op::types::F;
+    use molrs::spatial::{Mic, SimBox};
 
     /// Deterministic xorshift64* uniform in `[lo, hi)` — no external dep.
     pub(crate) fn rng_uniform(seed: &mut u64, lo: F, hi: F) -> F {
@@ -180,7 +180,7 @@ pub(super) mod testutil {
     /// A free-boundary cube big enough to hold the test coordinates; the
     /// partitioning a restraint builds from it must not change any answer.
     pub(crate) fn free_box(side: F) -> SimBox {
-        SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3]).expect("test box")
+        SimBox::cube(side, molrs::op::types::F3::zeros(3), [false; 3]).expect("test box")
     }
 
     /// Unit scales, free boundaries, `natoms_per_copy` atoms per copy.

@@ -45,7 +45,8 @@
 
 use std::path::PathBuf;
 
-use molpack::{F, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target};
+use molpack::{GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target};
+use molrs::op::types::F;
 use std::sync::Arc;
 
 use molrs::io::data::pdb::read_pdb_frame;
