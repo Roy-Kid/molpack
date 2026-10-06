@@ -21,7 +21,7 @@ Add via `/mol:spec <feature description>`. Implement via `/mol:impl <slug>` (cha
   - stage-pipeline-06-combinators — DONE 2026-09-03（9/9 verified；`Stage::run` 改为可失败 `Result<StageOutcome, PackError>`（对 04 的修正）；`src/invariant.rs`：`Layers` L0–L5 位集落在唯一消费者 `Invariant::layer()` 旁、`Violation`、`RestraintsSatisfied`（读共享 `frest`）；`src/pipeline/combinators.rs`：`Repeat`/`Until`、`Guarded`/`OnViolation`（同阶段重跑或具名失败，永不换算法），`with_repeat`/`with_guarded` 经 `with_stage` 同一采纳路径；`PackError::InvariantViolated`；`Repeat` 第二遍逐位 ≡ 接续入口（现 `GenCanPack::with_restart`），`fdist` 单调断言撤回；预算修正 combinators ≤ 320 / mod ≤ 500；随本段提交关闭并删除）
   - stage-pipeline-07-bindings — DONE 2026-09-03（7/7 verified；Python `Pipeline([stage, …])` / `.with_stage` / 共享 `with_*` / `run`，每入口 `IntoStageFactory`（`to_stage_factory`）+ 唯一 `stage_entry_registry!`（派发 + `TypeError` 文案），阶段对象的 handler 经 `take_handlers` 被采纳，`StepInfo.stage` → `StageInfo{index,total,name}`；`.pyi`/`_protocols`/`__init__` 同步；五个文档页 + CLAUDE.md + conventions + `/mol:map` 蓝图刷新；Python 门 `tox -c python -e py` 167 过（含 9 条 `test_pipeline.py`，两金标）；顺带修 tox `commands_pre[3]` 路径 bug；随本段提交关闭并删除）
 - [dg-refine](./dg-refine.md) — 笛卡尔距离几何精修阶段 `DgRefine`：软核 overlap 项 + 分子内重叠项 + 1-2/1-3 键距弹簧 + 可选手性/约束项，复用 gencan 线搜索原语与 `gxcar`，半径阶梯 s₀→1；熔体密度 push-off 不再出境到 MD — **DRAFT**
-- [grow-axes](./grow-axes.md) — 一个 `Grow<Space, ExcludedVolume>` 驱动 + Selector / Escape / Schedule 三个 enum；CbmcGrow / LatticeGrow 成为预设（后者获得哈希流与轮转），新增 `WalkGrow`（理想链，Auhl 路线第一步）；删除 relax / serial / void_bias 旗标，软化按链局部化 — **DRAFT**
+- [grow-axes](./grow-axes.md) — CBMC 与晶格保持两个驱动。按链软化落在 CBMC 上。不设 `WalkGrow`：晶格驱动就是自回避随机行走。泛型 `Grow<S, X>` 不再实施 — **DRAFT**
 
 ## Active
 

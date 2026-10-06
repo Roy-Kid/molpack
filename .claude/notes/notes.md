@@ -10,6 +10,13 @@ Format per entry:
 **How to apply:** <when / where this kicks in>
 ```
 
+## 2026-10-02 — 不设 WalkGrow；晶格驱动就是自回避随机行走
+
+不增加理想链入口 `WalkGrow`。自回避随机行走是 `LatticeGrow` 的职责。CBMC 与晶格继续是两个驱动，不合成 `Grow<S, X>`。
+**Why:** 操作者 2026-10-02：理想链入口没有单独的职责，晶格驱动本身就是自回避随机行走。
+**How to apply:** 熔体生成走晶格。不要为无排除体积的连续行走再开一个入口。`dg-refine` 的重叠夹具用人工重叠放置，不依赖 `WalkGrow`。
+**Supersedes:** grow-axes 里的 `WalkGrow` 预设，以及 2026-09-02「熔体主路径改为理想链生成」中的理想链入口。
+
 ## 2026-09-29 — 清理：删死代码、优化器接缝去门控、GenCanPack 默认早停
 
 - **删除**：`src/cases.rs`（`ExampleCase`、`build_targets`、`example_dir_from_manifest`、`render_inp_script`）；校验模块 `validation`（`validate_from_targets`、`ValidationReport`、`ViolationMetrics`、`MOLPACK_DEBUG_VALIDATION`）——裁决只读 `State::fdist`/`frest`，阶段守卫是 `RestraintsSatisfied`；`src/context/state.rs`（`RuntimeState`/`RuntimeStateMut`、`runtime()`/`runtime_mut()`）与 `src/context/model.rs`（`ModelData`、`model()`）——调用方直接读 `PackContext`/`PackState`；`template::frame_positions` 与 `FramePositionsError`——改为 `molrs::Frame::coords` + `template::coord_rows`；`NullHandler`、`Handler::on_inner_iter`、`StepInfo.relaxer_acceptance`；`PackContext` 的 `RestraintRef` 别名（就是 `usize`）。单测共享夹具在 `src/testutil.rs`（`cfg(test)`）。

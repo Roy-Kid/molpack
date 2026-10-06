@@ -43,11 +43,8 @@ criteria:
     summary: WalkGrow 的统计与密度无关且等于先验
     type: scientific
     pass_when: |
-      同 seed 的 WalkGrow 在稀释极限盒与 KG 熔体密度盒（ρ* = 0.85）下每链坐标（相对
-      各自种子）逐位相同；RIS 先验 `three_state_from_c_inf(5.5, θ_tet)` 下 200 珠链
-      C_n = 5.5 ± 0.3；`AnglePrior::wlc_from_c_inf(1.76)` 下 c_n = 1.76 ± 10%；
-      各链 R_g 互不相同；熔体盒下 `converged == false` 且 `fdist > 0`（诚实报告，无特判）。
-    status: pending
+      不实施。晶格驱动就是自回避随机行走，不另设理想链入口。
+    status: dropped
 
   - id: ac-005
     summary: 软化按链局部化且可恢复
@@ -72,9 +69,9 @@ criteria:
     summary: Python 镜像与文档同步
     type: code
     pass_when: |
-      `WalkGrow` pyclass 存在并冒烟通过；`CbmcGrow` 无 `with_relax / with_serial /
+      不增加 `WalkGrow` pyclass。`CbmcGrow` 无 `with_relax / with_serial /
       with_void_bias`，有 `with_schedule / with_reseed_void_bias / with_initial_hard_scale`；
       `LatticeGrow` 有 `with_schedule`；`.pyi` / `_protocols.py` 同步；
-      docs/python/guide/growth.md 含「Six axes of growth」与「WalkGrow」两节；
+      docs/python/guide/growth.md 不含 `WalkGrow` 一节；
       CLAUDE.md 与 docs/architecture.md 的 `src/grow/` 行按新目录更新；`cargo doc` 零警告。
     status: pending

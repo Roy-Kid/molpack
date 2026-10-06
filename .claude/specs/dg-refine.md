@@ -151,7 +151,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
   1. 各 `Term` 有限差分梯度（含跨周期边界的键、含 fixed 邻居）；
   2. 扰动链恢复：对模板链加 0.3 Å 随机扰动，仅 Bond + Angle13 项精修后成键几何回到
      容差内；
-  3. 重叠消除：8 × 12 珠链在 26 Å 盒里用 `WalkGrow`（grow-axes）或人工重叠放置后
+  3. 重叠消除：8 × 12 珠链在 26 Å 盒里人工重叠放置后
      `DgRefine` 到 `fdist < precision`；
   4. **刚体做不到、精修做得到**：重建原 `lattice_grow_then_seeded_push_off_dense`（已随 `tests/` 于 2026-09-20 删除）的
      20 × 24 珠 / 22 Å 算例，断言 `DgRefine` 末级 `fdist ≤ 0.1 × grown.fdist` 且严格小于

@@ -41,7 +41,7 @@ criteria:
     summary: 不改拓扑、大尺度统计守恒、成键几何在容差内
     type: scientific
     pass_when: |
-      对 `CbmcGrow`（或 grow-axes 的 `WalkGrow`）产物做全阶梯精修：键图逐位不变；
+      对 `CbmcGrow` 或 `LatticeGrow` 的产物做全阶梯精修：键图逐位不变；
       每链 R_g 相对变化 ≤ 3%；内距曲线 ⟨R²(s)⟩/s 在 s ≥ 50 处相对变化 ≤ 5%；
       精修后 1-2 距离相对模板偏差 ≤ bond_tolerance（默认 0.10），1-3 距离 ≤ 1.5 × 该值。
       在珠链（default feature）与 PEO dp=100 × 25 / ρ = 1.06（examples/pack_peo refine，io）

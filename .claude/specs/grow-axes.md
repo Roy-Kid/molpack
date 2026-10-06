@@ -10,6 +10,11 @@ chain: packing-taxonomy（03 of 3；依赖 stage-pipeline 的 PackState / Stage�
 状态：DRAFT（2026-09-02）。依赖 `stage-pipeline`。与 `dg-refine` 并行，无代码耦合
 （`WalkGrow` + `DgRefine` 的端到端熔体验收在 dg-refine 的 Test plan 里）。
 
+**2026-10-02：** `CbmcGrow` 和 `LatticeGrow` 保持两个驱动，不引入 `Grow<S, X>`。
+按链 `hard_scale` 落在现有 CBMC 驱动上：一条链的缩核不改变其他链。
+不设 `WalkGrow`。晶格驱动就是自回避随机行走，理想链入口没有单独的职责。
+下面的泛型驱动和 `WalkGrow` 预设因此不再实施。
+
 **设计来源**：packing 分类 rev 2「生成族的正交轴」（用户裁定：LatticeGrow 也含 CBMC
 思想，方法必须正交）；grow 族算法评审 A3（relax 死功能）、B1（全局软化）、B2（relax
 贪心判据）、B3（格相全局 RNG、顺序生长）、C1（`serial` 的 any() 折叠）。
