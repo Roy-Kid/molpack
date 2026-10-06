@@ -53,7 +53,7 @@ struct WatchFdist;
 
 impl Handler for WatchFdist {
     fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
-        eprintln!("phase={} loop={} fdist={}", info.phase, info.loop_idx, info.fdist);
+        eprintln!("phase={} loop={} fdist={}", info.phase.phase, info.loop_idx, info.fdist);
     }
 }
 ```

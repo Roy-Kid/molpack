@@ -217,8 +217,8 @@ an explicit second stage, never a hidden fallback. Feed the **same free
 targets** to a seeded `GenCanPack`:
 
 ```python
-grown = CbmcGrow(prior).with_density(0.9).run([chain], max_loops=60)
-pushed = GenCanPack().with_restart(grown).with_seed(7).run([chain], max_loops=60)
+grown = CbmcGrow(prior).with_density(0.9).run([peo], max_loops=60)
+pushed = GenCanPack().with_restart(grown).with_seed(7).run([peo], max_loops=60)
 ```
 
 The seeded run continues on the very same state — zero coordinate

@@ -31,7 +31,7 @@ in sequence — grow a chain, then push it apart with rigid-body descent —
 compose stages directly with `Pipeline` instead of chaining separate runs:
 
 ```rust
-use molpack::{CbmcGrow, GenCanPack, Pipeline};
+use molpack::{CbmcGrow, GenCanPack, PackEngine, Pipeline};
 
 let result = Pipeline::new()
     .with_stage(CbmcGrow::new(prior))
