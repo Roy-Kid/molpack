@@ -12,6 +12,9 @@ documentation = "https://docs.rs/molcrafts-molpack"
 readme = "README.md"
 keywords = ["packmol", "molecular-modeling", "chemistry", "simulation"]
 categories = ["science", "algorithms"]
+# Repo tooling, not crate content (python/ is its own package and is left out
+# by cargo already).
+exclude = [".cargo/", ".claude/", ".github/", ".pre-commit-config.yaml", "CLAUDE.md"]
 
 [lib]
 name = "molpack"
