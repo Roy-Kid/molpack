@@ -59,6 +59,9 @@ pub(super) struct Chain {
     pub(super) deadend_streak: usize,
     /// Softening rungs this chain has actually taken this run.
     pub(super) rungs_earned: usize,
+    /// Dimensionless hard-core scale for this chain alone. `1.0` is full
+    /// declared contact. A rung here does not shrink any other chain.
+    pub(super) hard_scale: F,
     /// Relax epochs completed (keys the relax streams).
     pub(super) relax_epoch: u32,
 }

@@ -205,8 +205,9 @@ the hard core or a restraint is rejected, never penalized, so a
 successfully grown structure has `fdist == 0` by construction rather
 than by convergence. When a region of the box becomes so crowded that a
 chain dead-ends repeatedly even after retracting and regrowing, the
-solver's last resort is to shrink the hard core — and every one of those
-shrinks increments `State.degraded`. Each unit therefore records
+solver's last resort is to shrink that chain's hard core — only the
+chain that keeps dead-ending softens, every other chain stays at full
+contact — and every one of those shrinks increments `State.degraded`. Each unit therefore records
 one relaxation of the constructive guarantee; a grown structure only
 counts as converged when the count is zero at full tolerance, and on the
 rigid-body path it is always zero.

@@ -230,8 +230,11 @@ Growth-only builders, on top of the shared ones:
   `window` steps every `every` rounds; `every=0` disables (default
   `(25, 6)`). A regrown tail is only kept when its Rosenbluth weight
   does not degrade.
-- `.with_soften_after(attempts: int)` — consecutive dead ends at one
-  step before the hard core softens (clamped ≥ 1, default 50).
+- `.with_soften_after(attempts: int)` — cumulative dead ends on one
+  chain before that chain's hard core softens by one rung (×0.97); a
+  successful placement does not reset the count (clamped ≥ 1, default 50).
+  Softening is per chain: a rung on one chain leaves every other chain at
+  full contact.
 - `.with_min_hard_scale(scale: float)` — softening floor, clamped to
   `[0, 1]` (default 0.8, the classic push-off bound).
 - `.with_angle_prior(prior: AnglePrior)` — placement-angle prior

@@ -138,7 +138,7 @@ impl GrowConfig {
         self
     }
 
-    /// Cumulative dead ends on a chain before the hard core softens by one rung
+    /// Cumulative dead ends on a chain before that chain's hard core softens by one rung
     /// (one rung multiplies the dimensionless hard-core scale by [`Self::SOFTEN_RUNG`]).
     ///
     /// The clock is **cumulative** dead ends on that chain (`deadends_total`
@@ -151,10 +151,6 @@ impl GrowConfig {
     /// `deadend_streak` at the `min_hard_scale` floor to force-place a wedged
     /// chain. `retract_depth` reads the consecutive streak and the separate
     /// [`with_retract`](Self::with_retract) knob, never this counter.
-    ///
-    /// The Python wheel and `docs/python/api-reference.md` still describe this
-    /// knob as consecutive; that page is left stale on purpose until
-    /// special-bonds-06.
     pub fn with_soften_after(mut self, attempts: usize) -> Self {
         self.soften_after = attempts.max(1);
         self

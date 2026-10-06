@@ -78,7 +78,7 @@ impl CbmcGrow {
         self.config = self.config.with_relax(every, window);
         self
     }
-    /// Cumulative dead ends on a chain before the hard core softens by one rung
+    /// Cumulative dead ends on a chain before that chain's hard core softens by one rung
     /// (one rung multiplies the dimensionless hard-core scale by
     /// [`GrowConfig::SOFTEN_RUNG`](crate::grow::config::GrowConfig::SOFTEN_RUNG)).
     ///

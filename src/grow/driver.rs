@@ -25,10 +25,9 @@
 //! Three clocks feed three readers: `deadend_streak` (cleared on a successful
 //! commit) drives `retract_depth` and floor-level `force_due`;
 //! `deadends_total` with `rungs_earned` is the cumulative watermark that
-//! `rung_due` reads to earn a softening rung (one rung multiplies the
-//! dimensionless hard-core scale by [`GrowConfig::SOFTEN_RUNG`]). The driver takes at most one
-//! rung per round even when two chains earn one in the same round, because
-//! the rung is the driver's global step, not a per-chain one.
+//! `rung_due` reads to earn a softening rung (one rung multiplies **this
+//! chain's** dimensionless hard-core scale by [`GrowConfig::SOFTEN_RUNG`]).
+//! Another chain that did not earn the rung keeps scale `1.0`.
 //! [`StageOutcome::degraded`](crate::StageOutcome::degraded) counts
 //! each such shrink *and* each forced
 //! placement, and a structure is only `converged` when that counter is zero, so
@@ -196,6 +195,7 @@ impl Stage for GrowStage {
                     deadends_total: 0,
                     deadend_streak: 0,
                     rungs_earned: 0,
+                    hard_scale: 1.0,
                     relax_epoch: 0,
                 });
                 mol += 1;
@@ -216,7 +216,6 @@ impl Stage for GrowStage {
         );
 
         // ── Round loop ─────────────────────────────────────────────────────
-        let mut hard_scale: F = 1.0;
         let mut degraded = 0usize;
         // Upper bound on the round loop: `max_loops` passes over the longest
         // chain, one round per stage (module docs). Without it a density the
@@ -230,12 +229,6 @@ impl Stage for GrowStage {
                 .max()
                 .unwrap_or(0),
         );
-        let min_hard_scale = self
-            .species
-            .iter()
-            .map(|s| s.cfg.min_hard_scale)
-            .fold(1.0, F::min);
-
         let restraint_table = RestraintTable::from_context(sys);
         let mut aborted = false;
         let mut self_blocked = 0usize;
@@ -255,11 +248,6 @@ impl Stage for GrowStage {
                 break;
             }
             round += 1;
-            // At most one softening rung per round (see the ladder in the
-            // module docs). Two chains can legitimately earn a rung in the
-            // same round; the core still shrinks once, because the rung is
-            // the driver's global step, not a per-chain one.
-            let mut rung_this_round = false;
 
             // Chain order for this round: shuffled round-robin by default;
             // serial scheduling advances only the first pending chain, so
@@ -300,7 +288,7 @@ impl Stage for GrowStage {
                     sp,
                     &field,
                     &restraint_table,
-                    hard_scale,
+                    chains[c].hard_scale,
                     origin,
                     lengths,
                     self.seed,
@@ -320,29 +308,27 @@ impl Stage for GrowStage {
                 // through the escalating retractions. Anything less keeps
                 // retrying — forced placements are the last resort that
                 // breaks the constructive guarantee.
+                let scale = chains[c].hard_scale;
+                let min_scale = self.species[sp_idx].cfg.min_hard_scale;
                 let force = force_due(
-                    hard_scale,
-                    min_hard_scale,
+                    scale,
+                    min_scale,
                     chains[c].deadend_streak,
                     self.species[sp_idx].cfg.soften_after,
                 );
                 let committed = match prop {
-                    Ok(p) => match commit(
-                        &mut chains[c],
-                        &self.species[sp_idx],
-                        &mut field,
-                        p,
-                        hard_scale,
-                    ) {
-                        Ok(()) => true,
-                        Err(kind) => {
-                            match kind {
-                                BlockKind::SelfBlocked => self_blocked += 1,
-                                BlockKind::InterChain => inter_chain += 1,
+                    Ok(p) => {
+                        match commit(&mut chains[c], &self.species[sp_idx], &mut field, p, scale) {
+                            Ok(()) => true,
+                            Err(kind) => {
+                                match kind {
+                                    BlockKind::SelfBlocked => self_blocked += 1,
+                                    BlockKind::InterChain => inter_chain += 1,
+                                }
+                                false
                             }
-                            false
                         }
-                    },
+                    }
                     Err(DeadEnd::Overlap(kind)) => {
                         match kind {
                             BlockKind::SelfBlocked => self_blocked += 1,
@@ -391,11 +377,10 @@ impl Stage for GrowStage {
                     chains[c].deadends_total,
                     chains[c].rungs_earned,
                     cfg.soften_after,
-                ) && !rung_this_round
-                    && hard_scale > min_hard_scale
+                ) && chains[c].hard_scale > cfg.min_hard_scale
                 {
-                    hard_scale = (hard_scale * GrowConfig::SOFTEN_RUNG).max(min_hard_scale);
-                    rung_this_round = true;
+                    chains[c].hard_scale =
+                        (chains[c].hard_scale * GrowConfig::SOFTEN_RUNG).max(cfg.min_hard_scale);
                     chains[c].rungs_earned += 1;
                     degraded += 1;
                 }
@@ -416,7 +401,7 @@ impl Stage for GrowStage {
                         sp,
                         &mut field,
                         &restraint_table,
-                        hard_scale,
+                        chain.hard_scale,
                         sp.cfg.relax_window,
                         self.seed,
                     );
@@ -451,7 +436,9 @@ impl Stage for GrowStage {
                 frest: 0.0,
                 f: 0.0,
                 improvement_pct: 0.0,
-                radscale: hard_scale,
+                // Softest core this round. One chain's rung no longer moves
+                // the others, so the live report is the minimum.
+                radscale: chains.iter().map(|c| c.hard_scale).fold(1.0, F::min),
                 precision: budget.precision,
             };
             for h in handlers.iter_mut() {
