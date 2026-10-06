@@ -1,7 +1,9 @@
 //! In-loop geometry optimizers driven by [`molrs::optimize::Optimizer`].
 //!
-//! Callers construct a molrs optimizer (e.g. `LBFGS`, `SoftSpec::into_optimizer`,
-//! or molpack's [`TorsionMcOptimizer`]) and bind it with
+//! Callers construct a molrs optimizer (`LBFGS`, or
+//! `SoftLbfgs::new(SoftSpec::from_frame(..), ..)` for the soft overlap +
+//! 1-2 / 1-3 objective — both need the `ff` feature — or molpack's
+//! [`TorsionMcOptimizer`]) and bind it with
 //! [`GenCanPack::with_optimizer`](crate::GenCanPack::with_optimizer) plus an
 //! [`OptimizeSelect`] that names which components to assemble each call.
 
@@ -368,5 +370,130 @@ mod tests {
         let movable = [true, false, false];
         let near = environment_atoms(&xcart, &movable, &xcart[..1], 2.0, &Mic::Free);
         assert!(near.is_empty());
+    }
+
+    /// Records the atom count of every frame it is handed and leaves the
+    /// frame alone, so the non-harm gate never fires and the sizes are the
+    /// one thing a test observes.
+    struct FrameSizes(std::sync::Arc<std::sync::Mutex<Vec<usize>>>);
+
+    impl Optimizer for FrameSizes {
+        fn run(&mut self, frame: &mut Frame) -> Result<molrs::optimize::OptReport, String> {
+            let n = frame.coords().map_err(|e| e.to_string())?.nrows();
+            self.0.lock().unwrap().push(n);
+            Ok(molrs::optimize::OptReport {
+                converged: true,
+                n_steps: 0,
+                final_energy: 0.0,
+                final_fmax: 0.0,
+            })
+        }
+    }
+
+    /// Pack 8 monomers `a` and 8 dimers `b` into a 4 Å cube — unsatisfiable,
+    /// so the all-type phase iterates and reaches the optimizer block — with
+    /// one optimizer bound to `select`. Returns the atom count of every frame
+    /// the optimizer saw.
+    fn frame_sizes(select: OptimizeSelect) -> Vec<usize> {
+        use crate::{GenCanPack, PackEngine, Target};
+
+        let cube = || crate::testutil::inside_box([0.0; 3], [4.0; 3]);
+        let a = Target::from_coords(&[[0.0; 3]], &[1.0], 8)
+            .with_name("a")
+            .with_restraint(cube());
+        let b = Target::from_coords(&[[0.0; 3], [1.5, 0.0, 0.0]], &[1.0, 1.0], 8)
+            .with_name("b")
+            .with_restraint(cube());
+        let sizes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        GenCanPack::new()
+            .with_tolerance(2.0)
+            .with_seed(7)
+            .with_optimizer(select, FrameSizes(std::sync::Arc::clone(&sizes)))
+            .run(&[a, b], 4)
+            .expect("an unsatisfiable pack still returns a state");
+        sizes.lock().unwrap().clone()
+    }
+
+    /// `PerCopy` hands the optimizer one copy at a time.
+    #[test]
+    fn per_copy_optimizes_one_copy_per_call() {
+        let sizes = frame_sizes(OptimizeSelect::per_copy(["b"]));
+        assert!(!sizes.is_empty(), "fixture guard: the optimizer never ran");
+        assert!(sizes.iter().all(|&n| n == 2), "{sizes:?}");
+    }
+
+    /// `Joint` hands every copy of every named target over as one movable
+    /// group: 8 monomers + 8 dimers = 24 atoms per call.
+    #[test]
+    fn joint_optimizes_every_named_copy_together() {
+        let sizes = frame_sizes(OptimizeSelect::joint(["a", "b"]));
+        assert!(!sizes.is_empty(), "fixture guard: the optimizer never ran");
+        assert!(sizes.iter().all(|&n| n == 24), "{sizes:?}");
+    }
+
+    /// With the environment on, the frame also carries the frozen neighbours
+    /// of the joint group — here the copies of `a`, which is not selected.
+    #[test]
+    fn joint_environment_adds_frozen_neighbours() {
+        let sizes = frame_sizes(OptimizeSelect::joint(["b"]).with_environment(8.0));
+        assert!(!sizes.is_empty(), "fixture guard: the optimizer never ran");
+        // Every monomer sits in the 4 Å cube, within 8 Å of the dimers.
+        assert!(sizes.iter().all(|&n| n == 16 + 8), "{sizes:?}");
+    }
+
+    /// molrs's soft-overlap L-BFGS bound jointly over two species, in a box
+    /// crowded enough that the all-type phase iterates: it is called, the
+    /// non-harm gate keeps it from worsening the pack, and the pack converges.
+    #[cfg(feature = "ff")]
+    #[test]
+    fn joint_soft_lbfgs_over_two_species_converges() {
+        use molrs::optimize::{SoftLbfgs, SoftSpec};
+
+        use crate::{GenCanPack, PackEngine, Target};
+
+        /// Counts the calls it forwards to the wrapped optimizer.
+        struct Counted(SoftLbfgs, std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        impl Optimizer for Counted {
+            fn run(&mut self, frame: &mut Frame) -> Result<molrs::optimize::OptReport, String> {
+                self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.0.run(frame)
+            }
+        }
+
+        let cube = || crate::testutil::inside_box([0.0; 3], [10.0; 3]);
+        let ion = Target::from_coords(&[[0.0; 3]], &[1.0], 30)
+            .with_name("ion")
+            .with_restraint(cube());
+        let water = Target::from_coords(&[[0.0; 3], [2.0, 0.0, 0.0]], &[1.0, 1.0], 30)
+            .with_name("water")
+            .with_restraint(cube());
+        // A coordinates-only group has no bonds: a pure soft-overlap push.
+        let soft = SoftLbfgs::new(SoftSpec::from_frame(&Frame::new()), 0.05, 200, 0.2, 8);
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let state = GenCanPack::new()
+            .with_tolerance(2.0)
+            .with_precision(1e-2)
+            .with_seed(7)
+            .with_optimizer(
+                OptimizeSelect::joint(["ion", "water"]),
+                Counted(soft, std::sync::Arc::clone(&calls)),
+            )
+            .run(&[ion, water], 400)
+            .expect("pack runs");
+        let calls = calls.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(calls > 0, "fixture guard: the optimizer never ran");
+        assert!(
+            state.converged,
+            "calls={calls} fdist={} frest={}",
+            state.fdist, state.frest
+        );
+    }
+
+    /// A name that matches no target is skipped, not an error: the pack runs
+    /// and the optimizer is never called.
+    #[test]
+    fn an_unmatched_name_binds_nothing() {
+        let sizes = frame_sizes(OptimizeSelect::joint(["no_such_target"]));
+        assert!(sizes.is_empty(), "{sizes:?}");
     }
 }
