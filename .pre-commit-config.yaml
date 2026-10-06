@@ -105,12 +105,13 @@ repos:
         files: ^(src/|examples/|Cargo\.(toml|lock)|\.cargo/|rust-toolchain\.toml|\.github/partners\.env)
         stages: [pre-push]
 
-      # Builds the molrs extension (editable) into the typecheck env.
+      # Builds the molrs extension (editable) into the typecheck env. uv's
+      # maturin builds (molrs, molpack) get --locked through MATURIN_PEP517_ARGS.
       - id: ty
         name: ty (Python type check, ci.yml lint)
         entry: >-
           scripts/hook-run.sh python3 scripts/partners.py run --
-          uv run --locked --python 3.12 --directory python --group typecheck
+          env MATURIN_PEP517_ARGS=--locked uv run --locked --python 3.12 --directory python --group typecheck
           ty check python tests examples
         language: system
         pass_filenames: false
@@ -135,7 +136,7 @@ repos:
         name: python tests, tox isolated non-editable (ci.yml python)
         entry: >-
           scripts/hook-run.sh python3 scripts/partners.py run --
-          uv run --locked --python 3.12 --directory python --group dev tox -e py
+          env MATURIN_PEP517_ARGS=--locked uv run --locked --python 3.12 --directory python --group dev tox -e py
         language: system
         pass_filenames: false
         always_run: true

@@ -15,6 +15,9 @@ on:
 env:
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
+  # uv builds molrs and molpack through maturin's PEP 517 hook; this makes
+  # those cargo builds --locked as well.
+  MATURIN_PEP517_ARGS: --locked
 
 jobs:
   lint:
