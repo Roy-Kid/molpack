@@ -1,6 +1,6 @@
 [package]
 name = "molpack-python"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.91"
 authors = ["MolCrafts"]
@@ -17,7 +17,7 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.29", features = ["extension-module"] }
 numpy = "0.29"
 ndarray = "0.17"
-molpack = { path = "..", package = "molcrafts-molpack", version = "0.2.0" }
+molpack = { path = "..", package = "molcrafts-molpack", version = "0.3.0" }
 # Same crate (and version) molpack links, so frame types unify across the wheel.
 # Defaults off (molrs's default turns on `rayon`); the wheel's own `rayon`
 # feature turns it back on through molpack.

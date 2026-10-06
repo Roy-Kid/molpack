@@ -37,7 +37,7 @@ Optional features (crate defaults to none enabled):
 
 ```toml
 # Cargo.toml — common combinations
-molcrafts-molpack = { version = "0.2", features = ["io", "rayon"] }
+molcrafts-molpack = { version = "0.3", features = ["io", "rayon"] }
 ```
 
 ## Python binding
@@ -65,7 +65,8 @@ print(molpack.GenCanPack)
 ## Build from source
 
 When you are modifying the crate or Python binding, check out **molrs** as a
-sibling (path deps resolve `../molrs/molrs`):
+sibling (path deps resolve `../molrs/molrs`). molpack 0.3 builds on the molrs
+**0.15** line — the `v0.15.0` tag or a later 0.15 commit:
 
 ```bash
 # sibling layout

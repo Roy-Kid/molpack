@@ -13,7 +13,7 @@ from importlib.metadata import version as _pkg_version
 try:
     version = _pkg_version("molcrafts-molpack")
 except PackageNotFoundError:
-    version = "0.2.0"
+    version = "0.3.0"
 
 # Keep in lockstep with ``python/pyproject.toml`` (``molcrafts-molrs>=X.Y,<X.Y+1``)
 # and ``MOLRS_GIT_REF`` in ``.github/workflows/ci.yml``.

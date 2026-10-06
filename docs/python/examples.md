@@ -21,10 +21,13 @@ molpack — no hand-placed coordinates.
 | `pack_peo_mesh.py`    | —                 | linear PEO inside a branched mesh cavity (a `molrs.Polyhedron` masks `LatticeGrow` sites) |
 | `pack_peo_void.py`    | —                 | linear PEO through the solvent-accessible void of a bead-spring frame (`~molrs.SphereUnion`) |
 
-Install molpack once; the `molrs` dependency comes with it:
+Install molpack once; the `molrs` dependency comes with it. The
+`pack_peo_*.py` scenes also need molpy, on the same 0.15 line — the `molpy`
+extra pins it:
 
 ```bash
-pip install molcrafts-molpack
+pip install molcrafts-molpack            # Packmol ports, water cube, ions
+pip install "molcrafts-molpack[molpy]"   # + the pack_peo_*.py polymer scenes
 ```
 
 Each script is standalone: no shared helper. `pack_water_cube.py` builds
