@@ -10,6 +10,13 @@ Format per entry:
 **How to apply:** <when / where this kicks in>
 ```
 
+## 2026-10-06 — 0.3.0 发布线：molrs 0.15.0 标签；feat/subset-optimizer 由优化器接缝取代
+
+molpack 0.3.0 对 molrs **v0.15.0 发布标签**构建（不是 molrs dev）。发布工作流（`publish-crate.yml` / `publish-pypi.yml`）检出 `v0.15.0`；`ci.yml` 在 `workflow_call` 上接 `mol_git_ref` 输入，发布时传 `v0.15.0`。molpy 不是运行时依赖，只给 `pack_peo_*.py` 用：`[molpy]` extra 钉 `molcrafts-molpy>=0.15.0,<0.16`。
+`feat/subset-optimizer`（`SoftOptimizer`、`Target::with_optimizer`、`Molpack::with_subset_optimizer`）不合入：它挂在已删除的 `Molpack` 上。Rust 侧由 `GenCanPack::with_optimizer` + `OptimizeSelect::{per_copy, joint}` + molrs `SoftLbfgs`/`SoftSpec`（软 overlap + 1-2/1-3 的唯一实现在 molrs）取代；约束项改由非损害门（整体目标含约束，变差即回滚）把关。joint 契约的单测补在 `src/optimizer/mod.rs`。
+**Why:** dev 原本对 molrs 发布前的 API 编译（`relation_endpoints` 两参、`Block::get_bool`、Python `Block.view`），对 v0.15.0 标签编译失败；tag 触发的 CI 会把 molpack 标签名当作 molrs/molpy 的 ref。
+**How to apply:** 升 molrs 小版本时同时改 `Cargo.toml` / `python/Cargo.toml` / `pyproject.toml` / `version.py::MOLRS_MINOR` / 两个发布工作流的标签（含 `jobs.ci.with.mol_git_ref`）。Python 端的 in-loop 优化器绑定（0.2.0 的 `TorsionMcRelaxer` / `LBFGSRelaxer` / `molpack.relaxer`）在 0.3.0 中没有替代品，属于待设计项，不要用旧 `Molpack` 形状补回。
+
 ## 2026-10-02 — 不设 WalkGrow；晶格驱动就是自回避随机行走
 
 不增加理想链入口 `WalkGrow`。自回避随机行走是 `LatticeGrow` 的职责。CBMC 与晶格继续是两个驱动，不合成 `Grow<S, X>`。
