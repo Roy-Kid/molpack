@@ -61,7 +61,7 @@ pub struct GrowConfig {
 
 impl GrowConfig {
     /// One softening rung. `hard_scale` is multiplied by this and never
-    /// falls below [`Self::min_hard_scale`].
+    /// falls below the floor set by [`Self::with_min_hard_scale`].
     pub const SOFTEN_RUNG: F = 0.97;
 
     /// A growth configuration with the mandatory torsion prior and defaults
