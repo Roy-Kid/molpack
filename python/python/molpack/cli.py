@@ -131,10 +131,10 @@ def info(
     """Print atom counts and bounding box for a structure file."""
     frame = _read_frame(path)
     atoms = frame["atoms"]
-    elements = list(atoms.view("element"))
-    xs = list(atoms.view("x"))
-    ys = list(atoms.view("y"))
-    zs = list(atoms.view("z"))
+    elements = list(atoms["element"])
+    xs = list(atoms["x"])
+    ys = list(atoms["y"])
+    zs = list(atoms["z"])
     counts: dict[str, int] = {}
     for el in elements:
         counts[el] = counts.get(el, 0) + 1

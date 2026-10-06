@@ -449,7 +449,11 @@ impl Optimizer for JiggleOptimizer {
     fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String> {
         let mut best = frame.coords().map_err(|e| e.to_string())?;
         let n = best.nrows();
-        let free: Vec<bool> = match frame.get("atoms").and_then(|a| a.get_bool("free")) {
+        let free: Vec<bool> = match frame
+            .get("atoms")
+            .and_then(|a| a.get("free"))
+            .and_then(|c| c.as_bool())
+        {
             Some(col) if col.len() == n => col.iter().copied().collect(),
             _ => vec![true; n],
         };

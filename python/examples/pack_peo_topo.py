@@ -91,7 +91,7 @@ def make_ring(n: int, *, seed: int = 42) -> Atomistic:
 
 
 def _h_indices(frame) -> list[int]:
-    elems = list(frame["atoms"].view("element"))
+    elems = list(frame["atoms"]["element"])
     return [i for i, e in enumerate(elems) if str(e).strip() == "H"]
 
 

@@ -12,7 +12,7 @@ import molpack
 
 def _col(frame, block: str, name: str) -> np.ndarray:
     """Read a column from a ``molrs.Frame`` block as a numpy array."""
-    return np.asarray(frame[block].view(name))
+    return np.asarray(frame[block][name])
 
 
 def _make_frame(

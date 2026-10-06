@@ -81,7 +81,7 @@ def _target(polymer: Atomistic, n_mol: int, name: str) -> molpack.Target:
     target = molpack.Target(frame, n_mol).with_name(name)
     raw = os.environ.get("PEO_H_RADIUS", "0.2")
     if raw not in ("", "off", "none"):
-        elems = list(frame["atoms"].view("element"))
+        elems = list(frame["atoms"]["element"])
         h_idx = [i for i, e in enumerate(elems) if str(e).strip() == "H"]
         if h_idx:
             r = float(raw)

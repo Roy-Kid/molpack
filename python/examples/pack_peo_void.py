@@ -140,9 +140,7 @@ def main(argv: list[str] | None = None) -> None:
 
     template = make_linear(n, seed=seed).to_frame()
     hs = [
-        i
-        for i, e in enumerate(template["atoms"].view("element"))
-        if str(e).strip() == "H"
+        i for i, e in enumerate(template["atoms"]["element"]) if str(e).strip() == "H"
     ]
     target = (
         molpack.Target(template, n_mol)

@@ -14,7 +14,7 @@
 use molrs::store::block::{Block, Column};
 use molrs::store::keys;
 use molrs::store::schema::block_names::ATOMS;
-use molrs::store::schema::{self, RowKind, relation_endpoints};
+use molrs::store::schema::{self, RowKind, RowReference, relation_endpoints};
 use molrs::types::{F, Idx};
 use ndarray::{Array1, Array2};
 
@@ -102,16 +102,28 @@ fn topology_frame(
         }
 
         let (copies, _, _) = one.replicate(count).map_err(column_error)?.into_inner();
+        let bases = row_bases(&relation_parts);
         for (name, mut block) in copies {
             if name == ATOMS {
                 atom_parts.push(block);
                 continue;
             }
-            if let Some((_, ends)) = relation_endpoints(&name, |k| block.contains_key(k)) {
-                for column in ends {
-                    if let Some(index) = block.get_mut(column).and_then(Column::as_uint_mut) {
-                        *index += atom_base as Idx;
-                    }
+            // `replicate` offset each copy within this target; shift every
+            // local row reference past the rows earlier targets put in the
+            // block it indexes.
+            let declared: Vec<(&str, &str)> = block.targets().collect();
+            let refs = relation_endpoints(&name, |k| block.contains_key(k), &declared);
+            for r in refs.into_iter().filter(RowReference::is_local) {
+                let base = if r.target == ATOMS {
+                    atom_base
+                } else {
+                    bases
+                        .iter()
+                        .find(|(k, _)| *k == r.target)
+                        .map_or(0, |&(_, rows)| rows)
+                };
+                if let Some(index) = block.get_mut(&r.column).and_then(Column::as_uint_mut) {
+                    *index += base as Idx;
                 }
             }
             match relation_parts.iter_mut().find(|(k, _)| *k == name) {
@@ -197,6 +209,18 @@ fn coords_only_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::Frame {
     let mut frame = molrs::Frame::new();
     frame.insert(ATOMS, atoms);
     frame
+}
+
+/// Rows each relation block holds so far: the base a later target's
+/// references into that block are shifted by.
+fn row_bases(parts: &[(String, Vec<Block>)]) -> Vec<(String, usize)> {
+    parts
+        .iter()
+        .map(|(name, blocks)| {
+            let rows = blocks.iter().map(|b| b.nrows().unwrap_or(0)).sum();
+            (name.clone(), rows)
+        })
+        .collect()
 }
 
 /// `positions` as the `N × 3` array [`Block::set_coords`] takes.

@@ -101,7 +101,7 @@ def pack_mesh(
         .with_atom_radius(
             [
                 i
-                for i, e in enumerate(frame["atoms"].view("element"))
+                for i, e in enumerate(frame["atoms"]["element"])
                 if str(e).strip() == "H"
             ],
             0.2,
