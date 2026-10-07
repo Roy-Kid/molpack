@@ -3,8 +3,9 @@
 Packmol workloads ported to Python live under `python/examples/`. The five
 `.inp` analogues are regression-tested against the equivalent Rust example
 (same RNG seed → identical final coordinates). Polymer scenes sit beside
-them: chemistry from molrs SMILES + molpy `PolymerBuilder`, packing from
-molpack — no hand-placed coordinates.
+them: chemistry and architecture from molrs (CGsmiles units + conformer,
+grown by `molrs.builder.Assembler`), packing from molpack — no hand-placed
+coordinates.
 
 | Script                | Packmol analogue  | What it shows |
 |-----------------------|-------------------|---------------|
@@ -21,21 +22,21 @@ molpack — no hand-placed coordinates.
 | `pack_peo_mesh.py`    | —                 | linear PEO inside a branched mesh cavity (a `molrs.spatial.Polyhedron` masks `LatticeGrow` sites) |
 | `pack_peo_void.py`    | —                 | linear PEO through the solvent-accessible void of a bead-spring frame (`~molrs.spatial.SphereUnion`) |
 
-Install molpack once; the `molrs` dependency comes with it. The
-`pack_peo_*.py` scenes also need molpy, on the same 0.16 line — the `molpy`
-extra pins it:
+Install molpack once; the `molrs` dependency comes with it, and every
+script needs nothing else:
 
 ```bash
-pip install molcrafts-molpack            # Packmol ports, water cube, ions
-pip install "molcrafts-molpack[molpy]"   # + the pack_peo_*.py polymer scenes
+pip install molcrafts-molpack
 ```
 
 Each script is standalone: no shared helper. `pack_water_cube.py` builds
 its frame in memory with `molrs.store.Frame` (no PDB file). The Packmol-port
 scripts load PDB files via `molrs.io.read_pdb`. The `pack_peo_*.py`
 scenes build polymers from CGsmiles units
-(`molrs.io.SmilesIR.from_fragment(body).to_template()`) grown by molpy
-instead. Writes go through molrs (`molrs.io.mrec.write`, `write_lammps_trajectory`,
+(`molrs.io.smiles.SmilesIR.from_fragment(body).to_template()`, given 3D
+coordinates by `molrs.conformer.Conformer`) grown by
+`molrs.builder.Assembler` with `molrs.builder.GrowthPlacer` instead. Writes
+go through molrs (`molrs.io.write_mrec`, `write_lammps_trajectory`,
 `write_lammps_dump_local`).
 
 ## Running
@@ -88,7 +89,7 @@ Each example writes its outputs to `python/examples/out/` (created on
 demand, git-ignored) — the path is script-relative, so the working
 directory does not matter:
 
-- `{stem}.mrec` — molrs scientific record (`molrs.io.mrec.write`)
+- `{stem}.mrec` — molrs scientific record (`molrs.io.write_mrec`)
 - `{stem}.lammpstrj` — LAMMPS dump custom (OVITO particle topology)
 - `{stem}.dump.local` — LAMMPS dump local bonds (`batom1`/`batom2`), for
   OVITO [Load trajectory](https://www.ovito.org/manual/reference/pipelines/modifiers/load_trajectory.html)

@@ -1,8 +1,9 @@
 """Topological PEO: 4-arm star and macrocycle, then pack.
 
-Chemistry is molrs (SMILES + conformer, including hydrogens). Architecture
-is molpy: CGsmiles topologies grown by ``mp.builder.Assembler`` with
-``mp.builder.GrowthPlacer``. Packing is molpack. No hand-placed coordinates.
+Chemistry and architecture are molrs: SMILES + conformer (hydrogens
+included) for each unit, and CGsmiles topologies grown by
+``molrs.builder.Assembler`` with ``molrs.builder.GrowthPlacer``. Packing is
+molpack. No hand-placed coordinates.
 
 A 4-arm star needs a tetrafunctional core. An EO unit only has two ports,
 so the core is ``X4`` (``C(C[>])(C[>])(C[>])C[>]``, pentaerythritol-like)
@@ -27,7 +28,6 @@ import sys
 import time
 from pathlib import Path
 
-import molpy as mp
 import molrs
 import numpy as np
 from molrs.system import Atomistic
@@ -45,17 +45,17 @@ EO_UNIT = "[<]OCC[>]"  # -O-CH2-CH2-, ports on O (<) and C (>)
 CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
 
 
-def _unit(name: str, body: str, seed: int) -> mp.Atomistic:
+def _unit(name: str, body: str, seed: int) -> Atomistic:
     """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
-    template = molrs.io.SmilesIR.from_fragment(body).to_template()
-    return mp.Conformer(seed=seed).generate(template)[0]
+    template = molrs.io.smiles.SmilesIR.from_fragment(body).to_template()
+    return molrs.conformer.Conformer(seed=seed).generate(template)[0]
 
 
-def _grow(topology: str, library: dict[str, mp.Atomistic]) -> Atomistic:
+def _grow(topology: str, library: dict[str, Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
-    sites = mp.io.CGSmilesIR(topology).to_coarsegrain()
-    return mp.builder.Assembler(library, mp.builder.GrowthPlacer()).assemble(
-        sites, mp.Atomistic
+    sites = molrs.io.smiles.CGSmilesIR(topology).to_coarsegrain()
+    return molrs.builder.Assembler(library, molrs.builder.GrowthPlacer()).assemble(
+        sites, Atomistic
     )
 
 
@@ -216,7 +216,7 @@ def main(argv: list[str] | None = None) -> None:
     n_mol = int(args[2]) if len(args) > 2 else 8
     density = float(args[3]) if len(args) > 3 else 0.5
     seed = int(args[4]) if len(args) > 4 else 42
-    print("── topological PEO (molrs chemistry, molpy architecture) ──")
+    print("── topological PEO (molrs chemistry and architecture) ──")
     t0 = time.perf_counter()
     if kind == "ring":
         state = pack_ring(dp, n_mol, density, seed)
@@ -235,7 +235,7 @@ def main(argv: list[str] | None = None) -> None:
         )
     stem = f"pack_peo_topo_{kind}"
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.mrec.write(str(OUT / f"{stem}.mrec"), packed)
+    molrs.io.write_mrec(str(OUT / f"{stem}.mrec"), packed)
     molrs.io.write_lammps_trajectory(
         str(OUT / f"{stem}.lammpstrj"),
         [packed],

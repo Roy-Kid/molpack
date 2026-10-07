@@ -41,7 +41,6 @@ import sys
 import time
 from pathlib import Path
 
-import molpy as mp
 import molrs
 import numpy as np
 from molrs.system import Atomistic
@@ -61,17 +60,17 @@ EO_UNIT = "[<]OCC[>]"  # -O-CH2-CH2-, ports on O (<) and C (>)
 CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
 
 
-def _unit(name: str, body: str, seed: int) -> mp.Atomistic:
+def _unit(name: str, body: str, seed: int) -> Atomistic:
     """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
-    template = molrs.io.SmilesIR.from_fragment(body).to_template()
-    return mp.Conformer(seed=seed).generate(template)[0]
+    template = molrs.io.smiles.SmilesIR.from_fragment(body).to_template()
+    return molrs.conformer.Conformer(seed=seed).generate(template)[0]
 
 
-def _grow(topology: str, library: dict[str, mp.Atomistic]) -> Atomistic:
+def _grow(topology: str, library: dict[str, Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
-    sites = mp.io.CGSmilesIR(topology).to_coarsegrain()
-    return mp.builder.Assembler(library, mp.builder.GrowthPlacer()).assemble(
-        sites, mp.Atomistic
+    sites = molrs.io.smiles.CGSmilesIR(topology).to_coarsegrain()
+    return molrs.builder.Assembler(library, molrs.builder.GrowthPlacer()).assemble(
+        sites, Atomistic
     )
 
 
@@ -147,7 +146,7 @@ def main(argv: list[str] | None = None) -> None:
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.mrec.write(str(OUT / "pack_peo_mesh.mrec"), packed)
+    molrs.io.write_mrec(str(OUT / "pack_peo_mesh.mrec"), packed)
     # The frame carries the template's chemistry (mass, res_name, …); the dump
     # is for a viewer, so it gets the `dump custom` line a viewer reads.
     molrs.io.write_lammps_trajectory(

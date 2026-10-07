@@ -21,11 +21,6 @@ dependencies = [
 #   pip install "molcrafts-molpack[doc]"
 # That is the build command a Cloudflare Pages Git-integration build should use.
 [project.optional-dependencies]
-# molpy is not imported by molpack; the polymer examples (`pack_peo_*.py`)
-# build their chains with it. Same minor line as molrs, which molpy pins too.
-molpy = [
-  "molcrafts-molpy>=0.16.0,<0.17",
-]
 doc = [
   "zensical>=0.0.53",
   "molcrafts-zensical-theme>=0.2.5",
@@ -41,8 +36,6 @@ typecheck = [
   "ty",
   "numpy>=2.0",
   "molcrafts-molrs>=0.16.0,<0.17",
-  # `ty check` walks examples/, several of which build templates with molpy.
-  "molcrafts-molpy>=0.16.0,<0.17",
   # `ty check` walks tests/ which imports pytest.
   "pytest",
 ]
@@ -112,10 +105,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.uv.sources]
-# Same path and editable flag as molpy. The dev group pulls molpy in, and uv
-# rejects two source rows for molcrafts-molrs that disagree on editable.
 molcrafts-molrs = { path = "../../molrs/molrs-python", editable = true }
-molcrafts-molpy = { path = "../../molpy" }
 
 [tool.ty]
 [tool.ty.environment]

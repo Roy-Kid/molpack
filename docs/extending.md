@@ -395,8 +395,8 @@ Confinement like this is a molpack extension workflow, not a Packmol parity
 claim: an in-loop optimizer reshapes flexible chains while the packer places
 them, so one engine can fit them inside a cavity no rigid pose would clear.
 Two runnable programs drive `TorsionMcOptimizer` exactly this way —
-`cargo run --release --example pack_adsorption` and
-`cargo run --release --example pack_translocation`.
+`cargo run --release --example pack_adsorption --features io` and
+`cargo run --release --example pack_translocation --features io`.
 
 ### Step 1 — implement `Optimizer`
 

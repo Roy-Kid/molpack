@@ -1,7 +1,8 @@
 """Open-space linear PEO melt.
 
-Chemistry is molrs (CGsmiles + conformer). Architecture is molpy: a CGsmiles topology grown by ``mp.builder.Assembler`` with
-``mp.builder.GrowthPlacer``. Packing is molpack: ``LatticeGrow`` at
+Chemistry and architecture are molrs: CGsmiles + conformer for the unit, and
+a CGsmiles topology grown by ``molrs.builder.Assembler`` with
+``molrs.builder.GrowthPlacer``. Packing is molpack: ``LatticeGrow`` at
 2.0 Å then ``GenCanPack.with_restart`` at 2.0 Å. Hydrogen packing radius
 defaults to 0.2 Å (``PEO_H_RADIUS=off`` restores ``tolerance/2``):
 hydrogens relax away in the first picoseconds of MD, so making them
@@ -19,7 +20,6 @@ import sys
 import time
 from pathlib import Path
 
-import molpy as mp
 import molrs
 import numpy as np
 from molrs.system import Atomistic
@@ -36,17 +36,17 @@ EO_UNIT = "[<]OCC[>]"  # -O-CH2-CH2-, ports on O (<) and C (>)
 CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
 
 
-def _unit(name: str, body: str, seed: int) -> mp.Atomistic:
+def _unit(name: str, body: str, seed: int) -> Atomistic:
     """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
-    template = molrs.io.SmilesIR.from_fragment(body).to_template()
-    return mp.Conformer(seed=seed).generate(template)[0]
+    template = molrs.io.smiles.SmilesIR.from_fragment(body).to_template()
+    return molrs.conformer.Conformer(seed=seed).generate(template)[0]
 
 
-def _grow(topology: str, library: dict[str, mp.Atomistic]) -> Atomistic:
+def _grow(topology: str, library: dict[str, Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
-    sites = mp.io.CGSmilesIR(topology).to_coarsegrain()
-    return mp.builder.Assembler(library, mp.builder.GrowthPlacer()).assemble(
-        sites, mp.Atomistic
+    sites = molrs.io.smiles.CGSmilesIR(topology).to_coarsegrain()
+    return molrs.builder.Assembler(library, molrs.builder.GrowthPlacer()).assemble(
+        sites, Atomistic
     )
 
 
@@ -120,7 +120,7 @@ def main(argv: list[str] | None = None) -> None:
     n_mol = int(args[1]) if len(args) > 1 else 8
     density = float(args[2]) if len(args) > 2 else 0.5
     seed = int(args[3]) if len(args) > 3 else 42
-    print("── linear PEO (open space, molrs chemistry, molpy architecture) ──")
+    print("── linear PEO (open space, molrs chemistry and architecture) ──")
     t0 = time.perf_counter()
     packed = pack_linear(n, n_mol, density, seed).frame
     if packed.box is None:
@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> None:
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.mrec.write(str(OUT / "pack_peo_linear.mrec"), packed)
+    molrs.io.write_mrec(str(OUT / "pack_peo_linear.mrec"), packed)
     molrs.io.write_lammps_trajectory(
         str(OUT / "pack_peo_linear.lammpstrj"),
         [packed],

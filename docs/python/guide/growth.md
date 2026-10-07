@@ -89,10 +89,10 @@ only the new species and never disturbs the grown chains.
 
 ## Branched trees and rings
 
-Build the chemistry with molrs (SMILES + conformer) and molpy
-`PolymerBuilder` — do not invent coordinates. A 4-arm star is a
-tetrafunctional core plus EO arms (`build_star`); a macrocycle is
-`build_ring`. Both `CbmcGrow` and `LatticeGrow` consume the **bond
+Build the chemistry with molrs (SMILES + conformer) and grow the
+architecture with `molrs.builder.Assembler` — do not invent coordinates. A
+4-arm star is a tetrafunctional core plus EO arms (`make_star`); a
+macrocycle is `make_ring`. Both `CbmcGrow` and `LatticeGrow` consume the **bond
 graph**: a tree is legal for either grower; a cycle raises
 `RingTemplate` on both, so `pack_ring` then picks rigid `GenCanPack`.
 

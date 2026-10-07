@@ -97,7 +97,7 @@ def write(name: str, result) -> None:
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.mrec.write(str(OUT / f"{name}.mrec"), packed)
+    molrs.io.write_mrec(str(OUT / f"{name}.mrec"), packed)
     molrs.io.write_lammps_trajectory(
         str(OUT / f"{name}.lammpstrj"),
         [packed],

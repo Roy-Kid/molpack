@@ -9,8 +9,8 @@ on:
     inputs:
       mol_git_ref:
         description: >-
-          molrs / molpy ref to check out. The publish workflows run on a
-          molpack tag, which names no molrs or molpy ref, so they pass the
+          molrs ref to check out. The publish workflows run on a
+          molpack tag, which names no molrs ref, so they pass the
           release tag of the molrs line Cargo.toml pins.
         type: string
         required: false
@@ -18,11 +18,10 @@ on:
   workflow_dispatch:
 
 # Local builds use the sibling directories. GitHub has two branches, and
-# CI checks out MolCrafts/molrs and MolCrafts/molpy on that same branch.
+# CI checks out MolCrafts/molrs on that same branch.
 # A pull request uses its head branch; a caller may name the ref instead.
 env:
   MOLRS_GIT_REPOSITORY: MolCrafts/molrs
-  MOLPY_GIT_REPOSITORY: MolCrafts/molpy
   MOL_GIT_REF: ${{ inputs.mol_git_ref || github.head_ref || github.ref_name }}
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
@@ -40,12 +39,6 @@ jobs:
           repository: ${{ env.MOLRS_GIT_REPOSITORY }}
           ref: ${{ env.MOL_GIT_REF }}
           path: molrs
-      # `ty check` walks examples/, which import molpy (typecheck group).
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ env.MOLPY_GIT_REPOSITORY }}
-          ref: ${{ env.MOL_GIT_REF }}
-          path: molpy
       - uses: actions/checkout@v6
         with:
           path: molpack
@@ -121,11 +114,6 @@ jobs:
           repository: ${{ env.MOLRS_GIT_REPOSITORY }}
           ref: ${{ env.MOL_GIT_REF }}
           path: molrs
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ env.MOLPY_GIT_REPOSITORY }}
-          ref: ${{ env.MOL_GIT_REF }}
-          path: molpy
       - uses: actions/checkout@v6
         with:
           path: molpack

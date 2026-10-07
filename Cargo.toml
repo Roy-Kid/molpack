@@ -62,8 +62,8 @@ name = "molpack"
 path = "src/bin/molpack/main.rs"
 required-features = ["cli"]
 
-# Example programs all read PDB files via molrs-io directly, so they need
-# the `io` feature on. Run with `cargo run --example <name> --features io`.
+# Example programs read and write their files through molrs's `io`, so they
+# need the `io` feature on. Run with `cargo run --example <name> --features io`.
 [[example]]
 name = "pack_peo"
 path = "examples/pack_peo/main.rs"
@@ -96,16 +96,19 @@ required-features = ["io"]
 
 # Polymer adsorption onto a substrate: a heterogeneous system whose chains relax
 # their conformation in-loop via `TorsionMcOptimizer`. Synthesizes its own
-# coarse-grain geometry, so it needs no feature.
+# coarse-grain geometry; `io` is for molrs's XYZ writer (the optional dump).
 [[example]]
 name = "pack_adsorption"
 path = "examples/pack_adsorption/main.rs"
+required-features = ["io"]
 
 # Polymer translocation initial state: chains threaded through a membrane pore —
-# a configuration MD cannot reach from an unthreaded start. Needs no feature.
+# a configuration MD cannot reach from an unthreaded start. `io` is for molrs's
+# XYZ writer (the optional dump).
 [[example]]
 name = "pack_translocation"
 path = "examples/pack_translocation/main.rs"
+required-features = ["io"]
 
 [profile.release]
 codegen-units = 1
