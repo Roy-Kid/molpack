@@ -1,9 +1,9 @@
 # Managed by prek (drop-in pre-commit replacement): `prek install`
-# CI parity: every command in .github/workflows/ci.yml has a hook here.
+# CI parity: every command in .github/workflows/{lint,test,docs}.yml has a hook here.
 #
 #   pre-commit  file hygiene, ruff, rustfmt, no ignored tests: nothing
 #               compiles, so a commit never waits for a build (or for Slurm).
-#   pre-push    the commit hooks on --all-files (ci.yml lint runs them that
+#   pre-push    the commit hooks on --all-files (lint.yml runs them that
 #               way), the partners, the locks, the docs build, and the
 #               gates that compile -- clippy, ty, rust tests, tox -- in CI's
 #               sibling layout with molrs at the commit
@@ -51,10 +51,10 @@ repos:
         entry: '```[a-z,_]*ignore|#\[ignore'
         files: ^(src|docs|examples|python/src)/.*\.(rs|md)$
 
-      # A commit checks its staged files only; ci.yml lint runs the hooks
+      # A commit checks its staged files only; lint.yml runs the hooks
       # above on every file.
       - id: all-files
-        name: commit hooks on --all-files (ci.yml lint)
+        name: commit hooks on --all-files (lint.yml)
         entry: uvx pre-commit run --all-files --hook-stage pre-commit --show-diff-on-failure
         language: system
         pass_filenames: false
@@ -62,7 +62,7 @@ repos:
         stages: [pre-push]
 
       - id: partners
-        name: partners resolve; path deps resolve in CI (ci.yml lint)
+        name: partners resolve; path deps resolve in CI (lint.yml)
         entry: python3 scripts/partners.py check
         language: system
         pass_filenames: false
@@ -72,7 +72,7 @@ repos:
       # The three lock files record the resolved molrs's metadata; every
       # cargo and uv call below is --locked, so a stale one fails here first.
       - id: locks
-        name: Cargo.lock + python/Cargo.lock + python/uv.lock current (ci.yml lint)
+        name: Cargo.lock + python/Cargo.lock + python/uv.lock current (lint.yml)
         entry: >-
           python3 scripts/partners.py run -- sh -c
           'cargo metadata --locked --format-version 1 >/dev/null
@@ -84,9 +84,9 @@ repos:
         stages: [pre-push]
 
       # The docs site, built from the `doc` group in a clean copy of the tree,
-      # --strict: any warning fails (ci.yml docs, Cloudflare Pages).
+      # --strict: any warning fails (docs.yml, Cloudflare Pages).
       - id: docs
-        name: docs build (ci.yml docs)
+        name: docs build (docs.yml)
         entry: >-
           python3 scripts/partners.py run --
           uv run --isolated --locked --python 3.12 --project python --only-group doc
@@ -97,7 +97,7 @@ repos:
         stages: [pre-push]
 
       - id: clippy
-        name: clippy --all-targets --all-features (ci.yml lint)
+        name: clippy --all-targets --all-features (lint.yml)
         entry: >-
           scripts/hook-run.sh python3 scripts/partners.py run --
           cargo clippy --locked --all-targets --all-features -- -D warnings
@@ -109,7 +109,7 @@ repos:
       # Builds the molrs extension (editable) into the typecheck env. uv's
       # maturin builds (molrs, molpack) get --locked through MATURIN_PEP517_ARGS.
       - id: ty
-        name: ty (Python type check, ci.yml lint)
+        name: ty (Python type check, lint.yml)
         entry: >-
           scripts/hook-run.sh python3 scripts/partners.py run --
           env MATURIN_PEP517_ARGS=--locked uv run --locked --python 3.12 --directory python --group typecheck
@@ -120,7 +120,7 @@ repos:
         stages: [pre-push]
 
       - id: rust-tests
-        name: rust tests (ci.yml test)
+        name: rust tests (test.yml)
         entry: >-
           scripts/hook-run.sh python3 scripts/partners.py run -- sh -c
           'cargo test --locked --lib --features cli
@@ -134,7 +134,7 @@ repos:
         stages: [pre-push]
 
       - id: python-tests
-        name: python tests, tox isolated non-editable (ci.yml python)
+        name: python tests, tox isolated non-editable (test.yml)
         entry: >-
           scripts/hook-run.sh python3 scripts/partners.py run --
           env MATURIN_PEP517_ARGS=--locked uv run --locked --python 3.12 --directory python --group dev tox -e py

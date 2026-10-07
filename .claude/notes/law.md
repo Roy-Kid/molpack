@@ -382,14 +382,14 @@ makes, the lock files match. A release commit names a molrs tag.
 - Never let a hook or script rewrite `Cargo.toml` / `pyproject.toml` /
   `.github/partners.env`.
 - Never check a partner out in CI or a hook other than through
-  `scripts/partners.py` (`resolve`, `run`).
+  `scripts/partners.py` (`fetch`, `run`).
 
 <!-- mol:law:id:local-gates-prek-tox -->
 ## P4. Local gates are prek + tox
 
 **Principle.** Hooks use prek (pre-commit-compatible config); Python
 isolation is tox from the `python/` `dev` dependency group. Gate commands
-are spelled in `.pre-commit-config.yaml` and `ci.yml`. `scripts/` holds the
+are spelled in `.pre-commit-config.yaml` and `.github/workflows/`. `scripts/` holds the
 hook plumbing only: `hook-run.sh` (dispatch to a compute node on the
 MolCrafts cluster) and `partners.py` (CI's sibling layout at the resolved
 partner commits).

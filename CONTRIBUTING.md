@@ -50,10 +50,10 @@ cargo build -p molcrafts-molpack
 ## Running tests
 
 prek pre-push and CI run the **same** commands (spelled out in
-`.pre-commit-config.yaml` and `.github/workflows/ci.yml`):
+`.pre-commit-config.yaml` and `.github/workflows/`):
 
 ```bash
-# Rust — same as CI "rust tests" job. Behaviour lives in `#[cfg(test)]`
+# Rust — same as CI `test / rust`. Behaviour lives in `#[cfg(test)]`
 # modules next to the code; there is no tests/ directory.
 cargo test --locked --lib --features cli
 cargo test --locked --doc --features cli
@@ -74,14 +74,14 @@ venv; **do not** rely on that for the gate — pre-push always uses
 ## Hooks
 
 `prek install` installs both hook types from `.pre-commit-config.yaml`; every
-command in `.github/workflows/ci.yml` has a hook. **Never `git commit
+command in `.github/workflows/{lint,test,docs}.yml` has a hook. **Never `git commit
 --no-verify` or `git push --no-verify`, and never merge a red pull request.**
 
 - **pre-commit** (staged files, nothing compiles, in place): file hygiene
   (whitespace, final newline, YAML/TOML, merge markers, line endings), ruff
   format + ruff (`python/`), rustfmt, and the no-ignored-tests guard.
 - **pre-push**:
-  - the pre-commit hooks again on `--all-files` (CI `lint` runs them so);
+  - the pre-commit hooks again on `--all-files` (CI `lint / hooks` runs them so);
   - `scripts/partners.py check` — every partner in `.github/partners.env`
     resolves, every path dependency (`../molrs`, `../../molrs`, ...)
     lands in a checkout CI makes, and no workflow spells a partner ref of its
@@ -108,8 +108,8 @@ command in `.github/workflows/ci.yml` has a hook. **Never `git commit
 
 On `dev`, partners are tracked, not pinned. `.github/partners.env` names
 molrs's branch (`MOLRS_REF=dev`), and `scripts/partners.py` resolves it -- for
-CI (`partners.py resolve`, appended to `$GITHUB_ENV`) and for the hooks
-(`partners.py run`) alike -- to the first of:
+CI (`partners.py fetch`, into `../molrs`) and for the hooks (`partners.py
+run`) alike -- to the first of:
 
 1. molrs's branch named like the one being built (CI: the pushed branch or a
    pull request's head branch; locally: the checked-out branch), looked up
@@ -123,17 +123,40 @@ CI (`partners.py resolve`, appended to `$GITHUB_ENV`) and for the hooks
 A change that needs a molrs change lands as two same-named branches, never by
 skipping a gate: create the same branch (say `converge/x`) in both checkouts;
 push both to your forks, never to MolCrafts (molpack's gates take molrs's
-branch from your fork, or from your sibling before it is pushed); run CI on
-the forks by opening each branch as a pull request inside its fork -- molpack's
-run resolves molrs's `converge/x` on your fork; only once both forks are
+branch from your fork, or from your sibling before it is pushed); each push
+runs the full CI tier on your fork, and molpack's run resolves molrs's
+`converge/x` there; only once both forks are
 green, open the pull requests into MolCrafts `dev`, land molrs's, then
 molpack's (never a red one), and delete the branches.
 
 **Releasing.** A release builds against a fixed molrs: the release commit on
 `master` sets `MOLRS_REF` to the molrs release tag of the line `Cargo.toml`
 names (`vX.Y.Z`), relocks if that changes molrs's metadata, and is tagged;
-`publish-crate.yml` and `publish-pypi.yml` resolve that tag. When `master` is
-merged back into `dev`, keep `MOLRS_REF=dev` there.
+`release.yml` resolves that tag. When `master` is merged back into `dev`, keep
+`MOLRS_REF=dev` there.
+
+## CI
+
+One workflow per kind of work. Every push of any branch runs `lint`, `test`
+and `docs`, on a fork as on MolCrafts. A pull request into `dev` or `master`
+runs them again only when it comes from another repository (a pull request
+inside a fork was already built by its push).
+
+| workflow | feature-branch push to MolCrafts | everything else: `dev`/`master`, pull requests, any push to a fork | upstream only |
+| --- | --- | --- | --- |
+| `lint.yml` | `lint / hooks` (commit hooks on every file, partners, lock files), `lint / clippy` (clippy, ty) | same | — |
+| `test.yml` | fast: `test / rust`, `test / python (ubuntu-latest)` | full: `test / rust`, `test / python` on Linux, macOS and Windows | — |
+| `docs.yml` | `docs / build` (zensical `--strict`) | same | Cloudflare Pages deploys the site from MolCrafts |
+| `release.yml` | — | dispatch: dry run (gates, builds, `cargo publish --dry-run`, uploads nothing) | `v*` tag: crates.io, PyPI wheels + sdist, GitHub Release |
+
+So a fork branch gets the full tier on its push: push to your fork, wait for
+green, then open the pull request into MolCrafts `dev`. Branches pushed to
+MolCrafts itself (Dependabot's) get the fast tier, and their pull requests the
+full one. The `require-green-ci` (`dev`) and `protect-master` rulesets require
+the full tier's jobs. A release tag must be `v` + the `Cargo.toml` version, on
+`master`; trusted publishing on crates.io and PyPI names `release.yml`.
+Shared setup lives in `.github/actions/` (`setup-rust`, `setup-python`,
+`setup-partners`).
 
 ## Code style
 
