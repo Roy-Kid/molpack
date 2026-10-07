@@ -6,7 +6,7 @@
 //! * [`StageFactory`] — "given the resolved setup, what stages do you
 //!   contribute?" Everything a [`Pipeline`](super::Pipeline) needs from the
 //!   things it was handed: their target validation, their shared settings,
-//!   the handlers they carry, and their stages. A preset entry implements it,
+//!   the callbacks they carry, and their stages. A preset entry implements it,
 //!   and so does `Pipeline` itself, which is what makes pipelines nest.
 //! * [`PackEngine`] — the runnable surface: the shared `with_*` builders and
 //!   [`run`](PackEngine::run). `run` is a **required** method with no
@@ -23,9 +23,9 @@ use molrs::op::F;
 use crate::PackError;
 use crate::Stage;
 use crate::Target;
-use crate::entry::setup::CellDecl;
-use crate::entry::{PackSettings, State};
-use crate::handler::{Handler, LogLevel};
+use crate::callback::{Callback, LogLevel};
+use crate::pack_space::CellDecl;
+use crate::{PackSettings, State};
 
 /// Everything the lifecycle resolved before handing control to the stages:
 /// the run's shared settings, the targets (post-broadcast), the space, and
@@ -52,7 +52,7 @@ pub struct EngineSetup<'a> {
 ///
 /// The unit a [`Pipeline`](super::Pipeline) composes: it validates the
 /// targets it will be given, states the shared settings it carries, hands
-/// over its handlers, and builds its stages once the setup is resolved.
+/// over its callbacks, and builds its stages once the setup is resolved.
 ///
 /// Implement this to plug a new algorithm into a pipeline without giving it
 /// its own lifecycle. Implement [`PackEngine`] on top when it should also be
@@ -73,13 +73,13 @@ pub trait StageFactory {
     /// ([`PackError::PresetSettingsInsidePipeline`]).
     fn settings(&self) -> &PackSettings;
 
-    /// Surrender the handlers this factory carries. Default: none.
+    /// Surrender the callbacks this factory carries. Default: none.
     ///
     /// A pipeline **adopts** them — it never drops them — and they then
     /// observe the whole run, not just the stage that carried them in. The
-    /// counterpart rule is the one above: handlers are adopted, non-default
+    /// counterpart rule is the one above: callbacks are adopted, non-default
     /// shared settings are refused by name.
-    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
+    fn take_callbacks(&mut self) -> Vec<Box<dyn Callback>> {
         Vec::new()
     }
 
@@ -100,8 +100,8 @@ impl<T: StageFactory + ?Sized> StageFactory for Box<T> {
     fn settings(&self) -> &PackSettings {
         (**self).settings()
     }
-    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
-        (**self).take_handlers()
+    fn take_callbacks(&mut self) -> Vec<Box<dyn Callback>> {
+        (**self).take_callbacks()
     }
     fn stages(&mut self, setup: &EngineSetup<'_>) -> Result<Vec<Box<dyn Stage>>, PackError> {
         (**self).stages(setup)
@@ -114,12 +114,12 @@ impl<T: StageFactory + ?Sized> StageFactory for Box<T> {
 /// exactly one place, [`Pipeline`](super::Pipeline), and every other
 /// implementor delegates to it (`Pipeline::single(self).run(targets, n)`).
 /// Consuming `self` makes an engine one shot by construction, which is what
-/// makes its handler set impossible to lose silently.
+/// makes its callback set impossible to lose silently.
 pub trait PackEngine: StageFactory + Sized {
     /// Mutate the shared settings (used by the provided `with_*` builders).
     fn settings_mut(&mut self) -> &mut PackSettings;
-    /// The engine's handler set.
-    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>>;
+    /// The engine's callback set.
+    fn callbacks_mut(&mut self) -> &mut Vec<Box<dyn Callback>>;
 
     // ── Shared builders (bound once, forwarded to `PackSettings`) ────────
 
@@ -155,8 +155,8 @@ pub trait PackEngine: StageFactory + Sized {
         self.settings_mut().log.frequency = n.max(1);
         self
     }
-    fn with_handler(mut self, handler: Box<dyn Handler>) -> Self {
-        self.handlers_mut().push(handler);
+    fn with_callback(mut self, callback: Box<dyn Callback>) -> Self {
+        self.callbacks_mut().push(callback);
         self
     }
     /// Declare the packing cell by lengths and angles (script `cell`).

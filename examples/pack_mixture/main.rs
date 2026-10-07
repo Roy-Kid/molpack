@@ -22,7 +22,9 @@
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
-use molpack::{GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target, XYZHandler};
+use molpack::{
+    GencanPack, PackEngine, ProgressCallback, RegionRestraint, Target, XyzTrajectoryCallback,
+};
 use std::sync::Arc;
 
 use molrs::core::Cuboid;
@@ -51,14 +53,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(box_restraint)
         .with_name("urea");
 
-    let mut packer = GenCanPack::new();
+    let mut packer = GencanPack::new();
     if std::env::var_os("MOLPACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.with_handler(Box::new(ProgressHandler::new()));
+        packer = packer.with_callback(Box::new(ProgressCallback::new()));
     }
     if std::env::var_os("MOLPACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.with_handler(Box::new(XYZHandler::new(out_dir.join("mixture.xyz"), 10)));
+        packer = packer.with_callback(Box::new(XyzTrajectoryCallback::new(
+            out_dir.join("mixture.xyz"),
+            10,
+        )));
     }
 
     let targets = vec![water_target, urea_target];

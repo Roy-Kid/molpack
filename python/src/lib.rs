@@ -5,13 +5,13 @@
 //! | Python class     | Rust wrapper         | Purpose                            |
 //! |------------------|----------------------|------------------------------------|
 //! | `Target`         | [`PyTarget`]         | Molecule specification for packing |
-//! | `GenCanPack`     | [`PyGenCanPack`]     | Rigid-body GENCAN packing entry    |
+//! | `GencanPack`     | [`PyGencanPack`]     | Rigid-body GENCAN packing entry    |
 //! | `CbmcGrow`       | [`PyCbmcGrow`]       | Chain-growth entry                 |
 //! | `LatticeGrow`    | [`PyLatticeGrow`]    | Lattice-growth entry               |
 //! | `Pipeline`       | [`PyPipeline`]       | Entries composed as stages         |
 //! | `State`     | [`PyState`]     | Frame + diagnostics from `run()`   |
 //! | `IntraResidual`  | [`PyIntraResidual`]  | Nested scored/exempted intra mins  |
-//! | `StepInfo`       | [`PyStepInfo`]       | Read-only snapshot for handlers    |
+//! | `StepInfo`       | [`PyStepInfo`]       | Read-only snapshot for callbacks    |
 //! | `StageInfo`      | [`PyStageInfo`]      | Which stage a callback came from   |
 //! | `StepContext`    | [`PyStepContext`]    | Callback-scoped live-context guard |
 //!
@@ -24,8 +24,8 @@
 //! `fg(x, scale, scale2)` methods to `Target.with_restraint` — no dedicated
 //! class needed.
 //!
-//! Custom Python progress handlers are registered via the entries'
-//! `with_handler(obj)`; see the [`handler`] module for the method contract.
+//! Custom Python progress callbacks are registered via the entries'
+//! `with_callback(obj)`; see the [`callback`] module for the method contract.
 
 use pyo3::prelude::*;
 
@@ -34,27 +34,24 @@ mod interop;
 mod errors;
 use errors::register_errors;
 
-mod types;
-use types::{PyAngle, PyAxis, PyCenteringMode};
-
 mod restraint;
 use restraint::{
     PyExponentialPlane, PyExponentialPoint, PyGaussianPlane, PyGaussianPoint, PySelfSeparation,
     PyTabulatedPlane, PyTabulatedPoint,
 };
 
-mod handler;
-use handler::{PyStageInfo, PyStepContext, PyStepInfo};
+mod callback;
+use callback::{PyStageInfo, PyStepContext, PyStepInfo};
 
 mod grow;
 
 mod target;
-use target::PyTarget;
+use target::{PyAngle, PyAxis, PyCenteringMode, PyTarget};
 
-mod entry;
-use entry::{PyCbmcGrow, PyGenCanPack, PyLatticeGrow, PyPipeline};
-mod result;
-use result::{PyIntraResidual, PyState};
+mod packing_methods;
+use packing_methods::{PyCbmcGrow, PyGencanPack, PyLatticeGrow, PyPipeline};
+mod state;
+use state::{PyIntraResidual, PyState};
 
 mod parallel;
 use parallel::{init_thread_pool, num_threads, rayon_enabled};
@@ -86,7 +83,7 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<grow::PyAnglePrior>()?;
 
     m.add_class::<PyTarget>()?;
-    m.add_class::<PyGenCanPack>()?;
+    m.add_class::<PyGencanPack>()?;
     m.add_class::<PyCbmcGrow>()?;
     m.add_class::<PyLatticeGrow>()?;
     m.add_class::<PyPipeline>()?;

@@ -29,7 +29,7 @@
 //! Rosenbluth selection has a known, characterizable bias (Consta et al.
 //! 1999), and equilibration is the downstream MD's job — the classic
 //! generate → push-off → equilibrate pipeline (Auhl et al. 2003). Push-off,
-//! when the caller wants it, is [`GenCanPack::with_restart`](crate::GenCanPack::with_restart)
+//! when the caller wants it, is [`GencanPack::with_restart`](crate::GencanPack::with_restart)
 //! on this run's [`State`](crate::State).
 //!
 //! # Round-snapshot semantics (part of the algorithm, not an implementation
@@ -44,9 +44,9 @@
 //! serial commits) is bit-identical to this serial one — see
 //! the growth driver (`grow/driver.rs`) for the full contract.
 
+pub(crate) mod cbmc_grow;
 mod config;
 pub(crate) mod driver;
-pub(crate) mod entry;
 mod error;
 pub(crate) mod field;
 pub(crate) mod internal;

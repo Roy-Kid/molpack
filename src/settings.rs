@@ -1,19 +1,17 @@
-//! Shared settings, packing space, and the run's result.
+//! [`PackSettings`] — the knobs every packing run shares.
 //!
-//! Three things every packing run needs, none of which belongs to one
-//! algorithm:
+//! The knobs the shared infrastructure reads (contact tolerance, precision,
+//! seed, the box or cell declaration, global restraints, screen logging via
+//! [`LogSpec`]). One ruler per run: algorithm-specific knobs live on their
+//! own entry type, never here. Two siblings complete what every run needs
+//! and no algorithm owns: [`pack_space`](crate::pack_space) resolves a
+//! density / periodic box / cell declaration into the one space the run
+//! packs into and broadcasts global restraints onto every target, and
+//! [`state`](crate::state) holds [`State`](crate::State) and the verbatim
+//! placement solution it carries, which is what makes one run continuable
+//! from another.
 //!
-//! * [`PackSettings`] — the knobs the shared infrastructure reads (contact
-//!   tolerance, precision, seed, the box or cell declaration, global
-//!   restraints, screen logging via [`LogSpec`]). One ruler per run:
-//!   algorithm-specific knobs live on their own entry type, never here.
-//! * `setup.rs` — resolving a density / periodic box / cell declaration into
-//!   the one space the run packs into, and broadcasting global restraints
-//!   onto every target.
-//! * `result.rs` — [`State`] and the verbatim placement solution it
-//!   carries, which is what makes one run continuable from another.
-//!
-//! What is deliberately *not* here: the entries themselves — [`GenCanPack`](crate::GenCanPack)
+//! What is deliberately *not* here: the entries themselves — [`GencanPack`](crate::GencanPack)
 //! lives with the rigid-body family, [`CbmcGrow`](crate::CbmcGrow) and
 //! [`LatticeGrow`](crate::LatticeGrow) with
 //! growth — and the lifecycle that drives them, which
@@ -21,16 +19,10 @@
 //! module names neither: settings and space are read by the lifecycle, they
 //! do not run it. The dependency arrow points one way only.
 
-pub(crate) mod result;
-pub(crate) mod setup;
-
-pub(crate) use result::positions_in_target_order;
-pub use result::{IntraResidual, State};
-
 use molrs::op::F;
 
 use crate::LogLevel;
-use setup::{CellDecl, PeriodicSpec};
+use crate::pack_space::{CellDecl, PeriodicSpec};
 
 /// Built-in screen logging: detail level + print cadence.
 #[derive(Debug, Clone, Copy)]

@@ -440,7 +440,7 @@ mod tests {
     }
 
     use crate::grow::lattice::saw::T_STEPS;
-    use crate::testutil::frame_from_parts;
+    use crate::test_fixtures::frame_from_parts;
 
     fn zigzag(n: usize, bond_len: F) -> (Vec<[F; 3]>, Vec<(u32, u32)>) {
         let theta = 109.5 * std::f64::consts::PI as F / 180.0;

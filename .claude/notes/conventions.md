@@ -45,7 +45,7 @@ frame (the PyO3 `target_from_frame` helper) and lowers scripts with
   large for its file gets a child `tests.rs` / `tests/` module
   (`src/grow/tests/`, `src/pipeline/tests.rs`,
   `src/context/pack_state/tests.rs`, `src/restraint/geometric/tests/`); fixtures
-  shared across modules live in `src/testutil.rs` (`cfg(test)`). There
+  shared across modules live in `src/test_fixtures.rs` (`cfg(test)`). There
   is **no** `tests/` directory, **no** `benches/` and **no** `regressions/` —
   they were deleted on 2026-09-20 with the end-to-end packing suites, the
   Packmol regression harness and the criterion benches. Reintroducing any of

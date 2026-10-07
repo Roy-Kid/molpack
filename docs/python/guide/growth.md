@@ -17,7 +17,7 @@ torsion at a time, inside the final box.
 not a preprocessor for it: growth consumes the same radii, tolerance,
 and restraints, is judged by the same `fdist` / `frest` objective, and
 returns the same `State`. You choose the algorithm by choosing the
-entry — `GenCanPack` places rigid bodies, `CbmcGrow` grows chains — and
+entry — `GencanPack` places rigid bodies, `CbmcGrow` grows chains — and
 every target in that call is handled by it. molpack never infers the
 algorithm from the molecule and never silently falls back from one to
 the other.
@@ -56,7 +56,7 @@ builders on the entry, alongside the shared ones (`with_density`,
 
 A target that cannot be grown — no bond graph, fewer than 3 atoms, a
 `fixed_at` placement, or no box — makes `run()` raise `ValueError`
-naming the problem and suggesting `GenCanPack` where that is the right
+naming the problem and suggesting `GencanPack` where that is the right
 fix.
 
 ## Staging a mixed pack
@@ -67,7 +67,7 @@ second:
 
 ```python
 import molrs
-from molpack import CbmcGrow, GenCanPack, Target
+from molpack import CbmcGrow, GencanPack, Target
 
 grown = CbmcGrow(prior).with_density(0.5).with_seed(42).run([peo], max_loops=60)
 
@@ -76,7 +76,7 @@ grown = CbmcGrow(prior).with_density(0.5).with_seed(42).run([peo], max_loops=60)
 cell = molrs.core.Cuboid([0.0, 0.0, 0.0], [l, l, l])
 
 result = (
-    GenCanPack()
+    GencanPack()
     .with_seed(42)
     .with_periodic_box([0.0, 0.0, 0.0], [l, l, l])
     .run([Target.fixed_from(grown), salt.with_restraint(cell)], max_loops=200)
@@ -94,11 +94,11 @@ architecture with `molrs.builder.Assembler` — do not invent coordinates. A
 4-arm star is a tetrafunctional core plus EO arms (`make_star`); a
 macrocycle is `make_ring`. Both `CbmcGrow` and `LatticeGrow` consume the **bond
 graph**: a tree is legal for either grower; a cycle raises
-`RingTemplate` on both, so `pack_ring` then picks rigid `GenCanPack`.
+`RingTemplate` on both, so `pack_ring` then picks rigid `GencanPack`.
 
 `python/examples/pack_peo_topo.py` `pack_star` is one explicit pick:
 `LatticeGrow` @ 2.0 Å (occupancy guard on) then caller-side
-`GenCanPack.with_restart` @ 2.0 Å — the same lattice-then-push-off
+`GencanPack.with_restart` @ 2.0 Å — the same lattice-then-push-off
 shape as the melt sample below. `CbmcGrow` remains a peer tree grower;
 its reduced-EV (0.6 Å) then 2.0 Å push-off recipe stays on the
 `CbmcGrow` path and is not copied onto `LatticeGrow`.
@@ -214,11 +214,11 @@ rigid-body path it is always zero.
 
 Softening is not a dead end, but the remedy is something you ask for —
 an explicit second stage, never a hidden fallback. Feed the **same free
-targets** to a seeded `GenCanPack`:
+targets** to a seeded `GencanPack`:
 
 ```python
 grown = CbmcGrow(prior).with_density(0.9).run([peo], max_loops=60)
-pushed = GenCanPack().with_restart(grown).with_seed(7).run([peo], max_loops=60)
+pushed = GencanPack().with_restart(grown).with_seed(7).run([peo], max_loops=60)
 ```
 
 The seeded run continues on the very same state — zero coordinate
@@ -270,7 +270,7 @@ grown = (
     .with_density(1.1)
     .run([Target(frame, 200)], max_loops=60)
 )
-pushed = GenCanPack().with_restart(grown).with_seed(42).run([Target(frame, 200)], max_loops=200)
+pushed = GencanPack().with_restart(grown).with_seed(42).run([Target(frame, 200)], max_loops=200)
 ```
 
 A template supplies its topology, not its geometry. The backbone's torsions

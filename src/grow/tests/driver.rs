@@ -14,8 +14,8 @@
 use super::*;
 
 use crate::AtomRestraint;
+use crate::callback::{Callback, StepInfo};
 use crate::context::PackContext;
-use crate::handler::{Handler, StepInfo};
 
 /// A restraint that refuses every point, so every growth attempt is a dead end.
 #[derive(Debug)]
@@ -37,7 +37,7 @@ struct StopAfterOne {
     seen: bool,
 }
 
-impl Handler for StopAfterOne {
+impl Callback for StopAfterOne {
     fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {
         self.seen = true;
     }
@@ -103,14 +103,14 @@ fn a_rung_shrinks_only_the_chain_that_earned_it() {
     let frame = chain_frame(3, 1.53, true);
     let wedged = |frame| Target::new(frame, 1).with_restraint(RefuseEverywhere);
     let state = CbmcGrow::from_config(cfg)
-        .with_handler(Box::new(StopAfterOne::default()))
+        .with_callback(Box::new(StopAfterOne::default()))
         .with_seed(3)
         .with_tolerance(2.0)
         .with_periodic_box([0.0; 3], [20.0; 3], [true; 3])
         .run(&[wedged(frame.clone()), wedged(frame)], 1)
         .expect("both chains are refused, and the run still returns");
 
-    // One round, then the handler stops. A 3-bead template is a seed plus
+    // One round, then the callback stops. A 3-bead template is a seed plus
     // one step, so the abort force-places both for each chain (4) and each
     // chain has taken its own rung (2). A shared core would count 5.
     assert_eq!(

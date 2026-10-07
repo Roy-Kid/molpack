@@ -513,7 +513,7 @@ impl Target {
     ///
     /// The named chaining primitive of engine-entry-split: grow first, then
     /// pack the next stage around the grown matrix held fixed —
-    /// `GenCanPack::new().run(&[Target::fixed_from(&grown.frame), solvent], …)`.
+    /// `GencanPack::new().run(&[Target::fixed_from(&grown.frame), solvent], …)`.
     pub fn fixed_from(frame: &molrs::core::Frame) -> Self {
         Self::new(frame.clone(), 1)
             .with_centering(CenteringMode::Off)
@@ -662,12 +662,12 @@ mod tests {
     //! Tests for Target builder: construction, natoms/count, fixed_at,
     //! centering modes, restraint attachment, and hook validation.
 
-    use crate::{GenCanPack, PackEngine, RegionRestraint, Target};
+    use crate::{GencanPack, PackEngine, RegionRestraint, Target};
     use molrs::core::BondDistanceWeights;
     use molrs::op::F;
     use std::sync::Arc;
 
-    use crate::testutil::inside_box;
+    use crate::test_fixtures::inside_box;
     use molrs::core::Sphere;
     use ndarray::array;
 
@@ -832,7 +832,7 @@ mod tests {
         let fixed = Target::from_coords(&[[10.0, 0.0, 0.0], [12.0, 0.0, 0.0]], &[1.0, 1.0], 1)
             .fixed_at([0.0, 0.0, 0.0]);
 
-        let result = GenCanPack::new()
+        let result = GencanPack::new()
             .with_seed(1)
             .run(&[free, fixed], 5)
             .expect("pack should succeed");
@@ -850,7 +850,7 @@ mod tests {
             .with_centering(crate::CenteringMode::Center)
             .fixed_at([0.0, 0.0, 0.0]);
 
-        let result = GenCanPack::new()
+        let result = GencanPack::new()
             .with_seed(1)
             .run(&[free, fixed], 5)
             .expect("pack should succeed");
@@ -1003,7 +1003,7 @@ mod atom_property_tests {
     //! that overrides the selected atoms. Per-atom values are a **per-type
     //! template** — every copy of a type gets the same ones.
 
-    use crate::{GenCanPack, PackEngine, Target};
+    use crate::{GencanPack, PackEngine, Target};
     use molrs::op::F;
 
     // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
@@ -1155,7 +1155,7 @@ mod atom_property_tests {
     #[test]
     #[should_panic(expected = "smaller than the tolerance")]
     fn global_short_tolerance_must_be_below_the_tolerance() {
-        let _ = GenCanPack::new()
+        let _ = GencanPack::new()
             .with_tolerance(2.0)
             .with_short_tolerance(4.0, 3.0);
     }

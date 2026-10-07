@@ -1,4 +1,4 @@
-"""Engine entries (engine-entry-split): GenCanPack / CbmcGrow 1:1 bindings."""
+"""Engine entries (engine-entry-split): GencanPack / CbmcGrow 1:1 bindings."""
 
 from __future__ import annotations
 
@@ -35,11 +35,11 @@ def _chain5():
     return fr
 
 
-class TestGenCanPackEntry:
+class TestGencanPackSurface:
     def test_public_surface_is_state_not_pack_result(self):
         assert hasattr(molpack, "State")
         assert not hasattr(molpack, "PackResult")
-        engine = molpack.GenCanPack()
+        engine = molpack.GencanPack()
         assert hasattr(engine, "with_restart")
         assert not hasattr(engine, "seeded_from")
 
@@ -49,7 +49,7 @@ class TestGenCanPackEntry:
         # removal — engine-entry-split migration record.)
         def pack():
             return (
-                molpack.GenCanPack()
+                molpack.GencanPack()
                 .with_seed(11)
                 .with_tolerance(2.0)
                 .with_periodic_box([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
@@ -62,13 +62,13 @@ class TestGenCanPackEntry:
         assert np.array_equal(a.positions, b.positions)
 
     def test_one_engine_one_run(self):
-        eng = molpack.GenCanPack().with_periodic_box([0.0] * 3, [20.0] * 3)
+        eng = molpack.GencanPack().with_periodic_box([0.0] * 3, [20.0] * 3)
         eng.run([molpack.Target(_dimer(), count=2)], max_loops=10)
         with pytest.raises(RuntimeError, match="one engine, one run"):
             eng.run([molpack.Target(_dimer(), count=2)], max_loops=10)
 
 
-class TestCbmcGrowEntry:
+class TestCbmcGrowSurface:
     def test_grows_and_reports_honestly(self):
         res = (
             molpack.CbmcGrow(molpack.TorsionPrior.uniform())
@@ -83,7 +83,7 @@ class TestCbmcGrowEntry:
 
     def test_seeded_push_off_chain(self):
         # The explicit push-off chain: grow, then continue the SAME free
-        # targets on the grown state with a seeded GenCanPack.
+        # targets on the grown state with a seeded GencanPack.
         target = lambda: molpack.Target(_chain5(), count=2)  # noqa: E731
         grown = (
             molpack.CbmcGrow(molpack.TorsionPrior.uniform())
@@ -93,7 +93,7 @@ class TestCbmcGrowEntry:
             .run([target()], max_loops=60)
         )
         pushed = (
-            molpack.GenCanPack()
+            molpack.GencanPack()
             .with_restart(grown)
             .with_seed(9)
             .with_tolerance(1.0)
@@ -113,7 +113,7 @@ class TestCbmcGrowEntry:
         )
         with pytest.raises(ValueError, match="seeded run"):
             (
-                molpack.GenCanPack()
+                molpack.GencanPack()
                 .with_restart(grown)
                 .run([molpack.Target(_chain5(), count=3)], max_loops=10)
             )
@@ -127,7 +127,7 @@ class TestCbmcGrowEntry:
             .run([molpack.Target(_chain5(), count=2)], max_loops=60)
         )
         packed = (
-            molpack.GenCanPack()
+            molpack.GencanPack()
             .with_seed(3)
             .with_tolerance(1.0)
             .with_periodic_box([0.0] * 3, [20.0] * 3)
@@ -143,7 +143,7 @@ class TestCbmcGrowEntry:
 
 class TestEngineErrorPaths:
     def test_empty_targets_list_raises(self):
-        packer = molpack.GenCanPack().with_progress(False).with_seed(1)
+        packer = molpack.GencanPack().with_progress(False).with_seed(1)
         with pytest.raises(molpack.NoTargetsError):
             packer.run([], max_loops=10)
 
@@ -162,12 +162,12 @@ class TestEngineErrorPaths:
         )
         target = molpack.Target(frame, 1)
         packer = (
-            molpack.GenCanPack()
+            molpack.GencanPack()
             .with_progress(False)
             .with_seed(1)
             .with_periodic_box((0.0, 0.0, 0.0), (0.0, 10.0, 10.0))
         )
-        with pytest.raises(molpack.InvalidPBCBoxError):
+        with pytest.raises(molpack.InvalidPbcBoxError):
             packer.run([target], max_loops=10)
 
     def test_pack_error_is_runtime_error_subclass(self):

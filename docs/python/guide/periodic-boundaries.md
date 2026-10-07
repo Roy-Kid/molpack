@@ -8,12 +8,12 @@ you attach. Use periodic boundaries (PBC) when packing for MD input.
 
 The periodic box is declared on the engine entry (Packmol's `pbc`
 keyword). `with_periodic_box` is a shared builder, so it reads the same on
-`GenCanPack`, `CbmcGrow` and `LatticeGrow`:
+`GencanPack`, `CbmcGrow` and `LatticeGrow`:
 
 ```python
-from molpack import GenCanPack
+from molpack import GencanPack
 
-packer = GenCanPack().with_periodic_box([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
+packer = GencanPack().with_periodic_box([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
 ```
 
 Only orthorhombic cells are supported through this builder; a triclinic
@@ -46,14 +46,14 @@ is periodic too.
 ## Errors
 
 A zero-length axis on a periodic box, or `max < min` on any axis,
-raises `InvalidPBCBoxError` at `run()` time:
+raises `InvalidPbcBoxError` at `run()` time:
 
 ```python
-from molpack import InvalidPBCBoxError
+from molpack import InvalidPbcBoxError
 
 try:
     packer.run(targets, max_loops=200)
-except InvalidPBCBoxError as e:
+except InvalidPbcBoxError as e:
     ...
 ```
 
@@ -75,12 +75,12 @@ box = molrs.core.Cuboid(cell_min, cell_len)
 target = target.with_restraint(box)
 
 result = (
-    GenCanPack()
+    GencanPack()
     .with_seed(42)
     .with_periodic_box(cell_min, [a + b for a, b in zip(cell_min, cell_len)])
     .run([target], max_loops=200)
 )
 ```
 
-Or broadcast the cuboid globally via `GenCanPack.with_global_restraint(box)`
+Or broadcast the cuboid globally via `GencanPack.with_global_restraint(box)`
 when several species share the same cell.

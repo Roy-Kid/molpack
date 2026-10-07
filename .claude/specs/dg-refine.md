@@ -47,7 +47,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
   （`topology-model`）。
 - 不做格上 MC 修复（R3）、不做拓扑守卫的键段交叉检查（守卫族，`ring-closure` spec 引入
   `Invariant` 实现；本 spec 只在每级之间留 `Guarded` 挂点）。
-- 不替换 `GenCanPack` 的刚体 push-off：R2 仍是刚性构象体系的正确工具。
+- 不替换 `GencanPack` 的刚体 push-off：R2 仍是刚性构象体系的正确工具。
 - 不做 rayon 新并行：pair kernel 已有的并行路径原样复用。
 
 ## Public surface
@@ -126,7 +126,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
   `tn_linesearch`（:611-987）拆到 `gencan/tnls.rs`，那是独立的 hygiene 改动。
 - `Term` trait 住 `refine/terms.rs`，不进 `restraint/`：约束是逐点谓词，项是全局可加能量。
   `Term` 与 `CartesianObjective` Rust-only；Python 只镜像 `DgRefine` 预设。
-- 命名：`DgRefine` 是 `Stage`，**不是** `optimizer/` 里的 in-loop optimizer（`GenCanPack::with_optimizer`）——模块文档写明；
+- 命名：`DgRefine` 是 `Stage`，**不是** `optimizer/` 里的 in-loop optimizer（`GencanPack::with_optimizer`）——模块文档写明；
   无 "packmol"；泛型标记若将来引入用 `CartesianVars / SpgMinimizer` 而非 `Cartesian / Spg`
   （后者与模块 `gencan::spg` 混视）。
 - 无 `ff`：`grep -rn 'molrs::ff\|molrs::optimize' src/refine/` 无命中（crate 内已无 `cfg(feature = "ff")`，`ff` 只透传 `molrs/ff`）。
@@ -147,7 +147,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
 
 ## Test plan
 
-- `DgRefine` 属主模块内的 `#[cfg(test)] mod tests`（新，default feature；crate 无 `tests/` 目录，共享夹具走 `src/testutil.rs`）：
+- `DgRefine` 属主模块内的 `#[cfg(test)] mod tests`（新，default feature；crate 无 `tests/` 目录，共享夹具走 `src/test_fixtures.rs`）：
   1. 各 `Term` 有限差分梯度（含跨周期边界的键、含 fixed 邻居）；
   2. 扰动链恢复：对模板链加 0.3 Å 随机扰动，仅 Bond + Angle13 项精修后成键几何回到
      容差内；
@@ -155,7 +155,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
      `DgRefine` 到 `fdist < precision`；
   4. **刚体做不到、精修做得到**：重建原 `lattice_grow_then_seeded_push_off_dense`（已随 `tests/` 于 2026-09-20 删除）的
      20 × 24 珠 / 22 Å 算例，断言 `DgRefine` 末级 `fdist ≤ 0.1 × grown.fdist` 且严格小于
-     `GenCanPack::with_restart` 同预算的结果；
+     `GencanPack::with_restart` 同预算的结果；
   5. L2 守恒：精修前后每链 R_g 相对变化 ≤ 3%；
   6. 约束项：`InsideSphereRestraint` 下精修不把原子推出球（`frest == 0`）；
   7. 手性：给定四元组符号，精修后签名体积符号不变；
@@ -173,9 +173,9 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
 
 - `CLAUDE.md` 架构表加 `src/refine/` 行；回归命令不变。
 - `docs/python/guide/growth.md`「Reading softened」与「Melt density」两节改写：push-off
-  的推荐做法是 `DgRefine`，`GenCanPack::with_restart` 保留为刚性构象体系的工具；
+  的推荐做法是 `DgRefine`，`GencanPack::with_restart` 保留为刚性构象体系的工具；
   新节「Refining with distance geometry」（阶梯、刚度、手性数据、残余的含义）。
-- `docs/python/api-reference.md`、`docs/rust/handlers-optimizers.md`（`StepInfo` 在精修阶段
+- `docs/python/api-reference.md`、`docs/rust/callbacks-optimizers.md`（`StepInfo` 在精修阶段
   的字段语义）。
 - `src/refine/mod.rs` 模块文档：与 Crippen–Havel / ETKDG 的关系、与 Auhl push-off 的关系、
   "无力场"边界（刚度是相对 overlap 项的无量纲几何参数）。

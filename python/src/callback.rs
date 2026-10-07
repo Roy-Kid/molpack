@@ -1,6 +1,6 @@
-//! Python-defined [`Handler`] hooks.
+//! Python-defined [`Callback`] hooks.
 //!
-//! A Python object attached via an entry's ``with_handler`` may
+//! A Python object attached via an entry's ``with_callback`` may
 //! implement any subset of three optional methods:
 //!
 //! ```python
@@ -14,7 +14,7 @@
 //! guard over the live packing context, valid only for the duration of the
 //! callback (accessing it afterwards raises `RuntimeError`). Its
 //! `positions` property materialises an owned `(ntotat, 3)` float64 NumPy
-//! array on demand — handlers that never touch it pay nothing.
+//! array on demand — callbacks that never touch it pay nothing.
 //!
 //! Missing methods are silently skipped (matching the Rust trait's default
 //! no-op impls). Exceptions raised inside any method are stashed in
@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::errors::stash_err;
 use molpack::PackContext;
-use molpack::{Handler, StepInfo};
+use molpack::{Callback, StepInfo};
 use molrs::op::F;
 use numpy::IntoPyArray;
 use pyo3::prelude::*;
@@ -156,11 +156,11 @@ impl PyStepInfo {
     }
 }
 
-// PyHandlerWrapper — bridges a Python object to the Rust `Handler` trait.
+// PythonCallback — bridges a Python object to the Rust `Callback` trait.
 //
 // Optional methods are resolved once at construction; missing ones stay
 // `None` and are silently skipped. `stop_flag` lives behind an atomic
-// because `Handler::should_stop` is `&self` while writes happen via the
+// because `Callback::should_stop` is `&self` while writes happen via the
 // mutating `on_*` methods.
 
 // PyStepContext — borrow guard over the live `PackContext`, handed to
@@ -185,7 +185,7 @@ impl PyStepContext {
         match self.sys.get() {
             // SAFETY: the pointer is set right before the callback and
             // cleared right after it returns, on the same thread; while it
-            // is Some the borrow in `Handler::on_step` is still alive.
+            // is Some the borrow in `Callback::on_step` is still alive.
             Some(p) => Ok(unsafe { &*p }),
             None => Err(Self::expired()),
         }
@@ -218,14 +218,14 @@ impl PyStepContext {
     }
 }
 
-pub(crate) struct PyHandlerWrapper {
+pub(crate) struct PythonCallback {
     on_start: Option<Py<PyAny>>,
     on_step: Option<Py<PyAny>>,
     on_finish: Option<Py<PyAny>>,
     stop_flag: Arc<AtomicBool>,
 }
 
-impl PyHandlerWrapper {
+impl PythonCallback {
     pub(crate) fn new(obj: Py<PyAny>, stop_flag: Arc<AtomicBool>) -> Self {
         Python::attach(|py| {
             let bound = obj.bind(py);
@@ -244,7 +244,7 @@ impl PyHandlerWrapper {
     }
 }
 
-impl Handler for PyHandlerWrapper {
+impl Callback for PythonCallback {
     fn on_start(&mut self, ntotat: usize, ntotmol: usize) {
         let Some(m) = &self.on_start else { return };
         Python::attach(|py| {

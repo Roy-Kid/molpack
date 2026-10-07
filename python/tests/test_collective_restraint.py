@@ -31,8 +31,8 @@ def _ion_frame() -> molrs.core.Frame:
     )
 
 
-def _packer() -> molpack.GenCanPack:
-    return molpack.GenCanPack().with_progress(False)
+def _packer() -> molpack.GencanPack:
+    return molpack.GencanPack().with_progress(False)
 
 
 class MeanTether:

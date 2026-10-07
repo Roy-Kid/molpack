@@ -65,7 +65,7 @@ written through the molrs reader and writer of their format
 
 ```rust
 use std::sync::Arc;
-use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
+use molpack::{GencanPack, PackEngine, RegionRestraint, Target};
 use molrs::core::Cuboid;
 use ndarray::array;
 
@@ -76,16 +76,16 @@ let target = Target::from_coords(&positions, &radii, 100)
     .with_name("water")
     .with_restraint(RegionRestraint(Arc::new(Cuboid::new(array![0.0, 0.0, 0.0], array![40.0, 40.0, 40.0]))));
 
-// You pick the algorithm by picking the entry: `GenCanPack` for rigid-body
+// You pick the algorithm by picking the entry: `GencanPack` for rigid-body
 // packing, `CbmcGrow` for chain growth. Both share the `PackEngine` builders
 // and the single terminal verb `run`, which consumes the entry — one engine,
 // one run. Every tuning knob has a Packmol-matching default, so
-// `GenCanPack::new().run(...)` is a complete call; `200` is the outer-loop
+// `GencanPack::new().run(...)` is a complete call; `200` is the outer-loop
 // budget.
 //
 // `run` returns a `State`: the packed, topology-complete `molrs::core::Frame`
 // in `.frame`, plus `fdist`, `frest`, `converged`, `degraded`.
-let result = GenCanPack::new().run(&[target], 200)?;
+let result = GencanPack::new().run(&[target], 200)?;
 let frame = result.frame;
 ```
 
@@ -93,7 +93,7 @@ let frame = result.frame;
 
 ```python
 import molrs
-from molpack import GenCanPack, Target
+from molpack import GencanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
@@ -102,7 +102,7 @@ water = (
     .with_name("water")
     .with_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]))
 )
-result = GenCanPack().run([water], max_loops=200)
+result = GencanPack().run([water], max_loops=200)
 frame = result.frame
 ```
 

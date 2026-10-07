@@ -1,4 +1,4 @@
-"""Tests for Python-defined packing handlers (``with_handler`` on the entries)."""
+"""Tests for Python-defined packing callbacks (``with_callback`` on the entries)."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ def _two_water_frame() -> molrs.core.Frame:
     )
 
 
-def _packer() -> molpack.GenCanPack:
-    return molpack.GenCanPack().with_progress(False).with_inner_iterations(5)
+def _packer() -> molpack.GencanPack:
+    return molpack.GencanPack().with_progress(False).with_inner_iterations(5)
 
 
 @dataclass
@@ -49,7 +49,7 @@ class CallLog:
         self.finished = True
 
 
-class TestHandlerCallbacks:
+class TestCallbackHooks:
     def test_lifecycle_methods_are_called(self):
         log = CallLog()
         # 30 copies in a 6³ box forces the outer loop to actually
@@ -58,7 +58,7 @@ class TestHandlerCallbacks:
         target = molpack.Target(_two_water_frame(), count=30).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
-        _packer().with_handler(log).with_seed(1).run([target], max_loops=5)
+        _packer().with_callback(log).with_seed(1).run([target], max_loops=5)
 
         assert log.started is True
         assert log.finished is True
@@ -90,7 +90,7 @@ class TestHandlerCallbacks:
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
-        _packer().with_handler(Grabber()).with_seed(1).run([target], max_loops=2)
+        _packer().with_callback(Grabber()).with_seed(1).run([target], max_loops=2)
 
         assert captured, "expected at least one on_step call"
         first = captured[0]
@@ -103,7 +103,7 @@ class TestHandlerCallbacks:
         assert all(isinstance(v, float) for v in first[5:10])
 
     def test_methods_are_optional(self):
-        """Handler with *no* methods must not crash."""
+        """Callback with *no* methods must not crash."""
 
         class Empty:
             pass
@@ -111,11 +111,13 @@ class TestHandlerCallbacks:
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
-        result = _packer().with_handler(Empty()).with_seed(1).run([target], max_loops=2)
+        result = (
+            _packer().with_callback(Empty()).with_seed(1).run([target], max_loops=2)
+        )
         assert result.natoms == 4
 
 
-class TestHandlerEarlyStop:
+class TestCallbackEarlyStop:
     def test_returning_true_halts_pack(self):
         steps_seen: list[int] = []
 
@@ -127,9 +129,9 @@ class TestHandlerEarlyStop:
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
         )
-        _packer().with_handler(StopAfterOne()).with_seed(1).run([target], max_loops=50)
+        _packer().with_callback(StopAfterOne()).with_seed(1).run([target], max_loops=50)
 
-        # The per-phase compaction loop itself runs through its handler
+        # The per-phase compaction loop itself runs through its callback
         # pass before checking should_stop; we just assert that we did
         # NOT run the full 50 outer loops.
         assert len(steps_seen) < 50, (
@@ -137,11 +139,11 @@ class TestHandlerEarlyStop:
         )
 
 
-class TestGenCanEarlyStop:
-    """``GenCanPack.with_early_stop`` — on by default, switchable off."""
+class TestGencanEarlyStop:
+    """``GencanPack.with_early_stop`` — on by default, switchable off."""
 
     @staticmethod
-    def _loops_per_phase(packer: molpack.GenCanPack, max_loops: int) -> list[int]:
+    def _loops_per_phase(packer: molpack.GencanPack, max_loops: int) -> list[int]:
         # Forty atoms at 2 A tolerance in a 3 A cube can never pack, so
         # every phase stalls and only the early stop can end it before
         # max_loops.
@@ -155,7 +157,9 @@ class TestGenCanEarlyStop:
             molrs.core.Cuboid([0.0, 0.0, 0.0], [3.0, 3.0, 3.0])
         )
         result = (
-            packer.with_handler(Count()).with_seed(1).run([target], max_loops=max_loops)
+            packer.with_callback(Count())
+            .with_seed(1)
+            .run([target], max_loops=max_loops)
         )
         assert not result.converged
         return list(seen.values())
@@ -169,17 +173,17 @@ class TestGenCanEarlyStop:
         assert loops and all(n == 60 for n in loops), loops
 
 
-class TestHandlerErrorPropagation:
+class TestCallbackErrorPropagation:
     def test_exception_in_on_step_is_reraised(self):
         class Explodes:
             def on_step(self, info: molpack.StepInfo, ctx: molpack.StepContext) -> None:
-                raise ValueError("boom from handler")
+                raise ValueError("boom from callback")
 
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
-        with pytest.raises(ValueError, match="boom from handler"):
-            _packer().with_handler(Explodes()).with_seed(1).run([target], max_loops=5)
+        with pytest.raises(ValueError, match="boom from callback"):
+            _packer().with_callback(Explodes()).with_seed(1).run([target], max_loops=5)
 
     def test_exception_in_on_start_is_reraised(self):
         class ExplodesEarly:
@@ -190,19 +194,19 @@ class TestHandlerErrorPropagation:
             molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         with pytest.raises(RuntimeError, match="boom from on_start"):
-            _packer().with_handler(ExplodesEarly()).with_seed(1).run(
+            _packer().with_callback(ExplodesEarly()).with_seed(1).run(
                 [target], max_loops=5
             )
 
 
-class TestMultipleHandlers:
-    def test_each_handler_receives_callbacks(self):
+class TestMultipleCallbacks:
+    def test_each_callback_is_called(self):
         log1 = CallLog()
         log2 = CallLog()
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
-        _packer().with_handler(log1).with_handler(log2).with_seed(1).run(
+        _packer().with_callback(log1).with_callback(log2).with_seed(1).run(
             [target], max_loops=2
         )
 
@@ -222,7 +226,7 @@ class TestStepContext:
         target = molpack.Target(_two_water_frame(), count=30).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
-        _packer().with_handler(Recorder()).with_seed(1).run([target], max_loops=5)
+        _packer().with_callback(Recorder()).with_seed(1).run([target], max_loops=5)
 
         assert frames, "expected at least one on_step call"
         loop_idx, arr = frames[0]
@@ -245,17 +249,17 @@ class TestStepContext:
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
-        _packer().with_handler(Stasher()).with_seed(1).run([target], max_loops=2)
+        _packer().with_callback(Stasher()).with_seed(1).run([target], max_loops=2)
 
         assert stashed
         with pytest.raises(RuntimeError, match="expired"):
             _ = stashed[0].positions
         assert "expired" in repr(stashed[0])
 
-    def test_handler_ignoring_context_still_works(self):
+    def test_callback_ignoring_context_still_works(self):
         log = CallLog()
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
-        _packer().with_handler(log).with_seed(1).run([target], max_loops=2)
+        _packer().with_callback(log).with_seed(1).run([target], max_loops=2)
         assert log.finished is True

@@ -1,6 +1,6 @@
 //! GENCAN on the [`Stage`] seam.
 //!
-//! [`GenCanStage`] is the rigid-body path behind the stage seam: the same
+//! [`GencanStage`] is the rigid-body path behind the stage seam: the same
 //! lifecycle the growth stages implement, judged by
 //! the same shared-objective ruler, selected by the same seam.
 
@@ -9,19 +9,19 @@ use molrs::op::F;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-use crate::Handler;
+use crate::Callback;
 use crate::PackError;
 use crate::Target;
 use crate::context::{PackState, Placed, RigidView};
-use crate::entry::result::Placements;
 use crate::optimizer::{OptimizerBinding, ResolvedBinding, resolve_bindings};
 use crate::pack::gencan::phases::{PhaseOutcome, run_phase};
 use crate::pack::gencan::{GencanParams, GencanWorkspace};
 use crate::pack::initial::{SwapState, initial};
 use crate::pack::movebad::MoveBadConfig;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
+use crate::state::Placements;
 
-/// GENCAN-only knobs (engine-entry-split: these live on `GenCanPack`, never
+/// GENCAN-only knobs (engine-entry-split: these live on `GencanPack`, never
 /// on the shared settings — they mean nothing to a growth entry).
 #[derive(Debug, Clone)]
 pub struct GencanSettings {
@@ -74,7 +74,7 @@ impl Default for GencanSettings {
 /// The optimizer bindings and the placement seed stay on the stage for its
 /// whole life and are read afresh on every [`run`](Stage::run) — the seam's
 /// re-entrancy contract: a stage does not consume its own configuration.
-pub struct GenCanStage {
+pub struct GencanStage {
     settings: GencanSettings,
     maxmove_per_type: Vec<usize>,
     cell: Option<SimBox>,
@@ -85,7 +85,7 @@ pub struct GenCanStage {
     rng: SmallRng,
 }
 
-impl GenCanStage {
+impl GencanStage {
     /// The name this stage reports. Same constant as [`super::STAGE_NAME`],
     /// which the phase step report fills in, so the two cannot drift apart.
     pub(crate) const NAME: &'static str = super::STAGE_NAME;
@@ -130,7 +130,7 @@ impl GenCanStage {
     }
 }
 
-impl Stage for GenCanStage {
+impl Stage for GencanStage {
     fn name(&self) -> &'static str {
         Self::NAME
     }
@@ -178,7 +178,7 @@ impl Stage for GenCanStage {
         state: &mut PackState,
         targets: &[Target],
         budget: &Budget,
-        handlers: &mut [Box<dyn Handler>],
+        callbacks: &mut [Box<dyn Callback>],
     ) -> Result<StageOutcome, PackError> {
         // ① Box + cell grid, only for a run that continues from placements.
         if state.placed() == Placed::All || self.seed_placements.is_some() {
@@ -226,8 +226,8 @@ impl Stage for GenCanStage {
             x.write_xcart(sys);
         }
 
-        // Notify handlers: initialization complete, xcart is valid
-        for h in handlers.iter_mut() {
+        // Notify callbacks: initialization complete, xcart is valid
+        for h in callbacks.iter_mut() {
             h.on_initialized(sys);
         }
 
@@ -282,7 +282,7 @@ impl Stage for GenCanStage {
                 x.as_mut_slice(),
                 &mut swap,
                 &mut optimizer_bindings,
-                handlers,
+                callbacks,
                 &mut gencan_workspace,
                 &mut self.rng,
             );
@@ -345,7 +345,7 @@ mod tests {
             seed: 7,
             ..Default::default()
         };
-        let mut stage: Box<dyn Stage> = Box::new(GenCanStage::new(
+        let mut stage: Box<dyn Stage> = Box::new(GencanStage::new(
             settings,
             built.maxmove_per_type.clone(),
             Some(cell),
@@ -353,9 +353,9 @@ mod tests {
             built.ntype_with_fixed,
         ));
 
-        let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
+        let mut callbacks: Vec<Box<dyn Callback>> = Vec::new();
         let outcome = stage
-            .run(&mut state, &targets, &Budget::new(50, 0.01), &mut handlers)
+            .run(&mut state, &targets, &Budget::new(50, 0.01), &mut callbacks)
             .expect("gencan stage runs");
 
         assert_eq!(stage.name(), "gencan");
@@ -457,7 +457,7 @@ mod tests {
             seed: 7,
             ..Default::default()
         };
-        let mut stage = GenCanStage::new(
+        let mut stage = GencanStage::new(
             settings,
             built.maxmove_per_type.clone(),
             Some(cell),
@@ -473,10 +473,10 @@ mod tests {
 
         let mut state = PackState::new(built.sys, built.ntotmol_free);
         let budget = Budget::new(2, 0.01);
-        let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
+        let mut callbacks: Vec<Box<dyn Callback>> = Vec::new();
 
         stage
-            .run(&mut state, &targets, &budget, &mut handlers)
+            .run(&mut state, &targets, &budget, &mut callbacks)
             .expect("gencan stage runs");
         let after_first = calls.load(Ordering::Relaxed);
         assert!(
@@ -486,7 +486,7 @@ mod tests {
         );
 
         stage
-            .run(&mut state, &targets, &budget, &mut handlers)
+            .run(&mut state, &targets, &budget, &mut callbacks)
             .expect("gencan stage runs a second time");
         let after_second = calls.load(Ordering::Relaxed);
 

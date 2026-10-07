@@ -58,7 +58,7 @@ mod analysis;
 mod geometry;
 
 use molpack::{
-    CenteringMode, GenCanPack, OptimizeSelect, PackEngine, ProgressHandler, RegionRestraint,
+    CenteringMode, GencanPack, OptimizeSelect, PackEngine, ProgressCallback, RegionRestraint,
     Target, TorsionMcOptimizer,
 };
 use molrs::op::F;
@@ -180,7 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         torsion.rotatable_bond_count()
     );
 
-    let mut packer = GenCanPack::new()
+    let mut packer = GencanPack::new()
         .with_tolerance(TOLERANCE)
         .with_seed(20_260_807)
         .with_periodic_box(
@@ -198,7 +198,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     if std::env::var_os("MOLPACK_ADSORPTION_PROGRESS").is_some() {
-        packer = packer.with_handler(Box::new(ProgressHandler::new()));
+        packer = packer.with_callback(Box::new(ProgressCallback::new()));
     }
 
     let targets = [substrate, chains, solvent];

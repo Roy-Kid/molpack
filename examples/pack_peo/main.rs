@@ -26,7 +26,7 @@
 
 use molpack::grow::{GrowConfig, TorsionPrior};
 use molpack::{
-    CbmcGrow, GenCanPack, Handler, LatticeGrow, PackContext, PackEngine, State, StepInfo, Target,
+    Callback, CbmcGrow, GencanPack, LatticeGrow, PackContext, PackEngine, State, StepInfo, Target,
 };
 use molrs::core::Block;
 use molrs::core::Frame;
@@ -48,12 +48,12 @@ struct Ladder {
     last_hist: Vec<usize>,
 }
 
-struct LadderHandler {
+struct LadderCallback {
     state: Arc<Mutex<Ladder>>,
     trace: Option<std::io::BufWriter<std::fs::File>>,
 }
 
-impl LadderHandler {
+impl LadderCallback {
     fn new(state: Arc<Mutex<Ladder>>, trace_path: Option<&str>) -> Self {
         let trace = trace_path.map(|p| {
             let f = std::fs::File::create(p).expect("PEO_TRACE");
@@ -61,7 +61,7 @@ impl LadderHandler {
             use std::io::Write;
             let _ = writeln!(
                 w,
-                "round,elapsed_s,n_placed,frac,n_done,placed_min,placed_med,placed_max,min_inter,max_overlap,handler_fdist"
+                "round,elapsed_s,n_placed,frac,n_done,placed_min,placed_med,placed_max,min_inter,max_overlap,callback_fdist"
             );
             w
         });
@@ -69,7 +69,7 @@ impl LadderHandler {
     }
 }
 
-impl Handler for LadderHandler {
+impl Callback for LadderCallback {
     fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
         {
             let mut s = self.state.lock().expect("ladder");
@@ -822,13 +822,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .with_seed(seed)
                 .with_tolerance(tolerance)
                 .with_density(density)
-                .with_handler(Box::new(LadderHandler::new(
+                .with_callback(Box::new(LadderCallback::new(
                     Arc::clone(&ladder),
                     trace_path.as_deref(),
                 )))
                 .run(&[target], max_loops)?
         }
-        "rigid" => GenCanPack::new()
+        "rigid" => GencanPack::new()
             .with_seed(seed)
             .with_tolerance(tolerance)
             .with_periodic_box([0.0; 3], [l, l, l], [true; 3])
@@ -842,7 +842,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let push_tol: F = 2.0;
             let h_push: F = h_radius.unwrap_or(0.05);
             println!(
-                "  Auhl         : CbmcGrow all-parallel @ {grow_tol} Å → GenCanPack @ {push_tol} Å (H={h_push})"
+                "  Auhl         : CbmcGrow all-parallel @ {grow_tol} Å → GencanPack @ {push_tol} Å (H={h_push})"
             );
             let cfg = GrowConfig::new(TorsionPrior::three_state_from_c_inf(PEO_C_INF, TET))
                 .with_trials(trials)
@@ -881,7 +881,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 grown
             } else {
                 let p0 = Instant::now();
-                let pushed = GenCanPack::new()
+                let pushed = GencanPack::new()
                     .with_restart(&grown)
                     .with_seed(seed)
                     .with_tolerance(push_tol)
@@ -904,7 +904,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let push_tol: F = 2.0;
             let h_push: F = h_radius.unwrap_or(0.05);
             println!(
-                "  lattice      : LatticeGrow occupancy-guard → GenCanPack @ {push_tol} Å (H={h_push})"
+                "  lattice      : LatticeGrow occupancy-guard → GencanPack @ {push_tol} Å (H={h_push})"
             );
             let g0 = Instant::now();
             let grown = LatticeGrow::new(TorsionPrior::three_state_from_c_inf(PEO_C_INF, TET))
@@ -931,7 +931,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 grown
             } else {
                 let p0 = Instant::now();
-                let pushed = GenCanPack::new()
+                let pushed = GencanPack::new()
                     .with_restart(&grown)
                     .with_seed(seed)
                     .with_tolerance(push_tol)
@@ -950,7 +950,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Grow one conformer, then rigid-pack N copies (not seeded push-off).
             let h_r: F = h_radius.unwrap_or(0.05);
             println!(
-                "  grow1        : 1 chain (serial, H={h_r} Å, tol=2.0) → GenCanPack × {n_chains} @ {density} g/cm³"
+                "  grow1        : 1 chain (serial, H={h_r} Å, tol=2.0) → GencanPack × {n_chains} @ {density} g/cm³"
             );
             let mut t1 = Target::new(synthesize_peo(dp), 1).with_name("peo");
             if !h_idx.is_empty() {
@@ -981,7 +981,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tn = tn.with_atom_radius(&h_idx, h_r);
             }
             let p0 = Instant::now();
-            let packed = GenCanPack::new()
+            let packed = GencanPack::new()
                 .with_seed(seed)
                 .with_tolerance(2.0)
                 .with_density(density)

@@ -5,7 +5,7 @@ structured convergence diagnostics, or when you are extending molpack itself.
 
 ```rust
 use std::sync::Arc;
-use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
+use molpack::{GencanPack, PackEngine, RegionRestraint, Target};
 use molrs::core::Cuboid;
 use ndarray::array;
 
@@ -16,26 +16,26 @@ let water = Target::from_coords(&positions, &radii, 100)
     .with_name("water")
     .with_restraint(RegionRestraint(Arc::new(Cuboid::new(array![0.0, 0.0, 0.0], array![40.0, 40.0, 40.0]))));
 
-let result = GenCanPack::new().with_seed(42).run(&[water], 200)?;
+let result = GencanPack::new().with_seed(42).run(&[water], 200)?;
 let frame = result.frame;
 ```
 
-The shared builders (`with_seed`, `with_tolerance`, handlers, boxes, …) and
+The shared builders (`with_seed`, `with_tolerance`, callbacks, boxes, …) and
 the terminal `run` come from the `PackEngine` trait, so it has to be in scope.
-`GenCanPack` is the rigid-body entry; `CbmcGrow` is the chain-growth one.
+`GencanPack` is the rigid-body entry; `CbmcGrow` is the chain-growth one.
 
-Each entry is a **single-stage preset**: calling `.run(...)` on `GenCanPack`
+Each entry is a **single-stage preset**: calling `.run(...)` on `GencanPack`
 or `CbmcGrow` drives exactly one packing algorithm end to end (internally,
 `Pipeline::single(self).run(...)`). When a pack needs more than one algorithm
 in sequence — grow a chain, then push it apart with rigid-body descent —
 compose stages directly with `Pipeline` instead of chaining separate runs:
 
 ```rust
-use molpack::{CbmcGrow, GenCanPack, PackEngine, Pipeline};
+use molpack::{CbmcGrow, GencanPack, PackEngine, Pipeline};
 
 let result = Pipeline::new()
     .with_stage(CbmcGrow::new(prior))
-    .with_stage(GenCanPack::new())
+    .with_stage(GencanPack::new())
     .run(&targets, max_loops)?;
 ```
 
@@ -55,7 +55,7 @@ Feature flags:
 
 | Feature | Enables |
 |---|---|
-| `io` | Template reading and output writing through the molrs reader and writer of each file's format (`script::StructureFormat`), and `XYZHandler`. |
+| `io` | Template reading and output writing through the molrs reader and writer of each file's format (`script::StructureFormat`), and `XyzTrajectoryCallback`. |
 | `cli` | The `molpack` binary plus `io`. |
 | `rayon` | Parallel objective evaluation. |
 
@@ -68,6 +68,6 @@ molpack has no `ff` feature: a force-field optimizer bound through
 - [Quickstart](getting-started.md) walks through a first target and run.
 - [Restraints and PBC](restraints-and-pbc.md) explains target-level,
   atom-subset, global, and periodic restraints.
-- [Handlers and Optimizers](handlers-optimizers.md) covers progress output,
+- [Callbacks and Optimizers](callbacks-optimizers.md) covers progress output,
   observers, early stop, trajectory dumping, and in-loop conformation sampling.
 - [Examples](examples.md) lists the checked-in Rust workloads.

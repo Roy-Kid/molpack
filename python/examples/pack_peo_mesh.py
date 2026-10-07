@@ -11,7 +11,7 @@ confines the chains to it, and ``LatticeGrow`` at 2.0 Å walks
 Region ∩ lattice — diamond sites outside the mesh are blocked.
 
 Growth is the whole pipeline here. A seeded push-off
-(``GenCanPack().with_restart(grown)``) is the right follow-up for a dilute
+(``GencanPack().with_restart(grown)``) is the right follow-up for a dilute
 box, but at melt density in a cavity it has nowhere to put the overlap it
 resolves except through the wall: on this scene it spent 1 h 45 min to
 move ``fdist`` 3.99 → 3.28 while ``frest`` went 0.42 → 6.43, i.e. the

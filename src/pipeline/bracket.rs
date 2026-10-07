@@ -1,62 +1,62 @@
-//! The handler bracket around a run.
+//! The callback bracket around a run.
 //!
-//! Adopted-handler tagging ([`StageTagger`], [`tag_all`]) stamps the run's
-//! current stage position onto every `on_step` event a handler receives —
+//! Adopted-callback tagging ([`StageTagger`], [`tag_all`]) stamps the run's
+//! current stage position onto every `on_step` event a callback receives —
 //! a stage only knows `index: 0, total: 1`, so where it sits in a chain has
 //! to be stamped on from outside. [`open_bracket`] opens the bracket:
-//! appends the built-in LAMMPS log handler when enabled, tags the set, and
+//! appends the built-in LAMMPS log callback when enabled, tags the set, and
 //! fires `on_start`. [`close_bracket`] closes it with `on_finish`. The
 //! per-stage loop that runs between the two is the lifecycle body and lives
 //! in `mod.rs`, not here.
 
 use std::sync::{Arc, Mutex};
 
+use crate::callback::{Callback, LammpsLogCallback, PhaseInfo, PhaseReport, StageInfo, StepInfo};
 use crate::context::PackContext;
-use crate::entry::setup::ResolvedSpace;
-use crate::handler::{Handler, LammpsLogHandler, PhaseInfo, PhaseReport, StageInfo, StepInfo};
+use crate::pack_space::ResolvedSpace;
 use crate::stage::{Budget, Stage, StageOutcome};
 
 use super::EngineSetup;
 
 /// The slot the pipeline writes its current stage identity into, shared with
-/// every wrapped handler.
+/// every wrapped callback.
 pub(super) type StagePosition = Arc<Mutex<StageInfo>>;
 
-/// Wrap each handler so its `on_step` events carry the run's stage position.
+/// Wrap each callback so its `on_step` events carry the run's stage position.
 ///
-/// One pass over the set, at the point the run's handler list is assembled;
-/// nothing else in the crate wraps a handler.
+/// One pass over the set, at the point the run's callback list is assembled;
+/// nothing else in the crate wraps a callback.
 pub(super) fn tag_all(
-    handlers: Vec<Box<dyn Handler>>,
+    callbacks: Vec<Box<dyn Callback>>,
     position: &StagePosition,
-) -> Vec<Box<dyn Handler>> {
-    handlers
+) -> Vec<Box<dyn Callback>> {
+    callbacks
         .into_iter()
         .map(|inner| {
             Box::new(StageTagger {
                 inner,
                 position: Arc::clone(position),
-            }) as Box<dyn Handler>
+            }) as Box<dyn Callback>
         })
         .collect()
 }
 
-/// Open the run's handler bracket: append the built-in LAMMPS log handler
+/// Open the run's callback bracket: append the built-in LAMMPS log callback
 /// when enabled, tag the set with a fresh position slot (stamped at the
 /// first stage), fire `on_start`, and hand both back —
 /// [`Pipeline::run_stages`](super::Pipeline::run_stages) updates the slot
 /// before each stage.
 pub(super) fn open_bracket(
-    own_handlers: Vec<Box<dyn Handler>>,
+    own_callbacks: Vec<Box<dyn Callback>>,
     stages: &[Box<dyn Stage>],
     setup: &EngineSetup<'_>,
     space: &ResolvedSpace,
     budget: &Budget,
-) -> (Vec<Box<dyn Handler>>, StagePosition) {
+) -> (Vec<Box<dyn Callback>>, StagePosition) {
     let log = setup.settings.log;
-    let mut collected = own_handlers;
+    let mut collected = own_callbacks;
     if log.level.is_enabled() {
-        collected.push(Box::new(LammpsLogHandler::new(
+        collected.push(Box::new(LammpsLogCallback::new(
             log.level,
             log.frequency,
             setup.settings.tolerance(),
@@ -79,10 +79,10 @@ pub(super) fn open_bracket(
     (tagged, position)
 }
 
-/// Close the run's handler bracket: fire `on_finish` on the tagged set
+/// Close the run's callback bracket: fire `on_finish` on the tagged set
 /// [`open_bracket`] produced.
-pub(super) fn close_bracket(handlers: &mut [Box<dyn Handler>], sys: &PackContext) {
-    for h in handlers.iter_mut() {
+pub(super) fn close_bracket(callbacks: &mut [Box<dyn Callback>], sys: &PackContext) {
+    for h in callbacks.iter_mut() {
         h.on_finish(sys);
     }
 }
@@ -92,15 +92,15 @@ pub(super) fn close_bracket(handlers: &mut [Box<dyn Handler>], sys: &PackContext
 ///
 /// A stage reports `index: 0, total: 1` — true standalone, and all it can
 /// know. Where it sits in a chain is the pipeline's fact, so the pipeline
-/// owns it: one wrapper per handler, one shared slot updated before each
+/// owns it: one wrapper per callback, one shared slot updated before each
 /// stage runs. Every other callback, including `should_stop`, is forwarded
 /// untouched.
 struct StageTagger {
-    inner: Box<dyn Handler>,
+    inner: Box<dyn Callback>,
     position: StagePosition,
 }
 
-impl Handler for StageTagger {
+impl Callback for StageTagger {
     fn on_start(&mut self, ntotat: usize, ntotmol: usize) {
         self.inner.on_start(ntotat, ntotmol);
     }

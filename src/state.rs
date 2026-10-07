@@ -131,7 +131,7 @@ impl IntraResidual {
 /// by private `Pipeline::assemble`, which is the freeze point, and the
 /// caller then holds this `State`. There is no `type` alias either way.
 ///
-/// Cross-entry continuation (`GenCanPack::with_restart`) reads the hidden
+/// Cross-entry continuation (`GencanPack::with_restart`) reads the hidden
 /// `Placements` snapshot, not the public [`Self::frame`] — reconstructing
 /// COM from the assembled frame would lose bitwise continuity.
 ///
@@ -145,7 +145,7 @@ pub struct State {
     /// columns, plus the templates' relation blocks and the resolved cell.
     pub frame: molrs::core::Frame,
     /// The verbatim placement solution, for cross-entry seeding
-    /// (`GenCanPack::with_restart`).
+    /// (`GencanPack::with_restart`).
     pub(crate) placements: Placements,
     /// Maximum inter-molecular distance violation at termination.
     pub fdist: F,
@@ -216,7 +216,7 @@ pub(crate) fn positions_in_target_order(
 mod tests {
     use super::IntraResidual;
     use crate::Target;
-    use crate::testutil::{chain_bonds, frame_from_parts};
+    use crate::test_fixtures::{chain_bonds, frame_from_parts};
     use molrs::core::BondDistanceWeights;
     use molrs::core::SimBox;
 

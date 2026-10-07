@@ -50,12 +50,12 @@ Attach a restraint to every target through the engine entry:
 
 ```rust
 use std::sync::Arc;
-use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
+use molpack::{GencanPack, PackEngine, RegionRestraint, Target};
 use molrs::core::Sphere;
 use ndarray::array;
 
 let ball = Sphere::new(array![20.0, 20.0, 20.0], 30.0);
-let result = GenCanPack::new()
+let result = GencanPack::new()
     .with_global_restraint(RegionRestraint(Arc::new(ball)))
     .run(&[a, b], 200)?;
 ```
@@ -69,9 +69,9 @@ Periodic boundary conditions are declared on the engine entry; a region only
 confines:
 
 ```rust
-use molpack::{GenCanPack, PackEngine};
+use molpack::{GencanPack, PackEngine};
 
-let engine = GenCanPack::new().with_periodic_box([0.0; 3], [30.0; 3], [true; 3]);
+let engine = GencanPack::new().with_periodic_box([0.0; 3], [30.0; 3], [true; 3]);
 ```
 
 Per-axis periodicity is the third argument (`[true, true, false]` for a slab

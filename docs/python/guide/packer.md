@@ -1,18 +1,18 @@
 # Packer
 
-`GenCanPack` drives the GENCAN-based three-phase optimizer. It is one of
+`GencanPack` drives the GENCAN-based three-phase optimizer. It is one of
 two engine entries — the other, `CbmcGrow`, grows chains instead of
 placing rigid bodies; see [Chain growth](growth.md). You pick the
 algorithm by picking the entry, and both share the builder names below.
-All tuning is through `with_*` builder methods — the `GenCanPack`
+All tuning is through `with_*` builder methods — the `GencanPack`
 constructor takes no arguments.
 
 ## Constructor
 
 ```python
-from molpack import GenCanPack
+from molpack import GencanPack
 
-packer = GenCanPack()
+packer = GencanPack()
 ```
 
 All defaults match Packmol's reference behaviour. Override any of
@@ -20,11 +20,11 @@ them via the builders below.
 
 ## Builder methods
 
-Every builder returns a **new** `GenCanPack`:
+Every builder returns a **new** `GencanPack`:
 
 ```python
 packer = (
-    GenCanPack()
+    GencanPack()
     .with_tolerance(2.0)            # minimum allowed pairwise distance (Å)
     .with_precision(0.01)           # convergence threshold on fdist and frest
     .with_inner_iterations(20)      # GENCAN inner-loop cap (Packmol `maxit`)
@@ -55,7 +55,7 @@ packer = (
 ```
 
 `with_tolerance`, `with_precision`, `with_seed`, `with_periodic_box`,
-`with_density`, `with_parallel_eval`, `with_progress`, `with_handler`,
+`with_density`, `with_parallel_eval`, `with_progress`, `with_callback`,
 and `with_global_restraint` are the shared entry builders — they exist
 on `CbmcGrow` too. The rest are GENCAN-only.
 
@@ -72,22 +72,22 @@ packer = packer.with_global_restraint(
 Semantically equivalent to calling `.with_restraint(r)` on every
 target.
 
-## Handlers
+## Callbacks
 
 Attach any object implementing some subset of `on_start(ntotat, ntotmol)`,
 `on_step(info) -> bool | None`, `on_finish()`:
 
 ```python
-class MyHandler:
+class MyCallback:
     def on_step(self, info, ctx):
         print(f"phase={info.phase} loop={info.loop_idx} fdist={info.fdist:.3f}")
         return None  # or True to request early stop
 
-packer = packer.with_handler(MyHandler())
+packer = packer.with_callback(MyCallback())
 ```
 
 Returning `True` from `on_step` halts the run at the next check. See
-the `Handler` Protocol in `molpack`.
+the `Callback` Protocol in `molpack`.
 
 ## Periodic boundaries
 
@@ -105,11 +105,11 @@ result = packer.run(targets, max_loops=200)
 - `max_loops` — per-phase outer-iteration budget.
 
 Raises one of the typed `PackError` subclasses on failure
-(`NoTargetsError`, `InvalidPBCBoxError`, …).
+(`NoTargetsError`, `InvalidPbcBoxError`, …).
 
 `run()` is the entry's only terminal verb and it consumes the entry —
 one engine, one run. Calling `run()` twice on the same object raises
-`RuntimeError`; build a fresh `GenCanPack` for the next pack.
+`RuntimeError`; build a fresh `GencanPack` for the next pack.
 
 ## State
 
@@ -121,7 +121,7 @@ result.natoms      # int
 result.converged   # bool — True iff both fdist and frest < precision
 result.fdist       # float — final distance-violation sum
 result.frest       # float — final restraint-violation sum
-result.degraded    # int — growth-only; always 0 on the GenCanPack path
+result.degraded    # int — growth-only; always 0 on the GencanPack path
 result.intra       # IntraResidual — same-copy scored / exempted minima (Å)
 ```
 
@@ -138,25 +138,25 @@ writers.
 
 ## Composing stages
 
-`GenCanPack`, `CbmcGrow`, and `LatticeGrow` are each a **single-stage
+`GencanPack`, `CbmcGrow`, and `LatticeGrow` are each a **single-stage
 preset**: calling `.run(...)` on one of them drives exactly one packing
 algorithm end to end. When a pack needs more than one algorithm in the same
 run — grow a chain, then compact it with rigid-body descent — compose the
 stage objects with `Pipeline` instead of writing two separate `run()` calls:
 
 ```python
-from molpack import CbmcGrow, GenCanPack, Pipeline, TorsionPrior
+from molpack import CbmcGrow, GencanPack, Pipeline, TorsionPrior
 
 prior = TorsionPrior.uniform()  # see the Chain growth guide for a real prior
 result = (
-    Pipeline([CbmcGrow(prior), GenCanPack()])
+    Pipeline([CbmcGrow(prior), GencanPack()])
     .with_seed(7)
     .run(targets, max_loops=200)
 )
 ```
 
 `Pipeline([stage, ...])` accepts a list of stage objects at construction, and
-`.with_stage(x)` appends one more; both accept `GenCanPack`, `CbmcGrow`, and
+`.with_stage(x)` appends one more; both accept `GencanPack`, `CbmcGrow`, and
 `LatticeGrow` instances. The pipeline runs every stage in one lifecycle,
 continuing from the previous stage's placements rather than starting over —
 the same continuation `.with_restart` gives you across two separate runs (see
@@ -173,16 +173,16 @@ it enters a `Pipeline` raises `ValueError`, naming both the offending stage
 and the setting, rather than silently picking one of two conflicting values:
 
 ```python
-Pipeline([CbmcGrow(prior), GenCanPack().with_seed(7)]).run(targets, max_loops=200)
+Pipeline([CbmcGrow(prior), GencanPack().with_seed(7)]).run(targets, max_loops=200)
 # ValueError: preset `gencan` carries a non-default `seed` inside a pipeline;
 #             set `seed` on the Pipeline instead (shared settings are one ruler)
 ```
 
-### Handlers travel with their stage
+### Callbacks travel with their stage
 
-A stage object's own `.with_handler(...)` callback is **not** dropped when
+A stage object's own `.with_callback(...)` callback is **not** dropped when
 that stage is composed into a `Pipeline` — it is adopted into the pipeline's
-handler set and keeps firing for every stage in the run, not only the one it
+callback set and keeps firing for every stage in the run, not only the one it
 was attached to:
 
 ```python
@@ -193,13 +193,13 @@ class CountSteps:
         self.count += 1
 
 counter = CountSteps()
-result = Pipeline([GenCanPack().with_handler(counter)]).run(targets, max_loops=200)
+result = Pipeline([GencanPack().with_callback(counter)]).run(targets, max_loops=200)
 assert counter.count > 0
 ```
 
 ### `StepInfo.stage` names the running algorithm
 
-Inside a multi-stage pipeline, `info.stage` on every `StepInfo` a handler
+Inside a multi-stage pipeline, `info.stage` on every `StepInfo` a callback
 receives tells you which stage emitted that step:
 
 ```python
@@ -209,13 +209,13 @@ class WatchStages:
         print(f"stage {s.index + 1}/{s.total} ({s.name}) loop={info.loop_idx}")
         return None
 
-Pipeline([CbmcGrow(prior), GenCanPack()]).with_handler(WatchStages()).run(targets, max_loops=200)
+Pipeline([CbmcGrow(prior), GencanPack()]).with_callback(WatchStages()).run(targets, max_loops=200)
 ```
 
 `info.stage.index` is 0-based and increases monotonically over the run,
 `info.stage.total` is the number of stages the pipeline holds, and
 `info.stage.name` is the stage's own name — `"gencan"`, `"growth"`, or
-`"lattice"`. A single-entry run (`GenCanPack().run(...)` directly, with no
+`"lattice"`. A single-entry run (`GencanPack().run(...)` directly, with no
 `Pipeline`) reports the same triple, with `index = 0` and `total = 1`.
 
 ### Composition errors
@@ -226,7 +226,7 @@ Pipeline([CbmcGrow(prior), GenCanPack()]).with_handler(WatchStages()).run(target
   not `guarantee` — raises `ValueError` naming the stage.
 - A preset entering the pipeline with a non-default shared setting (above)
   raises `ValueError` naming the stage and the setting.
-- An object that is not one of `GenCanPack`, `CbmcGrow`, or `LatticeGrow`
+- An object that is not one of `GencanPack`, `CbmcGrow`, or `LatticeGrow`
   passed to `Pipeline([...])` or `.with_stage(x)` raises `TypeError`, listing
   the three supported entries.
 

@@ -189,7 +189,7 @@ impl Restraint for TabulatedPoint {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testutil::{assert_fd_grad, ctx_free, free_box, rng_uniform};
+    use super::super::test_fixtures::{assert_fd_grad, ctx_free, free_box, rng_uniform};
     use super::*;
 
     /// A fine grid sampling a Gaussian density; the tabulated quantile should

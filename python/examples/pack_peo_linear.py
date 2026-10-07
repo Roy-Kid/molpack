@@ -3,7 +3,7 @@
 Chemistry and architecture are molrs: CGsmiles + conformer for the unit, and
 a CGsmiles topology grown by ``molrs.builder.Assembler`` with
 ``molrs.builder.GrowthPlacer``. Packing is molpack: ``LatticeGrow`` at
-2.0 Å then ``GenCanPack.with_restart`` at 2.0 Å. Hydrogen packing radius
+2.0 Å then ``GencanPack.with_restart`` at 2.0 Å. Hydrogen packing radius
 defaults to 0.2 Å (``PEO_H_RADIUS=off`` restores ``tolerance/2``):
 hydrogens relax away in the first picoseconds of MD, so making them
 fight for space here only costs the heavy-atom packing.
@@ -87,7 +87,7 @@ def pack_linear(n: int, n_mol: int, density: float, seed: int):
     prior = molpack.TorsionPrior.three_state_from_c_inf(PEO_C_INF, TET)
     print(
         "  lattice      : LatticeGrow occupancy-guard @ 2.0 Å → "
-        "GenCanPack.with_restart @ 2.0 Å"
+        "GencanPack.with_restart @ 2.0 Å"
     )
     grown = (
         molpack.LatticeGrow(prior)
@@ -103,7 +103,7 @@ def pack_linear(n: int, n_mol: int, density: float, seed: int):
         f"intra scored {grown.intra.scored:.3f} Å"
     )
     pushed = (
-        molpack.GenCanPack()
+        molpack.GencanPack()
         .with_restart(grown)
         .with_seed(seed)
         .with_tolerance(2.0)

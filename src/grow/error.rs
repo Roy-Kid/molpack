@@ -93,12 +93,12 @@ impl fmt::Display for GrowError {
                 f,
                 "the target has no template frame (built from bare coordinates); growth needs \
                  a bond graph — load the species from a file or build a frame with bonds, or \
-                 pack this target with GenCanPack"
+                 pack this target with GencanPack"
             ),
             GrowError::TemplateTooSmall(n) => write!(
                 f,
                 "the template has {n} atom(s); growth needs at least 3 — pack this \
-                 target with GenCanPack"
+                 target with GencanPack"
             ),
             GrowError::NoAtomsBlock => {
                 write!(f, "the template frame has no readable atoms block")
@@ -113,7 +113,7 @@ impl fmt::Display for GrowError {
             GrowError::NoBonds => write!(
                 f,
                 "the template frame carries no bonds; growth needs the bond graph — pack \
-                 this target with GenCanPack or supply connectivity"
+                 this target with GencanPack or supply connectivity"
             ),
             GrowError::Disconnected => {
                 write!(f, "the template's bond graph does not connect all atoms")
@@ -155,7 +155,7 @@ impl fmt::Display for GrowError {
             GrowError::FixedTarget => write!(
                 f,
                 "a fixed target cannot be grown: drop fixed_at or pack this \
-                 target with GenCanPack"
+                 target with GencanPack"
             ),
             GrowError::LatticeRegionEmpty => write!(
                 f,

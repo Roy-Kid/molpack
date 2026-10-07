@@ -1,15 +1,15 @@
-//! Engine-entry bindings (engine-entry-split): `GenCanPack` and `CbmcGrow`
+//! Engine-entry bindings (engine-entry-split): `GencanPack` and `CbmcGrow`
 //! as 1:1 mirrors of the Rust entries — one terminal verb, one-shot
 //! semantics, no sugar aliases.
 //!
-//! The shared `with_*` builders are bound ONCE, in `entry_pymethods!` —
+//! The shared `with_*` builders are bound ONCE, in `packing_method_pymethods!` —
 //! the macro stamps the same forwarders into each entry's `#[pymethods]`
 //! block, so the shared surface cannot drift between entries.
 //!
 //! `Pipeline` takes those same entry objects as its stages. How an entry
 //! becomes one is stamped by the same macro, next to the entry
 //! (`IntoStageFactory`), and *which* objects may be one is the single
-//! `stage_entry_registry!` table below — both the dispatch and the
+//! `stage_method_registry!` table below — both the dispatch and the
 //! `TypeError` text come from it, so `PyPipeline` never names a concrete
 //! entry type and a fourth entry registers itself in one line.
 
@@ -17,16 +17,16 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use molpack::{
-    CbmcGrow, EarlyStopHandler, GenCanPack, LatticeGrow, LogLevel, PackEngine, StageFactory,
+    CbmcGrow, EarlyStopCallback, GencanPack, LatticeGrow, LogLevel, PackEngine, StageFactory,
 };
 use pyo3::prelude::*;
 
+use crate::callback::PythonCallback;
 use crate::errors::{pack_error_to_pyerr, take_err};
 use crate::grow::{PyAnglePrior, PyTorsionPrior};
-use crate::handler::PyHandlerWrapper;
 use crate::parallel::rayon_compiled;
 use crate::restraint::extract_restraint;
-use crate::result::PyState;
+use crate::state::PyState;
 use crate::target::PyTarget;
 
 use molrs::op::F;
@@ -44,7 +44,7 @@ struct SharedKnobs {
     progress: bool,
     log_level: Option<LogLevel>,
     log_frequency: Option<usize>,
-    py_handlers: Vec<Py<pyo3::types::PyAny>>,
+    py_callbacks: Vec<Py<pyo3::types::PyAny>>,
     global_restraints: Vec<Py<pyo3::types::PyAny>>,
     consumed: bool,
 }
@@ -61,7 +61,7 @@ impl SharedKnobs {
             progress: self.progress,
             log_level: self.log_level,
             log_frequency: self.log_frequency,
-            py_handlers: self.py_handlers.iter().map(|h| h.clone_ref(py)).collect(),
+            py_callbacks: self.py_callbacks.iter().map(|h| h.clone_ref(py)).collect(),
             global_restraints: self
                 .global_restraints
                 .iter()
@@ -103,16 +103,16 @@ impl SharedKnobs {
         if let Some(n) = self.log_frequency {
             engine = engine.with_log_frequency(n);
         }
-        // One flag per `apply` call — shared by the handlers this call
+        // One flag per `apply` call — shared by the callbacks this call
         // attaches, whether they land on a standalone entry or on one stage
-        // of a pipeline. The lifecycle polls every handler
-        // (`handlers.iter().any(|h| h.should_stop())`), so a stage handler
+        // of a pipeline. The lifecycle polls every callback
+        // (`callbacks.iter().any(|h| h.should_stop())`), so a stage callback
         // asking to stop still stops the whole run, and a raised exception
         // still reaches `finish_run` through the shared `take_err` stash.
         let stop_flag = Arc::new(AtomicBool::new(false));
-        for py_h in &self.py_handlers {
-            let wrapper = PyHandlerWrapper::new(py_h.clone_ref(py), Arc::clone(&stop_flag));
-            engine = engine.with_handler(Box::new(wrapper));
+        for py_h in &self.py_callbacks {
+            let wrapper = PythonCallback::new(py_h.clone_ref(py), Arc::clone(&stop_flag));
+            engine = engine.with_callback(Box::new(wrapper));
         }
         Ok(engine)
     }
@@ -161,14 +161,14 @@ fn finish_run(
 
 /// How an entry object becomes a pipeline stage.
 ///
-/// Stamped by [`entry_pymethods!`] next to each entry, so the conversion
+/// Stamped by [`packing_method_pymethods!`] next to each entry, so the conversion
 /// lives with the entry it converts and a new entry cannot forget to
 /// provide one. The body is the entry's own `build_engine` — the very
 /// construction its `run` uses, so a stage and a standalone run are the
 /// same engine — followed by [`SharedKnobs::apply`], which attaches this
-/// object's Python handlers (the pipeline *adopts* them) and carries any
+/// object's Python callbacks (the pipeline *adopts* them) and carries any
 /// non-default shared knob through so the Rust side refuses it **by name**.
-/// The binding neither strips a knob nor drops a handler.
+/// The binding neither strips a knob nor drops a callback.
 ///
 /// `to_` and not `into_`: the entry object stays owned by the interpreter,
 /// so the conversion borrows it and the caller's stage object is still
@@ -181,7 +181,7 @@ trait IntoStageFactory {
 /// identically for every entry), the entry's own methods, and its
 /// [`IntoStageFactory`] body — which is why every entry must define
 /// `fn build_engine(&self, py: Python<'_>) -> PyResult<impl PackEngine>`.
-macro_rules! entry_pymethods {
+macro_rules! packing_method_pymethods {
     ($ty:ty { $($extra:tt)* }) => {
         #[pymethods]
         impl $ty {
@@ -250,11 +250,11 @@ macro_rules! entry_pymethods {
                 c.shared.log_frequency = Some(n.max(1));
                 c
             }
-            /// Append a Python handler. See :class:`StepInfo` for the
+            /// Append a Python callback. See :class:`StepInfo` for the
             /// callback contract.
-            fn with_handler(&self, handler: Py<pyo3::types::PyAny>) -> Self {
+            fn with_callback(&self, callback: Py<pyo3::types::PyAny>) -> Self {
                 let mut c = self.clone_fields();
-                c.shared.py_handlers.push(handler);
+                c.shared.py_callbacks.push(callback);
                 c
             }
 
@@ -274,7 +274,7 @@ macro_rules! entry_pymethods {
 /// It generates both halves of the answer — the ordered dispatch and the
 /// `TypeError` text listing what was expected — so the two cannot drift and
 /// a new entry costs exactly one line, next to its own pyclass.
-macro_rules! stage_entry_registry {
+macro_rules! stage_method_registry {
     ($($ty:ty => $name:literal),+ $(,)?) => {
         /// The accepted entries, in dispatch order.
         const STAGE_ENTRIES: &[&str] = &[$($name),+];
@@ -313,9 +313,9 @@ macro_rules! stage_entry_registry {
     };
 }
 
-/// Rigid-body GENCAN packing entry (1:1 mirror of the Rust `GenCanPack`).
-#[pyclass(name = "GenCanPack")]
-pub struct PyGenCanPack {
+/// Rigid-body GENCAN packing entry (1:1 mirror of the Rust `GencanPack`).
+#[pyclass(name = "GencanPack")]
+pub struct PyGencanPack {
     shared: SharedKnobs,
     seed: Option<molpack::State>,
     inner_iterations: Option<usize>,
@@ -324,10 +324,10 @@ pub struct PyGenCanPack {
     perturb: Option<(F, bool, bool)>,
     avoid_overlap: Option<bool>,
     /// `None`: the entry's default early stop; `Some(None)`: switched off.
-    early_stop: Option<Option<EarlyStopHandler>>,
+    early_stop: Option<Option<EarlyStopCallback>>,
 }
 
-entry_pymethods!(PyGenCanPack {
+packing_method_pymethods!(PyGencanPack {
     #[new]
     fn new() -> Self {
         Self {
@@ -388,7 +388,7 @@ entry_pymethods!(PyGenCanPack {
     fn with_early_stop(&self, enabled: bool, threshold_pct: F, patience: usize) -> Self {
         let mut c = self.clone_fields();
         c.early_stop =
-            Some(enabled.then(|| EarlyStopHandler::new(threshold_pct).with_patience(patience)));
+            Some(enabled.then(|| EarlyStopCallback::new(threshold_pct).with_patience(patience)));
         c
     }
 
@@ -402,7 +402,7 @@ entry_pymethods!(PyGenCanPack {
         max_loops: Option<usize>,
     ) -> PyResult<PyState> {
         self.shared.guard_one_shot()?;
-        let max_loops = max_loops.unwrap_or(GenCanPack::default_max_loops(targets.len()));
+        let max_loops = max_loops.unwrap_or(GencanPack::default_max_loops(targets.len()));
         let rust_targets: Vec<_> = targets.into_iter().map(|t| t.inner).collect();
         let engine = self.shared.apply(py, self.build_engine(py)?)?;
         let pb = self.shared.periodic_box;
@@ -410,11 +410,11 @@ entry_pymethods!(PyGenCanPack {
     }
 
     fn __repr__(&self) -> String {
-        "GenCanPack(...)".to_string()
+        "GencanPack(...)".to_string()
     }
 });
 
-impl PyGenCanPack {
+impl PyGencanPack {
     /// Script-loader constructor: shared knobs pre-set from a parsed `.inp`.
     pub(crate) fn from_script(
         tolerance: Option<F>,
@@ -440,8 +440,8 @@ impl PyGenCanPack {
 
     /// The Rust engine these knobs describe — one home for that
     /// construction, read by `run` and by the pipeline conversion alike.
-    fn build_engine(&self, _py: Python<'_>) -> PyResult<GenCanPack> {
-        let mut engine = GenCanPack::new();
+    fn build_engine(&self, _py: Python<'_>) -> PyResult<GencanPack> {
+        let mut engine = GencanPack::new();
         if let Some(seed) = &self.seed {
             engine = engine.with_restart(seed);
         }
@@ -498,7 +498,7 @@ pub struct PyCbmcGrow {
     void_bias: bool,
 }
 
-entry_pymethods!(PyCbmcGrow {
+packing_method_pymethods!(PyCbmcGrow {
     #[new]
     fn new(torsion_prior: &PyTorsionPrior) -> Self {
         Self {
@@ -572,7 +572,7 @@ entry_pymethods!(PyCbmcGrow {
 
     /// Run the growth. One engine, one run. Reports honestly — nothing else
     /// runs on non-convergence. For the rigid push-off, chain explicitly:
-    /// ``GenCanPack().with_restart(result).run(same_targets, ...)``.
+    /// ``GencanPack().with_restart(result).run(same_targets, ...)``.
     fn run(
         &mut self,
         py: Python<'_>,
@@ -593,7 +593,7 @@ entry_pymethods!(PyCbmcGrow {
 
 /// Diamond-lattice growth entry (1:1 mirror of `LatticeGrow`): melt-density
 /// chain generation as an on-lattice SAW, decorated back to all-atom
-/// geometry. Residual contacts are honest; chain a seeded ``GenCanPack``.
+/// geometry. Residual contacts are honest; chain a seeded ``GencanPack``.
 #[pyclass(name = "LatticeGrow")]
 pub struct PyLatticeGrow {
     shared: SharedKnobs,
@@ -601,7 +601,7 @@ pub struct PyLatticeGrow {
     occupancy_guard: Option<bool>,
 }
 
-entry_pymethods!(PyLatticeGrow {
+packing_method_pymethods!(PyLatticeGrow {
     #[new]
     fn new(torsion_prior: &PyTorsionPrior) -> Self {
         Self {
@@ -713,17 +713,17 @@ impl PyCbmcGrow {
 // The single table: which entry objects may be a pipeline stage. A fourth
 // entry adds one line here, next to its own pyclass — the dispatch and the
 // `TypeError` text follow, and `PyPipeline` below stays untouched.
-stage_entry_registry!(
-    PyGenCanPack => "GenCanPack",
+stage_method_registry!(
+    PyGencanPack => "GencanPack",
     PyCbmcGrow => "CbmcGrow",
     PyLatticeGrow => "LatticeGrow",
 );
 
 /// A sequence of stages behind one lifecycle, one settings set and one
-/// handler set (1:1 mirror of the Rust `Pipeline`).
+/// callback set (1:1 mirror of the Rust `Pipeline`).
 ///
 /// The shared knobs are the run's — declare them here, not on a stage. A
-/// stage's own Python handlers travel with it and are **adopted**: they
+/// stage's own Python callbacks travel with it and are **adopted**: they
 /// observe the whole run. A stage carrying a non-default shared knob is
 /// refused by name at `run` (`ValueError`), never silently stripped.
 ///
@@ -740,9 +740,9 @@ pub struct PyPipeline {
 
 // The shared macro also stamps `IntoStageFactory` on `PyPipeline` (a Rust
 // `Pipeline` is itself a `StageFactory`), but `PyPipeline` is deliberately
-// NOT in `stage_entry_registry!`: nesting pipelines stays a Rust-only
+// NOT in `stage_method_registry!`: nesting pipelines stays a Rust-only
 // extension point in v1, so that impl has no caller by design.
-entry_pymethods!(PyPipeline {
+packing_method_pymethods!(PyPipeline {
     #[new]
     #[pyo3(signature = (stages = None))]
     fn new(py: Python<'_>, stages: Option<Vec<Py<pyo3::types::PyAny>>>) -> PyResult<Self> {

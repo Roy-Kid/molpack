@@ -46,7 +46,7 @@ class TestRegionAttach:
         for region in regions:
             assert target.with_restraint(region) is not None, type(region)
             assert target.with_atom_restraint([0], region) is not None, type(region)
-            assert molpack.GenCanPack().with_global_restraint(region) is not None
+            assert molpack.GencanPack().with_global_restraint(region) is not None
 
     def test_region_is_lifted_not_duck_typed(self):
         sphere = molrs.core.Sphere([0.0, 0.0, 0.0], 5.0)
@@ -76,7 +76,7 @@ class TestRegionPacking:
         ball = molrs.core.Sphere(centre, radius)
         target = molpack.Target(_one_atom_frame(), 8).with_restraint(ball)
         state = (
-            molpack.GenCanPack()
+            molpack.GencanPack()
             .with_seed(3)
             .with_tolerance(2.0)
             .with_precision(1e-4)
@@ -93,7 +93,7 @@ class TestRegionPacking:
         void = ~polymer & molrs.core.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
         target = molpack.Target(_one_atom_frame(), 6).with_restraint(void)
         state = (
-            molpack.GenCanPack()
+            molpack.GencanPack()
             .with_seed(5)
             .with_tolerance(2.0)
             .with_precision(1e-4)

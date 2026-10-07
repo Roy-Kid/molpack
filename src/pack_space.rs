@@ -189,7 +189,7 @@ pub(crate) fn resolve_pack_space(
     if let Some((min, max, _)) = declared_box {
         let length = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
         if length.iter().any(|&v| v <= 0.0) {
-            return Err(PackError::InvalidPBCBox { min, max });
+            return Err(PackError::InvalidPbcBox { min, max });
         }
     }
     let derived_cell = derive_cell(targets)?;
@@ -225,7 +225,7 @@ pub(crate) fn resolve_pack_space(
                 array![min[0], min[1], min[2]],
                 periodic,
             )
-            .map_err(|_| PackError::InvalidPBCBox { min, max })?,
+            .map_err(|_| PackError::InvalidPbcBox { min, max })?,
         ),
         (None, None) => None,
     };
@@ -268,7 +268,7 @@ mod periodic_declaration_tests {
     //! in `region_under_wrap_tests` below.
 
     use crate::restraint::geometric::{AbovePlaneRestraint, BelowPlaneRestraint};
-    use crate::{GenCanPack, PackEngine, PackError, Target};
+    use crate::{GencanPack, PackEngine, PackError, Target};
 
     fn one_atom(n: usize) -> Target {
         Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.5], n)
@@ -280,7 +280,7 @@ mod periodic_declaration_tests {
     #[test]
     fn a_plane_across_a_periodic_axis_is_rejected_naming_the_axis() {
         let target = one_atom(4).with_restraint(AbovePlaneRestraint::new([0.0, 0.0, 1.0], 5.0));
-        let err = GenCanPack::new()
+        let err = GencanPack::new()
             .with_seed(1)
             .with_periodic_box([0.0; 3], [30.0; 3], [true; 3])
             .run(std::slice::from_ref(&target), 2)
@@ -295,7 +295,7 @@ mod periodic_declaration_tests {
         );
 
         let target = one_atom(4).with_restraint(BelowPlaneRestraint::new([1.0, 0.0, 0.0], 5.0));
-        let err = GenCanPack::new()
+        let err = GencanPack::new()
             .with_seed(1)
             .with_periodic_box([0.0; 3], [30.0; 3], [true, true, false])
             .run(std::slice::from_ref(&target), 2)
@@ -310,7 +310,7 @@ mod periodic_declaration_tests {
     #[test]
     fn a_plane_along_a_confined_axis_is_accepted() {
         let target = one_atom(4).with_restraint(AbovePlaneRestraint::new([0.0, 0.0, 1.0], 5.0));
-        let result = GenCanPack::new()
+        let result = GencanPack::new()
             .with_seed(1)
             .with_periodic_box([0.0; 3], [30.0; 3], [true, true, false])
             .run(std::slice::from_ref(&target), 5);
@@ -324,13 +324,13 @@ mod periodic_declaration_tests {
     /// collapsed into a two-dimensional cell.
     #[test]
     fn zero_extent_declaration_is_rejected() {
-        let result = GenCanPack::new()
+        let result = GencanPack::new()
             .with_seed(7)
             .with_periodic_box([0.0; 3], [10.0, 0.0, 10.0], [true; 3])
             .run(&[one_atom(1)], 5);
         assert!(
-            matches!(result, Err(PackError::InvalidPBCBox { .. })),
-            "expected InvalidPBCBox, got: {result:?}"
+            matches!(result, Err(PackError::InvalidPbcBox { .. })),
+            "expected InvalidPbcBox, got: {result:?}"
         );
     }
 }
@@ -345,7 +345,7 @@ mod region_under_wrap_tests {
     use std::sync::Arc;
 
     use crate::AtomRestraint;
-    use crate::{GenCanPack, PackEngine, PackError, RegionRestraint, Target};
+    use crate::{GencanPack, PackEngine, PackError, RegionRestraint, Target};
     use molrs::core::{AndRegion, Cuboid, HalfSpace, NotRegion, Region, Sphere};
     use ndarray::array;
 
@@ -366,7 +366,7 @@ mod region_under_wrap_tests {
     #[test]
     fn a_lifted_half_space_across_a_periodic_axis_is_rejected() {
         let target = one_atom(4).with_restraint(half_space_above_z());
-        let err = GenCanPack::new()
+        let err = GencanPack::new()
             .with_seed(1)
             .with_periodic_box([0.0; 3], [30.0; 3], [true; 3])
             .run(&[target], 2)
@@ -384,7 +384,7 @@ mod region_under_wrap_tests {
     #[test]
     fn the_same_region_along_confined_axes_is_the_slab_it_should_be() {
         let target = one_atom(4).with_restraint(half_space_above_z());
-        let result = GenCanPack::new()
+        let result = GencanPack::new()
             .with_seed(1)
             .with_periodic_box([0.0; 3], [30.0; 3], [true, true, false])
             .run(&[target], 5);

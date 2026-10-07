@@ -15,7 +15,7 @@ with four EO arms.
     python python/examples/pack_peo_topo.py ring 6 8 0.4 42
 
 Star packing is an explicit pick: ``LatticeGrow`` at 2.0 Å then
-``GenCanPack.with_restart`` at 2.0 Å. Hydrogen packing radius defaults
+``GencanPack.with_restart`` at 2.0 Å. Hydrogen packing radius defaults
 to 0.2 Å (``PEO_H_RADIUS=off`` restores ``tolerance/2``):
 hydrogens relax away in the first picoseconds of MD, so making them
 fight for space here only costs the heavy-atom packing.
@@ -136,7 +136,7 @@ def lattice_then_push(
     """Open-space melt: LatticeGrow occupancy-guard @ 2.0 Å, then GENCAN push-off."""
     prior = _prior()
     print(
-        "  lattice      : LatticeGrow occupancy-guard @ 2.0 Å → GenCanPack.with_restart @ 2.0 Å"
+        "  lattice      : LatticeGrow occupancy-guard @ 2.0 Å → GencanPack.with_restart @ 2.0 Å"
     )
     grown = (
         molpack.LatticeGrow(prior)
@@ -152,7 +152,7 @@ def lattice_then_push(
         f"intra scored {grown.intra.scored:.3f} Å"
     )
     pushed = (
-        molpack.GenCanPack()
+        molpack.GencanPack()
         .with_restart(grown)
         .with_seed(seed)
         .with_tolerance(2.0)
@@ -195,7 +195,7 @@ def pack_ring(dp: int, n_mol: int, density: float, seed: int) -> molpack.State:
             raise
         print(f"  grow         : named reject — {err}")
     packed = (
-        molpack.GenCanPack()
+        molpack.GencanPack()
         .with_seed(seed)
         .with_tolerance(2.0)
         .with_density(density)

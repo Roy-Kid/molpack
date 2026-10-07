@@ -37,7 +37,7 @@ def _make_tiny_pack() -> molpack.State:
     target = molpack.Target(frame, 3).with_restraint(
         molrs.core.Cuboid([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
     )
-    packer = molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
+    packer = molpack.GencanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
     return packer.run([target], max_loops=50)
 
 
@@ -133,7 +133,7 @@ class TestFrameTopology:
             molrs.core.Cuboid([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
         )
         packer = (
-            molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(7)
+            molpack.GencanPack().with_tolerance(2.0).with_progress(False).with_seed(7)
         )
         if box:
             packer = packer.with_periodic_box([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])

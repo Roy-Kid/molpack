@@ -1,6 +1,6 @@
-# Handlers and Optimizers
+# Callbacks and Optimizers
 
-Handlers observe a packing run. In-loop optimizers modify a copy's reference
+Callbacks observe a packing run. In-loop optimizers modify a copy's reference
 geometry between GENCAN iterations.
 
 ## Screen output
@@ -8,9 +8,9 @@ geometry between GENCAN iterations.
 Enable LAMMPS-style progress output through the builder:
 
 ```rust
-use molpack::{GenCanPack, LogLevel, PackEngine};
+use molpack::{GencanPack, LogLevel, PackEngine};
 
-let engine = GenCanPack::new()
+let engine = GencanPack::new()
     .with_log_level(LogLevel::Progress)
     .with_log_frequency(10);
 ```
@@ -18,43 +18,43 @@ let engine = GenCanPack::new()
 The CLI enables screen output by default; library callers stay quiet unless you
 opt in.
 
-## Built-in handlers
+## Built-in callbacks
 
-`XYZHandler` needs the `io` feature: it writes each snapshot through molrs's
+`XyzTrajectoryCallback` needs the `io` feature: it writes each snapshot through molrs's
 extended XYZ writer.
 
 ```rust
-use molpack::{EarlyStopHandler, GenCanPack, PackEngine, XYZHandler};
+use molpack::{EarlyStopCallback, GencanPack, PackEngine, XyzTrajectoryCallback};
 
-let engine = GenCanPack::new()
-    .with_handler(Box::new(XYZHandler::new("traj.xyz", 10)))
+let engine = GencanPack::new()
+    .with_callback(Box::new(XyzTrajectoryCallback::new("traj.xyz", 10)))
     // Stricter than the default early stop: 20 % per 5 loops.
-    .with_early_stop(EarlyStopHandler::new(20.0).with_patience(5));
+    .with_early_stop(EarlyStopCallback::new(20.0).with_patience(5));
 ```
 
-Packmol runs every phase until it converges or reaches `nloop`. `GenCanPack`
+Packmol runs every phase until it converges or reaches `nloop`. `GencanPack`
 additionally ends a phase once, at the user's radii (`radscale == 1`),
 Packmol's `bestf` has improved by less than 10 % (its movebad threshold) over
 10 loops — measured with Packmol's `fimprov` formula. A pack that stalls there
 is almost always too dense, and a `converged == false` in minutes beats
 running to `max_loops`. `with_early_stop(None)` restores Packmol's behaviour.
 
-`with_handler` is a `PackEngine` builder, so it works the same on `CbmcGrow`.
-Use handlers for progress logs, trajectory snapshots, custom observation, and
-early stop. Handler callbacks receive an immutable `PackContext` view; they do
+`with_callback` is a `PackEngine` builder, so it works the same on `CbmcGrow`.
+Use callbacks for progress logs, trajectory snapshots, custom observation, and
+early stop. Callbacks receive an immutable `PackContext` view; they do
 not mutate engine state.
 
-## Custom handlers
+## Custom callbacks
 
-Implement the `Handler` trait when you need structured events from a run:
+Implement the `Callback` trait when you need structured events from a run:
 
 ```rust
-use molpack::{Handler, PackContext, StepInfo};
+use molpack::{Callback, PackContext, StepInfo};
 
 #[derive(Debug)]
 struct WatchFdist;
 
-impl Handler for WatchFdist {
+impl Callback for WatchFdist {
     fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
         eprintln!("phase={} loop={} fdist={}", info.phase.phase, info.loop_idx, info.fdist);
     }
@@ -66,18 +66,18 @@ one algorithm behind molpack's packing seam (the `Stage` trait), and
 `info.stage` is a `StageInfo` carrying `index` (0-based position of the stage
 in the run), `total` (how many stages the run has), and `name` (the stage's own
 name, `"gencan"` for the rigid-body path). One engine entry drives one stage,
-so a plain `GenCanPack` or `CbmcGrow` run reports `index = 0`, `total = 1`.
+so a plain `GencanPack` or `CbmcGrow` run reports `index = 0`, `total = 1`.
 
 Two further callbacks bracket a whole stage, the way `on_phase_start` /
 `on_phase_end` bracket one GENCAN phase:
 
 ```rust
 use molpack::StageInfo;
-use molpack::{Handler, PackContext, StageOutcome, StepInfo};
+use molpack::{Callback, PackContext, StageOutcome, StepInfo};
 
 struct WatchStages;
 
-impl Handler for WatchStages {
+impl Callback for WatchStages {
     fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {}
 
     fn on_stage_start(&mut self, info: &StageInfo) {
@@ -100,7 +100,7 @@ stage with. Note where the numbers come from:
 `degraded`), while the violation maxima `fdist` and `frest` are read off the
 post-stage `PackContext`, so every algorithm is judged by the same objective.
 
-See [Extending](../extending.md) for a full custom-handler walkthrough and for
+See [Extending](../extending.md) for a full custom-callback walkthrough and for
 writing a stage of your own.
 
 ## In-loop optimizers
@@ -110,9 +110,9 @@ placed. It is useful for flexible molecules that need to sample torsions to fit
 their restraints. Bind one to the engine, naming the targets it applies to:
 
 ```rust
-use molpack::{GenCanPack, OptimizeSelect, PackEngine, TorsionMcOptimizer};
+use molpack::{GencanPack, OptimizeSelect, PackEngine, TorsionMcOptimizer};
 
-let engine = GenCanPack::new().with_optimizer(
+let engine = GencanPack::new().with_optimizer(
     OptimizeSelect::per_copy(["chain"]).with_environment(8.0),
     TorsionMcOptimizer::new(&graph)
         .with_temperature(0.5)

@@ -1,17 +1,17 @@
 //! `LatticeGrow` — the diamond-lattice chain-growth entry.
 //!
 //! Split out of `lattice/mod.rs` so the lattice module has the same shape as
-//! its two peers (`gencan/entry.rs`, `grow/entry.rs`): the algorithm in one
+//! its two peers (`gencan/gencan_pack.rs`, `grow/cbmc_grow.rs`): the algorithm in one
 //! file, the entry that selects it in another.
 
-use crate::Handler;
+use crate::Callback;
 use crate::PackError;
 use crate::Stage;
 use crate::Target;
-use crate::entry::{PackSettings, State};
 use crate::grow::prior::TorsionPrior;
 use crate::grow::{GrowError, validate_grow_cell};
 use crate::pipeline::{EngineSetup, PackEngine, Pipeline, StageFactory};
+use crate::{PackSettings, State};
 
 use super::LatticeStage;
 use super::config::LatticeConfig;
@@ -30,7 +30,7 @@ use super::decorate::analyze_backbone;
 /// outcome honestly: decoration drift and hydrogen crowding leave real
 /// contacts at melt density, `fdist` says so, and the remedy is the
 /// explicit seeded push-off chain
-/// ([`GenCanPack::with_restart`](crate::GenCanPack::with_restart)).
+/// ([`GencanPack::with_restart`](crate::GencanPack::with_restart)).
 ///
 /// A molecule-level geometric restraint (including
 /// any molrs region lifted by [`RegionRestraint`](crate::RegionRestraint)) masks the diamond lattice: sites whose
@@ -39,7 +39,7 @@ use super::decorate::analyze_backbone;
 /// [`GrowError::LatticeRegionEmpty`].
 pub struct LatticeGrow {
     settings: PackSettings,
-    handlers: Vec<Box<dyn Handler>>,
+    callbacks: Vec<Box<dyn Callback>>,
     config: LatticeConfig,
 }
 
@@ -52,7 +52,7 @@ impl LatticeGrow {
     pub fn from_config(config: LatticeConfig) -> Self {
         Self {
             settings: PackSettings::default(),
-            handlers: Vec::new(),
+            callbacks: Vec::new(),
             config,
         }
     }
@@ -91,8 +91,8 @@ impl StageFactory for LatticeGrow {
         Ok(())
     }
 
-    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
-        std::mem::take(self.handlers_mut())
+    fn take_callbacks(&mut self) -> Vec<Box<dyn Callback>> {
+        std::mem::take(self.callbacks_mut())
     }
 
     fn stages(&mut self, setup: &EngineSetup<'_>) -> Result<Vec<Box<dyn Stage>>, PackError> {
@@ -113,8 +113,8 @@ impl PackEngine for LatticeGrow {
     fn settings_mut(&mut self) -> &mut PackSettings {
         &mut self.settings
     }
-    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>> {
-        &mut self.handlers
+    fn callbacks_mut(&mut self) -> &mut Vec<Box<dyn Callback>> {
+        &mut self.callbacks
     }
 
     fn run(self, targets: &[Target], max_loops: usize) -> Result<State, PackError> {

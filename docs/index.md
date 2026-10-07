@@ -85,9 +85,9 @@ molecule templates, copy counts, geometric restraints, then one packing run.
     <strong>Rust API</strong>
     <em>Native Target and PackEngine builders inside your crate.</em>
   </a>
-  <a href="rust/handlers-optimizers/">
+  <a href="rust/callbacks-optimizers/">
     <span>06</span>
-    <strong>Handlers</strong>
+    <strong>Callbacks</strong>
     <em>Observe steps, dump trajectories, or stop a run early.</em>
   </a>
 </nav>
@@ -140,7 +140,7 @@ the writer or analysis code you already use. See the [Python API](python/).
 water = Target(frame, 100).with_restraint(
     molrs.core.Cuboid([0, 0, 0], [40, 40, 40])
 )
-packed = GenCanPack().with_seed(42).run([water], max_loops=200).frame
+packed = GencanPack().with_seed(42).run([water], max_loops=200).frame
 ```
 
 </article>
@@ -155,7 +155,7 @@ Use the native builder API for applications, services, and tests. See the
 [Rust API](rust/).
 
 ```rust
-let result = GenCanPack::new()
+let result = GencanPack::new()
     .with_seed(42)
     .run(&[water], 200)?;
 ```
@@ -164,15 +164,15 @@ let result = GenCanPack::new()
 
 <article markdown>
 
-<div class="molcrafts-workflow-list__meta">Path 04 · Handler</div>
+<div class="molcrafts-workflow-list__meta">Path 04 · Callback</div>
 
 ### Observe or stop a run
 
-Handlers receive structured events from the packing loop. See
-[Handlers and optimizers](rust/handlers-optimizers/).
+Callbacks receive structured events from the packing loop. See
+[Callbacks and optimizers](rust/callbacks-optimizers/).
 
 ```rust
-impl Handler for WatchFdist {
+impl Callback for WatchFdist {
     fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
         eprintln!("fdist={}", info.fdist);
     }
@@ -220,7 +220,7 @@ Dense summary of what the engine and each surface cover.
   </div>
   <div>
     <dt>Rust</dt>
-    <dd>Native builders, handlers, in-loop optimizers, and feature-gated IO / FF / rayon.</dd>
+    <dd>Native builders, callbacks, in-loop optimizers, and feature-gated IO / FF / rayon.</dd>
   </div>
 </dl>
 
@@ -253,7 +253,7 @@ A compact mirror of the navigation tree for returning users.
   </section>
   <section>
     <h3>Rust</h3>
-    <p>Builders, restraints, PBC, handlers, in-loop optimizers, and example programs.</p>
+    <p>Builders, restraints, PBC, callbacks, in-loop optimizers, and example programs.</p>
   </section>
   <section>
     <h3>Development</h3>
@@ -284,7 +284,7 @@ A compact mirror of the navigation tree for returning users.
   </a>
   <a href="rust/">
     <strong>Rust</strong>
-    <em>Native builders, handlers, and in-loop optimizers.</em>
+    <em>Native builders, callbacks, and in-loop optimizers.</em>
   </a>
 </div>
 

@@ -50,12 +50,12 @@ marshalled, and both wheels must share one molrs minor line.
 
 How each packing entry uses a region is **not** inferred from the shape:
 
-- `GenCanPack` — soft quadratic wall on atom centres (`frest`).
+- `GencanPack` — soft quadratic wall on atom centres (`frest`).
 - `CbmcGrow` — hard reject on `propose`; `force_place` may leave atoms
   outside and counts `degraded`.
 - `LatticeGrow` — diamond sites outside the region are blocked
   (Region ∩ lattice). An empty intersection is a named error. Decorated
-  hydrogens may still sit slightly outside; chain `GenCanPack.with_restart`.
+  hydrogens may still sit slightly outside; chain `GencanPack.with_restart`.
 
 ### A cavity from a mesh
 
@@ -183,7 +183,7 @@ engine entry:
 
 ```python
 packer = (
-    GenCanPack()
+    GencanPack()
     .with_global_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]))
 )
 ```

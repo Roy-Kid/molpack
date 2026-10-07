@@ -19,7 +19,7 @@ use crate::restraint::geometric::{
     OutsideCubeRestraint, OutsideCylinderRestraint, OutsideEllipsoidRestraint,
     OutsideSphereRestraint,
 };
-use crate::{Angle, AtomRestraint, CenteringMode, GenCanPack, PackEngine, Target};
+use crate::{Angle, AtomRestraint, CenteringMode, GencanPack, PackEngine, Target};
 
 use super::error::ScriptError;
 use super::parser::{AtomGroup, RestraintSpec, Script, Structure};
@@ -33,7 +33,7 @@ use super::parser::{AtomGroup, RestraintSpec, Script, Structure};
 /// stamp on the script's restraints / centering / fixed placement.
 pub struct ScriptPlan {
     /// Engine pre-configured with `tolerance`, `seed`, and (optional) `pbc`.
-    pub entry: GenCanPack,
+    pub entry: GencanPack,
     /// One entry per `structure … end structure` block, in source order.
     pub structures: Vec<StructurePlan>,
     /// Resolved output file path.
@@ -88,7 +88,7 @@ impl Script {
             return Err(ScriptError::NoStructures);
         }
 
-        let mut entry = GenCanPack::new()
+        let mut entry = GencanPack::new()
             .with_tolerance(self.tolerance)
             .with_avoid_overlap(self.avoid_overlap);
         if let Some(seed) = self.seed {
@@ -273,12 +273,12 @@ fn apply_atom_group(mut target: Target, group: &AtomGroup) -> Target {
 /// Everything a script expanded to: a configured packer, the target
 /// list, the resolved output path, and the outer-loop iteration cap.
 ///
-/// The packer is not yet equipped with a handler; callers decide
-/// whether to attach a [`ProgressHandler`](crate::ProgressHandler),
-/// a custom handler, or none.
+/// The packer is not yet equipped with a callback; callers decide
+/// whether to attach a [`ProgressCallback`](crate::ProgressCallback),
+/// a custom callback, or none.
 #[cfg(feature = "io")]
 pub struct BuildResult {
-    pub entry: GenCanPack,
+    pub entry: GencanPack,
     pub targets: Vec<Target>,
     pub output: PathBuf,
     pub nloop: usize,

@@ -35,7 +35,7 @@ mod rotatable_tests {
     //! so it is pinned here.
 
     use super::rotatable_bonds;
-    use crate::testutil::{chain_frame, chain_graph};
+    use crate::test_fixtures::{chain_frame, chain_graph};
     use molrs::core::Atomistic;
     use ndarray::Array1;
 

@@ -2,7 +2,7 @@
 //!
 //! The run's types — [`PackContext`], [`PackState`], [`Placed`],
 //! [`RigidView`] — are published at the crate root; this
-//! module publishes only the layout details a custom objective or handler
+//! module publishes only the layout details a custom objective or callback
 //! reads off a `PackContext` (per-atom property flags, scratch buffers, the
 //! geometry cache key). The leaves are private: one path per item.
 

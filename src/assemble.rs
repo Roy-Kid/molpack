@@ -160,7 +160,7 @@ fn coords_only_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::core::F
 /// 1-based molecule ID per atom, for groups of `(atoms per copy, copies)` in
 /// packed order: every copy of the first group, then of the next. The one
 /// numbering behind the assembled frame's `mol_id` and the
-/// [`XYZHandler`](crate::XYZHandler) snapshots.
+/// [`XyzTrajectoryCallback`](crate::XyzTrajectoryCallback) snapshots.
 pub(crate) fn mol_ids(groups: impl IntoIterator<Item = (usize, usize)>) -> Array1<Idx> {
     let mut ids = Vec::new();
     let mut mol: Idx = 0;
@@ -176,7 +176,7 @@ pub(crate) fn mol_ids(groups: impl IntoIterator<Item = (usize, usize)>) -> Array
 /// A coordinates-only frame: one `atoms` row per position, with `id`,
 /// `mol_id`, `x` / `y` / `z` and `element`. What [`assemble_frame`] returns
 /// when a target has no template, and what every
-/// [`XYZHandler`](crate::XYZHandler) snapshot is.
+/// [`XyzTrajectoryCallback`](crate::XyzTrajectoryCallback) snapshot is.
 ///
 /// # Panics
 /// When `elements` or `mol_ids` is not one entry per position.

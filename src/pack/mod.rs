@@ -13,4 +13,4 @@ pub(crate) mod initial;
 pub(crate) mod movebad;
 pub(crate) mod restmol;
 
-pub use gencan::entry::GenCanPack;
+pub use gencan::gencan_pack::GencanPack;

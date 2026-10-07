@@ -1,4 +1,6 @@
-//! Handler trait and built-in handlers for packing progress callbacks.
+//! The [`Callback`] trait the packing lifecycle calls at its start, steps,
+//! phases, stages and finish, and the built-in callbacks (progress, LAMMPS-style
+//! log, early stop, XYZ trajectory).
 
 use molrs::core::SimBox;
 use molrs::op::F;
@@ -15,7 +17,7 @@ use crate::outcome::StageOutcome;
 /// The field shape follows [`PhaseInfo`] on purpose — a stage is to a run
 /// what a phase is to the GENCAN loop, so the two identities read the same
 /// way — and, like `PhaseInfo`, this is a plain `Copy` record a caller may
-/// build by literal (a handler test drives the two stage hooks with one).
+/// build by literal (a callback test drives the two stage hooks with one).
 #[derive(Debug, Clone, Copy)]
 pub struct StageInfo {
     /// 0-based index of this stage in the run.
@@ -40,9 +42,9 @@ pub struct PhaseInfo {
 
 /// Summary report emitted at the end of each packing phase.
 ///
-/// Passed to [`Handler::on_phase_end`]. Fields mirror the counters
-/// reported by `ProgressHandler::on_phase_start`; when no summary is
-/// needed (e.g. early termination), callers may omit the handler hook.
+/// Passed to [`Callback::on_phase_end`]. Fields mirror the counters
+/// reported by `ProgressCallback::on_phase_start`; when no summary is
+/// needed (e.g. early termination), callers may omit the callback hook.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PhaseReport {
     /// Number of outer iterations actually run in this phase.
@@ -128,21 +130,21 @@ pub struct StepInfo {
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
-/// Callback interface called by the [`PackEngine`](crate::PackEngine) lifecycle during packing.
-pub trait Handler: Send {
+/// The hooks called by the [`PackEngine`](crate::PackEngine) lifecycle during packing.
+pub trait Callback: Send {
     /// Called immediately at the start of [`run`][crate::PackEngine::run],
     /// before any computation. Use this for immediate user feedback.
     fn on_start(&mut self, _ntotat: usize, _ntotmol: usize) {}
 
     /// Called once after initialization completes, with valid `xcart` positions.
-    /// Use this to write the initial conformation (e.g. `XYZHandler`).
+    /// Use this to write the initial conformation (e.g. `XyzTrajectoryCallback`).
     fn on_initialized(&mut self, _sys: &PackContext) {}
 
     /// Called after each outer optimization loop iteration.
     fn on_step(&mut self, info: &StepInfo, sys: &PackContext);
 
     /// Called at the start of each packing phase (per-type and all-types).
-    /// Allows stateful handlers to reset between phases.
+    /// Allows stateful callbacks to reset between phases.
     fn on_phase_start(&mut self, _info: &PhaseInfo) {}
 
     /// Called once after the packing loop finishes (convergence or max loops).
@@ -158,7 +160,7 @@ pub trait Handler: Send {
     /// Default: no-op. Paired with [`on_phase_start`] for symmetric
     /// setup / teardown hooks.
     ///
-    /// [`on_phase_start`]: Handler::on_phase_start
+    /// [`on_phase_start`]: Callback::on_phase_start
     fn on_phase_end(&mut self, _info: &PhaseInfo, _report: &PhaseReport) {}
 
     /// Called before a stage starts, with the stage's identity.
@@ -173,16 +175,16 @@ pub trait Handler: Send {
     /// Default: no-op. The **call** belongs to the pipeline that chains
     /// stages; a single-stage run reports `index == 0` and `total == 1`.
     ///
-    /// [`StageOutcome`] deliberately carries no verdict. A handler that wants
+    /// [`StageOutcome`] deliberately carries no verdict. A callback that wants
     /// the run's violation maxima reads them off `sys` — `sys.fdist` and
     /// `sys.frest`, the shared objective's numbers on the post-run state,
     /// exactly as [`on_finish`] does. Same shape, same authority.
     ///
-    /// [`on_finish`]: Handler::on_finish
+    /// [`on_finish`]: Callback::on_finish
     fn on_stage_end(&mut self, _info: &StageInfo, _outcome: &StageOutcome, _sys: &PackContext) {}
 }
 
-// ── XYZHandler ────────────────────────────────────────────────────────────────
+// ── XyzTrajectoryCallback ────────────────────────────────────────────────────────────────
 
 /// Writes packing snapshots as a multi-frame extended XYZ trajectory.
 ///
@@ -194,7 +196,7 @@ pub trait Handler: Send {
 /// (`molrs::io::xyz::XyzWriter`); molpack keeps no XYZ format code of its
 /// own. Needs the `io` feature.
 #[cfg(feature = "io")]
-pub struct XYZHandler {
+pub struct XyzTrajectoryCallback {
     path: std::path::PathBuf,
     /// Write every `n` steps (must be >= 1).
     every: usize,
@@ -202,8 +204,8 @@ pub struct XYZHandler {
 }
 
 #[cfg(feature = "io")]
-impl XYZHandler {
-    /// Create a new XYZ trajectory handler.
+impl XyzTrajectoryCallback {
+    /// Create a new XYZ trajectory callback.
     ///
     /// `every` controls writing frequency: a frame is written on every step
     /// where `loop_idx % every == 0` (step 0 is always included).
@@ -223,7 +225,10 @@ impl XYZHandler {
         }
         match std::fs::File::create(&self.path) {
             Ok(f) => self.file = Some(std::io::BufWriter::new(f)),
-            Err(e) => log::warn!("XYZHandler: cannot open {}: {e}", self.path.display()),
+            Err(e) => log::warn!(
+                "XyzTrajectoryCallback: cannot open {}: {e}",
+                self.path.display()
+            ),
         }
     }
 
@@ -256,13 +261,16 @@ impl XYZHandler {
             .write(&frame)
             .and_then(|()| std::io::Write::flush(w));
         if let Err(e) = written {
-            log::warn!("XYZHandler: writing {}: {e}", self.path.display());
+            log::warn!(
+                "XyzTrajectoryCallback: writing {}: {e}",
+                self.path.display()
+            );
         }
     }
 }
 
 #[cfg(feature = "io")]
-impl Handler for XYZHandler {
+impl Callback for XyzTrajectoryCallback {
     fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
         if info.loop_idx.is_multiple_of(self.every) {
             self.write_snapshot(info.loop_idx, sys);
@@ -270,30 +278,30 @@ impl Handler for XYZHandler {
     }
 }
 
-// ── ProgressHandler ───────────────────────────────────────────────────────────
+// ── ProgressCallback ───────────────────────────────────────────────────────────
 
 /// Prints human-readable progress lines to `stderr`.
 ///
-/// Attach it with [`PackEngine::with_handler`](crate::PackEngine::with_handler);
+/// Attach it with [`PackEngine::with_callback`](crate::PackEngine::with_callback);
 /// the screen log the engine installs from its log level is
-/// [`LammpsLogHandler`].
-pub struct ProgressHandler {
+/// [`LammpsLogCallback`].
+pub struct ProgressCallback {
     start: Option<Instant>,
 }
 
-impl ProgressHandler {
+impl ProgressCallback {
     pub fn new() -> Self {
         Self { start: None }
     }
 }
 
-impl Default for ProgressHandler {
+impl Default for ProgressCallback {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Handler for ProgressHandler {
+impl Callback for ProgressCallback {
     fn on_start(&mut self, ntotat: usize, ntotmol: usize) {
         self.start = Some(Instant::now());
         eprintln!("Packing {ntotmol} molecules ({ntotat} atoms)...");
@@ -344,15 +352,15 @@ impl Handler for ProgressHandler {
     }
 }
 
-// ── LammpsLogHandler ─────────────────────────────────────────────────────────
+// ── LammpsLogCallback ─────────────────────────────────────────────────────────
 
 /// LAMMPS-style screen log for packing runs.
 ///
 /// Most users should enable this through
 /// [`PackEngine::with_log_level`][crate::PackEngine::with_log_level]
 /// or [`with_log_frequency`][crate::PackEngine::with_log_frequency]
-/// instead of attaching the handler manually.
-pub struct LammpsLogHandler {
+/// instead of attaching the callback manually.
+pub struct LammpsLogCallback {
     level: LogLevel,
     every: usize,
     tolerance: F,
@@ -365,7 +373,7 @@ pub struct LammpsLogHandler {
     phase_start: Option<Instant>,
 }
 
-impl LammpsLogHandler {
+impl LammpsLogCallback {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         level: LogLevel,
@@ -402,7 +410,7 @@ impl LammpsLogHandler {
     }
 }
 
-impl Handler for LammpsLogHandler {
+impl Callback for LammpsLogCallback {
     fn on_start(&mut self, ntotat: usize, ntotmol: usize) {
         if !self.level.is_enabled() {
             return;
@@ -539,12 +547,12 @@ impl Handler for LammpsLogHandler {
     }
 }
 
-// ── EarlyStopHandler ──────────────────────────────────────────────────────────
+// ── EarlyStopCallback ──────────────────────────────────────────────────────────
 
 /// Ends a GENCAN phase whose best objective has stopped improving.
 ///
 /// Packmol has no early stop — a phase runs until it converges or reaches
-/// `nloop` — so this handler is molpack's, but it is phrased entirely in
+/// `nloop` — so this callback is molpack's, but it is phrased entirely in
 /// Packmol's own quantities (`app/packmol.f90`):
 ///
 /// * the objective is `fx`, the function value at the user's radii after each
@@ -565,13 +573,13 @@ impl Handler for LammpsLogHandler {
 /// rather than `fx` because movebad kicks `fx` up on purpose.
 ///
 /// The stop ends the current phase only; later phases and later pipeline
-/// stages still run. [`GenCanPack`](crate::GenCanPack) installs one by
+/// stages still run. [`GencanPack`](crate::GencanPack) installs one by
 /// default ([`Default`] values); `with_early_stop` replaces or removes it. A
 /// run whose final phase was stopped is not converged:
 /// [`State::converged`](crate::State) reports `false`, as Packmol's
 /// "maximum number of GENCAN loops achieved" would.
 #[derive(Debug, Clone)]
-pub struct EarlyStopHandler {
+pub struct EarlyStopCallback {
     /// Minimum improvement of `bestf` across `patience` loops, in percent
     /// (Packmol's `fimprov` units). Default: `10.0`, Packmol's movebad
     /// threshold.
@@ -585,7 +593,7 @@ pub struct EarlyStopHandler {
     stop: bool,
 }
 
-impl EarlyStopHandler {
+impl EarlyStopCallback {
     pub fn new(threshold_pct: F) -> Self {
         Self {
             threshold_pct,
@@ -636,13 +644,13 @@ impl EarlyStopHandler {
     }
 }
 
-impl Default for EarlyStopHandler {
+impl Default for EarlyStopCallback {
     fn default() -> Self {
         Self::new(10.0)
     }
 }
 
-impl Handler for EarlyStopHandler {
+impl Callback for EarlyStopCallback {
     fn on_initialized(&mut self, _sys: &PackContext) {
         self.reset();
     }
@@ -672,7 +680,7 @@ impl Handler for EarlyStopHandler {
 mod tests {
     use super::*;
 
-    fn run(h: &mut EarlyStopHandler, fx: &[F], radscale: F) -> Option<usize> {
+    fn run(h: &mut EarlyStopCallback, fx: &[F], radscale: F) -> Option<usize> {
         for (i, &f) in fx.iter().enumerate() {
             h.observe(f, radscale);
             if h.should_stop() {
@@ -687,7 +695,7 @@ mod tests {
         // The first judged loop only seeds the window: a flat bestf is
         // stopped on loop `patience`.
         assert_eq!(
-            run(&mut EarlyStopHandler::default(), &[3.0; 30], 1.0),
+            run(&mut EarlyStopCallback::default(), &[3.0; 30], 1.0),
             Some(10)
         );
     }
@@ -695,7 +703,10 @@ mod tests {
     #[test]
     fn early_stop_never_judges_above_the_user_radii() {
         // Packmol's own radscale schedule is still running: never stop there.
-        assert_eq!(run(&mut EarlyStopHandler::default(), &[3.0; 60], 1.1), None);
+        assert_eq!(
+            run(&mut EarlyStopCallback::default(), &[3.0; 60], 1.1),
+            None
+        );
     }
 
     #[test]
@@ -711,21 +722,21 @@ mod tests {
                 }
             })
             .collect();
-        assert_eq!(run(&mut EarlyStopHandler::default(), &fx, 1.0), None);
+        assert_eq!(run(&mut EarlyStopCallback::default(), &fx, 1.0), None);
     }
 
     #[test]
     fn early_stop_carries_bestf_from_the_scaled_loops() {
         // bestf is per phase, as in Packmol, so a good point found at
         // radscale > 1 is what the first judged loop is measured against.
-        let mut h = EarlyStopHandler::default();
+        let mut h = EarlyStopCallback::default();
         assert_eq!(run(&mut h, &[1.0], 1.1), None);
         assert_eq!(run(&mut h, &[5.0; 20], 1.0), Some(10));
     }
 
     #[test]
     fn early_stop_resets_at_phase_end_and_never_fires_on_zero() {
-        let mut h = EarlyStopHandler::default();
+        let mut h = EarlyStopCallback::default();
         assert_eq!(run(&mut h, &[3.0; 11], 1.0), Some(10));
         let info = PhaseInfo {
             phase: 0,

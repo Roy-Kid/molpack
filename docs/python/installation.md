@@ -27,7 +27,7 @@ pip install molcrafts-molpack
 
 ```python
 import molrs
-from molpack import GenCanPack, Target
+from molpack import GencanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 water = (
@@ -35,7 +35,7 @@ water = (
     .with_name("water")
     .with_restraint(molrs.core.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
-frame = GenCanPack().with_seed(42).run([water], max_loops=200).frame
+frame = GencanPack().with_seed(42).run([water], max_loops=200).frame
 ```
 
 `Target` takes a `molrs.core.Frame` (`molpy.Frame` is the same class), resolved zero-copy through

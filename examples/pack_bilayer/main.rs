@@ -15,7 +15,9 @@
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
-use molpack::{GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target, XYZHandler};
+use molpack::{
+    GencanPack, PackEngine, ProgressCallback, RegionRestraint, Target, XyzTrajectoryCallback,
+};
 use molrs::op::F;
 use std::sync::Arc;
 
@@ -86,14 +88,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_name("lipid_high");
 
     let targets = vec![water_low, water_high, lipid_low, lipid_high];
-    let mut packer = GenCanPack::new();
+    let mut packer = GencanPack::new();
     if std::env::var_os("MOLPACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.with_handler(Box::new(ProgressHandler::new()));
+        packer = packer.with_callback(Box::new(ProgressCallback::new()));
     }
     if std::env::var_os("MOLPACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.with_handler(Box::new(XYZHandler::new(out_dir.join("bilayer.xyz"), 10)));
+        packer = packer.with_callback(Box::new(XyzTrajectoryCallback::new(
+            out_dir.join("bilayer.xyz"),
+            10,
+        )));
     }
 
     packer.run(&targets, 800)?;

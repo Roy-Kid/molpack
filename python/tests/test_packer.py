@@ -197,14 +197,14 @@ class TestTargetBuilder:
         assert "natoms=1" in r
 
 
-class TestGenCanPack:
+class TestGencanPack:
     def test_creation_default(self):
-        p = molpack.GenCanPack()
+        p = molpack.GencanPack()
         r = repr(p)
-        assert "GenCanPack" in r
+        assert "GencanPack" in r
 
     def test_builder_immutability(self):
-        p1 = molpack.GenCanPack()
+        p1 = molpack.GencanPack()
         p2 = p1.with_tolerance(3.0)
         p3 = p1.with_precision(0.5)
         p4 = p1.with_inner_iterations(50)
@@ -219,14 +219,14 @@ class TestGenCanPack:
             assert later is not p1
 
 
-class TestGenCanPackRun:
+class TestGencanPackRun:
     def _make_target(self, count: int = 3) -> molpack.Target:
         return molpack.Target(_make_frame(), count).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
         )
 
-    def _packer(self) -> molpack.GenCanPack:
-        return molpack.GenCanPack().with_tolerance(2.0).with_progress(False)
+    def _packer(self) -> molpack.GencanPack:
+        return molpack.GencanPack().with_tolerance(2.0).with_progress(False)
 
     def test_minimal_packing(self):
         result = self._packer().with_seed(42).run([self._make_target()], max_loops=50)
@@ -283,7 +283,7 @@ class TestGenCanPackRun:
         assert result.positions.shape[0] == 8
 
     def test_no_targets_raises_typed_error(self):
-        packer = molpack.GenCanPack().with_progress(False)
+        packer = molpack.GencanPack().with_progress(False)
         with pytest.raises(molpack.NoTargetsError):
             packer.run([], max_loops=10)
 
@@ -307,7 +307,7 @@ class TestParallelEval:
     def test_with_parallel_eval_does_not_raise_when_compiled(self):
         # Fail-fast only triggers in a wheel built without rayon; here it must
         # return a configured builder.
-        p = molpack.GenCanPack().with_parallel_eval(True)
+        p = molpack.GencanPack().with_parallel_eval(True)
         assert p is not None
 
     def test_init_thread_pool_rejects_zero(self):

@@ -38,7 +38,7 @@
 //! `n_steps + 1` rounds (the seed plus every step), so the cap is
 //! `max(max_loops, 1) × (max n_steps + 1)` rounds — a zero budget still buys
 //! one pass. Reaching it is a surrender, not a result: the pending chains are
-//! force-completed exactly as on a handler abort, each forced placement counted
+//! force-completed exactly as on a callback abort, each forced placement counted
 //! in `degraded`, and the outcome is `converged == false`.
 
 use molrs::core::SimBox;
@@ -46,6 +46,7 @@ use molrs::op::F;
 
 use crate::PackError;
 use crate::Target;
+use crate::callback::{Callback, PhaseInfo, StageInfo, StepInfo};
 use crate::context::pack_state::evaluate_unscaled;
 use crate::context::{PackState, Placed};
 use crate::grow::GrowError;
@@ -55,7 +56,6 @@ use crate::grow::moves::{
     Chain, DeadEnd, Proposal, RestraintTable, SALT_SHUFFLE, Species, commit, force_place, propose,
     relax, retract, stream,
 };
-use crate::handler::{Handler, PhaseInfo, StageInfo, StepInfo};
 use crate::random::uniform01;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 
@@ -151,7 +151,7 @@ impl Stage for GrowStage {
         state: &mut PackState,
         _targets: &[Target],
         budget: &Budget,
-        handlers: &mut [Box<dyn Handler>],
+        callbacks: &mut [Box<dyn Callback>],
     ) -> Result<StageOutcome, PackError> {
         // ── The box and its cell grid ──────────────────────────────────────
         // See `install_resolved_cell` for why `radmax` reads `radius_ini`.
@@ -243,7 +243,7 @@ impl Stage for GrowStage {
                 break;
             }
             if round >= max_rounds {
-                // Out of rounds. Same contract as a handler abort: the
+                // Out of rounds. Same contract as a callback abort: the
                 // pending chains are completed below and nothing is claimed.
                 aborted = true;
                 break;
@@ -409,7 +409,7 @@ impl Stage for GrowStage {
                 }
             }
 
-            // Handler visibility: one StepInfo per round. `radscale` carries
+            // Callback visibility: one StepInfo per round. `radscale` carries
             // the current hard-core scale (softening is visible live);
             // fdist/frest are constructively 0 while growth holds its
             // guarantees, and `loop_idx` is the 1-based round number.
@@ -442,16 +442,16 @@ impl Stage for GrowStage {
                 radscale: chains.iter().map(|c| c.hard_scale).fold(1.0, F::min),
                 precision: budget.precision,
             };
-            for h in handlers.iter_mut() {
+            for h in callbacks.iter_mut() {
                 h.on_step(&info, sys);
             }
-            if handlers.iter().any(|h| h.should_stop()) {
+            if callbacks.iter().any(|h| h.should_stop()) {
                 aborted = true;
                 break;
             }
         }
 
-        // An abort — a handler stop or the exhausted round cap — leaves later
+        // An abort — a callback stop or the exhausted round cap — leaves later
         // stages at the origin sentinel in `Chain.coords`. Completing them
         // with force_place (hard core ignored) keeps bonded geometry chemical
         // so assemble_frame does not emit 0-length or box-scale bonds. Each

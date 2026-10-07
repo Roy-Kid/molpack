@@ -33,8 +33,8 @@ BOX_LO = [0.0, 0.0, 0.0]
 BOX_HI = [40.0, 40.0, 40.0]
 
 
-def _packer() -> molpack.GenCanPack:
-    return molpack.GenCanPack().with_progress(False)
+def _packer() -> molpack.GencanPack:
+    return molpack.GencanPack().with_progress(False)
 
 
 class InsideSpherePy:

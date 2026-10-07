@@ -54,7 +54,7 @@
 mod geometry;
 
 use molpack::{
-    CenteringMode, GenCanPack, OptimizeSelect, PackEngine, RegionRestraint, Target,
+    CenteringMode, GencanPack, OptimizeSelect, PackEngine, RegionRestraint, Target,
     TorsionMcOptimizer,
 };
 use molrs::op::F;
@@ -214,7 +214,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     targets.push(solvent);
     let mut names: Vec<String> = (0..PORES.len()).map(|i| format!("threaded{i}")).collect();
     names.push("free".to_string());
-    let result = GenCanPack::new()
+    let result = GencanPack::new()
         .with_tolerance(TOLERANCE)
         .with_seed(20_260_807)
         .with_periodic_box(

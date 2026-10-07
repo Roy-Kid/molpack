@@ -71,7 +71,7 @@ fn grow_rejects_template_without_bonds() {
     assert_eq!(
         source.to_string(),
         "the template frame carries no bonds; growth needs the bond graph — pack this \
-         target with GenCanPack or supply connectivity"
+         target with GencanPack or supply connectivity"
     );
 }
 
@@ -381,7 +381,7 @@ fn seeded_run_contract() {
     assert!(grown.converged);
 
     // Shape mismatch is a named rejection, not a scrambled pack.
-    let err = GenCanPack::new()
+    let err = GencanPack::new()
         .with_restart(&grown)
         .run(&[Target::new(chain_frame(5, 1.5, true), 3)], 10)
         .expect_err("a seed for 2 copies must refuse 3");
@@ -392,7 +392,7 @@ fn seeded_run_contract() {
 
     // The cell travels with the seed; a second box is the existing
     // mutual-exclusion error, never a silent precedence rule.
-    let err = GenCanPack::new()
+    let err = GencanPack::new()
         .with_restart(&grown)
         .with_periodic_box([0.0; 3], BOX_MAX, [true; 3])
         .run(&[Target::new(chain_frame(5, 1.5, true), 2)], 10)
@@ -404,7 +404,7 @@ fn seeded_run_contract() {
     let dimer = Target::from_coords(&[[0.0; 3], [1.5, 0.0, 0.0]], &[0.5, 0.5], 1)
         .with_centering(crate::CenteringMode::Off)
         .fixed_at([2.0, 2.0, 2.0]);
-    let packed = GenCanPack::new()
+    let packed = GencanPack::new()
         .with_restart(&grown)
         .with_seed(3)
         .with_tolerance(1.0)
@@ -472,7 +472,7 @@ fn lattice_grow_empty_region_is_named() {
 // migration record). What stays is determinism on the entry itself:
 
 /// Same seed, same targets: bit-identical placements, for a pure grow and
-/// for the grow → `GenCanPack::with_restart` push-off chain.
+/// for the grow → `GencanPack::with_restart` push-off chain.
 #[test]
 fn grow_and_push_off_are_deterministic_for_a_seed() {
     let grow = || {
@@ -484,7 +484,7 @@ fn grow_and_push_off_are_deterministic_for_a_seed() {
             .expect("grow stage runs")
     };
     let push_off = |seed: &crate::State| {
-        GenCanPack::new()
+        GencanPack::new()
             .with_restart(seed)
             .with_seed(3)
             .with_tolerance(1.0)

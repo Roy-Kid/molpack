@@ -9,10 +9,10 @@
 //!
 //! What this file pins:
 //!
-//! 1. **Nothing is dropped silently.** A preset's handlers are adopted by
+//! 1. **Nothing is dropped silently.** A preset's callbacks are adopted by
 //!    the pipeline; a preset carrying non-default *shared* settings into
 //!    `with_stage` is refused BY NAME; an unmet stage precondition is named
-//!    before a single handler callback fires; an empty pipeline, and a run
+//!    before a single callback fires; an empty pipeline, and a run
 //!    with no targets, are named errors rather than no-op runs.
 //! 2. **One verdict, one bracket.** `on_start` / `on_finish` bracket the
 //!    whole run, `on_stage_start` / `on_stage_end` bracket each stage,
@@ -21,18 +21,18 @@
 //! 3. **A combinator is a stage.** `Repeat` runs its body `n` times;
 //!    `Guarded` reruns the same stage or fails by name and never switches
 //!    algorithm; both report one stage identity however often the body
-//!    runs, adopt the body's handlers and refuse its shared settings.
+//!    runs, adopt the body's callbacks and refuse its shared settings.
 //!
 //! Everything is deterministic by construction — fixed seeds, no wall clock, no
 //! filesystem, no network, no third-party oracle.
 
 use crate::EngineSetup;
+use crate::callback::{PhaseInfo, StageInfo};
 use crate::grow::TorsionPrior;
-use crate::handler::{PhaseInfo, StageInfo};
-use crate::testutil::{chain_frame, inside_box};
+use crate::test_fixtures::{chain_frame, inside_box};
 use crate::{
-    Budget, CbmcGrow, GenCanPack, Guarantees, Handler, Invariant, Layers, OnViolation, PackContext,
-    PackEngine, PackError, PackSettings, PackState, Pipeline, Placed, Requires,
+    Budget, Callback, CbmcGrow, GencanPack, Guarantees, Invariant, Layers, OnViolation,
+    PackContext, PackEngine, PackError, PackSettings, PackState, Pipeline, Placed, Requires,
     RestraintsSatisfied, Stage, StageFactory, StageOutcome, State, StepInfo, Target, Until,
     Violation,
 };
@@ -97,7 +97,7 @@ fn boxfree_settings<E: PackEngine>(engine: E) -> E {
 }
 
 /// The growth fixture, mirroring `grow::tests::seeded_run_contract` so the
-/// `CbmcGrow` → `GenCanPack::with_restart` comparison is known to be
+/// `CbmcGrow` → `GencanPack::with_restart` comparison is known to be
 /// reachable: two 5-bead chains in a generous 20 Å periodic box.
 const CHAIN_BOX: F = 20.0;
 const CHAIN_SEED: u64 = 9;
@@ -163,7 +163,7 @@ fn assert_bitwise_equal(pipeline: &State, direct: &State, what: &str) {
 
 // ── observers ─────────────────────────────────────────────────────────────
 
-/// Everything a run told its handlers, in arrival order.
+/// Everything a run told its callbacks, in arrival order.
 #[derive(Debug, Default)]
 struct Tally {
     /// `on_start` calls (must be exactly one per RUN, not per stage).
@@ -186,14 +186,14 @@ fn shared() -> Shared {
 
 /// Records every lifecycle callback into a shared [`Tally`], and — when
 /// `stop_after` is finite — asks the run to stop once that many `on_step`
-/// events have arrived (the `EarlyStopHandler` shape of
+/// events have arrived (the `EarlyStopCallback` shape of
 /// `grow::tests::Recorder`).
 struct Observer {
     tally: Shared,
     stop_after: usize,
 }
 
-impl Handler for Observer {
+impl Callback for Observer {
     fn on_start(&mut self, _ntotat: usize, _ntotmol: usize) {
         self.tally.lock().expect("observer mutex").starts += 1;
     }
@@ -232,7 +232,7 @@ impl Handler for Observer {
 }
 
 /// An observer that never asks for a stop.
-fn observer(tally: &Shared) -> Box<dyn Handler> {
+fn observer(tally: &Shared) -> Box<dyn Callback> {
     Box::new(Observer {
         tally: Arc::clone(tally),
         stop_after: usize::MAX,
@@ -265,7 +265,7 @@ impl Stage for NeedsPlacedStage {
         _state: &mut PackState,
         _targets: &[Target],
         _budget: &Budget,
-        _handlers: &mut [Box<dyn Handler>],
+        _callbacks: &mut [Box<dyn Callback>],
     ) -> Result<StageOutcome, PackError> {
         panic!(
             "the stage-order check let a stage requiring Placed::All run first \
@@ -302,45 +302,45 @@ impl StageFactory for NeedsPlacedFactory {
 
 // ── 2. cross-algorithm hand-off ≡ with_restart ─────────────────────────────
 
-// ── 3. handlers are adopted, never dropped ────────────────────────────────
+// ── 3. callbacks are adopted, never dropped ────────────────────────────────
 
-/// A handler attached to a PRESET that is then handed to `with_stage` still
+/// A callback attached to a PRESET that is then handed to `with_stage` still
 /// receives its callbacks: the pipeline adopts it (ac-005). Dropping it is
 /// the silent failure this whole design exists to prevent.
 #[test]
-fn pipeline_adopts_preset_handlers() {
+fn pipeline_adopts_preset_callbacks() {
     let one = shared();
     let piped = boxfree_settings(
-        Pipeline::new().with_stage(GenCanPack::new().with_handler(observer(&one))),
+        Pipeline::new().with_stage(GencanPack::new().with_callback(observer(&one))),
     )
     .run(&boxfree_targets(), FREE_LOOPS)
-    .expect("a single-stage pipeline with an adopted handler runs");
+    .expect("a single-stage pipeline with an adopted callback runs");
     assert!(piped.converged);
     {
         let t = one.lock().expect("observer mutex");
         assert!(
             !t.steps.is_empty(),
-            "the handler carried in by GenCanPack::with_handler saw no \
-             on_step events — with_stage must adopt a preset's handlers, not \
+            "the callback carried in by GencanPack::with_callback saw no \
+             on_step events — with_stage must adopt a preset's callbacks, not \
              drop them on the floor"
         );
         assert_eq!(
             t.starts, 1,
-            "an adopted handler is bracketed by the run like any other"
+            "an adopted callback is bracketed by the run like any other"
         );
         assert_eq!(t.finishes, 1);
     }
 
-    // Two stages: an adopted handler observes the WHOLE run, so both stage
+    // Two stages: an adopted callback observes the WHOLE run, so both stage
     // indices show up on the events it recorded.
     let both = shared();
     dense_settings(
         Pipeline::new()
-            .with_stage(GenCanPack::new().with_handler(observer(&both)))
-            .with_stage(GenCanPack::new()),
+            .with_stage(GencanPack::new().with_callback(observer(&both)))
+            .with_stage(GencanPack::new()),
     )
     .run(&dense_targets(), DENSE_LOOPS)
-    .expect("a two-stage pipeline with an adopted handler runs");
+    .expect("a two-stage pipeline with an adopted callback runs");
 
     let t = both.lock().expect("observer mutex");
     let mut seen: Vec<usize> = t.steps.iter().map(|&(index, _, _)| index).collect();
@@ -349,7 +349,7 @@ fn pipeline_adopts_preset_handlers() {
     assert_eq!(
         seen,
         vec![0, 1],
-        "an adopted handler must see BOTH stages (recorded stage indices \
+        "an adopted callback must see BOTH stages (recorded stage indices \
          {seen:?}) — adoption is for the run, not for the stage that carried \
          it in"
     );
@@ -357,16 +357,16 @@ fn pipeline_adopts_preset_handlers() {
 
 // ── 4. the two named rejections and the empty pipeline ────────────────────
 
-/// An unmet `requires()` is reported by name BEFORE any handler is notified
+/// An unmet `requires()` is reported by name BEFORE any callback is notified
 /// and before any stage runs (ac-003).
 #[test]
-fn pipeline_stage_order_error_fires_before_any_handler() {
+fn pipeline_stage_order_error_fires_before_any_callback() {
     let tally = shared();
     let err = boxfree_settings(
         Pipeline::new()
-            .with_handler(observer(&tally))
+            .with_callback(observer(&tally))
             .with_stage(NeedsPlacedFactory::new())
-            .with_stage(GenCanPack::new()),
+            .with_stage(GencanPack::new()),
     )
     .run(&boxfree_targets(), FREE_LOOPS)
     .expect_err("a stage requiring Placed::All cannot be first");
@@ -399,7 +399,7 @@ fn pipeline_stage_order_error_fires_before_any_handler() {
     assert_eq!(
         t.starts, 0,
         "on_start fired before the chain was checked — the order check runs \
-         before ANY handler is notified"
+         before ANY callback is notified"
     );
     assert!(
         t.stage_starts.is_empty() && t.stage_ends.is_empty() && t.steps.is_empty(),
@@ -422,7 +422,7 @@ fn pipeline_stage_order_error_fires_before_any_handler() {
 #[test]
 fn pipeline_rejects_preset_with_non_default_settings_by_name() {
     let err = Pipeline::new()
-        .with_stage(GenCanPack::new().with_seed(7))
+        .with_stage(GencanPack::new().with_seed(7))
         .run(&boxfree_targets(), 1)
         .expect_err("a preset carrying a seed into with_stage must be refused");
 
@@ -448,7 +448,7 @@ fn pipeline_rejects_preset_with_non_default_settings_by_name() {
 
     // The same preset run directly (i.e. through `Pipeline::single`) is NOT
     // an error: `single` adopts the settings instead of refusing them.
-    let direct = GenCanPack::new()
+    let direct = GencanPack::new()
         .with_seed(7)
         .with_tolerance(FREE_TOL)
         .run(&boxfree_targets(), 1)
@@ -456,7 +456,7 @@ fn pipeline_rejects_preset_with_non_default_settings_by_name() {
     assert!(direct.fdist.is_finite() && direct.frest.is_finite());
 
     // …and neither is the explicit `Pipeline::single` spelling.
-    let single = Pipeline::single(GenCanPack::new().with_seed(7).with_tolerance(FREE_TOL))
+    let single = Pipeline::single(GencanPack::new().with_seed(7).with_tolerance(FREE_TOL))
         .run(&boxfree_targets(), 1)
         .expect("Pipeline::single adopts the engine's settings");
     assert_bitwise_equal(&single, &direct, "Pipeline::single vs the preset run");
@@ -485,7 +485,7 @@ fn pipeline_empty_is_a_named_error() {
 /// error, not an empty success.
 #[test]
 fn pipeline_without_targets_is_a_named_error() {
-    let err = Pipeline::single(GenCanPack::new())
+    let err = Pipeline::single(GencanPack::new())
         .run(&[], FREE_LOOPS)
         .expect_err("a run with no targets has nothing to place");
     assert!(
@@ -508,7 +508,7 @@ fn pipeline_two_stages_sum_degraded_and_count_hooks() {
     let grown = chain_settings(CbmcGrow::new(TorsionPrior::Uniform))
         .run(&targets, CHAIN_LOOPS)
         .expect("the growth stage runs standalone");
-    let seeded = GenCanPack::new()
+    let seeded = GencanPack::new()
         .with_restart(&grown)
         .with_seed(CHAIN_SEED)
         .with_tolerance(CHAIN_TOL)
@@ -519,9 +519,9 @@ fn pipeline_two_stages_sum_degraded_and_count_hooks() {
     let attached = shared();
     let piped = chain_settings(
         Pipeline::new()
-            .with_handler(observer(&attached))
-            .with_stage(CbmcGrow::new(TorsionPrior::Uniform).with_handler(observer(&carried)))
-            .with_stage(GenCanPack::new()),
+            .with_callback(observer(&attached))
+            .with_stage(CbmcGrow::new(TorsionPrior::Uniform).with_callback(observer(&carried)))
+            .with_stage(GencanPack::new()),
     )
     .run(&targets, CHAIN_LOOPS)
     .expect("a growth → GENCAN pipeline runs");
@@ -597,7 +597,7 @@ fn pipeline_two_stages_sum_degraded_and_count_hooks() {
 //
 // `Repeat` and `Guarded` are stages, so everything above still applies to
 // them: they are resolved by the same chain check, bracketed by the same
-// handlers, and report ONE stage identity no matter how often their body
+// callbacks, and report ONE stage identity no matter how often their body
 // runs. What is new here is the body's run count, the honest `degraded` sum,
 // the continuation of a repeated GENCAN pass, and the named refusal a broken
 // invariant produces.
@@ -607,7 +607,7 @@ fn pipeline_two_stages_sum_degraded_and_count_hooks() {
 /// The combinators are about *how often* and *under what condition* a stage
 /// runs, so the body they wrap only has to be countable — a real algorithm
 /// would add arithmetic that hides the count. When asked, the stage also
-/// emits one `on_phase_start` per run: that is how a handler learns the body
+/// emits one `on_phase_start` per run: that is how a callback learns the body
 /// did a unit of work from *inside* a combinator.
 struct CountingStage {
     runs: Arc<AtomicUsize>,
@@ -634,11 +634,11 @@ impl Stage for CountingStage {
         _state: &mut PackState,
         _targets: &[Target],
         _budget: &Budget,
-        handlers: &mut [Box<dyn Handler>],
+        callbacks: &mut [Box<dyn Callback>],
     ) -> Result<StageOutcome, PackError> {
         self.runs.fetch_add(1, Ordering::Relaxed);
         if self.signal {
-            for h in handlers.iter_mut() {
+            for h in callbacks.iter_mut() {
                 h.on_phase_start(&PhaseInfo {
                     phase: 0,
                     total_phases: 1,
@@ -732,14 +732,14 @@ impl Invariant for AlwaysViolated {
     }
 }
 
-/// A handler that asks for a stop as soon as the body has signalled one unit
+/// A callback that asks for a stop as soon as the body has signalled one unit
 /// of work. `should_stop` must be honoured from *inside* a combinator, not
 /// only between the pipeline's own stages.
 struct StopOnFirstSignal {
     signals: Arc<AtomicUsize>,
 }
 
-impl Handler for StopOnFirstSignal {
+impl Callback for StopOnFirstSignal {
     fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {}
 
     fn on_phase_start(&mut self, _info: &PhaseInfo) {
@@ -824,7 +824,7 @@ fn repeat_passes_zero_contributes_no_stage() {
     let after = Arc::new(AtomicUsize::new(0));
     let result = boxfree_settings(
         Pipeline::new()
-            .with_stage(GenCanPack::new())
+            .with_stage(GencanPack::new())
             .with_repeat(body(CountingFactory::new(&after)), Until::Passes(0)),
     )
     .run(&boxfree_targets(), FREE_LOOPS)
@@ -853,7 +853,7 @@ fn guarded_fail_returns_named_error() {
     let invariants: Vec<Box<dyn Invariant>> = vec![Box::new(RestraintsSatisfied::new(0.0))];
 
     let err = boxfree_settings(Pipeline::new().with_guarded(
-        GenCanPack::new(),
+        GencanPack::new(),
         invariants,
         OnViolation::Fail,
     ))
@@ -949,7 +949,7 @@ fn guarded_rerun_max_two_reruns_twice_then_unconverged() {
 }
 
 /// A combinator is ONE stage to the run around it: the inner passes never
-/// move `StepInfo.stage.index` or `total`, and the names a handler sees are
+/// move `StepInfo.stage.index` or `total`, and the names a callback sees are
 /// the top-level ones. Nesting a combinator inside another does not change
 /// that (ac-006).
 #[test]
@@ -957,9 +957,9 @@ fn combinators_keep_stage_index_monotone() {
     let flat = shared();
     dense_settings(
         Pipeline::new()
-            .with_handler(observer(&flat))
-            .with_stage(GenCanPack::new())
-            .with_repeat(body(GenCanPack::new()), Until::Passes(2)),
+            .with_callback(observer(&flat))
+            .with_stage(GencanPack::new())
+            .with_repeat(body(GencanPack::new()), Until::Passes(2)),
     )
     .run(&dense_targets(), DENSE_LOOPS)
     .expect("a [gencan, repeat] pipeline runs");
@@ -994,10 +994,10 @@ fn combinators_keep_stage_index_monotone() {
     // purpose — this test is about stage identity, and the guard's own
     // verdict is pinned by the two tests above.
     let nested = shared();
-    let inner = Pipeline::new().with_repeat(body(GenCanPack::new()), Until::Passes(2));
+    let inner = Pipeline::new().with_repeat(body(GencanPack::new()), Until::Passes(2));
     dense_settings(
         Pipeline::new()
-            .with_handler(observer(&nested))
+            .with_callback(observer(&nested))
             .with_guarded(inner, Vec::new(), OnViolation::Fail),
     )
     .run(&dense_targets(), DENSE_LOOPS)
@@ -1016,32 +1016,32 @@ fn combinators_keep_stage_index_monotone() {
     }
 }
 
-/// A body factory's handlers are **adopted** exactly as `with_stage` adopts
+/// A body factory's callbacks are **adopted** exactly as `with_stage` adopts
 /// them, and its non-default shared settings are refused BY NAME exactly as
 /// `with_stage` refuses them — a combinator is not a hole in either rule.
 #[test]
-fn repeat_adopts_body_handlers_and_refuses_settings() {
+fn repeat_adopts_body_callbacks_and_refuses_settings() {
     let tally = shared();
     boxfree_settings(Pipeline::new().with_repeat(
-        body(GenCanPack::new().with_handler(observer(&tally))),
+        body(GencanPack::new().with_callback(observer(&tally))),
         Until::Passes(2),
     ))
     .run(&boxfree_targets(), FREE_LOOPS)
-    .expect("a Repeat whose body carries a handler runs");
+    .expect("a Repeat whose body carries a callback runs");
 
     {
         let t = tally.lock().expect("observer mutex");
         assert!(
             !t.steps.is_empty(),
-            "the handler carried in by the body preset saw no on_step events \
-             — with_repeat must adopt a body's handlers, not drop them"
+            "the callback carried in by the body preset saw no on_step events \
+             — with_repeat must adopt a body's callbacks, not drop them"
         );
-        assert_eq!(t.starts, 1, "an adopted handler is bracketed once per RUN");
+        assert_eq!(t.starts, 1, "an adopted callback is bracketed once per RUN");
         assert_eq!(t.finishes, 1);
     }
 
     let err = Pipeline::new()
-        .with_repeat(body(GenCanPack::new().with_seed(7)), Until::Passes(2))
+        .with_repeat(body(GencanPack::new().with_seed(7)), Until::Passes(2))
         .run(&boxfree_targets(), 1)
         .expect_err("a body preset carrying a seed must be refused");
     match &err {
@@ -1061,7 +1061,7 @@ fn repeat_adopts_body_handlers_and_refuses_settings() {
     }
 }
 
-/// A handler asking to stop from inside a combinator body ends the run there:
+/// A callback asking to stop from inside a combinator body ends the run there:
 /// the remaining passes never start and the verdict is honestly
 /// `converged == false`.
 #[test]
@@ -1071,7 +1071,7 @@ fn repeat_should_stop_yields_immediately() {
 
     let result = boxfree_settings(
         Pipeline::new()
-            .with_handler(Box::new(StopOnFirstSignal {
+            .with_callback(Box::new(StopOnFirstSignal {
                 signals: Arc::clone(&signals),
             }))
             .with_repeat(

@@ -10,9 +10,9 @@ Polymer PEO scenes are Python-only (`python/examples/pack_peo_*.py`):
 monomers from molrs SMILES + conformer, architecture from molrs
 (`molrs.builder.Assembler` growing a CGsmiles topology), then molpack
 packing. Linear melt and mixed
-linear+star share `LatticeGrow` @ 2.0 Å then `GenCanPack.with_restart`;
+linear+star share `LatticeGrow` @ 2.0 Å then `GencanPack.with_restart`;
 the ring path is `pack_peo_topo.py ring` (named grower reject, rigid
-`GenCanPack`); mesh-confined linear PEO is `pack_peo_mesh.py` (a
+`GencanPack`); mesh-confined linear PEO is `pack_peo_mesh.py` (a
 `molrs.core.Polyhedron` read from STL masks lattice sites outside the mesh), and
 `pack_peo_void.py` grows PEO through the solvent-accessible void of a
 bead-spring frame (`~molrs.core.SphereUnion` over the bonded beads of a LAMMPS

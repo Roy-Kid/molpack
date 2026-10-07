@@ -4,7 +4,7 @@
 
 use molrs::op::F;
 mod cg;
-pub(super) mod entry;
+pub(super) mod gencan_pack;
 mod linesearch;
 mod phases;
 mod search;
@@ -14,7 +14,7 @@ mod spg;
 use linesearch::TnLsScratch;
 pub use search::gencan;
 
-/// Stage name shared by [`solver::GenCanStage`] and the phase step report.
+/// Stage name shared by [`solver::GencanStage`] and the phase step report.
 pub(crate) const STAGE_NAME: &str = "gencan";
 
 // ── Precision-aware floors shared by the GENCAN phases ─────────────────────
@@ -343,7 +343,7 @@ mod tests {
 
     // ── the seam markers the GENCAN stage declares ─────────────────────────────
 
-    /// Owner-side half of acceptance ac-008: what `GenCanStage` declares on the
+    /// Owner-side half of acceptance ac-008: what `GencanStage` declares on the
     /// stage seam belongs here, not in `stage::tests` (which knows only fakes).
     ///
     /// `Placed::None` because the stage seeds its own placements with `initial()`
@@ -352,12 +352,12 @@ mod tests {
     /// before chaining anything after this stage.
     #[test]
     fn gencan_stage_requires_none_guarantees_all() {
-        use crate::pack::gencan::solver::{GenCanStage, GencanSettings};
+        use crate::pack::gencan::solver::{GencanSettings, GencanStage};
         use crate::{Placed, Stage};
 
         // The declarations are construction-time constants: an empty system is
         // enough to read them, and using one keeps this test off the algorithm.
-        let stage = GenCanStage::new(GencanSettings::default(), Vec::new(), None, 0, 0);
+        let stage = GencanStage::new(GencanSettings::default(), Vec::new(), None, 0, 0);
 
         assert_eq!(
             stage.requires().placed,

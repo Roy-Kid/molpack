@@ -1,19 +1,19 @@
 """The Python mirror of the multi-stage ``Pipeline`` (stage-pipeline-07-bindings).
 
-``Pipeline`` is the composition surface: the entries (``GenCanPack`` /
+``Pipeline`` is the composition surface: the entries (``GencanPack`` /
 ``CbmcGrow`` / ``LatticeGrow``) stay single-stage presets, and chaining them
 is one object with the *same* shared knobs. What this file owns, and nothing
 else can:
 
 1. **Two spellings, one answer.** A single-stage pipeline is the preset run,
    bitwise (`ac-001`); a two-stage pipeline runs and reports one verdict.
-2. **Nothing is dropped silently.** A stage's own ``with_handler`` callback is
+2. **Nothing is dropped silently.** A stage's own ``with_callback`` callback is
    *adopted* by the pipeline and still fires (`ac-004`); a preset carrying a
    non-default *shared* knob into a pipeline is refused by name, knob included
    (`ac-004`); an empty pipeline is a named ``ValueError``, not a no-op; an
    object that is not a registered entry is a ``TypeError`` that *lists* the
    entries (`ac-002`'s user-visible face).
-3. **Handlers can see which stage they are in.** ``StepInfo.stage`` carries the
+3. **Callbacks can see which stage they are in.** ``StepInfo.stage`` carries the
    ``index`` / ``total`` / ``name`` triple, in a pipeline and in a bare preset
    run alike (`ac-003`).
 4. **The numbers do not drift.** Two hard-coded goldens (`ac-007`).
@@ -34,7 +34,7 @@ import pytest
 
 from molpack import (
     CbmcGrow,
-    GenCanPack,
+    GencanPack,
     LatticeGrow,
     Pipeline,
     StepContext,
@@ -46,7 +46,7 @@ from molpack import (
 #: The entries a `Pipeline` accepts as a stage. The binding builds its
 #: `TypeError` text from ONE registry; this tuple is the same list spelled
 #: from the classes themselves, so it cannot drift into a stale literal.
-ENTRY_NAMES = (GenCanPack.__name__, CbmcGrow.__name__, LatticeGrow.__name__)
+ENTRY_NAMES = (GencanPack.__name__, CbmcGrow.__name__, LatticeGrow.__name__)
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────
@@ -109,7 +109,7 @@ def _chain_targets(copies: int = 2) -> list[Target]:
 
 
 class _Counter:
-    """Counting handler (the shape ``test_packer.py`` / ``test_handler.py``
+    """Counting callback (the shape ``test_packer.py`` / ``test_callback.py``
     use): three optional hooks, no state beyond the tallies."""
 
     def __init__(self) -> None:
@@ -143,7 +143,7 @@ class _StageRecorder:
 def test_pipeline_two_stages_runs() -> None:
     """Growth then rigid push-off is ONE object with one verdict."""
     result = (
-        Pipeline([CbmcGrow(TorsionPrior.uniform()), GenCanPack()])
+        Pipeline([CbmcGrow(TorsionPrior.uniform()), GencanPack()])
         .with_seed(7)
         .with_tolerance(1.0)
         .with_periodic_box([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
@@ -156,20 +156,20 @@ def test_pipeline_two_stages_runs() -> None:
     assert isinstance(result.converged, bool)
 
 
-def test_pipeline_adopts_stage_handlers() -> None:
-    """A handler that arrived on a stage observes the whole run.
+def test_pipeline_adopts_stage_callbacks() -> None:
+    """A callback that arrived on a stage observes the whole run.
 
     Handing a preset to a pipeline must not cost the caller their callback:
-    the stage's handlers are adopted, bracketed once by the run.
+    the stage's callbacks are adopted, bracketed once by the run.
     """
     counter = _Counter()
-    Pipeline([GenCanPack().with_handler(counter)]).with_seed(42).with_tolerance(
+    Pipeline([GencanPack().with_callback(counter)]).with_seed(42).with_tolerance(
         2.0
     ).run(_water_targets(), max_loops=20)
 
     assert counter.steps > 0, (
-        "the handler carried in by GenCanPack().with_handler saw no on_step "
-        "events — a pipeline adopts a stage's handlers, it does not drop them"
+        "the callback carried in by GencanPack().with_callback saw no on_step "
+        "events — a pipeline adopts a stage's callbacks, it does not drop them"
     )
     assert counter.starts == 1
     assert counter.finishes == 1
@@ -178,7 +178,7 @@ def test_pipeline_adopts_stage_handlers() -> None:
 def test_step_info_exposes_stage_triple() -> None:
     """``StepInfo.stage`` names the emitting stage, in both spellings."""
     recorder = _StageRecorder()
-    Pipeline([CbmcGrow(TorsionPrior.uniform()), GenCanPack()]).with_handler(
+    Pipeline([CbmcGrow(TorsionPrior.uniform()), GencanPack()]).with_callback(
         recorder
     ).with_seed(7).with_tolerance(1.0).with_periodic_box(
         [0.0, 0.0, 0.0], [20.0, 20.0, 20.0]
@@ -195,7 +195,7 @@ def test_step_info_exposes_stage_triple() -> None:
 
     # A bare preset run is a one-stage run and says so.
     solo = _StageRecorder()
-    GenCanPack().with_handler(solo).with_seed(42).with_tolerance(2.0).run(
+    GencanPack().with_callback(solo).with_seed(42).with_tolerance(2.0).run(
         _water_targets(), max_loops=20
     )
     assert solo.seen, "expected at least one on_step call"
@@ -208,7 +208,7 @@ def test_step_info_exposes_stage_triple() -> None:
 def test_pipeline_preset_settings_inside_pipeline_is_value_error() -> None:
     """Shared knobs are the run's, and a refusal names the stage and knob."""
     with pytest.raises(ValueError) as excinfo:
-        Pipeline([GenCanPack().with_seed(7)]).run(_water_targets(4), max_loops=2)
+        Pipeline([GencanPack().with_seed(7)]).run(_water_targets(4), max_loops=2)
 
     message = str(excinfo.value)
     assert "gencan" in message, f"the refusal must name the stage, got: {message}"
@@ -216,7 +216,7 @@ def test_pipeline_preset_settings_inside_pipeline_is_value_error() -> None:
 
     # The supported spelling of the same intent: the knob on the Pipeline.
     result = (
-        Pipeline([GenCanPack()])
+        Pipeline([GencanPack()])
         .with_seed(7)
         .with_tolerance(2.0)
         .run(_water_targets(4), max_loops=2)

@@ -1,6 +1,6 @@
 """Open-space mixed PEO: linear chains and 4-arm stars in one box.
 
-Two ``Target``s, one ``LatticeGrow.run``, then ``GenCanPack.with_restart``.
+Two ``Target``s, one ``LatticeGrow.run``, then ``GencanPack.with_restart``.
 The box is density-sized from the total mass of both species. Rings stay
 out of this scene — both growers raise ``RingTemplate``.
 
@@ -117,7 +117,7 @@ def pack_mix(
     prior = molpack.TorsionPrior.three_state_from_c_inf(PEO_C_INF, TET)
     print(
         "  lattice      : LatticeGrow occupancy-guard @ 2.0 Å → "
-        "GenCanPack.with_restart @ 2.0 Å"
+        "GencanPack.with_restart @ 2.0 Å"
     )
     grown = (
         molpack.LatticeGrow(prior)
@@ -133,7 +133,7 @@ def pack_mix(
         f"intra scored {grown.intra.scored:.3f} Å"
     )
     pushed = (
-        molpack.GenCanPack()
+        molpack.GencanPack()
         .with_restart(grown)
         .with_seed(seed)
         .with_tolerance(2.0)

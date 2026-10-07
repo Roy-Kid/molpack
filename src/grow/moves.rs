@@ -463,7 +463,7 @@ pub(super) fn retract(chain: &mut Chain, sp: &Species, field: &mut OverlapField,
 /// the hard core, so the driver can terminate.
 ///
 /// The driver calls this in exactly two situations — a chain still wedged at
-/// the softening floor, and an abort (a handler stop, or the exhausted round
+/// the softening floor, and an abort (a callback stop, or the exhausted round
 /// cap) that leaves later stages unplaced. Either way the constructive
 /// no-overlap guarantee is broken, so the caller counts every call as a
 /// softening event and the run's result is never `converged`.

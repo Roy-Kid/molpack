@@ -10,6 +10,14 @@ Format per entry:
 **How to apply:** <when / where this kicks in>
 ```
 
+## 2026-10-07 — molrs S1–S4 命名波（`ir/p-registry` @ 166cd540）与容器词清扫
+
+- **molrs 路径**：`molrs::{store, system, spatial, units}` → `molrs::core`（Python `molrs.core`）；`op` 扁平（`op::rigid::nerf` → `op::place_from_internal_coords`，`about`/`apply` → `rotation_about`/`transform_point`）；`LBFGS` → `Lbfgs` + `LbfgsSettings`；`Optimizer::run` → `minimize`；`OptReport` → `OptimizationReport`（多 `final_grad_rms`）；密度盒用 `core::constants::ANGSTROM3_PER_CM3`。
+- **取代 K1**：molrs 删了按扩展名分派的 `io::read_frame` / `write_frame`，`.inp` 的 `filetype` 词表回到 molpack：`script::StructureFormat`（原 12 种格式，名或扩展名；`resolve` 恒编译，`read`/`write` 走 molrs 各格式自己的门，`io` 门控）。CLI、`Script::build` 与 wheel 默认加载器（同一 `resolve` + 对应 `molrs.io.read_<fmt>`）共用这一张表。
+- **容器词与缩写**：`Handler` → `Callback`（`with_callback`、`ProgressCallback`、`LammpsLogCallback`、`EarlyStopCallback`、`XyzTrajectoryCallback`，Python 协议 `molpack.Callback`）；`entry/` 拆为 `settings.rs` / `pack_space.rs` / `state.rs`；`*/entry.rs` → `gencan_pack.rs` / `cbmc_grow.rs` / `lattice_grow.rs`；`testutil` → `test_fixtures`；绑定 `entry.rs` → `packing_methods.rs`，`handler.rs` → `callback.rs`，`result.rs` → `state.rs`，`types.rs` 并入 `target.rs`；`GenCanPack` → `GencanPack`，`InvalidPBCBox(Error)` → `InvalidPbcBox(Error)`。
+**Why:** molrs 每个符号一条路径、缩写按词大写；molpack 自己的名字同一规则。
+**How to apply:** 逐位对拍（对 `parity-base`）：四个 CLI 结构文件、`pack_peo grow` 与其余 stdout 逐字节一致；`adsorption.xyz` / `translocation.xyz` 与上一轮（molrs 0.16 写出器）逐字节一致，对基线的差别是写出器（extended XYZ，全精度），原子与元素相同、坐标差 ≤ 5e-5（基线 `%.4f` 的舍入）；`pack_peo lattice` stdout 只差 `GenCanPack` → `GencanPack` 一词。
+
 ## 2026-10-07 — 0.4.0：模块单一职责重构（wave K），对 molrs `ir/p-registry` @ 64afcf90
 
 每个模块一个职责；molpack 不重复 molrs；每个公开符号只有一条路径；删别名、重复、死代码与兼容垫片（审计 `molnex/.claude/specs/module-responsibility-audit-2026-10-06.md` §4 K1–K11 与裁决 10）。

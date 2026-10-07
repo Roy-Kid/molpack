@@ -7,7 +7,7 @@ from molpack import (
     # Core
     Target, State, IntraResidual, StepInfo,
     # Engine entries — one per packing algorithm
-    GenCanPack, CbmcGrow, LatticeGrow,
+    GencanPack, CbmcGrow, LatticeGrow,
     # Multi-stage composition
     Pipeline,
     # Typed values
@@ -26,14 +26,14 @@ from molpack import (
     # Parallel evaluation
     rayon_enabled, num_threads, init_thread_pool,
     # Protocols
-    Handler, Restraint,
+    Callback, Restraint,
     # Errors
     PackError,
     ConstraintsFailedError,
     MaxIterationsError,
     NoTargetsError,
     EmptyMoleculeError,
-    InvalidPBCBoxError,
+    InvalidPbcBoxError,
 )
 ```
 
@@ -126,7 +126,7 @@ Target(frame, count: int)
 - `Target.fixed_from(result: State)` — wrap a previous run's whole
   output as one fixed obstacle, coordinates kept verbatim. The chaining
   primitive for staged packs: grow with `CbmcGrow`, then pack the next
-  species around the frozen matrix with `GenCanPack`. See
+  species around the frozen matrix with `GencanPack`. See
   [Engine entries](#engine-entries).
 
 **Properties**
@@ -158,7 +158,7 @@ packing failure.
 
 ### Shared builders
 
-Available on `GenCanPack` **and** `CbmcGrow`:
+Available on `GencanPack` **and** `CbmcGrow`:
 
 - `.with_tolerance(t: float)` — minimum pairwise distance (Å; default 2.0).
 - `.with_precision(p: float)` — convergence threshold (default 0.01).
@@ -175,16 +175,16 @@ Available on `GenCanPack` **and** `CbmcGrow`:
   `RuntimeError` if the wheel lacks the `rayon` feature (fail-fast).
 - `.with_progress(on: bool = True)` — LAMMPS-style screen output
   (off by default).
-- `.with_handler(handler)` — attach a custom `Handler` (stackable).
+- `.with_callback(callback)` — attach a custom `Callback` (stackable).
 - `.with_global_restraint(r)` — broadcast to every target (stackable).
 
-### `GenCanPack`
+### `GencanPack`
 
 Rigid-body placement driven by the three-phase GENCAN optimizer — the
 Packmol algorithm. Zero-arg constructor.
 
 ```python
-GenCanPack()
+GencanPack()
 ```
 
 GENCAN-only builders, on top of the shared ones:
@@ -266,24 +266,24 @@ rejections.
 
 ### `Pipeline`
 
-Composes stage objects — `GenCanPack`, `CbmcGrow`, and `LatticeGrow`
+Composes stage objects — `GencanPack`, `CbmcGrow`, and `LatticeGrow`
 instances — into one multi-algorithm run: grow a chain, then hand it to
 rigid-body descent, in one lifecycle and one `State` rather than two
 separate `run()` calls. See [Composing stages](guide/packer.md#composing-stages)
 for the full walkthrough.
 
 ```python
-Pipeline(stages: Sequence[GenCanPack | CbmcGrow | LatticeGrow] | None = None)
+Pipeline(stages: Sequence[GencanPack | CbmcGrow | LatticeGrow] | None = None)
 ```
 
 **Builders**
 
-- `.with_stage(stage: GenCanPack | CbmcGrow | LatticeGrow)` — append one
+- `.with_stage(stage: GencanPack | CbmcGrow | LatticeGrow)` — append one
   more stage; returns a new `Pipeline`.
-- The shared builders — same as [`GenCanPack`](#shared-builders):
+- The shared builders — same as [`GencanPack`](#shared-builders):
   `.with_tolerance`, `.with_precision`, `.with_seed`,
   `.with_periodic_box`, `.with_density`, `.with_parallel_eval`,
-  `.with_progress`, `.with_handler`, `.with_global_restraint`. Set these on
+  `.with_progress`, `.with_callback`, `.with_global_restraint`. Set these on
   the `Pipeline`, never on a stage object that goes into one — a stage
   carrying a non-default shared setting raises `ValueError` naming the
   stage and the setting.
@@ -294,13 +294,13 @@ Pipeline(stages: Sequence[GenCanPack | CbmcGrow | LatticeGrow] | None = None)
 .run(targets: list[Target], max_loops: int) -> State
 ```
 
-Each stage's own `.with_handler(...)` callbacks are adopted into the
-pipeline's handler set and fire for every stage in the run, not only the
+Each stage's own `.with_callback(...)` callbacks are adopted into the
+pipeline's callback set and fire for every stage in the run, not only the
 one they were attached to. Raises `ValueError` for an empty pipeline, a
 stage-ordering error, or a stage carrying a non-default shared setting
 (each naming the offending stage); raises `TypeError`, listing the three
 supported entries, for any object passed to `Pipeline([...])` or
-`.with_stage(x)` that is not a `GenCanPack`, `CbmcGrow`, or `LatticeGrow`.
+`.with_stage(x)` that is not a `GencanPack`, `CbmcGrow`, or `LatticeGrow`.
 
 ### Chaining two entries
 
@@ -311,10 +311,10 @@ instead, in one of two shapes:
 ```python
 # Push-off: continue the SAME free targets on the grown state.
 grown = CbmcGrow(prior).with_density(0.9).run([chain], max_loops=60)
-pushed = GenCanPack().with_restart(grown).with_seed(7).run([chain], max_loops=60)
+pushed = GencanPack().with_restart(grown).with_seed(7).run([chain], max_loops=60)
 
 # Fixed matrix: freeze the first result, pack new species around it.
-full = GenCanPack().run([Target.fixed_from(grown), solvent], max_loops=200)
+full = GencanPack().run([Target.fixed_from(grown), solvent], max_loops=200)
 ```
 
 ---
@@ -323,7 +323,7 @@ full = GenCanPack().run([Target.fixed_from(grown), solvent], max_loops=200)
 
 Frozen outcome of one `run()`. Diagnostics (`frame`, `fdist`, `frest`,
 `converged`, `degraded`, `intra`) live on this object; pass the same
-object to `GenCanPack.with_restart` or `Target.fixed_from` to continue.
+object to `GencanPack.with_restart` or `Target.fixed_from` to continue.
 
 **Properties**
 
@@ -397,7 +397,7 @@ Geometric data only — never a force field. Static constructors:
 
 ## `StepInfo`
 
-Read-only snapshot passed to `Handler.on_step`.
+Read-only snapshot passed to `Callback.on_step`.
 
 ```python
 info.loop_idx          # outer-loop iteration
@@ -447,7 +447,7 @@ the shapes, their constructors and their `contains` / `distance` /
 `bounds` queries are documented with molrs. Solver split (the same for
 every region, not inferred from the shape):
 
-- `GenCanPack` — soft exterior penalty.
+- `GencanPack` — soft exterior penalty.
 - `CbmcGrow` — hard reject on propose; `force_place` may sit outside.
 - `LatticeGrow` — sites outside the mesh are blocked (Region ∩ lattice), and
   the backbone atoms **are** those sites, so the mask's guarantee is the
@@ -561,7 +561,7 @@ job = load_script("mix.inp")
 packer, targets, output, nloop = load_script("mix.inp")   # same object
 ```
 
-- `.packer : GenCanPack` — pre-configured with the script's `tolerance`,
+- `.packer : GencanPack` — pre-configured with the script's `tolerance`,
   `seed`, and any `pbc` box. `.inp` scripts always lower to the
   rigid-body entry.
 - `.targets : list[Target]`
@@ -597,16 +597,16 @@ class Restraint(Protocol):
     ) -> tuple[float, tuple[float, float, float]]: ...
 ```
 
-### `Handler`
+### `Callback`
 
 ```python
-class Handler(Protocol):
+class Callback(Protocol):
     def on_start(self, ntotat: int, ntotmol: int) -> None: ...
     def on_step(self, info: StepInfo) -> bool | None: ...   # True → stop
     def on_finish(self) -> None: ...
 ```
 
-All `Handler` methods are optional — missing ones are silently skipped.
+All `Callback` methods are optional — missing ones are silently skipped.
 
 ---
 
@@ -621,7 +621,7 @@ subclass). Catch the base to handle any packing failure uniformly.
 - `MaxIterationsError` — ran out of outer loops.
 - `NoTargetsError` — empty target list.
 - `EmptyMoleculeError` — a target has zero atoms.
-- `InvalidPBCBoxError` — periodic box has a non-positive extent.
+- `InvalidPbcBoxError` — periodic box has a non-positive extent.
 
 `ValueError` / `TypeError` still surface on Python-side invariants
 (bad atom indices, wrong restraint object, etc.). Growth and density

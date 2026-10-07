@@ -11,7 +11,7 @@ reference output.
 
 ```python
 import molrs
-from molpack import GenCanPack, Target
+from molpack import GencanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
@@ -21,7 +21,7 @@ water = (
     .with_restraint(molrs.core.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
-packer = GenCanPack().with_tolerance(2.0).with_seed(42)
+packer = GencanPack().with_tolerance(2.0).with_seed(42)
 result = packer.run([water], max_loops=200)
 print(f"packed {result.frame['atoms'].nrows} atoms")
 ```
@@ -47,7 +47,7 @@ print(f"packed {result.frame['atoms'].nrows} atoms")
   </a>
   <a href="guide/packer/">
     <strong>Packer</strong>
-    <em>Builder options, diagnostics, handlers.</em>
+    <em>Builder options, diagnostics, callbacks.</em>
   </a>
   <a href="guide/growth/">
     <strong>Chain growth</strong>

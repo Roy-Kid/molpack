@@ -426,7 +426,7 @@ hydrogens, and stereo centers enter only as user data at the boundary
   aromaticity, element symbols); `molrs::perceive` may only produce
   data the user passes in.
 
-**Derived guidance.** The in-loop optimizer (`GenCanPack::with_optimizer`) is an optional
+**Derived guidance.** The in-loop optimizer (`GencanPack::with_optimizer`) is an optional
 enhancement and must never become a solver dependency. Dependencies
 follow policy (§ 6).
 

@@ -73,16 +73,16 @@ repeated `.with_restraint()` calls — see
 ## 4. Pack
 
 ```python
-from molpack import GenCanPack
+from molpack import GencanPack
 
-packer = GenCanPack().with_tolerance(2.0).with_seed(42)
+packer = GencanPack().with_tolerance(2.0).with_seed(42)
 result = packer.run([water], max_loops=200)
 frame = result.frame
 
 print(frame["atoms"].nrows)
 ```
 
-`GenCanPack` is the rigid-body entry — you choose the packing algorithm
+`GencanPack` is the rigid-body entry — you choose the packing algorithm
 by choosing the entry, and `CbmcGrow` is the chain-growth one. Both have
 the same builders and the same terminal verb, `run()`, which returns a
 `State` with `.frame`, `.converged`, `.fdist`, `.frest`,
@@ -102,13 +102,13 @@ molrs.io.write_xyz("packed.xyz", frame)
 
 `result.frame` is the same object — keep the `State` around when you
 need the diagnostic fields, or to continue with
-`GenCanPack().with_restart(result)` / `Target.fixed_from(result)`.
+`GencanPack().with_restart(result)` / `Target.fixed_from(result)`.
 
 ## Full script
 
 ```python
 import molrs
-from molpack import GenCanPack, Target
+from molpack import GencanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
@@ -119,7 +119,7 @@ water = (
 )
 
 result = (
-    GenCanPack().with_tolerance(2.0).with_seed(42).run([water], max_loops=200)
+    GencanPack().with_tolerance(2.0).with_seed(42).run([water], max_loops=200)
 )
 
 print(f"packed {result.frame['atoms'].nrows} atoms")

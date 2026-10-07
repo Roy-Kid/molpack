@@ -141,7 +141,7 @@ impl Restraint for ExponentialPoint {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testutil::{assert_fd_grad, ctx_free, free_box, rng_uniform};
+    use super::super::test_fixtures::{assert_fd_grad, ctx_free, free_box, rng_uniform};
     use super::*;
 
     #[test]

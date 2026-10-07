@@ -134,7 +134,7 @@ follow if it earns its own measurement.
 Existing coverage is adequate and was what let the reverted attempt pass:
 `src/objective.rs` (`compute_fg_parallel_matches_compute_g_serial_large_system`,
 `compute_fg_small_system_parallel_matches_serial`: serial/parallel equivalence of
-the pair sums; seed parity is `gencan/entry.rs::gencan_entry_is_deterministic`),
+the pair sums; seed parity is `gencan/gencan_pack.rs::gencan_pack_is_deterministic`),
 `src/restraint/geometric/tests/gradient.rs` plus the `*_gradient_matches_finite_difference`
 tests in `src/restraint/collective/*.rs` (finite-difference parity per restraint
 kind and through the objective), and the five example programs (all five official

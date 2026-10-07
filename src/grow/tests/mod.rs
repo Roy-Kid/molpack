@@ -2,10 +2,10 @@
 //! `src/grow/`; nothing here runs a growth to completion.
 
 mod driver;
-mod entry;
 mod field;
 mod internal;
 mod prior;
+mod refusals;
 
 // Integration tests for the chain-growth solver spec
 // (`.claude/specs/chain-growth-solver.md`), running on the `CbmcGrow`
@@ -28,11 +28,11 @@ mod prior;
 use crate::grow::field::{BlockKind, OverlapField, Probe};
 
 use crate::grow::internal::InternalTree;
-use crate::testutil::{chain_bonds, frame_from_parts, zigzag_coords};
+use crate::test_fixtures::{chain_bonds, frame_from_parts, zigzag_coords};
 
 use crate::grow::{GrowConfig, GrowError, TorsionPrior};
 
-use crate::{CbmcGrow, GenCanPack, IntraResidual, PackEngine, PackError, RegionRestraint, Target};
+use crate::{CbmcGrow, GencanPack, IntraResidual, PackEngine, PackError, RegionRestraint, Target};
 use molrs::op::F;
 
 use molrs::core::BondDistanceWeights;
@@ -270,7 +270,7 @@ fn sampled_c_n(prior: &TorsionPrior, n_beads: usize, bond: F, n_samples: usize, 
 // entry (engine-entry-split); the explicit chain over a fixed matrix is
 // covered by `grow_then_gencan_chaining_over_fixed_matrix` below.
 
-// ── Section: Tasks 6-7 — restraint hard rejection + handler wiring ─────────
+// ── Section: Tasks 6-7 — restraint hard rejection + callback wiring ─────────
 //
 // runtime-RED until Task 6 (growth currently IGNORES `AtomRestraint`s during
 // placement, so a restrained Grow pack scatters atoms outside the region and
@@ -286,14 +286,14 @@ fn sampled_c_n(prior: &TorsionPrior, n_beads: usize, bond: F, n_samples: usize, 
 // Task 7 contract (spec Design §4g): one `StepInfo` per growth round with
 // `loop_idx` = round number (1-based, strictly increasing), `radscale` =
 // current hard-core scale (1.0 while undegraded), and fdist/frest = 0.0
-// while the hard-rejection regime holds. `Handler::should_stop() == true`
+// while the hard-rejection regime holds. `Callback::should_stop() == true`
 // aborts growth: `pack` still returns Ok, with `converged == false`.
 
 // ── Section: push-off — the explicit free-target chain (门槛 2) ────────────
 //
 // When growth ends unconverged (degraded > 0), the entry says so and stops.
 // The rigid push-off is the user-explicit chain (placement-seeding spec):
-// the SAME free targets go to `GenCanPack::with_restart(&grown)`, whose
+// the SAME free targets go to `GencanPack::with_restart(&grown)`, whose
 // phases continue on the coor/x growth wrote (Auhl slow push-off /
 // Theodorou–Suter staged relaxation, spec §5.4/§5.7). The seeded run must
 // (i) NOT run `initial()` — that re-randomizes every COM/Euler and

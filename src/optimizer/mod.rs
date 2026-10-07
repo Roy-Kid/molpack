@@ -5,7 +5,7 @@
 //! for the soft overlap + 1-2 / 1-3 objective — both live in molrs's `ff`
 //! module, which the caller enables on its own molrs dependency — or molpack's
 //! [`TorsionMcOptimizer`]) and bind it with
-//! [`GenCanPack::with_optimizer`](crate::GenCanPack::with_optimizer) plus an
+//! [`GencanPack::with_optimizer`](crate::GencanPack::with_optimizer) plus an
 //! [`OptimizeSelect`] that names which components to assemble each call.
 
 use molrs::core::Frame;
@@ -67,7 +67,7 @@ impl OptimizeSelect {
     }
 }
 
-/// One bound optimizer + selection, stored on [`crate::GenCanPack`].
+/// One bound optimizer + selection, stored on [`crate::GencanPack`].
 pub(crate) struct OptimizerBinding {
     pub select: OptimizeSelect,
     pub optimizer: Box<dyn Optimizer>,
@@ -401,9 +401,9 @@ mod tests {
     /// one optimizer bound to `select`. Returns the atom count of every frame
     /// the optimizer saw.
     fn frame_sizes(select: OptimizeSelect) -> Vec<usize> {
-        use crate::{GenCanPack, PackEngine, Target};
+        use crate::{GencanPack, PackEngine, Target};
 
-        let cube = || crate::testutil::inside_box([0.0; 3], [4.0; 3]);
+        let cube = || crate::test_fixtures::inside_box([0.0; 3], [4.0; 3]);
         let a = Target::from_coords(&[[0.0; 3]], &[1.0], 8)
             .with_name("a")
             .with_restraint(cube());
@@ -411,7 +411,7 @@ mod tests {
             .with_name("b")
             .with_restraint(cube());
         let sizes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        GenCanPack::new()
+        GencanPack::new()
             .with_tolerance(2.0)
             .with_seed(7)
             .with_optimizer(select, FrameSizes(std::sync::Arc::clone(&sizes)))
@@ -455,7 +455,7 @@ mod tests {
         use molrs::ff::potential::soft::SoftSpec;
         use molrs::optimize::{Lbfgs, LbfgsSettings};
 
-        use crate::{GenCanPack, PackEngine, Target};
+        use crate::{GencanPack, PackEngine, Target};
 
         /// Counts the calls it forwards to the wrapped optimizer.
         struct Counted(Lbfgs, std::sync::Arc<std::sync::atomic::AtomicUsize>);
@@ -469,7 +469,7 @@ mod tests {
             }
         }
 
-        let cube = || crate::testutil::inside_box([0.0; 3], [10.0; 3]);
+        let cube = || crate::test_fixtures::inside_box([0.0; 3], [10.0; 3]);
         let ion = Target::from_coords(&[[0.0; 3]], &[1.0], 30)
             .with_name("ion")
             .with_restraint(cube());
@@ -485,7 +485,7 @@ mod tests {
             },
         );
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let state = GenCanPack::new()
+        let state = GencanPack::new()
             .with_tolerance(2.0)
             .with_precision(1e-2)
             .with_seed(7)

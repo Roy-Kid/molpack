@@ -148,7 +148,7 @@ impl Restraint for GaussianPoint {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testutil::{assert_fd_grad, ctx_free, free_box, rng_uniform};
+    use super::super::test_fixtures::{assert_fd_grad, ctx_free, free_box, rng_uniform};
 
     #[test]
     fn a_distribution_target_is_not_a_bound() {

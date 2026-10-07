@@ -69,10 +69,10 @@ water = (
 ## 4. Pack
 
 ```python
-from molpack import GenCanPack
+from molpack import GencanPack
 
 result = (
-    GenCanPack()
+    GencanPack()
     .with_tolerance(2.0)
     .with_seed(42)
     .run([water], max_loops=200)
@@ -89,7 +89,7 @@ packed = result.frame
 | `frest` | Restraint violations |
 | `frame` | Topology-complete packed `molrs.core.Frame` |
 
-`GenCanPack` is the rigid-body entry; `CbmcGrow` grows chains instead. Each
+`GencanPack` is the rigid-body entry; `CbmcGrow` grows chains instead. Each
 engine runs once — `run()` consumes it, so build a new one per pack. If you
 only want the frame, take `result.frame`.
 

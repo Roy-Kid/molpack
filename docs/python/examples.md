@@ -16,9 +16,9 @@ coordinates.
 | `pack_spherical.py`   | `spherical.inp`   | nested spheres, double-layer shell |
 | `pack_solvprotein.py` | `solvprotein.inp` | fixed solute solvated by water + ions |
 | `pack_ion_dispersion.py` | —              | `SelfSeparation`: stop one species clustering, with a no-restraint control |
-| `pack_peo_linear.py`  | —                 | open-space linear PEO: `LatticeGrow` @ 2.0 Å then `GenCanPack.with_restart` |
+| `pack_peo_linear.py`  | —                 | open-space linear PEO: `LatticeGrow` @ 2.0 Å then `GencanPack.with_restart` |
 | `pack_peo_mix.py`     | —                 | linear + 4-arm star, two `Target`s, one box, one `LatticeGrow.run` |
-| `pack_peo_topo.py`    | —                 | 4-arm star (`LatticeGrow`) and ring (named reject, then `GenCanPack`) |
+| `pack_peo_topo.py`    | —                 | 4-arm star (`LatticeGrow`) and ring (named reject, then `GencanPack`) |
 | `pack_peo_mesh.py`    | —                 | linear PEO inside a branched mesh cavity (a `molrs.core.Polyhedron` masks `LatticeGrow` sites) |
 | `pack_peo_void.py`    | —                 | linear PEO through the solvent-accessible void of a bead-spring frame (`~molrs.core.SphereUnion`) |
 
@@ -55,7 +55,7 @@ python examples/pack_peo_void.py frame.data 25 200 42
 ```
 
 Set `MOLPACK_EXAMPLE_PROGRESS=0` to suppress the per-iteration progress log.
-Open-space PEO defaults `LatticeGrow` then `GenCanPack.with_restart` at 2.0 Å.
+Open-space PEO defaults `LatticeGrow` then `GencanPack.with_restart` at 2.0 Å.
 
 `pack_peo_mesh.py` runs `LatticeGrow` alone. Its cavity is the shipped
 `examples/pack_peo/dendrite.stl` — a watertight dendrite, a trunk that forks
@@ -69,7 +69,7 @@ Three things that scene makes concrete:
 
 - **The push-off is the wrong follow-up at melt density in a cavity.** It has
   nowhere to put the overlap it resolves except through the wall: on this scene
-  `GenCanPack.with_restart` spent 1 h 45 min moving `fdist` 3.99 → 3.28 while
+  `GencanPack.with_restart` spent 1 h 45 min moving `fdist` 3.99 → 3.28 while
   `frest` went 0.42 → 6.43 — worst excursion 6.5 Å → 25 Å. Residual contacts at
   melt density are honest, and the force field downstream removes them.
 - **A template owes the grower its topology, not its geometry.** Bond lengths,
@@ -116,7 +116,7 @@ The `pack_mixture.py` example reproduces Packmol's classic `mixture.inp`:
 
 ```python
 import molrs
-from molpack import GenCanPack, Target
+from molpack import GencanPack, Target
 
 water_frame = molrs.io.read_pdb("water.pdb")
 urea_frame  = molrs.io.read_pdb("urea.pdb")
@@ -126,7 +126,7 @@ box = molrs.core.Cuboid([0, 0, 0], [40, 40, 40])
 water = Target(water_frame, count=1000).with_name("water").with_restraint(box)
 urea  = Target(urea_frame,  count=400).with_name("urea").with_restraint(box)
 
-packer = GenCanPack().with_tolerance(2.0).with_seed(1_234_567)
+packer = GencanPack().with_tolerance(2.0).with_seed(1_234_567)
 result = packer.run([water, urea], max_loops=400)
 print(f"converged={result.converged}  natoms={result.natoms}")
 ```
@@ -136,7 +136,7 @@ print(f"converged={result.converged}  natoms={result.natoms}")
 ```python
 import molrs
 import numpy as np
-from molpack import GenCanPack, Target
+from molpack import GencanPack, Target
 
 frame = molrs.core.Frame({
     "atoms": {
@@ -150,7 +150,7 @@ frame = molrs.core.Frame({
 water = Target(frame, count=100).with_name("water").with_restraint(
     molrs.core.Cuboid([0, 0, 0], [30, 30, 30])
 )
-packer = GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
+packer = GencanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
 result = packer.run([water], max_loops=200)
 print(f"converged={result.converged}  natoms={result.natoms}")
 ```

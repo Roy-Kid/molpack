@@ -1,28 +1,28 @@
-//! `GenCanPack` — the rigid-body GENCAN packing entry.
+//! `GencanPack` — the rigid-body GENCAN packing entry.
 
 use molrs::op::F;
 
 use crate::PackError;
 use crate::Stage;
 use crate::Target;
-use crate::entry::result::Placements;
-use crate::entry::setup::CellDecl;
-use crate::entry::{PackSettings, State};
-use crate::handler::{EarlyStopHandler, Handler};
+use crate::callback::{Callback, EarlyStopCallback};
 use crate::optimizer::OptimizerBinding;
-use crate::pack::gencan::solver::{GenCanStage, GencanSettings};
+use crate::pack::gencan::solver::{GencanSettings, GencanStage};
+use crate::pack_space::CellDecl;
 use crate::pipeline::{EngineSetup, PackEngine, Pipeline, StageFactory};
+use crate::state::Placements;
+use crate::{PackSettings, State};
 
 /// Rigid-body packing via the GENCAN bound-constrained optimizer
 /// (Birgin & Martínez) — the Packmol algorithm as its own entry.
 ///
-/// Shared knobs (`with_seed`, `with_tolerance`, boxes, handlers, …) come
+/// Shared knobs (`with_seed`, `with_tolerance`, boxes, callbacks, …) come
 /// from [`PackEngine`]; everything on this type is GENCAN-only and means
 /// nothing to a growth entry.
-pub struct GenCanPack {
+pub struct GencanPack {
     settings: PackSettings,
-    handlers: Vec<Box<dyn Handler>>,
-    early_stop: Option<EarlyStopHandler>,
+    callbacks: Vec<Box<dyn Callback>>,
+    early_stop: Option<EarlyStopCallback>,
     inner_iterations: usize,
     init_passes: Option<usize>,
     init_box_half_size: F,
@@ -34,13 +34,13 @@ pub struct GenCanPack {
     optimizers: Vec<OptimizerBinding>,
 }
 
-impl Default for GenCanPack {
+impl Default for GencanPack {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl GenCanPack {
+impl GencanPack {
     /// Packmol's default `nloop` for `ntype` structure types: `200 * ntype`
     /// GENCAN loops per phase (getinp.f90:537-539). What `max_loops` to pass
     /// when the caller has no reason to pick another.
@@ -53,8 +53,8 @@ impl GenCanPack {
         let d = GencanSettings::default();
         Self {
             settings: PackSettings::default(),
-            handlers: Vec::new(),
-            early_stop: Some(EarlyStopHandler::default()),
+            callbacks: Vec::new(),
+            early_stop: Some(EarlyStopCallback::default()),
             inner_iterations: d.inner_iterations,
             init_passes: d.init_passes,
             init_box_half_size: d.init_box_half_size,
@@ -136,13 +136,13 @@ impl GenCanPack {
     /// End a phase whose best objective (Packmol's `bestf`) has stopped
     /// improving at the user's radii, instead of running it to `max_loops`.
     ///
-    /// On by default with [`EarlyStopHandler::default`] — 10 % over 10 loops
+    /// On by default with [`EarlyStopCallback::default`] — 10 % over 10 loops
     /// at `radscale == 1`, the criterion spelled out on that type. A pack
     /// that stalls there is almost always too dense, and the useful answer is
     /// `converged == false` in minutes, not an hour of GENCAN. Pass a
-    /// configured handler to tune it, or `None` to run every phase to
+    /// configured callback to tune it, or `None` to run every phase to
     /// `max_loops` as Packmol does.
-    pub fn with_early_stop(mut self, early_stop: impl Into<Option<EarlyStopHandler>>) -> Self {
+    pub fn with_early_stop(mut self, early_stop: impl Into<Option<EarlyStopCallback>>) -> Self {
         self.early_stop = early_stop.into();
         self
     }
@@ -154,7 +154,7 @@ impl GenCanPack {
     }
 }
 
-impl StageFactory for GenCanPack {
+impl StageFactory for GencanPack {
     fn settings(&self) -> &PackSettings {
         &self.settings
     }
@@ -178,12 +178,12 @@ impl StageFactory for GenCanPack {
         Ok(())
     }
 
-    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
-        let mut handlers = std::mem::take(self.handlers_mut());
+    fn take_callbacks(&mut self) -> Vec<Box<dyn Callback>> {
+        let mut callbacks = std::mem::take(self.callbacks_mut());
         if let Some(early_stop) = self.early_stop.take() {
-            handlers.push(Box::new(early_stop));
+            callbacks.push(Box::new(early_stop));
         }
-        handlers
+        callbacks
     }
 
     fn stages(&mut self, setup: &EngineSetup<'_>) -> Result<Vec<Box<dyn Stage>>, PackError> {
@@ -201,7 +201,7 @@ impl StageFactory for GenCanPack {
             discale: s.discale(),
             seed: s.seed(),
         };
-        let stage = GenCanStage::new(
+        let stage = GencanStage::new(
             gencan,
             setup.maxmove_per_type.to_vec(),
             setup.cell.clone(),
@@ -221,12 +221,12 @@ impl StageFactory for GenCanPack {
     }
 }
 
-impl PackEngine for GenCanPack {
+impl PackEngine for GencanPack {
     fn settings_mut(&mut self) -> &mut PackSettings {
         &mut self.settings
     }
-    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>> {
-        &mut self.handlers
+    fn callbacks_mut(&mut self) -> &mut Vec<Box<dyn Callback>> {
+        &mut self.callbacks
     }
 
     fn run(self, targets: &[Target], max_loops: usize) -> Result<State, PackError> {
@@ -244,10 +244,10 @@ mod tests {
     /// deleted `Molpack` path was proven before its removal —
     /// engine-entry-split migration record.)
     #[test]
-    fn gencan_entry_is_deterministic() {
+    fn gencan_pack_is_deterministic() {
         let coords = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
         let run = || {
-            GenCanPack::new()
+            GencanPack::new()
                 .with_seed(11)
                 .with_tolerance(2.0)
                 .with_periodic_box([0.0; 3], [20.0; 3], [true; 3])

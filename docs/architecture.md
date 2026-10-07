@@ -22,17 +22,18 @@ src/
 │   ├── engine.rs       StageFactory + PackEngine traits, EngineSetup
 │   ├── combinators.rs  Repeat (Until) + Guarded (OnViolation) — combinators
 │   │                   are Stage impls, so mod.rs needs no branch for either
-│   └── bracket.rs      the handler bracket: adopted-handler tagging, open_bracket, close_bracket
-├── entry/              settings + space + result — no lifecycle, never imports pipeline/
-│   ├── mod.rs          PackSettings + LogSpec
-│   ├── setup.rs        density / pbc / cell resolution + restraint broadcast
-│   └── result.rs       State + the verbatim Placements a run hands the next one
+│   └── bracket.rs      the callback bracket: adopted-callback tagging, open_bracket, close_bracket
+├── settings.rs         PackSettings + LogSpec        ┐ shared by every run — no
+├── pack_space.rs       density / pbc / cell resolution │ lifecycle, never import
+│                       + restraint broadcast           │ pipeline/
+├── state.rs            State + the verbatim Placements ┘
+│                       a run hands the next one
 ├── target.rs           Target — molecule type + per-molecule restraints + fixed_from
 ├── template.rs         coord_rows — Frame::coords as [x, y, z] rows (Å); rotatable_bonds
 │                       — the one unclassed-bond policy (crate-root leaf over molrs)
 ├── restraint/          AtomRestraint trait; region.rs (RegionRestraint over molrs Region),
 │                       cell.rs (CellRestraint), collective/, crate-private geometric/ (.inp kernels)
-├── handler.rs          Handler trait + LogLevel + 4 built-in observers
+├── callback.rs         Callback trait + LogLevel + 4 built-in callbacks
 ├── objective.rs        Objective trait + its PackContext impl over the crate-private
 │                       compute_f / compute_g / compute_fg
 ├── eval.rs             EvalMode / EvalOutput
@@ -46,7 +47,7 @@ src/
 │   ├── build.rs        build_context — context + CSR restraint pool from Targets
 │   └── work_buffers.rs scratch arrays (xcart, gxcar, …)
 ├── pack/               rigid-body family (crate-private)
-│   ├── gencan/         GenCanPack entry, GenCanStage, pgencan / gencan / linesearch
+│   ├── gencan/         GencanPack (gencan_pack.rs), GencanStage, pgencan / gencan / linesearch
 │   ├── initial.rs      initial random placement
 │   ├── restmol.rs      single-molecule constraint pre-fit
 │   └── movebad.rs      worst-molecule perturbation heuristic
@@ -54,9 +55,9 @@ src/
 ├── invariant.rs        Layers (L0–L5 repair-cost ladder) + Invariant trait +
 │                       Violation + RestraintsSatisfied — consumed by combinators.rs::Guarded
 ├── grow/               chain-growth path, peer of the GENCAN path
-│   ├── entry.rs        CbmcGrow — the chain-growth engine entry (honest verdicts)
+│   ├── cbmc_grow.rs    CbmcGrow — the chain-growth engine entry (honest verdicts)
 │   ├── lattice/        LatticeStage — diamond-lattice SAW for melt density
-│   │                   (entry.rs LatticeGrow entry, saw.rs walk,
+│   │                   (lattice_grow.rs LatticeGrow entry, saw.rs walk,
 │   │                   decorate.rs backbone on sites, config.rs leaf)
 │   ├── config.rs       GrowConfig (leaf — no target/entry imports)
 │   ├── prior.rs        TorsionPrior / AnglePrior + C∞ calibration
@@ -80,13 +81,13 @@ src/
                           │
                      pipeline/  (the lifecycle — depends on everything below)
                           │
-    ┌────────┬────────┬──┴──────┬──────────┬──────────┐
-    ▼        ▼        ▼         ▼          ▼          ▼
-  entry/   target    pack/      grow/     handler
-    │        │        (gencan,     (lattice
-    │        │        initial,      is a peer
-    │        │        movebad)      inside)
-    ▼        ▼         │            │
+    ┌──────────┬────────┬───┴─────┬───────────┬──────────┐
+    ▼          ▼        ▼         ▼           ▼          ▼
+  settings   target   pack/     grow/      callback
+  pack_space   │      (gencan,  (lattice
+  state        │      initial,   is a peer
+    │          │      movebad)   inside)
+    ▼          ▼        │         │
     └───────────► context/PackContext  (+ grid)
                             │
                             ▼
@@ -100,9 +101,9 @@ src/
 bond is a rotatable single bond — for growth and the torsion optimizer alike).
 Bond graphs are `molrs::core::Topology`;
 molpack does not ship a parallel Topology type.
-`pipeline/` is the only module that imports everything else; `entry/`
-shrank to settings + space + result and imports nothing from `pipeline/` —
-the arrow points one way, `pipeline/` reads `entry/`, never the reverse.
+`pipeline/` is the only module that imports everything else; `settings`,
+`pack_space` and `state` import nothing from `pipeline/` — the arrow points
+one way, `pipeline/` reads them, never the reverse.
 `objective` is the narrow waist through which all per-atom work flows.
 
 The chain-growth path enters at the same level as `pack`: a preset's
@@ -127,7 +128,7 @@ how many times it had to relax a constructive guarantee. The run's
 algorithm grades its own paper.
 
 A [`Pipeline`](crate::Pipeline) composes several stages behind one
-call — `Pipeline::new().with_stage(CbmcGrow::new(prior)).with_stage(GenCanPack::new()).run(..)`
+call — `Pipeline::new().with_stage(CbmcGrow::new(prior)).with_stage(GencanPack::new()).run(..)`
 runs chain growth, then rigid-body push-off, in one lifecycle, continuing
 from the first stage's placements rather than re-placing from scratch. Still
 out of scope: parallel or branching stage graphs (v1 is a linear sequence
@@ -139,8 +140,8 @@ the earlier result to the next as a **fixed** obstacle via
 
 ```text
 USER INPUTS                 ─→  Target / PackEngine builders
-  Frame, count, restraints,       (GenCanPack | CbmcGrow | Pipeline)
-  handlers, tolerance, seed
+  Frame, count, restraints,       (GencanPack | CbmcGrow | Pipeline)
+  callbacks, tolerance, seed
                             ─→  PackEngine::run()      (one line per preset)
                             ─→  Pipeline::run()          the lifecycle body
                                 a. broadcast global → per-target restraints
@@ -154,7 +155,7 @@ USER INPUTS                 ─→  Target / PackEngine builders
 
 PER-ITERATION                ─→  evaluate(x, mode, &mut g)
   (inside a stage's own loop —      → expand_molecules: x → xcart
-   GenCanStage for the rigid path)  → restraint penalties per atom
+   GencanStage for the rigid path)  → restraint penalties per atom
   reads f / g via                   → cell list + pair penalties
   &mut dyn Objective                → project gradient back: gxcar → g
                                      returns f_total, fdist, frest
@@ -166,7 +167,7 @@ OUTPUT                       ─→  State
 
 Three rules govern this flow:
 
-- **`PackContext` owns mutable state.** GENCAN, movebad, handlers, and the
+- **`PackContext` owns mutable state.** GENCAN, movebad, callbacks, and the
   phase driver all take `&mut PackContext` (writers) or `&PackContext`
   (observers). No other module owns mutable state across iterations.
 - **`Arc<dyn Restraint>` for polymorphic storage.** Cheap clone (refcount
@@ -207,28 +208,28 @@ fn run(targets, max_loops):
     broadcast settings.global_restraints → each target's molecule_restraints
     resolve packing space; build PackContext, wrap into PackState
     check the stage chain (empty list / bad order / a preset's non-default settings)
-    handlers.on_start
+    callbacks.on_start
     for stage in stages:                  // one stage for a preset's own run
         state.invalidate_geometry_cache()
-        handlers.on_stage_start
-        outcome := stage.run(state, targets, budget, handlers)?  // named PackError
+        callbacks.on_stage_start
+        outcome := stage.run(state, targets, budget, callbacks)?  // named PackError
                                                                   // skips on_stage_end + on_finish
         state.set_placed(stage.guarantees().placed)
-        handlers.on_stage_end
-        if handlers.should_stop(): break
-    rebuild xcart from the final rigid view; handlers.on_finish
+        callbacks.on_stage_end
+        if callbacks.should_stop(): break
+    rebuild xcart from the final rigid view; callbacks.on_finish
     assemble Frame into State (+ converged / fdist / frest / degraded / intra)
 ```
 
 Every preset's `PackEngine::run` is one line —
-`Pipeline::single(self).run(targets, max_loops)` — so `GenCanPack::run()`,
+`Pipeline::single(self).run(targets, max_loops)` — so `GencanPack::run()`,
 `CbmcGrow::run()` and `LatticeGrow::run()` all resolve to the loop above. It
 lives once, in `src/pipeline/mod.rs`, never duplicated per entry.
 
-### Outer: `GenCanStage::run()` (one stage)
+### Outer: `GencanStage::run()` (one stage)
 
 ```text
-fn run(state, targets, budget, handlers):
+fn run(state, targets, budget, callbacks):
     if state already placed, or this stage carries a seed:
         install the box + cell grid
     if this stage carries a seed:
@@ -241,7 +242,7 @@ fn run(state, targets, budget, handlers):
             for each free target type:
                 place molecules randomly inside their restraints
                 relax restraint penalties only
-    handlers.on_initialized
+    callbacks.on_initialized
     for phase in 0 ..= ntype:
         if phase < ntype:
             comptype[i] := (i == phase)  // PER-TYPE pre-compaction
@@ -253,7 +254,7 @@ fn run(state, targets, budget, handlers):
 ```
 
 The preamble — box/grid install, seed injection, the `initial()`-vs-push-off
-choice — and the phase loop both live in `GenCanStage::run`
+choice — and the phase loop both live in `GencanStage::run`
 (`src/pack/gencan/solver.rs`); nothing above the stage boundary decides when
 `initial()` (and the `movebad` heuristic it configures) runs. `CbmcGrow`'s
 `GrowStage` (`src/grow/driver.rs`) is a peer stage under the same lifecycle,
@@ -268,7 +269,7 @@ gives the all-types phase a much better seed.
 
 ```text
 fn run_phase(phase_id, max_loops):
-    handlers.on_phase_start(phase_info)
+    callbacks.on_phase_start(phase_info)
     radscale := discale            // start with inflated radii (default 1.1)
     // Quick-exit: if the unscaled objective is already below precision,
     // skip the whole phase.
@@ -276,9 +277,9 @@ fn run_phase(phase_id, max_loops):
     for loop_idx in 0 .. max_loops:
         result := run_iteration(loop_idx, radscale, optimizer_bindings)
         radscale := decay(radscale)            // → 1.0 over the phase
-        handlers.on_step(step_info, sys)
+        callbacks.on_step(step_info, sys)
         if result.converged: return Converged
-        if handlers.should_stop(): return EarlyStop
+        if callbacks.should_stop(): return EarlyStop
     return MaxLoops
 ```
 
@@ -430,7 +431,7 @@ atoms into their regions before pair conflicts matter.
 | Question | Where to look |
 |---|---|
 | How is one restraint's penalty computed for one atom? | `restraint/*::f` / `*::fg` |
-| Where does `with_global_restraint` broadcast? | `entry/setup.rs::broadcast_global_restraints` |
+| Where does `with_global_restraint` broadcast? | `pack_space.rs::broadcast_global_restraints` |
 | Where is the per-atom CSR pool built? | `context/build.rs::build_context` (CSR build loop) |
 | How are `x` ↔ Cartesian coords expanded? | `objective.rs::expand_molecules`, `euler.rs::eulerrmat` |
 | Where is the pair-overlap kernel? | `objective.rs::accumulate_pair_fg_parallel` |

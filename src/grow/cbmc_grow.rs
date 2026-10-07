@@ -1,15 +1,15 @@
 //! `CbmcGrow` — the continuum configurational-bias chain-growth entry.
 
-use crate::Handler;
+use crate::Callback;
 use crate::PackError;
 use crate::Stage;
 use crate::Target;
-use crate::entry::{PackSettings, State};
 use crate::grow::GrowStage;
 use crate::grow::config::GrowConfig;
 use crate::grow::prior::{AnglePrior, TorsionPrior};
 use crate::grow::validate_grow_cell;
 use crate::pipeline::{EngineSetup, PackEngine, Pipeline, StageFactory};
+use crate::{PackSettings, State};
 use molrs::op::F;
 
 /// Configurational-bias chain growth (CBMC-style constructive packing) as
@@ -31,11 +31,11 @@ use molrs::op::F;
 /// and `converged` say so and nothing else runs — no hidden second
 /// algorithm (engine-entry-split 门槛 2). For the rigid push-off, chain
 /// explicitly: feed the same free targets to
-/// [`GenCanPack::with_restart`](crate::GenCanPack::with_restart) with this
+/// [`GencanPack::with_restart`](crate::GencanPack::with_restart) with this
 /// run's result (placement-seeding spec).
 pub struct CbmcGrow {
     settings: PackSettings,
-    handlers: Vec<Box<dyn Handler>>,
+    callbacks: Vec<Box<dyn Callback>>,
     config: GrowConfig,
 }
 
@@ -48,7 +48,7 @@ impl CbmcGrow {
     pub fn from_config(config: GrowConfig) -> Self {
         Self {
             settings: PackSettings::default(),
-            handlers: Vec::new(),
+            callbacks: Vec::new(),
             config,
         }
     }
@@ -144,8 +144,8 @@ impl StageFactory for CbmcGrow {
         Ok(())
     }
 
-    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
-        std::mem::take(self.handlers_mut())
+    fn take_callbacks(&mut self) -> Vec<Box<dyn Callback>> {
+        std::mem::take(self.callbacks_mut())
     }
 
     fn stages(&mut self, setup: &EngineSetup<'_>) -> Result<Vec<Box<dyn Stage>>, PackError> {
@@ -166,8 +166,8 @@ impl PackEngine for CbmcGrow {
     fn settings_mut(&mut self) -> &mut PackSettings {
         &mut self.settings
     }
-    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>> {
-        &mut self.handlers
+    fn callbacks_mut(&mut self) -> &mut Vec<Box<dyn Callback>> {
+        &mut self.callbacks
     }
 
     fn run(self, targets: &[Target], max_loops: usize) -> Result<State, PackError> {

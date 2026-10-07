@@ -15,8 +15,8 @@ use crate::eval::EvalMode;
 // by this stage: growth evaluates the same way, and the pipeline layer must
 // not import `gencan/`.
 use super::small_floor;
+use crate::callback::{Callback, PhaseInfo, PhaseReport, StageInfo, StepInfo};
 use crate::context::pack_state::evaluate_unscaled;
-use crate::handler::{Handler, PhaseInfo, PhaseReport, StageInfo, StepInfo};
 use crate::optimizer::{ResolvedBinding, run_optimizer_bindings};
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::pack::initial::SwapState;
@@ -27,7 +27,7 @@ use crate::pack::movebad::{MoveBadConfig, movebad};
 /// The per-iteration body runs movebad → in-loop optimizers → pgencan → radii
 /// schedule. `Continue`
 /// means "run the next iteration"; `Converged` means the convergence predicate
-/// fired inside this iteration; `EarlyStop` means a `Handler::should_stop()`
+/// fired inside this iteration; `EarlyStop` means a `Callback::should_stop()`
 /// returned true.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IterOutcome {
@@ -45,7 +45,7 @@ pub enum IterOutcome {
 /// 2. Per-target in-loop optimizer block (`run_optimizer_bindings`).
 /// 3. `pgencan` on the working coordinate vector.
 /// 4. Unscaled-radii statistics (`fdist` / `frest` / `fimp`).
-/// 5. Handler `on_step` notification; early stop if any handler opts in.
+/// 5. Callback `on_step` notification; early stop if any callback opts in.
 /// 6. Convergence check (`fdist < precision && frest < precision`).
 /// 7. Radii reduction schedule (only when `radscale > 1.0`).
 ///
@@ -70,7 +70,7 @@ pub fn run_iteration(
     fimp_prev: &mut F,
     radscale: &mut F,
     optimizer_bindings: &mut [ResolvedBinding<'_>],
-    handlers: &mut [Box<dyn Handler>],
+    callbacks: &mut [Box<dyn Callback>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
 ) -> IterOutcome {
@@ -116,7 +116,7 @@ pub fn run_iteration(
     *flast = fx_unscaled;
     *fimp_prev = fimp;
 
-    if !handlers.is_empty() {
+    if !callbacks.is_empty() {
         let step_info = StepInfo {
             // One stage per run until the pipeline lands; the name is the
             // stage's own, taken from the stage type so the two cannot drift.
@@ -135,11 +135,11 @@ pub fn run_iteration(
             radscale: *radscale,
             precision,
         };
-        for h in handlers.iter_mut() {
+        for h in callbacks.iter_mut() {
             h.on_step(&step_info, sys);
         }
 
-        if handlers.iter().any(|h| h.should_stop()) {
+        if callbacks.iter().any(|h| h.should_stop()) {
             log::debug!("  Early stop requested at loop {loop_idx}");
             return IterOutcome::EarlyStop;
         }
@@ -178,7 +178,7 @@ pub fn run_iteration(
 
 /// Outcome of one outer-loop phase.
 ///
-/// The per-phase scaffold covers handler phase-start notification, comptype
+/// The per-phase scaffold covers callback phase-start notification, comptype
 /// reconfiguration, radii reset, swap setup, pre-loop precision
 /// short-circuit, inner GENCAN loop, and swap restore / xwork-back copy.
 /// `Continue` means the outer phase loop should
@@ -200,7 +200,7 @@ pub enum PhaseOutcome {
 /// clone of `x`.
 ///
 /// The function takes the outer-loop state (`sys`, `x`, `swap`,
-/// optimizer bindings, `handlers`, `gencan_workspace`, `rng`) by `&mut` so that
+/// optimizer bindings, `callbacks`, `gencan_workspace`, `rng`) by `&mut` so that
 /// state persists across phases, exactly as the inlined body did.
 ///
 /// Returns `PhaseOutcome::Converged` **only** when the all-type phase
@@ -223,7 +223,7 @@ pub fn run_phase(
     x: &mut [F],
     swap: &mut SwapState,
     optimizer_bindings: &mut [ResolvedBinding<'_>],
-    handlers: &mut [Box<dyn Handler>],
+    callbacks: &mut [Box<dyn Callback>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
 ) -> PhaseOutcome {
@@ -235,8 +235,8 @@ pub fn run_phase(
         molecule_type: if is_all { None } else { Some(phase) },
     };
 
-    // Reset handler state between phases (e.g. EarlyStopHandler stall counter)
-    for h in handlers.iter_mut() {
+    // Reset callback state between phases (e.g. EarlyStopCallback stall counter)
+    for h in callbacks.iter_mut() {
         h.on_phase_start(&phase_info);
     }
 
@@ -287,7 +287,7 @@ pub fn run_phase(
             frest: sys.frest,
             converged: true,
         };
-        for h in handlers.iter_mut() {
+        for h in callbacks.iter_mut() {
             h.on_phase_end(&phase_info, &report);
         }
         if !is_all {
@@ -328,7 +328,7 @@ pub fn run_phase(
             &mut fimp_prev,
             &mut radscale,
             optimizer_bindings,
-            handlers,
+            callbacks,
             gencan_workspace,
             rng,
         );
@@ -349,7 +349,7 @@ pub fn run_phase(
         frest: sys.frest,
         converged: converged_inner,
     };
-    for h in handlers.iter_mut() {
+    for h in callbacks.iter_mut() {
         h.on_phase_end(&phase_info, &report);
     }
 

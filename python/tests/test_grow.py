@@ -22,7 +22,7 @@ import pytest
 from molpack import (
     AnglePrior,
     CbmcGrow,
-    GenCanPack,
+    GencanPack,
     LatticeGrow,
     Target,
     TorsionPrior,
@@ -77,13 +77,13 @@ class TestTypedSurface:
         assert "Wlc" in repr(AnglePrior.wlc(3.0))
         assert "Wlc" in repr(AnglePrior.wlc_from_c_inf(1.76))
 
-    def test_grow_entry_requires_torsion_prior(self):
+    def test_cbmc_grow_requires_torsion_prior(self):
         # The torsion prior is mandatory — no default, no empty constructor
         # (uniform sampling is quantitatively wrong for melts, spec §5.1).
         with pytest.raises(TypeError):
             CbmcGrow()  # ty: ignore[missing-argument]
 
-    def test_grow_entry_builder_chain(self):
+    def test_cbmc_grow_builder_chain(self):
         base = CbmcGrow(TorsionPrior.uniform())
         chained = (
             base.with_trials(16)
@@ -166,7 +166,7 @@ class TestGencanPath:
         # the same positions bitwise — one entry per run, one verdict.
         def pack():
             return (
-                GenCanPack()
+                GencanPack()
                 .with_seed(42)
                 .with_tolerance(2.0)
                 .with_progress(False)

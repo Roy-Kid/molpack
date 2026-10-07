@@ -1006,7 +1006,7 @@ mod geometry_cache_tests {
 
     use crate::PackContext;
     use crate::objective::{compute_f, compute_fg};
-    use crate::testutil::inside_box;
+    use crate::test_fixtures::inside_box;
     use molrs::op::F;
 
     // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────

@@ -27,8 +27,8 @@ use std::fs::create_dir_all;
 use std::path::PathBuf;
 
 use molpack::{
-    Angle, CenteringMode, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target,
-    XYZHandler,
+    Angle, CenteringMode, GencanPack, PackEngine, ProgressCallback, RegionRestraint, Target,
+    XyzTrajectoryCallback,
 };
 use molrs::op::F;
 use std::sync::Arc;
@@ -74,14 +74,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Angle::from_radians(1.57),
         ]);
 
-    let mut packer = GenCanPack::new();
+    let mut packer = GencanPack::new();
     if std::env::var_os("MOLPACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.with_handler(Box::new(ProgressHandler::new()));
+        packer = packer.with_callback(Box::new(ProgressCallback::new()));
     }
     if std::env::var_os("MOLPACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.with_handler(Box::new(XYZHandler::new(out_dir.join("interface.xyz"), 10)));
+        packer = packer.with_callback(Box::new(XyzTrajectoryCallback::new(
+            out_dir.join("interface.xyz"),
+            10,
+        )));
     }
 
     let targets = vec![water_target, chloro_target, t3_target];

@@ -161,7 +161,7 @@ pub use tabulated::{TabulatedPlane, TabulatedPoint};
 /// Shared test helpers for the concrete restraint types: a dependency-free RNG
 /// and a finite-difference gradient check.
 #[cfg(test)]
-pub(super) mod testutil {
+pub(super) mod test_fixtures {
     use super::{GroupCtx, Restraint};
     use molrs::core::{Mic, SimBox};
     use molrs::op::F;

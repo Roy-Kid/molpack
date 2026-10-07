@@ -299,7 +299,7 @@ fn excluded_pairs(topology: &Topology, weights: &BondDistanceWeights) -> HashSet
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::chain_graph;
+    use crate::test_fixtures::chain_graph;
 
     /// The all-atom default skips 1-2, 1-3 and 1-4 pairs and scores 1-5.
     #[test]

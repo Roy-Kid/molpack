@@ -20,15 +20,15 @@
 //!
 //! The shared objective judges the decorated result at full tolerance —
 //! residual contacts are reported honestly and belong to the seeded GENCAN
-//! push-off (`GenCanPack::with_restart`), never hidden.
+//! push-off (`GencanPack::with_restart`), never hidden.
 
 mod config;
 pub(crate) mod decorate;
-mod entry;
+mod lattice_grow;
 pub(crate) mod saw;
 
 pub use config::LatticeConfig;
-pub use entry::LatticeGrow;
+pub use lattice_grow::LatticeGrow;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -41,12 +41,12 @@ use rand::rngs::SmallRng;
 use crate::AtomRestraint;
 use crate::PackError;
 use crate::Target;
+use crate::callback::{Callback, PhaseInfo, StageInfo, StepInfo};
 use crate::context::pack_state::evaluate_unscaled;
 use crate::context::{PackState, Placed};
 use crate::grow::GrowError;
 use crate::grow::internal::InternalTree;
 use crate::grow::prior::TorsionPrior;
-use crate::handler::{Handler, PhaseInfo, StageInfo, StepInfo};
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 
 use decorate::{Backbone, analyze_backbone, decorate_chain};
@@ -183,7 +183,7 @@ impl Stage for LatticeStage {
         state: &mut PackState,
         targets: &[Target],
         budget: &Budget,
-        handlers: &mut [Box<dyn Handler>],
+        callbacks: &mut [Box<dyn Callback>],
     ) -> Result<StageOutcome, PackError> {
         // ── The box and its cell grid ──────────────────────────────────────
         // See `install_resolved_cell` for why `radmax` reads `radius_ini`.
@@ -302,7 +302,7 @@ impl Stage for LatticeStage {
                 done.push(base);
                 mol += 1;
 
-                // Handler visibility: one StepInfo per finished chain.
+                // Callback visibility: one StepInfo per finished chain.
                 let info = StepInfo {
                     // One stage per run until the pipeline lands; the name
                     // comes from the stage type so the two cannot drift.
@@ -325,10 +325,10 @@ impl Stage for LatticeStage {
                     radscale: 1.0,
                     precision: budget.precision,
                 };
-                for h in handlers.iter_mut() {
+                for h in callbacks.iter_mut() {
                     h.on_step(&info, sys);
                 }
-                if handlers.iter().any(|h| h.should_stop()) {
+                if callbacks.iter().any(|h| h.should_stop()) {
                     aborted = true;
                     break 'outer;
                 }

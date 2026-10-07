@@ -90,7 +90,7 @@ criteria:
     type: runtime
     pass_when: |
       In-module d==0 rejects as NonTetrahedralTemplate without dropping
-      the atom from the walk. src/grow/tests/entry.rs::lattice_grow_rejects_degree_gt_4
+      the atom from the walk. src/grow/tests/refusals.rs::lattice_grow_rejects_degree_gt_4
       is Err whose message does not contain "branched staged".
       lattice_grow_tetrahedral_star_completes and
       lattice_grow_tetrahedral_comb_completes return Ok.

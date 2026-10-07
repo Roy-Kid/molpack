@@ -1,8 +1,8 @@
 //! Python binding for the molpack script loader.
 //!
 //! Exposes a single function :func:`load_script` that parses an `.inp`
-//! script and returns a ready-to-run :class:`GenCanPack` plus target list.
-//! Everything downstream — attaching handlers, running ``run()``,
+//! script and returns a ready-to-run :class:`GencanPack` plus target list.
+//! Everything downstream — attaching callbacks, running ``run()``,
 //! writing output — stays in Python hands.
 //!
 //! The loader does **not** touch molecule files in Rust. Each
@@ -21,8 +21,8 @@ use pyo3::types::PyModule;
 
 use molpack::script::{self, ScriptPlan, StructureFormat, StructurePlan};
 
-use crate::entry::PyGenCanPack;
 use crate::errors::script_error_to_pyerr;
+use crate::packing_methods::PyGencanPack;
 use crate::target::{PyTarget, target_from_frame};
 
 /// Output of [`load_script`] — four fields bundled as a PyClass so
@@ -30,10 +30,10 @@ use crate::target::{PyTarget, target_from_frame};
 /// tuple-unpacking (``packer, targets, output, nloop = load_script(...)``).
 #[pyclass(name = "ScriptJob", module = "molpack", sequence)]
 pub struct PyScriptJob {
-    /// `GenCanPack` pre-configured with ``tolerance`` / ``seed`` /
+    /// `GencanPack` pre-configured with ``tolerance`` / ``seed`` /
     /// periodic box from the script.
     #[pyo3(get)]
-    pub packer: Py<PyGenCanPack>,
+    pub packer: Py<PyGencanPack>,
     /// Targets ready to be packed.
     #[pyo3(get)]
     pub targets: Vec<PyTarget>,
@@ -129,7 +129,7 @@ pub fn load_script(
         .map(|sp| build_target(py, sp, plan.filetype.as_deref(), &loader))
         .collect::<PyResult<_>>()?;
 
-    let packer = PyGenCanPack::from_script(
+    let packer = PyGencanPack::from_script(
         Some(script_ast.tolerance),
         script_ast.seed,
         script_ast.pbc.map(|pbc| (pbc.min, pbc.max)),

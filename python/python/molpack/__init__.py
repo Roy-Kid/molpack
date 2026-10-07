@@ -2,7 +2,7 @@
 
 from importlib.metadata import version as _dist_version
 
-from ._protocols import Handler, Restraint
+from ._protocols import Callback, Restraint
 from .molpack import (
     Angle,
     AnglePrior,
@@ -15,9 +15,9 @@ from .molpack import (
     ExponentialPoint,
     GaussianPlane,
     GaussianPoint,
-    GenCanPack,
+    GencanPack,
     IntraResidual,
-    InvalidPBCBoxError,
+    InvalidPbcBoxError,
     LatticeGrow,
     MaxIterationsError,
     NoTargetsError,
@@ -63,7 +63,7 @@ __all__ = [
     "SelfSeparation",
     # Core
     "Target",
-    "GenCanPack",
+    "GencanPack",
     "CbmcGrow",
     "LatticeGrow",
     "Pipeline",
@@ -80,7 +80,7 @@ __all__ = [
     "num_threads",
     "init_thread_pool",
     # Duck-type protocols
-    "Handler",
+    "Callback",
     "Restraint",
     # Errors
     "PackError",
@@ -88,6 +88,6 @@ __all__ = [
     "MaxIterationsError",
     "NoTargetsError",
     "EmptyMoleculeError",
-    "InvalidPBCBoxError",
+    "InvalidPbcBoxError",
     "version",
 ]

@@ -288,7 +288,7 @@ fn partition(cell: &SimBox, d_min: F, nsites: usize) -> CellGrid {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testutil::{assert_fd_grad_in, rng_uniform};
+    use super::super::test_fixtures::{assert_fd_grad_in, rng_uniform};
     use super::*;
     use molrs::core::SimBox;
 

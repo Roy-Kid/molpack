@@ -1,6 +1,6 @@
 //! The packing-stage seam: [`Stage`](crate::Stage) and its documentation.
 
-use crate::Handler;
+use crate::Callback;
 use crate::PackError;
 use crate::context::{PackState, Placed};
 
@@ -9,7 +9,7 @@ pub use crate::outcome::StageOutcome;
 use molrs::op::F;
 
 /// One packing algorithm, selected by picking its engine entry
-/// ([`GenCanPack`](crate::GenCanPack), [`CbmcGrow`](crate::CbmcGrow),
+/// ([`GencanPack`](crate::GencanPack), [`CbmcGrow`](crate::CbmcGrow),
 /// [`LatticeGrow`](crate::LatticeGrow)).
 ///
 /// The packing-stage seam.
@@ -29,7 +29,7 @@ use molrs::op::F;
 ///
 /// **Rust-only:** this module ([`Stage`], [`Requires`], [`Guarantees`],
 /// [`StageOutcome`], [`Budget`]) is deliberately not mirrored in the Python
-/// wheel — Python picks the algorithm by picking the entry (`GenCanPack` /
+/// wheel — Python picks the algorithm by picking the entry (`GencanPack` /
 /// `CbmcGrow` / `LatticeGrow`), and implementing a custom stage is a
 /// Rust-level extension point.
 ///
@@ -59,9 +59,9 @@ use molrs::op::F;
 /// on the state after [`Stage::run`] returns**, where the context owns them
 /// as its own fields. [`StageOutcome`] carries no verdict: a stage reports
 /// only what it alone knows (whether it hit its own convergence criterion,
-/// and how many times it had to relax a constructive guarantee). A handler
+/// and how many times it had to relax a constructive guarantee). A callback
 /// that wants the numbers reads them off the context in
-/// [`Handler::on_stage_end`], which is handed the state precisely so that no
+/// [`Callback::on_stage_end`], which is handed the state precisely so that no
 /// stage can self-report a verdict the shared ruler would disagree with.
 ///
 /// # What this seam deliberately does not have
@@ -75,7 +75,7 @@ use molrs::op::F;
 ///   [`Layers`](crate::Layers), owned by the module that reads it.
 pub trait Stage: Send {
     /// Short identifier for logs and reports. The same string a
-    /// [`StageInfo`](crate::StageInfo) carries to handlers.
+    /// [`StageInfo`](crate::StageInfo) carries to callbacks.
     fn name(&self) -> &'static str;
 
     /// What the state must already hold for this stage to run.
@@ -133,7 +133,7 @@ pub trait Stage: Send {
         state: &mut PackState,
         targets: &[Target],
         budget: &Budget,
-        handlers: &mut [Box<dyn Handler>],
+        callbacks: &mut [Box<dyn Callback>],
     ) -> Result<StageOutcome, PackError>;
 }
 
@@ -211,7 +211,7 @@ mod tests {
     //! Everything here runs on **fake stages**. The seam's own behaviour is
     //! object safety, the two declaration methods and their composition along a
     //! chain, the constructor paths of its three `#[non_exhaustive]` structs, the
-    //! two default handler hooks, and the re-entrancy contract on
+    //! two default callback hooks, and the re-entrancy contract on
     //! [`Stage::run`](crate::Stage::run) — none of which needs a real algorithm,
     //! and all of which a real algorithm would only obscure. What each concrete
     //! implementor declares belongs to that implementor's owner
@@ -231,7 +231,7 @@ mod tests {
 
     use crate::StageInfo;
     use crate::{
-        Budget, Guarantees, Handler, PackContext, PackError, PackState, Placed, Requires, Stage,
+        Budget, Callback, Guarantees, PackContext, PackError, PackState, Placed, Requires, Stage,
         StageOutcome, StepInfo, Target,
     };
 
@@ -294,7 +294,7 @@ mod tests {
             state: &mut PackState,
             _targets: &[Target],
             _budget: &Budget,
-            _handlers: &mut [Box<dyn Handler>],
+            _callbacks: &mut [Box<dyn Callback>],
         ) -> Result<StageOutcome, PackError> {
             self.runs += 1;
             // Read the configuration; deliberately do NOT move or drain it — a
@@ -305,11 +305,11 @@ mod tests {
         }
     }
 
-    /// A handler that implements only the one required method, so every stage
+    /// A callback that implements only the one required method, so every stage
     /// hook it answers is the trait's provided default.
-    struct NoopHandler;
+    struct NoopCallback;
 
-    impl Handler for NoopHandler {
+    impl Callback for NoopCallback {
         fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {}
     }
 
@@ -431,11 +431,11 @@ mod tests {
         );
     }
 
-    // ── 5. the stage identity a handler sees ───────────────────────────────────
+    // ── 5. the stage identity a callback sees ───────────────────────────────────
 
     /// `StageInfo` is a plain `Copy` struct like `PhaseInfo`: constructible by
     /// literal, three public fields, all readable. That literal is what lets a
-    /// fake — here and in any downstream handler test — drive the two hooks
+    /// fake — here and in any downstream callback test — drive the two hooks
     /// without booting a pipeline.
     #[test]
     fn stage_info_is_a_literal_with_three_readable_fields() {
@@ -455,16 +455,16 @@ mod tests {
 
     // ── 6. the two default hooks ───────────────────────────────────────────────
 
-    /// `on_stage_start` / `on_stage_end` are *provided* methods: a handler that
+    /// `on_stage_start` / `on_stage_end` are *provided* methods: a callback that
     /// implements only `on_step` still answers both, and answering them does
     /// nothing. The test passes iff neither call panics — reaching the end of the
     /// body is the assertion, exactly as for the trait's other defaults.
     #[test]
     fn the_two_stage_hooks_default_to_no_ops() {
-        // Driven through the same `Box<dyn Handler>` shape `Stage::run` receives,
+        // Driven through the same `Box<dyn Callback>` shape `Stage::run` receives,
         // so the hooks are pinned on the trait object and not only on the
         // concrete type.
-        let mut handler: Box<dyn Handler> = Box::new(NoopHandler);
+        let mut callback: Box<dyn Callback> = Box::new(NoopCallback);
         let info = StageInfo {
             index: 0,
             total: 1,
@@ -473,8 +473,8 @@ mod tests {
         let outcome = StageOutcome::new(false, 0);
         let sys = PackContext::new(0, 0, 0);
 
-        handler.on_stage_start(&info);
-        handler.on_stage_end(&info, &outcome, &sys);
+        callback.on_stage_start(&info);
+        callback.on_stage_end(&info, &outcome, &sys);
     }
 
     // ── 7. the re-entrancy contract ────────────────────────────────────────────
@@ -491,13 +491,13 @@ mod tests {
         let mut state = empty_state();
         let targets: Vec<Target> = Vec::new();
         let budget = tiny_budget();
-        let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
+        let mut callbacks: Vec<Box<dyn Callback>> = Vec::new();
 
         let mut stage = FakeStage::new("alpha", Placed::None, Placed::All, 0);
         let config_at_construction = stage.config.len();
 
         let first = stage
-            .run(&mut state, &targets, &budget, &mut handlers)
+            .run(&mut state, &targets, &budget, &mut callbacks)
             .expect("the fake stage runs");
         let config_after_first = stage.config.len();
         assert_eq!(
@@ -507,7 +507,7 @@ mod tests {
         );
 
         let second = stage
-            .run(&mut state, &targets, &budget, &mut handlers)
+            .run(&mut state, &targets, &budget, &mut callbacks)
             .expect("the fake stage runs a second time");
 
         assert_eq!(stage.runs, 2, "both calls must reach the stage body");

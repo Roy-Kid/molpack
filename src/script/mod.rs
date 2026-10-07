@@ -1,5 +1,5 @@
 //! Script loader: parse molpack's `.inp` input format and turn it into
-//! a configured [`GenCanPack`](crate::GenCanPack) plus a list of
+//! a configured [`GencanPack`](crate::GencanPack) plus a list of
 //! [`Target`](crate::Target)s.
 //!
 //! Two front-end shapes are supported:
@@ -35,7 +35,7 @@
 //!
 //! Parsing, lowering, and I/O are kept separate so embedders can
 //! intercept any stage — e.g. mutate the parsed [`Script`] before
-//! `lower`, attach a custom [`Handler`](crate::Handler) to the packer,
+//! `lower`, attach a custom [`Callback`](crate::Callback) to the packer,
 //! or route output through a different writer.
 
 mod build;

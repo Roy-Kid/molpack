@@ -1821,7 +1821,7 @@ mod parallel_equivalence_tests {
         }
     }
 
-    // ── pack-level parity: full GenCanPack run, serial vs parallel ──────────
+    // ── pack-level parity: full GencanPack run, serial vs parallel ──────────
 
     use rand::RngExt;
     use rand::SeedableRng;

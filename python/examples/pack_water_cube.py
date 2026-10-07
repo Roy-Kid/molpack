@@ -35,7 +35,7 @@ def main() -> None:
         .with_restraint(molrs.core.Cuboid([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
     )
 
-    packer = molpack.GenCanPack()
+    packer = molpack.GencanPack()
     result = packer.run([water], max_loops=200)
 
     print(f"converged = {result.converged}")

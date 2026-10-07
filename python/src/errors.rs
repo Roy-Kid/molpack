@@ -18,7 +18,7 @@ pyo3::create_exception!(molpack, ConstraintsFailedError, PackError);
 pyo3::create_exception!(molpack, MaxIterationsError, PackError);
 pyo3::create_exception!(molpack, NoTargetsError, PackError);
 pyo3::create_exception!(molpack, EmptyMoleculeError, PackError);
-pyo3::create_exception!(molpack, InvalidPBCBoxError, PackError);
+pyo3::create_exception!(molpack, InvalidPbcBoxError, PackError);
 
 /// Register all `PackError` subclasses on a module.
 pub fn register_errors(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -30,7 +30,7 @@ pub fn register_errors(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     m.add("MaxIterationsError", py.get_type::<MaxIterationsError>())?;
     m.add("NoTargetsError", py.get_type::<NoTargetsError>())?;
     m.add("EmptyMoleculeError", py.get_type::<EmptyMoleculeError>())?;
-    m.add("InvalidPBCBoxError", py.get_type::<InvalidPBCBoxError>())?;
+    m.add("InvalidPbcBoxError", py.get_type::<InvalidPbcBoxError>())?;
     Ok(())
 }
 
@@ -56,7 +56,7 @@ pub fn pack_error_to_pyerr(e: molpack::PackError) -> PyErr {
         molpack::PackError::MaxIterations => MaxIterationsError::new_err(msg),
         molpack::PackError::NoTargets => NoTargetsError::new_err(msg),
         molpack::PackError::EmptyMolecule(_) => EmptyMoleculeError::new_err(msg),
-        molpack::PackError::InvalidPBCBox { .. } => InvalidPBCBoxError::new_err(msg),
+        molpack::PackError::InvalidPbcBox { .. } => InvalidPbcBoxError::new_err(msg),
         // Triclinic / cell validation errors surface as ValueError until
         // dedicated Python exception types are added.
         molpack::PackError::InvalidCell { .. } => pyo3::exceptions::PyValueError::new_err(msg),
@@ -91,7 +91,7 @@ pub fn pack_error_to_pyerr(e: molpack::PackError) -> PyErr {
 }
 
 /// Sink for Python exceptions raised inside Rust-invoked callbacks
-/// (`PyCallableRestraint::fg`, `PyHandlerWrapper::on_*`). The Rust trait
+/// (`PyCallableRestraint::fg`, `PythonCallback::on_*`). The Rust trait
 /// signatures can't surface `PyErr` in-band, so callbacks stash the
 /// first error here and set their stop-flag; the entry's `run()` drains
 /// the slot at return time and re-raises.
