@@ -109,12 +109,7 @@ pub fn load_script(
 
     let script_ast = script::parse(&src).map_err(script_error_to_pyerr)?;
 
-    let base_dir = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.clone())
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
+    let base_dir = script::base_dir(&path);
 
     let plan: ScriptPlan = script_ast.lower(&base_dir).map_err(script_error_to_pyerr)?;
 

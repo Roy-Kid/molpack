@@ -59,13 +59,7 @@ fn main() {
                 eprintln!("Error: cannot read `{}`: {e}", path.display());
                 std::process::exit(1);
             });
-            let base = path
-                .canonicalize()
-                .unwrap_or_else(|_| path.to_path_buf())
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from("."));
-            (src, base)
+            (src, script::base_dir(path))
         }
         None => {
             let mut buf = String::new();

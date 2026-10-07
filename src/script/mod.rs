@@ -49,3 +49,59 @@ pub use build::{ScriptPlan, StructurePlan};
 pub use error::ScriptError;
 pub use parser::{AtomGroup, PbcSpec, RestraintSpec, Script, Structure, parse};
 pub use structure_format::StructureFormat;
+
+use std::path::{Path, PathBuf};
+
+/// The directory a script's relative paths resolve against: the script's own
+/// directory, canonical when the file exists. On Windows `canonicalize`
+/// returns a verbatim `\\?\` path; the prefix is dropped, so the paths a
+/// loader receives and the output path read as Python's `Path.resolve()`
+/// spells them.
+pub fn base_dir(script: &Path) -> PathBuf {
+    let path = script
+        .canonicalize()
+        .map(without_verbatim_prefix)
+        .unwrap_or_else(|_| script.to_path_buf());
+    path.parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn without_verbatim_prefix(path: PathBuf) -> PathBuf {
+    if cfg!(windows) {
+        let text = path.to_string_lossy();
+        if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{share}"));
+        }
+        if let Some(local) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(local);
+        }
+    }
+    path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_dir_is_the_canonical_parent_without_a_verbatim_prefix() {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let dir = base_dir(&manifest.join("Cargo.toml"));
+        assert!(dir.is_absolute(), "{}", dir.display());
+        assert!(
+            !dir.to_string_lossy().starts_with(r"\\?\"),
+            "{}",
+            dir.display()
+        );
+        assert_eq!(dir.file_name(), manifest.file_name());
+    }
+
+    #[test]
+    fn base_dir_of_a_missing_script_is_its_own_parent() {
+        assert_eq!(
+            base_dir(Path::new("nowhere/mix.inp")),
+            PathBuf::from("nowhere")
+        );
+    }
+}
