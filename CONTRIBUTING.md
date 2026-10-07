@@ -139,10 +139,10 @@ names (`vX.Y.Z`), relocks if that changes molrs's metadata, and is tagged;
 
 One workflow per kind of work. Every push of any branch runs `lint`, `test`
 and `docs`, on a fork as on MolCrafts. A pull request into `dev` or `master`
-runs them again only when it comes from another repository (a pull request
-inside a fork was already built by its push).
+runs them again unless it is a pull request inside a fork (that branch was
+already built, full tier, by its push). `test / tier` decides the tier.
 
-| workflow | feature-branch push to MolCrafts | everything else: `dev`/`master`, pull requests, any push to a fork | upstream only |
+| workflow | feature-branch push to MolCrafts | everything else: `dev`/`master`/`main` on MolCrafts, pull requests, tags, dispatches, any push to a fork | upstream only |
 | --- | --- | --- | --- |
 | `lint.yml` | `lint / hooks` (commit hooks on every file, partners, lock files), `lint / clippy` (clippy, ty) | same | — |
 | `test.yml` | fast: `test / rust`, `test / python (ubuntu-latest)` | full: `test / rust`, `test / python` on Linux, macOS and Windows | — |
@@ -153,10 +153,11 @@ So a fork branch gets the full tier on its push: push to your fork, wait for
 green, then open the pull request into MolCrafts `dev`. Branches pushed to
 MolCrafts itself (Dependabot's) get the fast tier, and their pull requests the
 full one. The `require-green-ci` (`dev`) and `protect-master` rulesets require
-the full tier's jobs. A release tag must be `v` + the `Cargo.toml` version, on
+`test / tier` and the full tier's jobs. A release tag must be `v` + the `Cargo.toml` version, on
 `master`; trusted publishing on crates.io and PyPI names `release.yml`.
-Shared setup lives in `.github/actions/` (`setup-rust`, `setup-python`,
-`setup-partners`).
+Shared setup is MolCrafts/molcrafts-ci's `actions/setup-rust`,
+`actions/setup-python` and `actions/setup-partners` (`@master`), the same
+actions every MolCrafts repository uses.
 
 ## Code style
 
