@@ -16,7 +16,7 @@ mol_project:
   science:
     required: true
   ci:
-    config: .github/workflows/ci.yml
+    config: .github/workflows/test.yml
     local: "scripts/partners.py run -- sh -c 'cargo test --locked --lib --features cli && cargo test --locked --doc --features cli && cargo check --locked --all-targets --features cli && cargo check --locked --no-default-features && cargo check --locked --features rayon && uv run --locked --python 3.12 --directory python --group dev tox -e py'"
   notes_path: .claude/notes/notes.md
   specs_path: .claude/specs/
@@ -72,7 +72,7 @@ Project invariants (bodies in `law.md` § IX):
 - **No "packmol" in public identifiers.** The product is molpack; prose may cite Packmol, symbols may not.
 - **Configuration is `.inp` only.** Never a TOML / YAML / JSON config surface.
 - **molrs refs are manual.** On `dev`, `.github/partners.env` tracks molrs's `dev` (or molrs's same-named branch; CONTRIBUTING.md "Partners"). Never let a hook or script rewrite a path / version / partner ref; hooks and CI only resolve and verify them.
-- **Local gates are prek + tox.** Gate commands live in `.pre-commit-config.yaml` / `ci.yml`, never in a `scripts/` test wrapper; `scripts/` holds only the hook dispatch and the partner layout. Python isolation is `uv run --directory python --group dev tox -e py`. Never `--no-verify`.
+- **Local gates are prek + tox.** Gate commands live in `.pre-commit-config.yaml` / `.github/workflows/`, never in a `scripts/` test wrapper; `scripts/` holds only the hook dispatch and the partner layout. Python isolation is `uv run --directory python --group dev tox -e py`. Never `--no-verify`.
 - **Fork → PR.** Never push to `MolCrafts/molpack` master; `origin` = fork, `upstream` = MolCrafts.
 - **Solvers are pure geometry.** Never a force-field or chemistry-perception dependency on the solver seam; priors and chemistry are user data.
 - **Solvers are peers.** Never call another solver's driver; share lifecycle, context, objective, frozen `State` — the shared objective is the one ruler.

@@ -1,0 +1,58 @@
+name: lint
+
+# Format, linters, type checks and lock files, against molrs at the commit
+# scripts/partners.py resolves (molrs's dev, or its branch named like this
+# one). Same in every context; see "CI" in CONTRIBUTING.md.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [dev, master]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/master' }}
+
+jobs:
+  # The commit-stage hooks on every file (hygiene, ruff, rustfmt, no ignored
+  # tests), the partners check and the three lock files. Nothing compiles.
+  hooks:
+    name: lint / hooks
+    # A pull request inside a fork was already built by its push.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.repository_owner == 'MolCrafts'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-partners
+      - uses: ./.github/actions/setup-rust
+      - run: uvx pre-commit run --all-files --show-diff-on-failure
+      - run: python3 scripts/partners.py check
+      - run: |
+          cargo metadata --locked --format-version 1 >/dev/null
+          cargo metadata --locked --format-version 1 --manifest-path python/Cargo.toml >/dev/null
+          uv lock --check --directory python
+
+  # clippy, and ty over the Python package (builds the extension).
+  clippy:
+    name: lint / clippy
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.repository_owner == 'MolCrafts'
+    runs-on: ubuntu-latest
+    env:
+      MATURIN_PEP517_ARGS: --locked
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-partners
+      # .cargo/config.toml routes every build into ../molrs/target.
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache: lint
+          workspaces: . -> ../molrs/target
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: uv run --locked --python 3.12 --directory python --group typecheck ty check python tests examples

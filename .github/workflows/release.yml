@@ -1,0 +1,172 @@
+name: release
+
+# A `v*` tag on MolCrafts/molpack: guard -> lint + the full test tier ->
+# crates.io (molcrafts-molpack), PyPI (Linux and universal2 macOS wheels for
+# Python 3.12 and 3.13, plus the sdist for every other platform), and the
+# GitHub Release. molrs is checked out at the commit scripts/partners.py
+# resolves: a release commit on master names the molrs release tag of the
+# line Cargo.toml names in .github/partners.env.
+#
+# A dispatch is the dry run, on any branch, fork or upstream: the same guard,
+# gates and builds, `cargo publish --dry-run`, no upload and no Release. Only
+# a tag push on MolCrafts uploads (PUBLISH). Every upload skips a version the
+# registry already has, so a partial release is retried by re-running the
+# tag's run.
+#
+# Trusted publishing (crates.io, PyPI) names this file: release.yml.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PUBLISH: ${{ github.event_name == 'push' && github.repository_owner == 'MolCrafts' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  guard:
+    name: release / guard
+    if: github.event_name == 'workflow_dispatch' || github.repository_owner == 'MolCrafts'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: The tag is the package version, on master
+        if: github.event_name == 'push'
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "::error::tag $GITHUB_REF_NAME is not v$version"; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master || { echo "::error::tag is not on master"; exit 1; }
+
+  lint:
+    needs: guard
+    uses: ./.github/workflows/lint.yml
+
+  test:
+    needs: guard
+    uses: ./.github/workflows/test.yml
+
+  crate:
+    name: release / crate
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-partners
+      - uses: ./.github/actions/setup-rust
+      - if: env.PUBLISH == 'true'
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+      - env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          if [ "$PUBLISH" != true ]; then
+            cargo publish --dry-run --locked
+            exit
+          fi
+          version=$(sed -nE 's/^version = "(.*)"/\1/p' Cargo.toml | head -1)
+          if curl -sfL -A "molpack-release/1.0" "https://crates.io/api/v1/crates/molcrafts-molpack/$version" >/dev/null; then
+            echo "molcrafts-molpack@$version is already on crates.io"
+            exit 0
+          fi
+          cargo publish --locked
+
+  # One wheel per OS per supported Python; each macOS wheel is universal2.
+  wheels:
+    name: release / wheels (${{ matrix.os }}, ${{ matrix.python }})
+    needs: guard
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+        with:
+          python-version: ${{ matrix.python }}
+      # python/Cargo.toml path-deps ../../molrs/{molrs,molrs-ffi}; maturin
+      # runs `cargo metadata` for every command, so molrs must be there, and
+      # mounted into the manylinux container at the same path.
+      - uses: ./.github/actions/setup-partners
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: python
+          manylinux: auto
+          docker-options: -v ${{ env.MOLRS_DIR }}:${{ env.MOLRS_DIR }}
+          command: build
+          args: >-
+            --release --locked --out dist --interpreter python${{ matrix.python }}
+            ${{ matrix.os == 'macos-latest' && '--target universal2-apple-darwin' || '' }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ matrix.os }}-${{ matrix.python }}
+          path: python/dist
+
+  sdist:
+    name: release / sdist
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-partners
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: python
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-sdist
+          path: python/dist
+
+  pypi:
+    name: release / pypi
+    needs: [lint, test, wheels, sdist]
+    if: github.event_name == 'push' && github.repository_owner == 'MolCrafts'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
+
+  github:
+    name: release / github
+    needs: [crate, pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber

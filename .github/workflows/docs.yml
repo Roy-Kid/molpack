@@ -1,0 +1,31 @@
+name: docs
+
+# The site from the `doc` group, --strict: any warning fails. Cloudflare Pages
+# deploys it from MolCrafts itself (its Git integration), so no job here
+# deploys.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [dev, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/master' }}
+
+jobs:
+  build:
+    name: docs / build
+    # A pull request inside a fork was already built by its push.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.repository_owner == 'MolCrafts'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      # `--locked` checks python/uv.lock, whose path sources are ../molrs.
+      - uses: ./.github/actions/setup-partners
+      - run: uv run --isolated --locked --python 3.12 --project python --only-group doc zensical build --clean --strict
