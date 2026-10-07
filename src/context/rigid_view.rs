@@ -63,7 +63,9 @@
 
 use crate::context::PackContext;
 use crate::euler::{compcart, eulerrmat};
+use molrs::op::superpose::centroid;
 use molrs::op::types::F;
+use molrs::op::vec3::sub;
 
 /// The rigid placement vector of one run: three COM plus three Euler values
 /// per free molecule, in the flat layout documented at module level.
@@ -260,23 +262,18 @@ impl RigidView {
 
         for itype in 0..ctx.ntype {
             let na = ctx.natoms[itype];
+            let unit_weights = vec![1.0; na];
             for icopy in 0..ctx.nmols[itype] {
                 let base = ctx.idfirst[itype] + icopy * na;
+                let atoms = base..base + na;
 
-                let mut com = [0.0 as F; 3];
-                for a in 0..na {
-                    let p = ctx.xcart[base + a];
-                    for k in 0..3 {
-                        com[k] += p[k];
-                    }
-                }
-                for v in com.iter_mut() {
-                    *v /= na as F;
-                }
+                // At unit weights the sum runs in atom order and is divided
+                // by `na` once: bit for bit the plain mean.
+                let com = centroid(&ctx.xcart[atoms.clone()], &unit_weights)
+                    .expect("a molecule type has atoms");
 
-                for a in 0..na {
-                    let p = ctx.xcart[base + a];
-                    ctx.coor[base + a] = [p[0] - com[0], p[1] - com[1], p[2] - com[2]];
+                for i in atoms {
+                    ctx.coor[i] = sub(ctx.xcart[i], com);
                 }
 
                 self.set_com(imol, com);

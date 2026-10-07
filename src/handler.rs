@@ -187,8 +187,9 @@ pub trait Handler: Send {
 /// Writes packing snapshots as a multi-frame extended XYZ trajectory.
 ///
 /// Writes a frame on every `every`-th step (starting from step 0).
-/// No automatic initial or final writes. Each snapshot is an `atoms` block
-/// (`element`, `x`/`y`/`z`, 1-based `mol_id`) with the step in the frame's
+/// No automatic initial or final writes. Each snapshot is the
+/// coordinates-only frame the final result falls back to (`atoms`: `id`,
+/// 1-based `mol_id`, `x`/`y`/`z`, `element`) with the step in the frame's
 /// `step` meta key, written by molrs's extended XYZ writer
 /// (`molrs::io::data::xyz::write_xyz_frame`); molpack keeps no XYZ format
 /// code of its own. Needs the `io` feature.
@@ -198,9 +199,6 @@ pub struct XYZHandler {
     /// Write every `n` steps (must be >= 1).
     every: usize,
     file: Option<std::io::BufWriter<std::fs::File>>,
-    /// Global molecule ID per atom, 1-based like the final frame's `mol_id`
-    /// (constant across all frames).
-    mol_ids: Vec<molrs::op::types::Idx>,
 }
 
 #[cfg(feature = "io")]
@@ -216,7 +214,6 @@ impl XYZHandler {
             path: path.into(),
             every,
             file: None,
-            mol_ids: Vec::new(),
         }
     }
 
@@ -230,38 +227,28 @@ impl XYZHandler {
         }
     }
 
-    /// The snapshot as a frame: one `atoms` row per entry of `xcart`.
-    fn snapshot(&self, step: usize, sys: &PackContext) -> molrs::store::Frame {
-        use ndarray::Array1;
-        let n = sys.xcart.len();
-        let axis = |k: usize| Array1::from_iter(sys.xcart.iter().map(|p| p[k])).into_dyn();
-        let element = Array1::from_iter((0..n).map(|i| {
-            sys.elements
-                .get(i)
-                .and_then(|e| *e)
-                .map_or("X", |e| e.symbol())
-                .to_string()
-        }));
-        let mol_id = Array1::from_iter((0..n).map(|i| self.mol_ids.get(i).copied().unwrap_or(0)));
-        let mut atoms = molrs::store::Block::new();
-        for (key, col) in [("x", axis(0)), ("y", axis(1)), ("z", axis(2))] {
-            atoms.insert(key, col).expect("one row per atom");
-        }
-        atoms
-            .insert("element", element.into_dyn())
-            .expect("one row per atom");
-        atoms
-            .insert("mol_id", mol_id.into_dyn())
-            .expect("one row per atom");
-        let mut frame = molrs::store::Frame::new();
-        frame.insert("atoms", atoms);
+    /// The snapshot as a frame: the coordinates-only frame of `xcart`, one
+    /// `atoms` row per entry, with the step in its meta.
+    fn snapshot(step: usize, sys: &PackContext) -> molrs::store::Frame {
+        let elements = (0..sys.xcart.len())
+            .map(|i| {
+                sys.elements
+                    .get(i)
+                    .and_then(|e| *e)
+                    .map_or("X", |e| e.symbol())
+                    .to_string()
+            })
+            .collect();
+        let groups = (0..sys.ntype_with_fixed).map(|t| (sys.natoms[t], sys.nmols[t]));
+        let mut frame =
+            crate::assemble::coords_frame(&sys.xcart, elements, crate::assemble::mol_ids(groups));
         frame.meta.insert("step", step as u64);
         frame
     }
 
     fn write_snapshot(&mut self, step: usize, sys: &PackContext) {
         self.open();
-        let frame = self.snapshot(step, sys);
+        let frame = Self::snapshot(step, sys);
         let Some(ref mut w) = self.file else { return };
         let written = molrs::io::data::xyz::write_xyz_frame(w, &frame)
             .and_then(|()| std::io::Write::flush(w));
@@ -273,30 +260,11 @@ impl XYZHandler {
 
 #[cfg(feature = "io")]
 impl Handler for XYZHandler {
-    fn on_initialized(&mut self, sys: &PackContext) {
-        self.mol_ids = mol_ids(sys);
-    }
-
     fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
         if info.loop_idx.is_multiple_of(self.every) {
             self.write_snapshot(info.loop_idx, sys);
         }
     }
-}
-
-/// Per-atom global molecule ID in `xcart` order (for each type, each copy,
-/// each atom), 1-based — the numbering the assembled frame's `mol_id` uses.
-#[cfg(feature = "io")]
-fn mol_ids(sys: &PackContext) -> Vec<molrs::op::types::Idx> {
-    let mut ids = Vec::with_capacity(sys.ntotat);
-    let mut mol: molrs::op::types::Idx = 0;
-    for itype in 0..sys.ntype_with_fixed {
-        for _ in 0..sys.nmols[itype] {
-            mol += 1;
-            ids.extend(std::iter::repeat_n(mol, sys.natoms[itype]));
-        }
-    }
-    ids
 }
 
 // ── ProgressHandler ───────────────────────────────────────────────────────────

@@ -390,7 +390,7 @@ mod tests {
     ///
     /// **Why the fixture is unsatisfiable.** The in-loop optimizer block runs
     /// only inside the all-type phase's iteration loop
-    /// (`run_iteration` in `src/gencan/phases.rs`), and a phase that is already a solution
+    /// (`run_iteration` in `src/pack/gencan/phases.rs`), and a phase that is already a solution
     /// short-circuits past that loop. Twelve unit-radius dimers restrained
     /// into a 4 Å cube cannot be solved, so the loop is entered on both runs.
     /// The `after_first > 0` assertion guards exactly that: if the fixture

@@ -3,14 +3,13 @@
 //! Reference: Birgin & Martinez, Comp.Opt.Appl. 23:101-125, 2002.
 
 use molrs::op::types::F;
-pub mod cg;
-pub mod entry;
-pub mod phases;
-pub mod solver;
-pub mod spg;
-
+mod cg;
+pub(super) mod entry;
 mod linesearch;
+mod phases;
 mod search;
+mod solver;
+mod spg;
 
 use linesearch::TnLsScratch;
 pub use search::gencan;

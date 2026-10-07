@@ -1,7 +1,7 @@
 """Open-space linear PEO melt.
 
-Chemistry is molrs (CGsmiles + conformer). Architecture is molpy: a CGsmiles topology grown by ``mp.Assembler`` with
-``mp.GrowthPlacer``. Packing is molpack: ``LatticeGrow`` at
+Chemistry is molrs (CGsmiles + conformer). Architecture is molpy: a CGsmiles topology grown by ``mp.builder.Assembler`` with
+``mp.builder.GrowthPlacer``. Packing is molpack: ``LatticeGrow`` at
 2.0 Å then ``GenCanPack.with_restart`` at 2.0 Å. Hydrogen packing radius
 defaults to 0.2 Å (``PEO_H_RADIUS=off`` restores ``tolerance/2``):
 hydrogens relax away in the first picoseconds of MD, so making them
@@ -22,7 +22,6 @@ from pathlib import Path
 import molpy as mp
 import molrs
 import numpy as np
-from molpy.conformer import Conformer
 from molrs.system import Atomistic
 
 import molpack
@@ -40,13 +39,15 @@ CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
 def _unit(name: str, body: str, seed: int) -> mp.Atomistic:
     """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
     template = molrs.io.SmilesIR.from_fragment(body).to_template()
-    return Conformer(seed=seed).generate(template)[0]
+    return mp.Conformer(seed=seed).generate(template)[0]
 
 
 def _grow(topology: str, library: dict[str, mp.Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
-    sites = mp.CGSmilesIR(topology).to_coarsegrain()
-    return mp.Assembler(library, mp.GrowthPlacer()).assemble(sites, mp.Atomistic)
+    sites = mp.io.CGSmilesIR(topology).to_coarsegrain()
+    return mp.builder.Assembler(library, mp.builder.GrowthPlacer()).assemble(
+        sites, mp.Atomistic
+    )
 
 
 def linear_topology(n: int) -> str:
@@ -131,7 +132,7 @@ def main(argv: list[str] | None = None) -> None:
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec(str(OUT / "pack_peo_linear.mrec"), packed)
+    molrs.io.mrec.write(str(OUT / "pack_peo_linear.mrec"), packed)
     molrs.io.write_lammps_trajectory(
         str(OUT / "pack_peo_linear.lammpstrj"),
         [packed],

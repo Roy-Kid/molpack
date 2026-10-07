@@ -10,6 +10,7 @@
 //! Wasserstein [`engine`](super::engine) then matches it like any other target.
 
 use molrs::op::types::F;
+use molrs::op::vec3::normalize;
 
 use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg};
 use super::{GroupCtx, Restraint};
@@ -104,7 +105,7 @@ impl TabulatedPlane {
     /// If the normal is the zero vector or the grid is invalid.
     pub fn new(normal: [F; 3], offset: F, strength: F, xs: &[F], rho: &[F]) -> Self {
         Self {
-            normal: super::geometry::unit(normal),
+            normal: normalize(normal).expect("normal must be non-zero"),
             offset,
             strength,
             quant: Quantile::from_grid(xs, rho),

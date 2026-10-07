@@ -195,7 +195,7 @@ impl PackState {
 /// do not write it.)
 ///
 /// The radius swap is inert on those paths too: `radius` is scaled only by
-/// the GENCAN schedule (`src/gencan/phases.rs`) and by `movebad`, which
+/// the GENCAN schedule (`src/pack/gencan/phases.rs`) and by `movebad`, which
 /// restores it, so growth evaluates at `radius == radius_ini` and the swap
 /// moves the same numbers out and back. `work.radiuswork` is sized `ntotat`
 /// by `WorkBuffers`, so it always has room for the whole array.
@@ -216,10 +216,7 @@ impl PackState {
 /// `molpack::gencan::phases::evaluate_unscaled`. It lives here because the
 /// pipeline layer may not import `gencan/`, and it is `pub(crate)` because
 /// this chain does not pay for a published symbol before its seam lands —
-/// so the old path leaves the public surface. The docs site still places the
-/// function in `phases.rs` (`docs/architecture.md:37`,
-/// `docs/extending.md:460`); those two lines belong to the chain's
-/// documentation task, not to this module.
+/// so the old path leaves the public surface.
 pub(crate) fn evaluate_unscaled(ctx: &mut PackContext, x: &[F]) -> (F, F, F) {
     let scale = ctx.scale;
     let scale2 = ctx.scale2;

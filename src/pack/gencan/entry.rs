@@ -88,7 +88,7 @@ impl GenCanPack {
         // The seed's cell flows through the shared settings — one source of
         // truth, and the existing mutual-exclusion errors fire if the caller
         // declares a second box.
-        self.settings.cell = Some(CellDecl::Resolved(result.placements.cell.clone()));
+        self.settings.cell = Some(CellDecl::Resolved(Box::new(result.placements.cell.clone())));
         self.seed_placements = Some(result.placements.clone());
         self
     }

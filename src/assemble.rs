@@ -91,17 +91,13 @@ fn topology_frame(
     positions: &[[F; 3]],
 ) -> Result<molrs::store::Frame, PackError> {
     let mut parts: Vec<molrs::store::Frame> = Vec::with_capacity(targets.len());
-    let mut mol_ids: Vec<Idx> = Vec::new();
-    let mut mol_base: usize = 0;
+    let mut groups: Vec<(usize, usize)> = Vec::with_capacity(targets.len());
     for (target, &count) in targets.iter().zip(counts) {
         let one = replayed(target_template(target))?;
-        let n = one.get(ATOMS).and_then(Block::nrows).unwrap_or(0);
-        for copy in 0..count {
-            mol_ids.extend(std::iter::repeat_n((mol_base + copy + 1) as Idx, n));
-        }
+        groups.push((one.get(ATOMS).and_then(Block::nrows).unwrap_or(0), count));
         parts.push(one.replicate(count).map_err(column_error)?);
-        mol_base += count;
     }
+    let mol_ids = mol_ids(groups);
 
     let (blocks, _, _) = molrs::store::Frame::concat(&parts)
         .map_err(column_error)?
@@ -111,12 +107,7 @@ fn topology_frame(
         let nrows = block.nrows().unwrap_or(0);
         insert_front(&mut block, keys::ID, 0, (1..=nrows as Idx).collect())?;
         if name == ATOMS {
-            insert_front(
-                &mut block,
-                keys::MOL_ID,
-                1,
-                Array1::from_vec(mol_ids.clone()),
-            )?;
+            insert_front(&mut block, keys::MOL_ID, 1, mol_ids.clone())?;
             block
                 .set_coords(xyz(positions).view())
                 .map_err(column_error)?;
@@ -158,25 +149,50 @@ fn replayed(template: &molrs::store::Frame) -> Result<molrs::store::Frame, PackE
 }
 
 fn coords_only_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::store::Frame {
-    let n = positions.len();
-    let mut elements: Vec<String> = Vec::with_capacity(n);
-    let mut mol_ids: Vec<Idx> = Vec::with_capacity(n);
-    let mut mol = 0usize;
-    for target in targets {
-        for _ in 0..target.count {
+    let elements = targets
+        .iter()
+        .flat_map(|t| std::iter::repeat_n(&t.elements, t.count).flatten().cloned())
+        .collect();
+    let ids = mol_ids(targets.iter().map(|t| (t.elements.len(), t.count)));
+    coords_frame(positions, elements, ids)
+}
+
+/// 1-based molecule ID per atom, for groups of `(atoms per copy, copies)` in
+/// packed order: every copy of the first group, then of the next. The one
+/// numbering behind the assembled frame's `mol_id` and the
+/// [`XYZHandler`](crate::XYZHandler) snapshots.
+pub(crate) fn mol_ids(groups: impl IntoIterator<Item = (usize, usize)>) -> Array1<Idx> {
+    let mut ids = Vec::new();
+    let mut mol: Idx = 0;
+    for (natoms, copies) in groups {
+        for _ in 0..copies {
             mol += 1;
-            elements.extend(target.elements.iter().cloned());
-            mol_ids.extend(std::iter::repeat_n(mol as Idx, target.elements.len()));
+            ids.extend(std::iter::repeat_n(mol, natoms));
         }
     }
+    Array1::from_vec(ids)
+}
 
+/// A coordinates-only frame: one `atoms` row per position, with `id`,
+/// `mol_id`, `x` / `y` / `z` and `element`. What [`assemble_frame`] returns
+/// when a target has no template, and what every
+/// [`XYZHandler`](crate::XYZHandler) snapshot is.
+///
+/// # Panics
+/// When `elements` or `mol_ids` is not one entry per position.
+pub(crate) fn coords_frame(
+    positions: &[[F; 3]],
+    elements: Vec<String>,
+    mol_ids: Array1<Idx>,
+) -> molrs::store::Frame {
+    let n = positions.len();
     let mut atoms = Block::new();
     let inserted = atoms
         .insert(keys::ID, (1..=n as Idx).collect::<Array1<Idx>>().into_dyn())
         .and_then(|()| atoms.set_coords(xyz(positions).view()))
-        .and_then(|()| atoms.insert(keys::MOL_ID, Array1::from_vec(mol_ids).into_dyn()))
+        .and_then(|()| atoms.insert(keys::MOL_ID, mol_ids.into_dyn()))
         .and_then(|()| atoms.insert(keys::ELEMENT, Array1::from_vec(elements).into_dyn()));
-    inserted.expect("canonical columns of one length always insert");
+    inserted.expect("one element and one molecule ID per position");
 
     let mut frame = molrs::store::Frame::new();
     frame.insert(ATOMS, atoms);

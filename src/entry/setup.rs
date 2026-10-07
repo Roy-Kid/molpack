@@ -23,7 +23,8 @@ pub(crate) type PeriodicSpec = ([F; 3], [F; 3], [bool; 3]);
 /// A packing cell as the caller declared it, resolved to a [`SimBox`]
 /// inside the engine lifecycle so the builders can stay infallible.
 /// `Resolved` is a cell that is already a [`SimBox`] (a seed's inherited
-/// cell), carried as-is rather than taken apart and rebuilt.
+/// cell), carried as-is rather than taken apart and rebuilt (boxed: a
+/// `SimBox` is several times the size of the other variants).
 #[derive(Clone, Debug)]
 pub(crate) enum CellDecl {
     LengthsAngles {
@@ -36,7 +37,7 @@ pub(crate) enum CellDecl {
         origin: [F; 3],
         pbc: [bool; 3],
     },
-    Resolved(SimBox),
+    Resolved(Box<SimBox>),
 }
 
 impl CellDecl {
@@ -48,7 +49,7 @@ impl CellDecl {
                 pbc,
             } => simbox_from_lengths_angles(lengths, angles_deg, pbc),
             CellDecl::Matrix { h, origin, pbc } => simbox_from_matrix(h, origin, pbc),
-            CellDecl::Resolved(bx) => Ok(bx),
+            CellDecl::Resolved(bx) => Ok(*bx),
         }
     }
 }

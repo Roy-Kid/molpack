@@ -9,8 +9,9 @@
 //! at the plane/centre (`ξ = 0`) and thin them out with decay length `λ`.
 
 use molrs::op::types::F;
+use molrs::op::vec3::normalize;
 
-use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg, unit};
+use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg};
 use super::{GroupCtx, Restraint};
 
 /// Exponential target quantile `q(p) = −λ·ln(1 − p)` (`≥ 0` for `p ∈ (0, 1)`).
@@ -48,7 +49,7 @@ impl ExponentialPlane {
     pub fn new(normal: [F; 3], offset: F, strength: F, lambda: F) -> Self {
         assert!(lambda > 0.0, "ExponentialPlane lambda must be positive");
         Self {
-            normal: unit(normal),
+            normal: normalize(normal).expect("normal must be non-zero"),
             offset,
             strength,
             lambda,

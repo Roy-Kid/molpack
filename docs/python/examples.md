@@ -35,7 +35,7 @@ its frame in memory with `molrs.store.Frame` (no PDB file). The Packmol-port
 scripts load PDB files via `molrs.io.read_pdb`. The `pack_peo_*.py`
 scenes build polymers from CGsmiles units
 (`molrs.io.SmilesIR.from_fragment(body).to_template()`) grown by molpy
-instead. Writes go through molrs (`molrs.io.write_mrec`, `write_lammps_trajectory`,
+instead. Writes go through molrs (`molrs.io.mrec.write`, `write_lammps_trajectory`,
 `write_lammps_dump_local`).
 
 ## Running
@@ -88,7 +88,7 @@ Each example writes its outputs to `python/examples/out/` (created on
 demand, git-ignored) — the path is script-relative, so the working
 directory does not matter:
 
-- `{stem}.mrec` — molrs scientific record (`molrs.io.write_mrec`)
+- `{stem}.mrec` — molrs scientific record (`molrs.io.mrec.write`)
 - `{stem}.lammpstrj` — LAMMPS dump custom (OVITO particle topology)
 - `{stem}.dump.local` — LAMMPS dump local bonds (`batom1`/`batom2`), for
   OVITO [Load trajectory](https://www.ovito.org/manual/reference/pipelines/modifiers/load_trajectory.html)

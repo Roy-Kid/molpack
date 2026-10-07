@@ -5,9 +5,10 @@
 //! differ.
 
 use molrs::op::types::F;
+use molrs::op::vec3::normalize;
 
 use super::engine::probit;
-use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg, unit};
+use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg};
 use super::{GroupCtx, Restraint};
 
 /// Gaussian target quantile `q(p) = μ + σ·Φ⁻¹(p)`.
@@ -47,7 +48,7 @@ impl GaussianPlane {
     pub fn new(normal: [F; 3], offset: F, strength: F, mu: F, sigma: F) -> Self {
         assert!(sigma > 0.0, "GaussianPlane sigma must be positive");
         Self {
-            normal: unit(normal),
+            normal: normalize(normal).expect("normal must be non-zero"),
             offset,
             strength,
             mu,

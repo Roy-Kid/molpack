@@ -17,24 +17,15 @@
 //! distribution.
 
 use molrs::op::types::F;
+use molrs::op::vec3::{dot, norm, sub};
 
 use super::engine::{wasserstein_grad, wasserstein_value};
-
-/// Validate / normalise a plane normal through molrs's
-/// [`normalize`](molrs::op::vec3::normalize); panics when it is not a
-/// direction (zero, shorter than `MIN_DIRECTION_LENGTH`, or non-finite).
-pub(super) fn unit(normal: [F; 3]) -> [F; 3] {
-    molrs::op::vec3::normalize(normal).expect("normal must be non-zero")
-}
 
 // --------------------------------------------------------------------- plane
 
 /// ξᵢ = xᵢ·n̂ − offset for a plane with **unit** normal `normal`.
 fn plane_xi(coords: &[[F; 3]], normal: &[F; 3], offset: F) -> Vec<F> {
-    coords
-        .iter()
-        .map(|x| x[0] * normal[0] + x[1] * normal[1] + x[2] * normal[2] - offset)
-        .collect()
+    coords.iter().map(|x| dot(*x, *normal) - offset).collect()
 }
 
 /// Accumulate `∂L/∂ξᵢ · n̂` into `grads[i]` (∇ξ is the constant plane normal).
@@ -78,13 +69,7 @@ pub(super) fn plane_match_fg(
 
 /// ξᵢ = ‖xᵢ − c‖ (distance from the centre `center`).
 fn point_xi(coords: &[[F; 3]], center: &[F; 3]) -> Vec<F> {
-    coords
-        .iter()
-        .map(|x| {
-            let d = [x[0] - center[0], x[1] - center[1], x[2] - center[2]];
-            (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
-        })
-        .collect()
+    coords.iter().map(|x| norm(sub(*x, *center))).collect()
 }
 
 /// Below this radius the outward unit vector r̂ is treated as undefined; the
@@ -94,12 +79,8 @@ const R_GUARD: F = 1e-9;
 /// Accumulate `∂L/∂ξᵢ · r̂ᵢ` into `grads[i]`, where `r̂ᵢ = (xᵢ − c)/‖xᵢ − c‖`.
 fn point_scatter(dxi: &[F], coords: &[[F; 3]], center: &[F; 3], grads: &mut [[F; 3]]) {
     for (i, g) in grads.iter_mut().enumerate() {
-        let d = [
-            coords[i][0] - center[0],
-            coords[i][1] - center[1],
-            coords[i][2] - center[2],
-        ];
-        let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let d = sub(coords[i], *center);
+        let r = norm(d);
         if r > R_GUARD {
             let s = dxi[i] / r;
             g[0] += s * d[0];

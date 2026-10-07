@@ -28,9 +28,9 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - `src/entry/mod.rs` (153) — shared settings only (`PackSettings`, `LogSpec`, `first_non_default_knob`); re-exports `State` + `IntraResidual`
 - `src/entry/setup.rs` (489) — `pub(crate)` space resolution: `resolve_pack_space`/`ResolvedSpace`/`CellDecl`, restraint broadcast, plane-vs-PBC refusal
 - `src/entry/result.rs` (428) — frozen public `State` + `IntraResidual` + `pub(crate)` `Placements` (holds a `RigidView`) + `positions_in_target_order`
-- `src/gencan/solver.rs` (502) — `GencanStage` on the seam + `GencanSettings`
-- `src/gencan/entry.rs` (266) — `GenCanPack` preset entry (`StageFactory` + `PackEngine`); continuation is `with_restart(&State)` only; default `EarlyStopHandler` (`with_early_stop(None | handler)`), `default_max_loops(ntype) = 200 * ntype`
-- `src/gencan/mod.rs` (1203) — GENCAN/SPG driver + `GencanWorkspace`; `phases.rs` (371) phase/iteration loop; `cg.rs` (429); `spg.rs` (159)
+- `src/pack/gencan/solver.rs` (500) — `GencanStage` on the seam + `GencanSettings`
+- `src/pack/gencan/entry.rs` (266) — `GenCanPack` preset entry (`StageFactory` + `PackEngine`); continuation is `with_restart(&State)` only; default `EarlyStopHandler` (`with_early_stop(None | handler)`), `default_max_loops(ntype) = 200 * ntype`
+- `src/pack/gencan/mod.rs` (373) — `pgencan` driver + `GencanWorkspace`; `search.rs` (510) the `gencan` SPG/TN search + `packmolprecision`; `linesearch.rs` (383); `phases.rs` (371) phase/iteration loop; `cg.rs` (420); `spg.rs` (159). Submodules are private; `entry` is `pub(super)` for `pack`'s `GenCanPack` re-export
 - `src/grow/driver.rs` (622) — `GrowStage` on the seam: CBMC round loop
 - `src/grow/entry.rs` (173) — `CbmcGrow` preset entry
 - `src/grow/mod.rs` (159) — grow facade + `topology_for_growth` / `validate_template` / `tree_from_target` / `validate_grow_cell`
@@ -39,17 +39,17 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - `src/grow/lattice/entry.rs` (122) — `LatticeGrow` preset entry
 - `src/grow/lattice/config.rs` (40); `decorate.rs` (620) template rebuild; `saw.rs` (840) diamond-lattice self-avoiding walk
 - `src/objective.rs` (1883) — pair/restraint value+gradient kernels, PBC wrap, rayon paths, `Objective` trait
-- `src/constraints/container.rs` (76) — `Constraints`/`EvalMode`/`EvalOutput` dispatch; `mod.rs` (5)
+- `src/eval.rs` (28) — `EvalMode`/`EvalOutput`
 - `src/restraint/mod.rs` (138) — `AtomRestraint` trait + blanket `Box<dyn>` impl
 - `src/restraint/geometric/` — `bounded.rs` (446), `surface.rs` (255), `mod.rs` (47)
 - `src/restraint/collective/` — `mod.rs` (226) `Restraint` trait, `tabulated.rs` (277), `gaussian.rs` (219), `exponential.rs` (197), `separation.rs` (595) `SelfSeparation`, `com.rs` (113), `engine.rs` (139), `geometry.rs` (136)
 - `src/restraint/region.rs` (183) + `src/restraint/cell.rs` (225) — `RegionRestraint` (lift of a molrs `Region`) + `CellRestraint` (the cell as wall and lattice declaration); molpack has no region type of its own
 - `src/target.rs` (1153) — `Target` builder: coords/radii, per-atom overrides, restraints, centering, `fixed_at`/`fixed_from(&State)`, `with_special_bonds`
 - `src/script/parser.rs` (1189) — `.inp` tokenizer → `Script`; `build.rs` lowering onto `GenCanPack` (`Script::build`, `io`-gated, reads templates through `molrs::io::read_frame`); `error.rs` (71); `mod.rs` — no format code of its own
-- `src/initial.rs` (891) — initial placement, `restmol`, `compute_dmax`, `SwapState`, `pub(crate)` `install_simbox_and_grid`/`install_resolved_cell`
-- `src/movebad.rs` (269) — escape moves + `flash1` sort
+- `src/pack/initial.rs` (600) — initial placement, `compute_dmax`, `SwapState`; `src/pack/restmol.rs` (115) single-molecule pre-fit; grid installation is `src/context/grid.rs`
+- `src/pack/movebad.rs` (270) — escape moves + `flash1` sort
 - `src/handler.rs` (749) — `Handler` trait + `StageInfo`/`StepInfo`/`PhaseInfo`/`PhaseReport` + four built-ins (`XYZHandler` — `io`-gated, written by molrs's extended XYZ writer —, `ProgressHandler`, `LammpsLogHandler`, `EarlyStopHandler` — the Packmol-aligned stop `GenCanPack` installs by default)
-- `src/assemble.rs` (478) — topology-complete `molrs::store::Frame` assembly: per-target `Frame::replicate`, joined with `Frame::concat` (every canonical relation block); `src/template.rs` — template coordinates + the one rotatable-bond policy
+- `src/assemble.rs` — topology-complete `molrs::store::Frame` assembly: per-target `Frame::replicate`, joined with `Frame::concat` (every canonical relation block); owns the one molecule-ID numbering (`mol_ids`) and the coordinates-only frame (`coords_frame`) that `XYZHandler` snapshots reuse; `src/template.rs` — template coordinates + the one rotatable-bond policy
 - `src/euler.rs` (337) — Euler ↔ rotation matrix + derivatives (there is no separate validation module: the verdict is `State::fdist`/`frest`, and `RestraintsSatisfied` guards stages)
 - `src/error.rs` (207) — `PackError`, 17 variants
 - `src/optimizer/mod.rs` (373) + `torsion_mc.rs` (313) — in-loop optimizer seam (`OptimizeSelect`, `TorsionMcOptimizer`), always compiled
@@ -102,10 +102,10 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - `src/invariant.rs` — **guard leaf**; depends on `context` only (`PackState`).
 - `src/template.rs` — **pure leaf**; `std` + molrs `Frame` only. Bond graphs are `molrs::Topology`.
 - `src/context/` (including `grid` and `geometry`), `src/objective.rs`, `src/eval.rs`, `src/restraint/` — **shared bottom layer**. `PackContext::evaluate` is implemented in `objective`. There is no `constraints` module. `GeometryKey` lives in `geometry.rs`.
-- `src/error.rs` — wraps `grow_error::GrowError` and does not import `grow`. `validate_grow_cell` returns `GrowError`; entries map `PackError::Grow`.
-- `src/grow_error.rs`, `src/outcome.rs` — leaves. Lattice-only faults stay variants of `GrowError`.
-- `src/euler.rs`, `src/numerics.rs`, `src/random.rs`, `src/template.rs` — leaf utilities; `src/assemble.rs`, `src/handler.rs` — cross-cutting.
-- `src/optimizer/` — **optional add-on** (always compiled, opt-in via `with_optimizer`), reached only from `gencan/`.
+- `src/error.rs` — wraps `grow::GrowError` (`src/grow/error.rs`). `validate_grow_cell` returns `GrowError`; entries map `PackError::Grow`.
+- `src/grow/error.rs`, `src/outcome.rs` — leaves. Lattice-only faults stay variants of `GrowError`.
+- `src/euler.rs`, `src/random.rs`, `src/template.rs` — leaf utilities (`euler` and `random` kept for Packmol bit parity, ruling 10); `src/assemble.rs`, `src/handler.rs` — cross-cutting.
+- `src/optimizer/` — **optional add-on** (always compiled, opt-in via `with_optimizer`), reached only from `pack/gencan/`.
 - `src/bin/molpack/` — **CLI front end** (`cli`).
 - `python/src/` — **binding layer**. `PyState` wraps crate `State`; `with_restart` is bound on `PyGenCanPack` only.
 

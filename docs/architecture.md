@@ -254,7 +254,7 @@ fn run(state, targets, budget, handlers):
 
 The preamble — box/grid install, seed injection, the `initial()`-vs-push-off
 choice — and the phase loop both live in `GenCanStage::run`
-(`src/gencan/solver.rs`); nothing above the stage boundary decides when
+(`src/pack/gencan/solver.rs`); nothing above the stage boundary decides when
 `initial()` (and the `movebad` heuristic it configures) runs. `CbmcGrow`'s
 `GrowStage` (`src/grow/driver.rs`) is a peer stage under the same lifecycle,
 with the phase loop above replaced by its own growth round loop.
@@ -434,8 +434,8 @@ atoms into their regions before pair conflicts matter.
 | Where is the per-atom CSR pool built? | `context/build.rs::build_context` (CSR build loop) |
 | How are `x` ↔ Cartesian coords expanded? | `objective.rs::expand_molecules`, `euler.rs::eulerrmat` |
 | Where is the pair-overlap kernel? | `objective.rs::accumulate_pair_fg_parallel` |
-| What does the initial pre-fit do? | `initial.rs::initial`, `restmol.rs::restmol` |
-| How is precision-based termination tested? | `gencan/mod.rs::packmolprecision` |
-| What does `movebad` do? | `movebad.rs::movebad` |
+| What does the initial pre-fit do? | `pack/initial.rs::initial`, `pack/restmol.rs::restmol` |
+| How is precision-based termination tested? | `pack/gencan/search.rs::converged` (Packmol's `packmolprecision`) |
+| What does `movebad` do? | `pack/movebad.rs::movebad` |
 | How is torsion MC wired in? | `optimizer/torsion_mc.rs::TorsionMcOptimizer::run`, called from `optimizer/mod.rs::run_optimizer_bindings` |
 | Where does periodic boundary wrap apply? | `context/pack_context.rs::pbc_distance` |

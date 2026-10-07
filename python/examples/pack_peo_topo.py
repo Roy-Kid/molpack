@@ -1,8 +1,8 @@
 """Topological PEO: 4-arm star and macrocycle, then pack.
 
 Chemistry is molrs (SMILES + conformer, including hydrogens). Architecture
-is molpy: CGsmiles topologies grown by ``mp.Assembler`` with
-``mp.GrowthPlacer``. Packing is molpack. No hand-placed coordinates.
+is molpy: CGsmiles topologies grown by ``mp.builder.Assembler`` with
+``mp.builder.GrowthPlacer``. Packing is molpack. No hand-placed coordinates.
 
 A 4-arm star needs a tetrafunctional core. An EO unit only has two ports,
 so the core is ``X4`` (``C(C[>])(C[>])(C[>])C[>]``, pentaerythritol-like)
@@ -30,7 +30,6 @@ from pathlib import Path
 import molpy as mp
 import molrs
 import numpy as np
-from molpy.conformer import Conformer
 from molrs.system import Atomistic
 
 import molpack
@@ -49,13 +48,15 @@ CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
 def _unit(name: str, body: str, seed: int) -> mp.Atomistic:
     """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
     template = molrs.io.SmilesIR.from_fragment(body).to_template()
-    return Conformer(seed=seed).generate(template)[0]
+    return mp.Conformer(seed=seed).generate(template)[0]
 
 
 def _grow(topology: str, library: dict[str, mp.Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
-    sites = mp.CGSmilesIR(topology).to_coarsegrain()
-    return mp.Assembler(library, mp.GrowthPlacer()).assemble(sites, mp.Atomistic)
+    sites = mp.io.CGSmilesIR(topology).to_coarsegrain()
+    return mp.builder.Assembler(library, mp.builder.GrowthPlacer()).assemble(
+        sites, mp.Atomistic
+    )
 
 
 def linear_topology(n: int) -> str:
@@ -234,7 +235,7 @@ def main(argv: list[str] | None = None) -> None:
         )
     stem = f"pack_peo_topo_{kind}"
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec(str(OUT / f"{stem}.mrec"), packed)
+    molrs.io.mrec.write(str(OUT / f"{stem}.mrec"), packed)
     molrs.io.write_lammps_trajectory(
         str(OUT / f"{stem}.lammpstrj"),
         [packed],

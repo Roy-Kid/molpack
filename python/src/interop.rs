@@ -11,7 +11,8 @@
 //! always-on `molcrafts-molrs` core, whose `Frame` / `Block` / `SimBox` layout
 //! is feature-independent. So a handle minted by molrs-python (built with the
 //! `full` feature set) and the `molrs::store::Frame` it lends are layout-identical to
-//! what molpack (built `ff`-only) sees across the extension boundary.
+//! what molpack (built on molrs's always-on core alone) sees across the
+//! extension boundary.
 //!
 //! The version contract is **minor-line = ABI version** (`molrs_ffi::abi`):
 //! layout is frozen within a molrs minor line (enforced by molrs-ffi's layout

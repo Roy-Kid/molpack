@@ -73,7 +73,7 @@ def main() -> None:
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec(str(OUT / "pack_solvprotein.mrec"), packed)
+    molrs.io.mrec.write(str(OUT / "pack_solvprotein.mrec"), packed)
     molrs.io.write_lammps_trajectory(
         str(OUT / "pack_solvprotein.lammpstrj"),
         [packed],
