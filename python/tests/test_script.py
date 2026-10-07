@@ -24,9 +24,9 @@ end structure
 
 
 def _write_inputs(tmp_path: pathlib.Path) -> pathlib.Path:
-    (tmp_path / "water.xyz").write_text(WATER_XYZ)
+    (tmp_path / "water.xyz").write_text(WATER_XYZ, encoding="utf-8")
     script = tmp_path / "mix.inp"
-    script.write_text(SCRIPT)
+    script.write_text(SCRIPT, encoding="utf-8")
     return script
 
 
