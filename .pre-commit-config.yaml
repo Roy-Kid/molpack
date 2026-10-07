@@ -6,9 +6,9 @@
 #   pre-push    the commit hooks on --all-files (ci.yml lint runs them that
 #               way), the partner pins, the locks, the docs build, and the
 #               gates that compile -- clippy, ty, rust tests, tox -- in CI's
-#               sibling layout with molrs and molpy at the commits
+#               sibling layout with molrs at the commit
 #               .github/partners.env pins (scripts/partners.py run), never
-#               the developer's ../molrs or ../molpy.
+#               the developer's ../molrs.
 #
 # Compiling gates go through scripts/hook-run.sh, which hands them to
 # $MOLCRAFTS_HOOK_RUNNER (a compute node on the MolCrafts cluster) when set and
@@ -68,7 +68,7 @@ repos:
         always_run: true
         stages: [pre-push]
 
-      # The three lock files record the pinned molrs/molpy versions; every
+      # The three lock files record the pinned molrs version; every
       # cargo and uv call below is --locked, so a stale one fails here first.
       - id: locks
         name: Cargo.lock + python/Cargo.lock + python/uv.lock current (ci.yml lint)

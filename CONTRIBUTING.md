@@ -22,14 +22,14 @@ workspace/
 The root `Cargo.toml` uses a path dependency on `../molrs/molrs`. With the
 sibling layout above everything resolves automatically.
 
-**Version pins:** a local build uses the sibling checkouts (`../molrs`, and
-`../molpy` for the Python tests). The version fields name the **0.16.***
-minor line (see `Cargo.toml` and `python/pyproject.toml`). CI, and the
-pre-push hooks, build against `MolCrafts/molrs` and `MolCrafts/molpy` at the
-commits `.github/partners.env` pins, in a layout of their own -- not your
-siblings. `Cargo.lock`, `python/Cargo.lock` and `python/uv.lock` are committed
-and every cargo / uv call in the gates is `--locked`; bumping a pin means
-relocking in the same commit (the recipe is in `.github/partners.env`).
+**Version pins:** a local build uses the sibling checkout `../molrs`. The
+version fields name the **0.16.*** minor line (see `Cargo.toml` and
+`python/pyproject.toml`). CI, and the pre-push hooks, build against
+`MolCrafts/molrs` at the commit `.github/partners.env` pins, in a layout of
+their own -- not your sibling. `Cargo.lock`, `python/Cargo.lock` and
+`python/uv.lock` are committed and every cargo / uv call in the gates is
+`--locked`; bumping a pin means relocking in the same commit (the recipe is in
+`.github/partners.env`).
 The Python wheel checks this on ``import molpack`` — a molrs minor mismatch is an
 ``ImportError``, not a later FFI segfault.
 
@@ -82,15 +82,15 @@ command in `.github/workflows/ci.yml` has a hook. **Never `git commit
 - **pre-push**:
   - the pre-commit hooks again on `--all-files` (CI `lint` runs them so);
   - `scripts/partners.py check` — every pin in `.github/partners.env` exists
-    on its remote, every path dependency (`../molrs`, `../../molpy`, ...)
+    on its remote, every path dependency (`../molrs`, `../../molrs`, ...)
     lands in a checkout CI makes, and no workflow spells a partner ref of its
     own;
-  - the three lock files are current against the pinned molrs/molpy;
+  - the three lock files are current against the pinned molrs;
   - the docs build (`zensical build --clean --strict` from the `doc` group)
     when docs/ or zensical.toml changed;
   - clippy (`--all-targets --all-features -D warnings`), ty, the rust tests
     and tox -- each in CI's sibling layout (`scripts/partners.py run`: a copy
-    of this tree next to molrs and molpy at their pinned commits), `--locked`,
+    of this tree next to molrs at its pinned commit), `--locked`,
     on the toolchain `rust-toolchain.toml` pins (1.99.0, the same as molrs)
     and Python 3.12.
 - **Dispatch on the MolCrafts cluster:** the compiling gates go through

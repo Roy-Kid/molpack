@@ -8,8 +8,8 @@ on:
   workflow_call:
   workflow_dispatch:
 
-# MolCrafts/molrs and MolCrafts/molpy are checked out next to molpack at the
-# commits .github/partners.env pins -- the one place those pins live; the
+# MolCrafts/molrs is checked out next to molpack at the commit
+# .github/partners.env pins -- the one place that pin lives; the
 # publish workflows and the pre-push hooks (scripts/partners.py) read the same
 # file. Every command here has a hook in .pre-commit-config.yaml.
 env:
@@ -34,12 +34,6 @@ jobs:
           repository: ${{ env.MOLRS_REPOSITORY }}
           ref: ${{ env.MOLRS_REF }}
           path: molrs
-      # `ty check` walks examples/, which import molpy (typecheck group).
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ env.MOLPY_REPOSITORY }}
-          ref: ${{ env.MOLPY_REF }}
-          path: molpy
       # The toolchain molpack/rust-toolchain.toml pins.
       - run: rustup toolchain install
         working-directory: molpack
@@ -119,11 +113,6 @@ jobs:
           repository: ${{ env.MOLRS_REPOSITORY }}
           ref: ${{ env.MOLRS_REF }}
           path: molrs
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ env.MOLPY_REPOSITORY }}
-          ref: ${{ env.MOLPY_REF }}
-          path: molpy
       - run: rustup toolchain install
         working-directory: molpack
       - uses: mozilla-actions/sccache-action@v0.0.9
@@ -156,11 +145,6 @@ jobs:
           repository: ${{ env.MOLRS_REPOSITORY }}
           ref: ${{ env.MOLRS_REF }}
           path: molrs
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ env.MOLPY_REPOSITORY }}
-          ref: ${{ env.MOLPY_REF }}
-          path: molpy
       - uses: astral-sh/setup-uv@v7
       - working-directory: molpack
         run: uv run --isolated --locked --python 3.12 --project python --only-group doc zensical build --clean --strict
