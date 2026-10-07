@@ -4,10 +4,11 @@
 #   pre-commit  file hygiene, ruff, rustfmt, no ignored tests: nothing
 #               compiles, so a commit never waits for a build (or for Slurm).
 #   pre-push    the commit hooks on --all-files (ci.yml lint runs them that
-#               way), the partner pins, the locks, the docs build, and the
+#               way), the partners, the locks, the docs build, and the
 #               gates that compile -- clippy, ty, rust tests, tox -- in CI's
 #               sibling layout with molrs at the commit
-#               .github/partners.env pins (scripts/partners.py run), never
+#               scripts/partners.py resolves (molrs's dev, or its branch
+#               named like this one; scripts/partners.py run), never
 #               the developer's ../molrs.
 #
 # Compiling gates go through scripts/hook-run.sh, which hands them to
@@ -61,14 +62,14 @@ repos:
         stages: [pre-push]
 
       - id: partners
-        name: partner pins exist; path deps resolve in CI (ci.yml lint)
+        name: partners resolve; path deps resolve in CI (ci.yml lint)
         entry: python3 scripts/partners.py check
         language: system
         pass_filenames: false
         always_run: true
         stages: [pre-push]
 
-      # The three lock files record the pinned molrs version; every
+      # The three lock files record the resolved molrs's metadata; every
       # cargo and uv call below is --locked, so a stale one fails here first.
       - id: locks
         name: Cargo.lock + python/Cargo.lock + python/uv.lock current (ci.yml lint)

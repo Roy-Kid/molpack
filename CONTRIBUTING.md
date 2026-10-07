@@ -25,11 +25,12 @@ sibling layout above everything resolves automatically.
 **Version pins:** a local build uses the sibling checkout `../molrs`. The
 version fields name the **0.16.*** minor line (see `Cargo.toml` and
 `python/pyproject.toml`). CI, and the pre-push hooks, build against
-`MolCrafts/molrs` at the commit `.github/partners.env` pins, in a layout of
-their own -- not your sibling. `Cargo.lock`, `python/Cargo.lock` and
-`python/uv.lock` are committed and every cargo / uv call in the gates is
-`--locked`; bumping a pin means relocking in the same commit (the recipe is in
-`.github/partners.env`).
+`MolCrafts/molrs` at the commit `scripts/partners.py` resolves (molrs's
+`dev`; see [Partners](#partners)), in a layout of their own -- not your
+sibling. `Cargo.lock`, `python/Cargo.lock` and `python/uv.lock` are committed
+and every cargo / uv call in the gates is `--locked`; they record molrs's
+package metadata, not a commit, so relock only when molrs's `dev` changes its
+version or dependencies (the recipe is in `.github/partners.env`).
 The Python wheel checks this on ``import molpack`` — a molrs minor mismatch is an
 ``ImportError``, not a later FFI segfault.
 
@@ -81,16 +82,16 @@ command in `.github/workflows/ci.yml` has a hook. **Never `git commit
   format + ruff (`python/`), rustfmt, and the no-ignored-tests guard.
 - **pre-push**:
   - the pre-commit hooks again on `--all-files` (CI `lint` runs them so);
-  - `scripts/partners.py check` — every pin in `.github/partners.env` exists
-    on its remote, every path dependency (`../molrs`, `../../molrs`, ...)
+  - `scripts/partners.py check` — every partner in `.github/partners.env`
+    resolves, every path dependency (`../molrs`, `../../molrs`, ...)
     lands in a checkout CI makes, and no workflow spells a partner ref of its
     own;
-  - the three lock files are current against the pinned molrs;
+  - the three lock files are current against the resolved molrs;
   - the docs build (`zensical build --clean --strict` from the `doc` group)
     when docs/ or zensical.toml changed;
   - clippy (`--all-targets --all-features -D warnings`), ty, the rust tests
     and tox -- each in CI's sibling layout (`scripts/partners.py run`: a copy
-    of this tree next to molrs at its pinned commit), `--locked`,
+    of this tree next to molrs at its resolved commit), `--locked`,
     on the toolchain `rust-toolchain.toml` pins (1.99.0, the same as molrs)
     and Python 3.12.
 - **Dispatch on the MolCrafts cluster:** the compiling gates go through
@@ -99,9 +100,36 @@ command in `.github/workflows/ci.yml` has a hook. **Never `git commit
   shared `core.hooksPath` sets it to `.build-alloc/hookrun`, which runs the
   command on a compute node (allocation `$USER-hooks`; it fails after 20
   minutes without a node, never passes) and sets `$MOLCRAFTS_PARTNER_CACHE` so
-  the pinned checkouts and their `target/` stay warm between pushes.
+  the partner checkouts and their `target/` stay warm between pushes.
   Everything else runs in place, so a commit never waits for Slurm. Elsewhere
   nothing sets the variables: every hook runs locally, in a temp layout.
+
+## Partners
+
+On `dev`, partners are tracked, not pinned. `.github/partners.env` names
+molrs's branch (`MOLRS_REF=dev`), and `scripts/partners.py` resolves it -- for
+CI (`partners.py resolve`, appended to `$GITHUB_ENV`) and for the hooks
+(`partners.py run`) alike -- to the first of:
+
+1. molrs's branch named like the one being built (CI: the pushed branch or a
+   pull request's head branch; locally: the checked-out branch), when
+   MolCrafts/molrs has one;
+2. outside CI only, that branch in your sibling clone `../molrs`, when it has
+   one and the remote does not yet;
+3. molrs's `dev`.
+
+A change that needs a molrs change lands as two same-named branches, never by
+skipping a gate: create the same branch (say `converge/x`) in both checkouts;
+push molrs's first, then molpack's (its gates take molrs's branch from the
+remote, or from your sibling before it is pushed); open both pull requests
+into `dev` -- molpack's CI resolves molrs's `converge/x` -- and once both are
+green, land molrs's, then molpack's, and delete the branches.
+
+**Releasing.** A release builds against a fixed molrs: the release commit on
+`master` sets `MOLRS_REF` to the molrs release tag of the line `Cargo.toml`
+names (`vX.Y.Z`), relocks if that changes molrs's metadata, and is tagged;
+`publish-crate.yml` and `publish-pypi.yml` resolve that tag. When `master` is
+merged back into `dev`, keep `MOLRS_REF=dev` there.
 
 ## Code style
 

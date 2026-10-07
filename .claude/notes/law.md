@@ -366,22 +366,23 @@ language would fork the user base and the parser.
   keyword (engine-entry-split ruling).
 
 <!-- mol:law:id:molrs-pins-manual -->
-## P3. molrs path and version pins are managed manually
+## P3. molrs path, version and partner refs are managed manually
 
 **Principle.** The `../molrs/molrs` path dependency, its version line,
-and the partner commits in `.github/partners.env` (the molrs / molpy
-commits CI and the pre-push hooks build against) are edited by a human,
-deliberately. Hooks and CI verify them -- every pinned ref exists, every
-path dependency lands in a checkout CI makes, the lock files match -- and
-never change them (owner ruling 2026-10-06, replacing "never automate the
-pin check": an unverified pin is how CI went red on things no hook ran).
+and the partner refs in `.github/partners.env` are edited by a human,
+deliberately. On `dev` the ref is molrs's `dev` branch: partners are
+tracked, not pinned (owner ruling 2026-10-07). `scripts/partners.py`
+resolves it -- molrs's same-named branch first, so a coordinated change
+lands as same-named branches -- for CI and the hooks alike, and verifies
+it -- the ref resolves, every path dependency lands in a checkout CI
+makes, the lock files match. A release commit names a molrs tag.
 
 **Never**
 
 - Never let a hook or script rewrite `Cargo.toml` / `pyproject.toml` /
-  `.github/partners.env` pins.
-- Never check a partner out by branch name in CI or a hook; the commit
-  comes from `.github/partners.env`.
+  `.github/partners.env`.
+- Never check a partner out in CI or a hook other than through
+  `scripts/partners.py` (`resolve`, `run`).
 
 <!-- mol:law:id:local-gates-prek-tox -->
 ## P4. Local gates are prek + tox
@@ -390,8 +391,8 @@ pin check": an unverified pin is how CI went red on things no hook ran).
 isolation is tox from the `python/` `dev` dependency group. Gate commands
 are spelled in `.pre-commit-config.yaml` and `ci.yml`. `scripts/` holds the
 hook plumbing only: `hook-run.sh` (dispatch to a compute node on the
-MolCrafts cluster) and `partners.py` (CI's sibling layout at the pinned
-commits).
+MolCrafts cluster) and `partners.py` (CI's sibling layout at the resolved
+partner commits).
 
 **Never**
 
@@ -399,7 +400,7 @@ commits).
   into `scripts/`.
 - Never hand-write a local hook where a registry-hosted one exists
   (`doublify/pre-commit-rust`, `astral-sh/ruff`) -- unless the gate
-  compiles: those run through `scripts/hook-run.sh` in the pinned layout
+  compiles: those run through `scripts/hook-run.sh` in the partner layout
   (clippy), which a registry hook cannot.
 - Never `git commit --no-verify` / `git push --no-verify`.
 - Never run Python binding tests any way other than

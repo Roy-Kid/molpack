@@ -117,7 +117,7 @@ extra-paths = ["examples"]
 # Isolated binding tests — prek pre-push + CI call: `tox -c python -e py`
 # Non-editable only: sibling molrs path install + maturin wheel + pytest.
 # Requires ../../molrs on the 0.16.* minor line. The hooks and CI both run it
-# in a layout whose ../../molrs is the commit .github/partners.env pins.
+# in a layout whose ../../molrs is the commit scripts/partners.py resolves.
 # Both builds are --locked (MATURIN_PEP517_ARGS reaches the molrs wheel).
 [tool.tox]
 requires = ["tox>=4.23"]
