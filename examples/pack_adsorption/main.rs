@@ -40,7 +40,7 @@
 //!
 //! Run with:
 //! ```sh
-//! cargo run --release --example pack_adsorption
+//! cargo run --release --example pack_adsorption --features io
 //! ```
 //!
 //! | env var | effect |
@@ -58,12 +58,13 @@ mod analysis;
 mod geometry;
 
 use molpack::{
-    CenteringMode, F, GenCanPack, OptimizeSelect, PackEngine, ProgressHandler, RegionRestraint,
+    CenteringMode, GencanPack, OptimizeSelect, PackEngine, ProgressCallback, RegionRestraint,
     Target, TorsionMcOptimizer,
 };
+use molrs::op::F;
 use std::sync::Arc;
 
-use molrs::spatial::region::{Cuboid, HalfSpace, NotRegion};
+use molrs::core::{Cuboid, HalfSpace, NotRegion};
 use ndarray::array;
 
 // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
@@ -179,7 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         torsion.rotatable_bond_count()
     );
 
-    let mut packer = GenCanPack::new()
+    let mut packer = GencanPack::new()
         .with_tolerance(TOLERANCE)
         .with_seed(20_260_807)
         .with_periodic_box(
@@ -197,7 +198,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     if std::env::var_os("MOLPACK_ADSORPTION_PROGRESS").is_some() {
-        packer = packer.with_handler(Box::new(ProgressHandler::new()));
+        packer = packer.with_callback(Box::new(ProgressCallback::new()));
     }
 
     let targets = [substrate, chains, solvent];
@@ -264,34 +265,8 @@ fn report(result: &molpack::State, sticky: &[usize]) -> Result<(), Box<dyn std::
     }
 
     if let Some(path) = std::env::var_os("MOLPACK_ADSORPTION_XYZ") {
-        write_xyz(std::path::Path::new(&path), result)?;
+        molrs::io::write_xyz(&path, &result.frame)?;
         println!("\nwrote {}", std::path::Path::new(&path).display());
-    }
-    Ok(())
-}
-
-/// Minimal XYZ writer — keeps the example free of the `io` feature.
-fn write_xyz(
-    path: &std::path::Path,
-    result: &molpack::State,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::Write;
-
-    let positions = result.positions();
-    let atoms = result
-        .frame
-        .get("atoms")
-        .ok_or("result has no atoms block")?;
-    let elements = atoms
-        .get("element")
-        .and_then(molrs::store::block::Column::as_string);
-
-    let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
-    writeln!(out, "{}", positions.len())?;
-    writeln!(out, "molpack pack_adsorption")?;
-    for (i, p) in positions.iter().enumerate() {
-        let sym = elements.map(|c| c[[i]].as_str()).unwrap_or("X");
-        writeln!(out, "{sym} {:.4} {:.4} {:.4}", p[0], p[1], p[2])?;
     }
     Ok(())
 }

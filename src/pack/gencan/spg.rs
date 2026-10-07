@@ -1,9 +1,9 @@
 //! Spectral Projected Gradient line search.
 //! Port of `spgls` from `gencan.f`.
 
+use crate::Objective;
 use crate::eval::EvalMode;
-use crate::objective::Objective;
-use molrs::types::F;
+use molrs::op::F;
 
 /// Reusable buffers for SPG line search.
 ///

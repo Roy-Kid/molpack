@@ -1,12 +1,13 @@
 //! movebad heuristic and flashsort.
 //! Port of `heuristics.f90` and `flashsort.f90`.
 
-use crate::context::PackContext;
+use crate::Objective;
 use crate::eval::EvalMode;
 use crate::pack::gencan::GencanWorkspace;
 use crate::pack::restmol::restmol;
 use crate::random::uniform01;
-use molrs::types::F;
+use crate::system::PackSystem;
+use molrs::op::F;
 use rand::Rng;
 
 pub struct MoveBadConfig<'a> {
@@ -20,7 +21,7 @@ pub struct MoveBadConfig<'a> {
 /// Port of `movebad` from `heuristics.f90`.
 pub fn movebad(
     x: &mut [F],
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     precision: F,
     cfg: &MoveBadConfig<'_>,
     rng: &mut impl Rng,
@@ -82,10 +83,10 @@ pub fn movebad(
         }
 
         let frac = (nbad as F / nmols_itype as F).min(cfg.movefrac);
-        let nmove_base = (nmols_itype as F * frac) as isize;
+        let nmove_by_frac = (nmols_itype as F * frac) as isize;
         let nmove = usize::min(
             cfg.maxmove_per_type[itype],
-            isize::max(nmove_base, 1) as usize,
+            isize::max(nmove_by_frac, 1) as usize,
         );
 
         // Sort molecules by violation (flash1 — O(N) histogram sort)
@@ -99,16 +100,16 @@ pub fn movebad(
         //   if(comptype(i)) imol = imol + nmols(i)  [only for i < itype]
         // Only ACTIVE types contribute to the offset.
         // In Phase 1 (compact x, one type active), all earlier types are inactive
-        // so mol_base = 0 — the active type's molecules start at x[0].
-        // In the main loop (full x, all types active), mol_base = sum(nmols[0..itype]).
-        let mol_base: usize = {
-            let mut base = 0usize;
+        // so mol_offset = 0 — the active type's molecules start at x[0].
+        // In the main loop (full x, all types active), mol_offset = sum(nmols[0..itype]).
+        let mol_offset: usize = {
+            let mut offset = 0usize;
             for it in 0..itype {
                 if sys.comptype[it] {
-                    base += sys.nmols[it];
+                    offset += sys.nmols[it];
                 }
             }
-            base
+            offset
         };
 
         // Pre-collect (bad, good) molecule index pairs to avoid borrowing
@@ -123,10 +124,10 @@ pub fn movebad(
             .collect();
 
         for &(ibad_mol, igood_mol) in &move_pairs {
-            let ilubar_bad = (mol_base + ibad_mol) * 3;
-            let ilugan_bad = ntotmol * 3 + (mol_base + ibad_mol) * 3;
-            let ilubar_good = (mol_base + igood_mol) * 3;
-            let ilugan_good = ntotmol * 3 + (mol_base + igood_mol) * 3;
+            let ilubar_bad = (mol_offset + ibad_mol) * 3;
+            let ilugan_bad = ntotmol * 3 + (mol_offset + ibad_mol) * 3;
+            let ilubar_good = (mol_offset + igood_mol) * 3;
+            let ilugan_good = ntotmol * 3 + (mol_offset + igood_mol) * 3;
 
             let dmax = sys.dmax[itype];
             if cfg.movebadrandom {

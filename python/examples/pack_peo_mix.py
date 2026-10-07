@@ -1,6 +1,6 @@
 """Open-space mixed PEO: linear chains and 4-arm stars in one box.
 
-Two ``Target``s, one ``LatticeGrow.run``, then ``GenCanPack.with_restart``.
+Two ``Target``s, one ``LatticeGrow.run``, then ``GencanPack.with_restart``.
 The box is density-sized from the total mass of both species. Rings stay
 out of this scene — both growers raise ``RingTemplate``.
 
@@ -16,11 +16,9 @@ import sys
 import time
 from pathlib import Path
 
-import molpy as mp
 import molrs
 import numpy as np
-from molpy.conformer import Conformer
-from molrs import Atomistic
+from molrs.core import Atomistic
 
 import molpack
 
@@ -35,16 +33,18 @@ EO_UNIT = "[<]OCC[>]"  # -O-CH2-CH2-, ports on O (<) and C (>)
 CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
 
 
-def _unit(name: str, body: str, seed: int) -> mp.Atomistic:
+def _unit(name: str, body: str, seed: int) -> Atomistic:
     """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
-    template = molrs.io.SmilesIR.from_fragment(body).to_template()
-    return Conformer(seed=seed).generate(template)[0]
+    template = molrs.io.smiles.SmilesIr.from_fragment(body).to_template()
+    return molrs.conformer.Conformer(seed=seed).generate(template)[0]
 
 
-def _grow(topology: str, library: dict[str, mp.Atomistic]) -> Atomistic:
+def _grow(topology: str, library: dict[str, Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
-    sites = mp.CGSmilesIR(topology).to_coarsegrain()
-    return mp.Assembler(library, mp.GrowthPlacer()).assemble(sites, mp.Atomistic)
+    sites = molrs.io.cgsmiles.CgSmilesIr(topology).to_coarsegrain()
+    return molrs.builder.Assembler(library, molrs.builder.GrowthPlacer()).assemble(
+        sites, Atomistic
+    )
 
 
 def linear_topology(n: int) -> str:
@@ -113,18 +113,22 @@ def pack_mix(
         _target(linear, n_linear, "lin-PEO"),
         _target(star, n_star, "star-PEO"),
     ]
-    progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "0") != "0"
+    log_level = (
+        "progress"
+        if os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "0") != "0"
+        else "quiet"
+    )
     prior = molpack.TorsionPrior.three_state_from_c_inf(PEO_C_INF, TET)
     print(
         "  lattice      : LatticeGrow occupancy-guard @ 2.0 Å → "
-        "GenCanPack.with_restart @ 2.0 Å"
+        "GencanPack.with_restart @ 2.0 Å"
     )
     grown = (
         molpack.LatticeGrow(prior)
         .with_seed(seed)
         .with_tolerance(2.0)
         .with_density(density)
-        .with_progress(progress)
+        .with_log_level(log_level)
         .run(targets, max_loops=max(40, (n_linear + n_star) * 8))
     )
     print(
@@ -133,11 +137,11 @@ def pack_mix(
         f"intra scored {grown.intra.scored:.3f} Å"
     )
     pushed = (
-        molpack.GenCanPack()
+        molpack.GencanPack()
         .with_restart(grown)
         .with_seed(seed)
         .with_tolerance(2.0)
-        .with_progress(progress)
+        .with_log_level(log_level)
         .run(targets, max_loops=80)
     )
     print(f"  push-off     : converged={pushed.converged}  fdist={pushed.fdist:.4e}")
@@ -157,20 +161,20 @@ def main(argv: list[str] | None = None) -> None:
     packed = pack_mix(n, arm_length, n_linear, n_star, density, seed).frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.Box.from_bounds(
+        packed.box = molrs.core.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec(str(OUT / "pack_peo_mix.mrec"), packed)
-    molrs.io.write_lammps_trajectory(
+    molrs.io.write_mrec_frame(str(OUT / "pack_peo_mix.mrec"), packed)
+    molrs.io.write_lammps_dump_trajectory(
         str(OUT / "pack_peo_mix.lammpstrj"),
         [packed],
         columns=["id", "element", "mol", "x", "y", "z"],
     )
-    if "bonds" in packed and packed["bonds"].nrows:
+    if "bonds" in packed and packed["bonds"].n_rows:
         molrs.io.write_lammps_dump_local(str(OUT / "pack_peo_mix.dump.local"), [packed])
     print(f"  wall         : {time.perf_counter() - t0:.3f} s")
 

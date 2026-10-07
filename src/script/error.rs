@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::error::PackError;
+use crate::PackError;
 
 /// Errors produced by the script module — from parsing, file loading, or
 /// the downstream `pack()` call invoked by a script-driven run.
@@ -13,11 +13,12 @@ pub enum ScriptError {
     Parse { line: usize, message: String },
     /// An unrecognised keyword appeared where a known one was expected.
     /// Unlike a generic parse error, this carries the offending token and
-    /// the context block so error messages can suggest fixes.
+    /// the enclosing section (`top-level` or `structure block`) so error
+    /// messages can suggest fixes.
     UnknownKeyword {
         line: usize,
         keyword: String,
-        context: &'static str,
+        section: &'static str,
     },
     /// Script is missing a required `output` keyword.
     MissingOutput,
@@ -38,10 +39,10 @@ impl fmt::Display for ScriptError {
             Self::UnknownKeyword {
                 line,
                 keyword,
-                context,
+                section,
             } => write!(
                 f,
-                "line {line}: unknown keyword `{keyword}` in {context}. \
+                "line {line}: unknown keyword `{keyword}` in {section}. \
                  Silently dropping it risks wrong semantics (e.g. \
                  `pbc` that was ignored blew the cell grid); if this \
                  keyword should be accepted, add it to the parser",

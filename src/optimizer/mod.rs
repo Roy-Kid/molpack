@@ -1,23 +1,25 @@
 //! In-loop geometry optimizers driven by [`molrs::optimize::Optimizer`].
 //!
-//! Callers construct a molrs optimizer (`LBFGS`, or
-//! `SoftLbfgs::new(SoftSpec::from_frame(..), ..)` for the soft overlap +
-//! 1-2 / 1-3 objective — both need the `ff` feature — or molpack's
+//! Callers construct a molrs optimizer (`Lbfgs` over a force-field potential,
+//! e.g. `Lbfgs::new(Arc::new(SoftSpec::from_frame(..).potential(None)), ..)`
+//! for the soft overlap + 1-2 / 1-3 objective — both live in molrs's `ff`
+//! module, which the caller enables on its own molrs dependency — or molpack's
 //! [`TorsionMcOptimizer`]) and bind it with
-//! [`GenCanPack::with_optimizer`](crate::GenCanPack::with_optimizer) plus an
+//! [`GencanPack::with_optimizer`](crate::GencanPack::with_optimizer) plus an
 //! [`OptimizeSelect`] that names which components to assemble each call.
 
+use molrs::core::Frame;
+use molrs::core::Mic;
+use molrs::op::F;
 use molrs::optimize::{Optimizer, set_free_mask};
-use molrs::spatial::simbox::Mic;
-use molrs::store::frame::Frame;
-use molrs::types::F;
 
-use crate::context::PackContext;
+use crate::Objective;
 use crate::euler::eulerrmat;
 use crate::eval::EvalMode;
+use crate::system::PackSystem;
 use crate::target::centered_coords;
 
-pub mod torsion_mc;
+mod torsion_mc;
 pub use torsion_mc::TorsionMcOptimizer;
 
 /// How selected components are optimized.
@@ -29,7 +31,7 @@ pub enum OptimizeMode {
     Joint,
 }
 
-/// Which components to assemble into the Frame passed to [`Optimizer::run`].
+/// Which components to assemble into the Frame passed to [`Optimizer::minimize`].
 #[derive(Debug, Clone)]
 pub struct OptimizeSelect {
     pub names: Vec<String>,
@@ -65,8 +67,8 @@ impl OptimizeSelect {
     }
 }
 
-/// One bound optimizer + selection, stored on [`crate::GenCanPack`].
-pub struct OptimizerBinding {
+/// One bound optimizer + selection, stored on [`crate::GencanPack`].
+pub(crate) struct OptimizerBinding {
     pub select: OptimizeSelect,
     pub optimizer: Box<dyn Optimizer>,
 }
@@ -84,7 +86,7 @@ pub struct OptimizerBinding {
 /// stage's own configuration and must still be there on the next run, so a
 /// run may resolve them but never take them. Cloning is not the alternative
 /// — [`Optimizer`] is a trait object with no `Clone` bound.
-pub struct ResolvedBinding<'a> {
+pub(crate) struct ResolvedBinding<'a> {
     pub select: &'a OptimizeSelect,
     pub type_indices: Vec<usize>,
     pub optimizer: &'a mut dyn Optimizer,
@@ -130,7 +132,7 @@ pub(crate) fn resolve_bindings<'a>(
 
 /// Run all bound optimizers (all-type phase only for clean COM/Euler indexing).
 pub(crate) fn run_optimizer_bindings(
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     xwork: &[F],
     bindings: &mut [ResolvedBinding<'_>],
 ) {
@@ -215,7 +217,7 @@ struct CopySpan {
 
 #[allow(clippy::too_many_arguments)]
 fn optimize_group(
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     xwork: &[F],
     xcart_snapshot: &[[F; 3]],
     mic: &Mic,
@@ -251,7 +253,7 @@ fn optimize_group(
         let _ = set_free_mask(&mut frame, &free);
     }
 
-    if optimizer.run(&mut frame).is_err() {
+    if optimizer.minimize(&mut frame).is_err() {
         return;
     }
 
@@ -340,7 +342,7 @@ fn environment_atoms(
 
 #[cfg(test)]
 mod tests {
-    use molrs::spatial::simbox::SimBox;
+    use molrs::core::SimBox;
     use ndarray::array;
 
     use super::*;
@@ -378,14 +380,18 @@ mod tests {
     struct FrameSizes(std::sync::Arc<std::sync::Mutex<Vec<usize>>>);
 
     impl Optimizer for FrameSizes {
-        fn run(&mut self, frame: &mut Frame) -> Result<molrs::optimize::OptReport, String> {
+        fn minimize(
+            &mut self,
+            frame: &mut Frame,
+        ) -> Result<molrs::optimize::OptimizationReport, String> {
             let n = frame.coords().map_err(|e| e.to_string())?.nrows();
             self.0.lock().unwrap().push(n);
-            Ok(molrs::optimize::OptReport {
+            Ok(molrs::optimize::OptimizationReport {
                 converged: true,
                 n_steps: 0,
                 final_energy: 0.0,
                 final_fmax: 0.0,
+                final_grad_rms: 0.0,
             })
         }
     }
@@ -395,9 +401,9 @@ mod tests {
     /// one optimizer bound to `select`. Returns the atom count of every frame
     /// the optimizer saw.
     fn frame_sizes(select: OptimizeSelect) -> Vec<usize> {
-        use crate::{GenCanPack, PackEngine, Target};
+        use crate::{GencanPack, PackEngine, Target};
 
-        let cube = || crate::testutil::inside_box([0.0; 3], [4.0; 3]);
+        let cube = || crate::test_fixtures::inside_box([0.0; 3], [4.0; 3]);
         let a = Target::from_coords(&[[0.0; 3]], &[1.0], 8)
             .with_name("a")
             .with_restraint(cube());
@@ -405,7 +411,7 @@ mod tests {
             .with_name("b")
             .with_restraint(cube());
         let sizes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        GenCanPack::new()
+        GencanPack::new()
             .with_tolerance(2.0)
             .with_seed(7)
             .with_optimizer(select, FrameSizes(std::sync::Arc::clone(&sizes)))
@@ -444,23 +450,26 @@ mod tests {
     /// molrs's soft-overlap L-BFGS bound jointly over two species, in a box
     /// crowded enough that the all-type phase iterates: it is called, the
     /// non-harm gate keeps it from worsening the pack, and the pack converges.
-    #[cfg(feature = "ff")]
     #[test]
     fn joint_soft_lbfgs_over_two_species_converges() {
-        use molrs::optimize::{SoftLbfgs, SoftSpec};
+        use molrs::ff::potential::soft::SoftSpec;
+        use molrs::optimize::{Lbfgs, LbfgsSettings};
 
-        use crate::{GenCanPack, PackEngine, Target};
+        use crate::{GencanPack, PackEngine, Target};
 
         /// Counts the calls it forwards to the wrapped optimizer.
-        struct Counted(SoftLbfgs, std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        struct Counted(Lbfgs, std::sync::Arc<std::sync::atomic::AtomicUsize>);
         impl Optimizer for Counted {
-            fn run(&mut self, frame: &mut Frame) -> Result<molrs::optimize::OptReport, String> {
+            fn minimize(
+                &mut self,
+                frame: &mut Frame,
+            ) -> Result<molrs::optimize::OptimizationReport, String> {
                 self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                self.0.run(frame)
+                self.0.minimize(frame)
             }
         }
 
-        let cube = || crate::testutil::inside_box([0.0; 3], [10.0; 3]);
+        let cube = || crate::test_fixtures::inside_box([0.0; 3], [10.0; 3]);
         let ion = Target::from_coords(&[[0.0; 3]], &[1.0], 30)
             .with_name("ion")
             .with_restraint(cube());
@@ -468,9 +477,15 @@ mod tests {
             .with_name("water")
             .with_restraint(cube());
         // A coordinates-only group has no bonds: a pure soft-overlap push.
-        let soft = SoftLbfgs::new(SoftSpec::from_frame(&Frame::new()), 0.05, 200, 0.2, 8);
+        let soft = Lbfgs::new(
+            std::sync::Arc::new(SoftSpec::from_frame(&Frame::new()).potential(None)),
+            LbfgsSettings {
+                max_steps: 200,
+                ..LbfgsSettings::DEFAULT
+            },
+        );
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let state = GenCanPack::new()
+        let state = GencanPack::new()
             .with_tolerance(2.0)
             .with_precision(1e-2)
             .with_seed(7)

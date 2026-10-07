@@ -1,6 +1,6 @@
 # Extending the Crate
 
-Tutorials for writing your own `AtomRestraint` / `Region` / `Handler` types,
+Tutorials for writing your own `AtomRestraint` / `Region` / `Callback` types,
 plus the in-loop optimizer seam and the `Stage` seam every packing algorithm
 implements. Every extension trait in this crate follows the same shape
 (direction-3 rule — see [`concepts`](crate::concepts)):
@@ -17,7 +17,7 @@ well.
 ### Step 1 — define the struct
 
 ```rust
-use molrs::types::F;
+use molrs::op::F;
 # use molpack::AtomRestraint;
 
 #[derive(Debug, Clone, Copy)]
@@ -41,7 +41,7 @@ pub struct PlaneTether {
 ### Step 2 — implement `AtomRestraint`
 
 ```rust
-# use molrs::types::F;
+# use molrs::op::F;
 # use molpack::AtomRestraint;
 # #[derive(Debug)]
 # pub struct PlaneTether { pub normal: [F; 3], pub offset: F, pub k: F }
@@ -80,7 +80,7 @@ Three contracts that all restraints must obey:
 ### Step 3 — write a gradient test
 
 ```no_run
-# use molrs::types::F;
+# use molrs::op::F;
 # use molpack::AtomRestraint;
 # #[derive(Debug)] pub struct PlaneTether { pub normal: [F; 3], pub offset: F, pub k: F }
 # impl AtomRestraint for PlaneTether {
@@ -112,7 +112,7 @@ kinks).
 ### Step 4 — use it
 
 ```no_run
-# use molrs::types::F;
+# use molrs::op::F;
 # use molpack::AtomRestraint;
 # #[derive(Debug, Clone, Copy)] pub struct PlaneTether { pub normal: [F; 3], pub offset: F, pub k: F }
 # impl AtomRestraint for PlaneTether {
@@ -121,7 +121,7 @@ kinks).
 # }
 use std::sync::Arc;
 use molpack::{RegionRestraint, Target};
-use molrs::spatial::region::Cuboid;
+use molrs::core::Cuboid;
 use ndarray::array;
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 
@@ -188,13 +188,13 @@ copy), and pack.
 ## Custom `Region`
 
 A region is molrs vocabulary: implement
-[`molrs::spatial::region::Region`] and lift it with
+[`molrs::core::Region`] and lift it with
 [`RegionRestraint`](crate::RegionRestraint). Goal: a conical region with
 apex at origin, axis along +z, half-angle 30°.
 
 ```rust
-use molrs::spatial::region::Region;
-use molrs::types::{F, FNx3};
+use molrs::core::Region;
+use molrs::op::{F, Fnx3};
 use ndarray::Array2;
 
 #[derive(Debug, Clone, Copy)]
@@ -205,7 +205,7 @@ pub struct Cone {
 }
 
 impl Region for Cone {
-    fn bounds(&self) -> FNx3 {
+    fn bounds(&self) -> Fnx3 {
         // Unbounded along the axis; ±∞ is the honest answer.
         let mut b = Array2::zeros((3, 2));
         for d in 0..3 {
@@ -234,18 +234,18 @@ impl Region for Cone {
 ### Compose with built-ins
 
 ```no_run
-# use molrs::spatial::region::Region;
-# use molrs::types::{F, FNx3};
+# use molrs::core::Region;
+# use molrs::op::{F, Fnx3};
 # use ndarray::Array2;
 # #[derive(Debug, Clone, Copy)]
 # pub struct Cone { pub apex: [F; 3], pub axis: [F; 3], pub half_angle_cos: F }
 # impl Region for Cone {
-#     fn bounds(&self) -> FNx3 { Array2::zeros((3, 2)) }
+#     fn bounds(&self) -> Fnx3 { Array2::zeros((3, 2)) }
 #     fn distance(&self, _x: &[F; 3]) -> F { 0.0 }
 # }
 use std::sync::Arc;
 use molpack::{RegionRestraint, Target};
-use molrs::spatial::region::{AndRegion, Sphere};
+use molrs::core::{AndRegion, Sphere};
 use ndarray::array;
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 
@@ -270,13 +270,13 @@ across the wheel boundary.
 For hot-path use, override `distance_grad` analytically. The cone above:
 
 ```rust
-# use molrs::spatial::region::Region;
-# use molrs::types::{F, FNx3};
+# use molrs::core::Region;
+# use molrs::op::{F, Fnx3};
 # use ndarray::Array2;
 # #[derive(Debug, Clone, Copy)]
 # pub struct Cone { pub apex: [F; 3], pub axis: [F; 3], pub half_angle_cos: F }
 # impl Region for Cone {
-#     fn bounds(&self) -> FNx3 { Array2::zeros((3, 2)) }
+#     fn bounds(&self) -> Fnx3 { Array2::zeros((3, 2)) }
 #     fn distance(&self, _x: &[F; 3]) -> F { 0.0 }
 fn distance_grad(&self, x: &[F; 3]) -> [F; 3] {
     let dx = x[0] - self.apex[0];
@@ -300,19 +300,20 @@ fn distance_grad(&self, x: &[F; 3]) -> [F; 3] {
 Then finite-difference check it — same pattern as the `AtomRestraint`
 test.
 
-## Custom `Handler`
+## Custom `Callback`
 
-Goal: a handler that writes a CSV row per step so you can plot the
+Goal: a callback that writes a CSV row per step so you can plot the
 objective evolution.
 
 ```no_run
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use molpack::{F, Handler, PackContext, StepInfo};
+use molpack::{Callback, PackSystem, StepReport};
+use molrs::op::F;
 
-pub struct CsvHandler { writer: BufWriter<File> }
+pub struct CsvCallback { writer: BufWriter<File> }
 
-impl CsvHandler {
+impl CsvCallback {
     pub fn new(path: &str) -> std::io::Result<Self> {
         let mut w = BufWriter::new(File::create(path)?);
         writeln!(w, "phase,loop_idx,fdist,frest,improvement_pct")?;
@@ -320,37 +321,37 @@ impl CsvHandler {
     }
 }
 
-impl Handler for CsvHandler {
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
+impl Callback for CsvCallback {
+    fn on_step(&mut self, step: &StepReport, _sys: &PackSystem) {
         let _ = writeln!(
             self.writer,
             "{},{},{},{},{}",
-            info.phase.phase,
-            info.loop_idx,
-            info.fdist,
-            info.frest,
-            info.improvement_pct,
+            step.phase.phase,
+            step.loop_idx,
+            step.fdist,
+            step.frest,
+            step.improvement_pct,
         );
     }
 }
 ```
 
-Handler notes:
+Callback notes:
 
 - **`on_step` is the only required method.** Everything else has a
   default no-op.
-- **`sys` is `&PackContext`, never `&mut`.** Handlers cannot mutate
+- **`sys` is `&PackSystem`, never `&mut`.** Callbacks cannot mutate
   packer state — bind an in-loop optimizer (next section) if you need to.
-- **Multiple handlers run in registration order.** Register your CSV
-  handler before `ProgressHandler` to get a row on every step,
+- **Multiple callbacks run in registration order.** Register your CSV
+  callback before `ProgressCallback` to get a row on every step,
   vice-versa otherwise.
 - **`should_stop` is polled every iteration.** Return `true` to break
   the outer loop early. Useful for time budgets or custom convergence
   criteria.
-- **Every step names its stage.** `info.stage` is a `StageInfo` — `index`,
+- **Every step names its stage.** `step.stage` is a `StageProgress` — `index`,
   `total`, `name` — identifying the packing algorithm that emitted the step
   (stages are the subject of the `Stage` section below). A run driven by one
-  engine entry has one stage, so it reports `index = 0` and `total = 1`. The
+  engine has one stage, so it reports `index = 0` and `total = 1`. The
   `on_stage_start` / `on_stage_end` hooks bracket a whole stage the way
   `on_phase_start` / `on_phase_end` bracket one GENCAN phase; both are
   no-op defaults, and a single-stage run calls neither.
@@ -371,7 +372,7 @@ worse. The seam is molrs's `Optimizer` trait — one method, which relaxes a
 
 ```text
 pub trait Optimizer: Send + Sync {
-    fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String>;
+    fn minimize(&mut self, frame: &mut Frame) -> Result<OptimizationReport, String>;
 }
 ```
 
@@ -380,12 +381,13 @@ Monte-Carlo sampling of rotations about a molecule's rotatable bonds.
 ("Metropolis Monte-Carlo" means propose a random move, then accept it with
 probability `min(1, exp(-ΔE / T))` — downhill moves always pass, uphill ones
 sometimes do, which is what lets the search escape a bad local shape.) molrs
-ships `LBFGS`, a force-field minimizer. Anything else implementing the trait
+ships `Lbfgs`, a force-field minimizer. Anything else implementing the trait
 drops into the same slot.
 
-The trait, its molpack implementation, and the `GenCanPack::with_optimizer`
+The trait, its molpack implementation, and the `GencanPack::with_optimizer`
 binder are always compiled. Binding a molrs force-field optimizer such as
-`LBFGS` needs molrs's `ff` module, which molpack's `ff` feature forwards.
+`Lbfgs` needs molrs's `ff` module: turn on `ff` in your own `molcrafts-molrs`
+dependency (molpack has no `ff` feature of its own).
 
 ![Flexible chains packed inside a spherical cavity](assets/images/paper-confinement-sphere.png)
 
@@ -393,8 +395,8 @@ Confinement like this is a molpack extension workflow, not a Packmol parity
 claim: an in-loop optimizer reshapes flexible chains while the packer places
 them, so one engine can fit them inside a cavity no rigid pose would clear.
 Two runnable programs drive `TorsionMcOptimizer` exactly this way —
-`cargo run --release --example pack_adsorption` and
-`cargo run --release --example pack_translocation`.
+`cargo run --release --example pack_adsorption --features io` and
+`cargo run --release --example pack_translocation --features io`.
 
 ### Step 1 — implement `Optimizer`
 
@@ -414,9 +416,9 @@ Two conventions the packer relies on:
   every atom is free.
 
 ```rust
-use molrs::Frame;
-use molrs::optimize::{OptReport, Optimizer};
-use molrs::types::{F, FNx3};
+use molrs::core::Frame;
+use molrs::optimize::{OptimizationReport, Optimizer};
+use molrs::op::{F, Fnx3};
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 
@@ -435,7 +437,7 @@ impl JiggleOptimizer {
 }
 
 /// Toy score (Å²): squared distance of the free atoms from the origin.
-fn score(coords: &FNx3, free: &[bool]) -> F {
+fn score(coords: &Fnx3, free: &[bool]) -> F {
     coords
         .rows()
         .into_iter()
@@ -446,7 +448,7 @@ fn score(coords: &FNx3, free: &[bool]) -> F {
 }
 
 impl Optimizer for JiggleOptimizer {
-    fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String> {
+    fn minimize(&mut self, frame: &mut Frame) -> Result<OptimizationReport, String> {
         let mut best = frame.coords().map_err(|e| e.to_string())?;
         let n = best.nrows();
         let free: Vec<bool> = match frame
@@ -486,11 +488,12 @@ impl Optimizer for JiggleOptimizer {
         }
 
         frame.set_coords(best.view()).map_err(|e| e.to_string())?;
-        Ok(OptReport {
+        Ok(OptimizationReport {
             converged: accepted > 0,
             n_steps: self.steps,
             final_energy: best_score,
             final_fmax: 0.0,
+            final_grad_rms: 0.0,
         })
     }
 }
@@ -498,7 +501,7 @@ impl Optimizer for JiggleOptimizer {
 
 ### Step 2 — bind it to a selection
 
-`GenCanPack::with_optimizer` takes two arguments: an `OptimizeSelect` saying
+`GencanPack::with_optimizer` takes two arguments: an `OptimizeSelect` saying
 which targets the optimizer sees and how, then the optimizer itself.
 `OptimizeSelect::per_copy(names)` hands over one copy at a time;
 `OptimizeSelect::joint(names)` hands over every copy of the named targets as a
@@ -507,16 +510,16 @@ atom within `rcut` ångström as frozen context, so a chain folds against its
 real neighbours rather than empty space.
 
 ```no_run
-# use molrs::{Frame, optimize::{OptReport, Optimizer}, types::F};
+# use molrs::{core::Frame, optimize::{OptimizationReport, Optimizer}, op::F};
 # struct JiggleOptimizer;
 # impl JiggleOptimizer { fn new(_: usize, _: F, _: u64) -> Self { Self } }
 # impl Optimizer for JiggleOptimizer {
-#     fn run(&mut self, _: &mut Frame) -> Result<OptReport, String> { unimplemented!() }
+#     fn minimize(&mut self, _: &mut Frame) -> Result<OptimizationReport, String> { unimplemented!() }
 # }
 # let targets: Vec<molpack::Target> = Vec::new();
-use molpack::{GenCanPack, OptimizeSelect, PackEngine};
+use molpack::{GencanPack, OptimizeSelect, PackEngine};
 
-let result = GenCanPack::new()
+let result = GencanPack::new()
     .with_tolerance(2.0)
     .with_optimizer(
         OptimizeSelect::per_copy(["chain"]).with_environment(8.0),
@@ -542,13 +545,13 @@ Optimizer notes:
 ## Custom `Stage` — a whole packing algorithm
 
 Everything above plugs into an algorithm that already exists: a restraint
-changes *what* the packer tries to satisfy, a handler watches it work, an
+changes *what* the packer tries to satisfy, a callback watches it work, an
 in-loop optimizer reshapes molecules while it runs. Replacing the algorithm
 itself — how molecules get from nothing to a non-overlapping arrangement — is
 what the `Stage` seam is for.
 
 A **stage** is one packing algorithm behind four methods. molpack ships three:
-`GenCanStage` (rigid-body descent on the shared objective), `GrowStage`
+`GencanStage` (rigid-body descent on the shared objective), `GrowStage`
 (configurational-bias chain growth) and `LatticeStage` (a self-avoiding walk on
 a diamond lattice). They are peers — no stage reaches into another stage's
 driver — and each is judged afterwards by the same objective, so none of them
@@ -560,7 +563,7 @@ pub trait Stage: Send {
     fn requires(&self) -> Requires;
     fn guarantees(&self) -> Guarantees;
     fn run(&mut self, state: &mut PackState, targets: &[Target],
-           budget: &Budget, handlers: &mut [Box<dyn Handler>])
+           budget: &Budget, callbacks: &mut [Box<dyn Callback>])
            -> Result<StageOutcome, PackError>;
 }
 ```
@@ -568,7 +571,7 @@ pub trait Stage: Send {
 Of the four arguments to `run`, `state` is the run's geometry — the subject of
 the next section — while `targets` are the molecule types the caller passed to
 the engine's `run`, `budget` is the caller's iteration allowance, and
-`handlers` are the observers to notify while you work.
+`callbacks` are the observers to notify while you work.
 
 `run` itself returns a `Result`, not a bare outcome: a stage that cannot do
 its job fails with a named [`PackError`](crate::PackError), never by
@@ -586,7 +589,7 @@ stages always return `Ok`.
 
 `run` takes a `&mut PackState`, which carries three things:
 
-- a [`PackContext`](crate::PackContext) — the run's mutable geometry: per-atom
+- a [`PackSystem`](crate::PackSystem) — the run's mutable geometry: per-atom
   radii, the restraint pool, the cell list, and `xcart`, the **lab-frame**
   coordinates, meaning where each atom actually sits in the packing cell;
 - a [`RigidView`](crate::RigidView) — the **rigid placement vector**: for every
@@ -597,12 +600,12 @@ stages always return `Ok`.
   `Placed::All` (every free molecule has a placement).
 
 Take the first two apart with `state.rigid_split_mut()`, which hands back
-`(&mut PackContext, &mut RigidView)` as two disjoint borrows.
+`(&mut PackSystem, &mut RigidView)` as two disjoint borrows.
 
-Two coordinate frames meet inside the context. `ctx.coor` holds each copy's
+Two coordinate frames meet inside the system. `sys.coor` holds each copy's
 **reference conformer** — its atoms measured from that copy's own centre of
 mass with no orientation applied, so it describes the molecule's shape and
-nothing else. `ctx.xcart` holds the lab-frame positions. The two are related by
+nothing else. `sys.xcart` holds the lab-frame positions. The two are related by
 `xcart = com + R(euler) · coor`, where `R(euler)` is the rotation matrix built
 from the three Euler angles.
 
@@ -634,10 +637,10 @@ A stage may be run **more than once** on an evolving state. The rule that falls
 out of that is short: the second `run` must have every capability the first
 had. The only thing a call may consume is scratch it created itself.
 
-The contract is not decorative. The rigid-body stage used to move its bound
-in-loop optimizers out of `self` on the first call; from the second call on it
-kept running, just *degraded* — with no error and no name for what it had lost.
-Borrow your configuration, do not take it.
+The contract is not decorative. A stage that moves its bound in-loop
+optimizers out of `self` on the first call keeps running from the second call
+on, just *degraded* — with no error and no name for what it lost. Borrow your
+configuration, do not take it.
 
 ### `StageOutcome` carries no verdict
 
@@ -647,17 +650,15 @@ convergence criterion, and how
 many times it had to relax a constructive guarantee (growth's hard-core
 softening rungs; always `0` on the rigid-body path, which relaxes nothing). The
 run's verdict — the largest inter-molecular overlap `fdist` and the largest
-restraint violation `frest` — is read off the context *after* `run` returns, by
+restraint violation `frest` — is read off the system *after* `run` returns, by
 the shared objective. That is the one-ruler rule: no algorithm reports its own
 score.
 
 ### A minimal stage
 
 ```rust
-use molpack::{
-    Budget, F, Guarantees, Handler, PackError, PackState, Placed, Requires, Stage, StageOutcome,
-    Target,
-};
+use molpack::{Budget, Guarantees, Callback, PackError, PackState, Placed, Requires, Stage, StageOutcome, Target};
+use molrs::op::F;
 
 /// Nudges every molecule by a fixed offset. Not useful — just the smallest
 /// thing that is still a stage.
@@ -686,10 +687,10 @@ impl Stage for ShakeStage {
         state: &mut PackState,
         _targets: &[Target],
         _budget: &Budget,
-        _handlers: &mut [Box<dyn Handler>],
+        _callbacks: &mut [Box<dyn Callback>],
     ) -> Result<StageOutcome, PackError> {
         // `self.step` is read, never taken — re-entrancy contract.
-        let (_ctx, x) = state.rigid_split_mut();
+        let (_sys, x) = state.rigid_split_mut();
         for i in 0..x.nmol() {
             let com = x.com(i);
             x.set_com(
@@ -710,42 +711,43 @@ impl Stage for ShakeStage {
 ### Wiring it into a run
 
 A stage does not run itself. The lifecycle around it — validation, restraint
-broadcast, context construction, handler bracketing, the lab-frame rebuild,
-frame assembly — lives in exactly one place: [`Pipeline`](crate::pipeline::Pipeline)'s
+broadcast, system construction, callback bracketing, the lab-frame rebuild,
+frame assembly — lives in exactly one place: [`Pipeline`](crate::Pipeline)'s
 [`run`](crate::PackEngine::run), reached through the
-[`PackEngine`](crate::PackEngine) trait. An **entry** is a type that plugs into
+[`PackEngine`](crate::PackEngine) trait. An **engine** is a type that plugs into
 that lifecycle by implementing [`StageFactory`](crate::StageFactory); its
-`stages` method is the one thing an entry must supply: the stage(s) it drives,
-built from the run's resolved [`EngineSetup`](crate::pipeline::EngineSetup).
+`stages` method is the one thing an engine must supply: the stage(s) it drives,
+built from the run's resolved [`EngineSetup`](crate::EngineSetup).
 `PackEngine` then adds the shared `with_*` builders plus a one-line `run` that
-hands the entry to the lifecycle as its sole stage source
+hands the engine to the lifecycle as its sole stage source
 (`Pipeline::single(self).run(targets, max_loops)`) — the same code path a
 hand-composed pipeline runs, not a second implementation to keep in step.
 
 ```rust
-# struct ShakeStage { step: [molpack::F; 3] }
+# struct ShakeStage { step: [molrs::op::F; 3] }
 # impl molpack::Stage for ShakeStage {
 #     fn name(&self) -> &'static str { "shake" }
 #     fn requires(&self) -> molpack::Requires { molpack::Requires::new(molpack::Placed::All) }
 #     fn guarantees(&self) -> molpack::Guarantees { molpack::Guarantees::new(molpack::Placed::All) }
 #     fn run(&mut self, _state: &mut molpack::PackState, _targets: &[molpack::Target],
-#            _budget: &molpack::Budget, _handlers: &mut [Box<dyn molpack::Handler>])
+#            _budget: &molpack::Budget, _callbacks: &mut [Box<dyn molpack::Callback>])
 #            -> Result<molpack::StageOutcome, molpack::PackError> {
 #         Ok(molpack::StageOutcome::new(true, 0))
 #     }
 # }
-use molpack::pipeline::EngineSetup;
-use molpack::{F, Handler, PackEngine, PackError, PackSettings, Pipeline, Stage, StageFactory};
+use molpack::EngineSetup;
+use molpack::{Callback, PackEngine, PackError, PackSettings, Pipeline, Stage, StageFactory};
+use molrs::op::F;
 
 pub struct ShakePack {
     settings: PackSettings,
-    handlers: Vec<Box<dyn Handler>>,
+    callbacks: Vec<Box<dyn Callback>>,
     step: [F; 3],
 }
 
 impl ShakePack {
     pub fn new(step: [F; 3]) -> Self {
-        Self { settings: PackSettings::default(), handlers: Vec::new(), step }
+        Self { settings: PackSettings::default(), callbacks: Vec::new(), step }
     }
 }
 
@@ -754,8 +756,8 @@ impl StageFactory for ShakePack {
         &self.settings
     }
 
-    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
-        std::mem::take(&mut self.handlers)
+    fn take_callbacks(&mut self) -> Vec<Box<dyn Callback>> {
+        std::mem::take(&mut self.callbacks)
     }
 
     /// The factory's single contribution: which stage(s) this run drives.
@@ -768,11 +770,11 @@ impl PackEngine for ShakePack {
     fn settings_mut(&mut self) -> &mut PackSettings {
         &mut self.settings
     }
-    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>> {
-        &mut self.handlers
+    fn callbacks_mut(&mut self) -> &mut Vec<Box<dyn Callback>> {
+        &mut self.callbacks
     }
 
-    /// One line: hand the entry to the crate's one lifecycle body as its
+    /// One line: hand the engine to the crate's one lifecycle body as its
     /// sole stage source — every preset writes exactly this.
     fn run(
         self,
@@ -784,11 +786,11 @@ impl PackEngine for ShakePack {
 }
 ```
 
-`ShakePack` now has every shared builder (`with_seed`, `with_tolerance`,
-`with_handler`, `with_global_restraint`, …) and the terminal
-`run(&targets, max_loops)`, exactly like `GenCanPack`, because all of them are
+`ShakePack` has every shared builder (`with_seed`, `with_tolerance`,
+`with_callback`, `with_global_restraint`, …) and the terminal
+`run(&targets, max_loops)`, exactly like `GencanPack`, because all of them are
 provided methods on `PackEngine`. `EngineSetup` (the resolved targets, cell and
-context shape) is the one thing `stages` reads to build its stage(s) from —
+system shape) is the one thing `stages` reads to build its stage(s) from —
 there is no separate hook for pre-loading a placement vector before a stage
 runs. Instead, each stage's own `run` does that as its own prelude: the
 shipped GENCAN stage installs its grid, and — only if it inherited a seed via
@@ -797,20 +799,20 @@ skip `initial()` and continue from what is already there.
 
 ### Composing stages
 
-A single-entry `run` is `Pipeline::single(self)` under the hood, so the same
-lifecycle also runs a hand-built sequence of stages directly, with no entry
-type of your own. [`Pipeline::new`](crate::pipeline::Pipeline::new) builds an
-empty pipeline; [`with_stage`](crate::pipeline::Pipeline::with_stage) appends
+A single-engine `run` is `Pipeline::single(self)` under the hood, so the same
+lifecycle also runs a hand-built sequence of stages directly, with no engine
+type of your own. [`Pipeline::new`](crate::Pipeline::new) builds an
+empty pipeline; [`with_stage`](crate::Pipeline::with_stage) appends
 one factory at a time — a chain grower feeding a rigid-body packer, for
 example:
 
 ```no_run
 use molpack::grow::TorsionPrior;
-use molpack::{CbmcGrow, GenCanPack, PackEngine, Pipeline, Target};
+use molpack::{CbmcGrow, GencanPack, PackEngine, Pipeline, Target};
 # let targets: Vec<Target> = Vec::new();
 let result = Pipeline::new()
     .with_stage(CbmcGrow::new(TorsionPrior::Uniform))
-    .with_stage(GenCanPack::new())
+    .with_stage(GencanPack::new())
     .with_seed(42)
     .with_periodic_box([0.0; 3], [30.0; 3], [true; 3])
     .run(&targets, 100)?;
@@ -818,7 +820,7 @@ let result = Pipeline::new()
 ```
 
 `with_stage` treats what a factory carries two ways, so nothing is silently
-dropped. Its **handlers are adopted** — appended to the pipeline's own set in
+dropped. Its **callbacks are adopted** — appended to the pipeline's own set in
 stage order, so they go on to observe every stage in the run, not just the one
 that carried them in. Its **shared settings are refused** the moment any knob
 is off its default (`PackError::PresetSettingsInsidePipeline`, naming the
@@ -826,7 +828,7 @@ offending knob) — tolerance, precision, seed and the cell are one ruler shared
 by the whole run, and two stages each bringing their own would leave the
 objective with no single ruler to read. That is why the example above sets
 `with_seed` and `with_periodic_box` on the `Pipeline` itself rather than on
-`CbmcGrow` or `GenCanPack`: those knobs belong to the run, never to one stage
+`CbmcGrow` or `GencanPack`: those knobs belong to the run, never to one stage
 inside it.
 
 ### Custom invariants and combinators
@@ -836,8 +838,8 @@ once. Two situations need more than that: repeating a body of stages until
 some condition is met, and refusing to accept a stage's exit until a property
 of the resulting state has been verified. molpack answers both with an
 [`Invariant`](crate::Invariant) trait plus two `Stage` combinators,
-[`Pipeline::with_repeat`](crate::pipeline::Pipeline::with_repeat) and
-[`Pipeline::with_guarded`](crate::pipeline::Pipeline::with_guarded).
+[`Pipeline::with_repeat`](crate::Pipeline::with_repeat) and
+[`Pipeline::with_guarded`](crate::Pipeline::with_guarded).
 
 An [`Invariant`](crate::Invariant) is a property of a
 [`PackState`](crate::PackState) a caller can demand — "restraints are
@@ -860,7 +862,7 @@ that computed its own second measure of "is this satisfied" would be exactly
 the mistake the one-ruler rule exists to catch, so reuse the objective's
 numbers rather than re-deriving them; molpack's own
 [`RestraintsSatisfied`](crate::RestraintsSatisfied) does this by comparing
-`state.ctx().frest` against a tolerance. `layer` names which rung of the
+`state.sys().frest` against a tolerance. `layer` names which rung of the
 repair-cost ladder ([`Layers`](crate::Layers), documented where it is
 consumed) a violation sits on — from a wrong bond graph that nothing
 downstream can repair, to bond lengths and angles a downstream force-field
@@ -893,22 +895,22 @@ impl Invariant for AlwaysSatisfied {
 
 Two combinators build on `Invariant`, and are themselves
 [`Stage`](crate::Stage)s — the pipeline needs no branch for either, because
-chain-checking, handler bracketing and the run's final verdict read them
-exactly as they read `GenCanPack`.
+chain-checking, callback bracketing and the run's final verdict read them
+exactly as they read `GencanPack`.
 
-- [`with_repeat(body, until)`](crate::pipeline::Pipeline::with_repeat) runs a
+- [`with_repeat(body, until)`](crate::Pipeline::with_repeat) runs a
   `Vec<Box<dyn StageFactory>>` body repeatedly:
   [`Until::Passes(n)`](crate::Until::Passes) stops after exactly `n` passes
   (`Passes(0)` contributes **no stage at all**, never a silently clamped
   single pass), and [`Until::Converged`](crate::Until::Converged)
   stops the first time a pass ends with the body's last stage reporting its
   own convergence — unbounded by construction, so a body that never converges
-  repeats until a handler asks the run to stop. Each pass *continues* from
+  repeats until a callback asks the run to stop. Each pass *continues* from
   where the last one left off, the same `Placed::All` continuation a seeded
   run uses, so `Repeat` around a chain-growth stage feeding a rigid-body one
   is a real "connect, then refine, then connect again" recipe rather than `n`
   independent packs.
-- [`with_guarded(stage, invariants, on_violation)`](crate::pipeline::Pipeline::with_guarded)
+- [`with_guarded(stage, invariants, on_violation)`](crate::Pipeline::with_guarded)
   runs `stage`, then checks every invariant against the state it left. On the
   first broken one, [`OnViolation`](crate::OnViolation) has exactly two
   answers, never a third: `Fail` returns
@@ -927,20 +929,20 @@ no such arm and never will.
 ```no_run
 use molpack::grow::TorsionPrior;
 use molpack::{
-    CbmcGrow, GenCanPack, Invariant, OnViolation, PackEngine, Pipeline, RestraintsSatisfied,
+    CbmcGrow, GencanPack, Invariant, OnViolation, PackEngine, Pipeline, RestraintsSatisfied,
     StageFactory, Target, Until,
 };
 # let targets: Vec<Target> = Vec::new();
 
 let body: Vec<Box<dyn StageFactory>> = vec![
     Box::new(CbmcGrow::new(TorsionPrior::Uniform)),
-    Box::new(GenCanPack::new()),
+    Box::new(GencanPack::new()),
 ];
 let invariants: Vec<Box<dyn Invariant>> = vec![Box::new(RestraintsSatisfied::new(1e-3))];
 
 let result = Pipeline::new()
     .with_repeat(body, Until::Converged)
-    .with_guarded(GenCanPack::new(), invariants, OnViolation::Rerun { max: 2 })
+    .with_guarded(GencanPack::new(), invariants, OnViolation::Rerun { max: 2 })
     .with_seed(42)
     .with_periodic_box([0.0; 3], [30.0; 3], [true; 3])
     .run(&targets, 100)?;
@@ -949,8 +951,8 @@ let result = Pipeline::new()
 
 Stage notes:
 
-- **Pick your own name.** `name()` is what every `StepInfo` a handler sees
-  carries in `info.stage.name`; keep it short and lowercase — the three
+- **Pick your own name.** `name()` is what every `StepReport` a callback sees
+  carries in `step.stage.name`; keep it short and lowercase — the three
   built-ins report `"gencan"`, `"growth"` and `"lattice"`.
 - **`targets` is the one source of chemistry.** They are the same objects the
   caller passed to `run`, so a stage never needs a second copy of the molecule
@@ -1008,10 +1010,10 @@ Rules:
   during per-type pre-compaction, you will see no effect there.
 - **`radscale` is phase-dependent.** Don't hard-code atomic radii —
   always go through `sys.radius[i]`. The crate-internal `evaluate_unscaled`
-  (`src/context/pack_state.rs`) temporarily swaps `radius` with `radius_ini`
+  (`src/system/pack_state.rs`) temporarily swaps `radius` with `radius_ini`
   so the numbers it reports are unscaled.
 - **PBC boxes must be valid.** Zero-length axis returns
-  `PackError::InvalidPBCBox`.
+  `PackError::InvalidPbcBox`.
 
 ## Contributing flow
 

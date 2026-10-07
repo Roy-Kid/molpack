@@ -52,12 +52,12 @@ cat mixture.inp | molpack
 | Addition | Description |
 |---|---|
 | `avoid_overlap <no\|false\|0>` | Disable the default fixed-solute initial-placement guard. Leave it on unless you need to reproduce a less guarded initialization. |
-| `filetype sdf` | Read SDF/MOL inputs. Read-only. |
-| `filetype lammps_dump` | Read LAMMPS dump inputs and write `.lammpstrj` outputs. |
-| `filetype lammps_data` | Read LAMMPS data inputs. Read-only. |
+| `filetype <format>` | Any format in [Formats](docs/cli/formats.md) (`sdf`, `mol2`, `gro`, `cif`, `lammps_data`, `lammps_dump`, …), named or by extension. |
 
-Unknown top-level keywords are rejected instead of ignored. Output format is
-inferred from the `output` extension.
+Unknown top-level keywords are rejected instead of ignored. Files are read and
+written through the molrs reader and writer of their format
+(`molpack::script::StructureFormat`); the output format is inferred from the
+`output` file name.
 
 ## Quick start
 
@@ -65,8 +65,8 @@ inferred from the `output` extension.
 
 ```rust
 use std::sync::Arc;
-use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
-use molrs::spatial::region::Cuboid;
+use molpack::{GencanPack, PackEngine, RegionRestraint, Target};
+use molrs::core::Cuboid;
 use ndarray::array;
 
 let positions = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
@@ -76,16 +76,16 @@ let target = Target::from_coords(&positions, &radii, 100)
     .with_name("water")
     .with_restraint(RegionRestraint(Arc::new(Cuboid::new(array![0.0, 0.0, 0.0], array![40.0, 40.0, 40.0]))));
 
-// You pick the algorithm by picking the entry: `GenCanPack` for rigid-body
+// You pick the algorithm by picking the engine: `GencanPack` for rigid-body
 // packing, `CbmcGrow` for chain growth. Both share the `PackEngine` builders
-// and the single terminal verb `run`, which consumes the entry — one engine,
+// and the single terminal verb `run`, which consumes the engine — one engine,
 // one run. Every tuning knob has a Packmol-matching default, so
-// `GenCanPack::new().run(...)` is a complete call; `200` is the outer-loop
+// `GencanPack::new().run(...)` is a complete call; `200` is the outer-loop
 // budget.
 //
-// `run` returns a `State`: the packed, topology-complete `molrs::Frame`
+// `run` returns a `State`: the packed, topology-complete `molrs::core::Frame`
 // in `.frame`, plus `fdist`, `frest`, `converged`, `degraded`.
-let result = GenCanPack::new().run(&[target], 200)?;
+let result = GencanPack::new().run(&[target], 200)?;
 let frame = result.frame;
 ```
 
@@ -93,16 +93,16 @@ let frame = result.frame;
 
 ```python
 import molrs
-from molpack import GenCanPack, Target
+from molpack import GencanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]))
 )
-result = GenCanPack().run([water], max_loops=200)
+result = GencanPack().run([water], max_loops=200)
 frame = result.frame
 ```
 
@@ -132,8 +132,8 @@ Behaviour is tested in `#[cfg(test)]` modules next to the code it belongs
 to — molpack has no `tests/` directory and no benchmark suite.
 
 ```bash
-cargo test --lib --features cli,ff       # the gate: in-module unit tests
-cargo test --doc --features cli,ff       # rustdoc examples
+cargo test --lib --features cli       # the gate: in-module unit tests
+cargo test --doc --features cli       # rustdoc examples
 cd python && maturin develop --release && pytest   # Python wheel
 ```
 

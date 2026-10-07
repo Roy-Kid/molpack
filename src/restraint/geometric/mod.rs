@@ -7,9 +7,19 @@
 //! [`surface`] holds the plane/cylinder families (kinds 10–13).
 //!
 //! Crate-private: these are the penalty kernels the `.inp` grammar lowers
-//! onto (`script::build`) and the Packmol-example harness (`cases`) builds
-//! directly. The public geometric restraint is `RegionRestraint` over a molrs
-//! region.
+//! onto (`script::build`). The public geometric restraint is
+//! `RegionRestraint` over a molrs region.
+//!
+//! # Why these are not molrs regions
+//!
+//! Kept as Packmol-faithful kernels on purpose (module-responsibility ruling
+//! 10): each body is the exact arithmetic of Packmol's `comprest` / `gwalls`
+//! kind, operation for operation, so an `.inp` script reproduces Packmol's
+//! penalty values — and therefore its packed coordinates — bit for bit. A
+//! molrs region's signed distance is a different (if equivalent) formula and
+//! would move those bits. Geometry questions that do not feed the penalty
+//! value — such as whether a plane repeats along a cell vector — are asked of
+//! molrs ([`HalfSpace`]).
 
 mod bounded;
 mod surface;
@@ -22,22 +32,14 @@ pub use surface::{
     AbovePlaneRestraint, BelowPlaneRestraint, InsideCylinderRestraint, OutsideCylinderRestraint,
 };
 
-use molrs::types::F;
+use molrs::core::{HalfSpace, Region};
+use molrs::op::F;
 
-/// Does the half-space with unit outward `normal` repeat along `shift`?
-///
-/// True exactly when the shift runs parallel to the plane, so translating by
-/// it moves no point across the boundary. The same test molrs's `HalfSpace`
-/// applies to itself — these crate-private `.inp` kernels predate the region
-/// lift and answer for themselves.
+/// Does the plane with normal `normal` repeat along `shift`? Asked of molrs's
+/// [`HalfSpace::repeats_along`]; a zero normal bounds nothing, so it repeats
+/// along every shift.
 pub(crate) fn plane_repeats_along(normal: [F; 3], shift: [F; 3]) -> bool {
-    let n2 = normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2];
-    let s2 = shift[0] * shift[0] + shift[1] * shift[1] + shift[2] * shift[2];
-    if n2 == 0.0 || s2 == 0.0 {
-        return true;
-    }
-    let crossing = normal[0] * shift[0] + normal[1] * shift[1] + normal[2] * shift[2];
-    crossing.abs() <= 1e-9 * (n2 * s2).sqrt()
+    HalfSpace::new(normal, [0.0; 3]).map_or(true, |plane| plane.repeats_along(shift))
 }
 
 #[cfg(test)]

@@ -23,15 +23,19 @@ def main() -> None:
     water_frame = molrs.io.read_pdb(str(DATA / "water.pdb"))
     urea_frame = molrs.io.read_pdb(str(DATA / "urea.pdb"))
 
-    box = molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
+    box = molrs.core.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])
 
     water = (
         molpack.Target(water_frame, count=1000).with_name("water").with_restraint(box)
     )
     urea = molpack.Target(urea_frame, count=400).with_name("urea").with_restraint(box)
 
-    show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
-    packer = molpack.GenCanPack().with_progress(show_progress)
+    log_level = (
+        "progress"
+        if os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
+        else "quiet"
+    )
+    packer = molpack.GencanPack().with_log_level(log_level)
 
     result = packer.run([water, urea], max_loops=400)
 
@@ -42,20 +46,20 @@ def main() -> None:
     packed = result.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.Box.from_bounds(
+        packed.box = molrs.core.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec(str(OUT / "pack_mixture.mrec"), packed)
-    molrs.io.write_lammps_trajectory(
+    molrs.io.write_mrec_frame(str(OUT / "pack_mixture.mrec"), packed)
+    molrs.io.write_lammps_dump_trajectory(
         str(OUT / "pack_mixture.lammpstrj"),
         [packed],
         columns=["id", "element", "mol", "x", "y", "z"],
     )
-    if "bonds" in packed and packed["bonds"].nrows:
+    if "bonds" in packed and packed["bonds"].n_rows:
         molrs.io.write_lammps_dump_local(str(OUT / "pack_mixture.dump.local"), [packed])
 
 

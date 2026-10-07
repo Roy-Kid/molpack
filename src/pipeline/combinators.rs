@@ -1,10 +1,10 @@
 //! Two ways to compose stages: repeat a body, or guard a stage's exit.
 //!
 //! **A combinator is a [`Stage`].** [`Pipeline`](super::Pipeline) needs no
-//! branch for either — chain check, handler bracket and verdict read them as
-//! they read `GenCanPack` — and each stays *one* stage to the run around it:
+//! branch for either — chain check, callback bracket and verdict read them as
+//! they read `GencanPack` — and each stays *one* stage to the run around it:
 //! `name()` is `"repeat"` or `"guarded"`, inner passes never touch the index
-//! and total the pipeline stamps on `StepInfo.stage`, and the inner stages
+//! and total the pipeline stamps on `StepReport.stage`, and the inner stages
 //! get no `on_stage_start` / `on_stage_end` of their own.
 //!
 //! What a combinator owes its body is the rest of `mod.rs`'s per-stage
@@ -21,13 +21,13 @@
 
 use std::sync::OnceLock;
 
-use crate::context::{PackState, Placed};
-use crate::entry::PackSettings;
-use crate::error::PackError;
-use crate::handler::Handler;
-use crate::invariant::Invariant;
+use crate::Callback;
+use crate::Invariant;
+use crate::PackError;
+use crate::PackSettings;
+use crate::Target;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
-use crate::target::Target;
+use crate::system::{PackState, Placed};
 
 use super::engine::{EngineSetup, StageFactory};
 
@@ -40,7 +40,7 @@ pub enum Until {
     Passes(usize),
     /// Until a pass ends with the body's last stage reporting its own
     /// convergence criterion met — unbounded by construction: a body that
-    /// never converges repeats until a handler stops the run.
+    /// never converges repeats until a callback stops the run.
     Converged,
 }
 
@@ -85,23 +85,23 @@ fn resolve(
 }
 
 /// Run `stages` once, in order, across the same boundary the pipeline puts
-/// in front of a stage. Reports whether a handler asked to stop, which a
+/// in front of a stage. Reports whether a callback asked to stop, which a
 /// combinator honours immediately.
 fn run_body(
     stages: &mut [Box<dyn Stage>],
     state: &mut PackState,
     targets: &[Target],
     budget: &Budget,
-    handlers: &mut [Box<dyn Handler>],
+    callbacks: &mut [Box<dyn Callback>],
 ) -> Result<(StageOutcome, bool), PackError> {
     let (mut converged, mut degraded) = (false, 0usize);
     for stage in stages.iter_mut() {
         state.invalidate_geometry_cache();
-        let outcome = stage.run(state, targets, budget, handlers)?;
+        let outcome = stage.run(state, targets, budget, callbacks)?;
         state.set_placed(stage.guarantees().placed);
         degraded += outcome.degraded;
         converged = outcome.converged;
-        if handlers.iter().any(|h| h.should_stop()) {
+        if callbacks.iter().any(|h| h.should_stop()) {
             return Ok((StageOutcome::new(false, degraded), true));
         }
     }
@@ -129,8 +129,8 @@ impl StageFactory for RepeatFactory {
     }
 
     /// Adopted, in body order, exactly as `with_stage` adopts a preset's.
-    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
-        let taken = self.body.iter_mut().map(|f| f.take_handlers());
+    fn take_callbacks(&mut self) -> Vec<Box<dyn Callback>> {
+        let taken = self.body.iter_mut().map(|f| f.take_callbacks());
         taken.flatten().collect()
     }
 
@@ -177,12 +177,12 @@ impl Stage for Repeat {
         state: &mut PackState,
         targets: &[Target],
         budget: &Budget,
-        handlers: &mut [Box<dyn Handler>],
+        callbacks: &mut [Box<dyn Callback>],
     ) -> Result<StageOutcome, PackError> {
         let (mut degraded, mut passes) = (0usize, 0usize);
         let mut converged;
         loop {
-            let (outcome, stopped) = run_body(&mut self.stages, state, targets, budget, handlers)?;
+            let (outcome, stopped) = run_body(&mut self.stages, state, targets, budget, callbacks)?;
             degraded += outcome.degraded;
             converged = outcome.converged;
             passes += 1;
@@ -215,8 +215,8 @@ impl StageFactory for GuardedFactory {
         no_knobs()
     }
 
-    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
-        self.inner.take_handlers()
+    fn take_callbacks(&mut self) -> Vec<Box<dyn Callback>> {
+        self.inner.take_callbacks()
     }
 
     /// One [`Guarded`] around whatever the inner factory produced — a
@@ -261,12 +261,12 @@ impl Stage for Guarded {
         state: &mut PackState,
         targets: &[Target],
         budget: &Budget,
-        handlers: &mut [Box<dyn Handler>],
+        callbacks: &mut [Box<dyn Callback>],
     ) -> Result<StageOutcome, PackError> {
         let (mut degraded, mut attempt) = (0usize, 0usize);
         let stage = self.stages[0].name();
         loop {
-            let (outcome, stopped) = run_body(&mut self.stages, state, targets, budget, handlers)?;
+            let (outcome, stopped) = run_body(&mut self.stages, state, targets, budget, callbacks)?;
             degraded += outcome.degraded;
             if stopped {
                 return Ok(StageOutcome::new(false, degraded));

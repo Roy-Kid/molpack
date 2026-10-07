@@ -2,23 +2,48 @@
 //!
 //! Reference: Birgin & Martinez, Comp.Opt.Appl. 23:101-125, 2002.
 
-use molrs::types::F;
-pub mod cg;
-pub mod entry;
-pub mod phases;
-pub mod solver;
-pub mod spg;
-
+use molrs::op::F;
+mod cg;
+pub(super) mod gencan_pack;
 mod linesearch;
+mod phases;
 mod search;
+mod solver;
+mod spg;
 
 use linesearch::TnLsScratch;
 pub use search::gencan;
 
-/// Stage name shared by [`solver::GenCanStage`] and the phase step report.
+/// Stage name shared by [`solver::GencanStage`] and the phase step report.
 pub(crate) const STAGE_NAME: &str = "gencan";
 
-use crate::objective::Objective;
+// ── Precision-aware floors shared by the GENCAN phases ─────────────────────
+//
+// Packmol calibrates its thresholds for double precision, which is the
+// active precision here (`F = f64`). The `.max(eps)`-style floors are a
+// defensive lower bound; under f64 they are no-ops, but they keep each
+// threshold meaningful if `F` is ever narrowed.
+
+/// The "effectively zero" level for an objective value or a squared
+/// residual norm: `1e-10`, floored at `F::EPSILON`.
+#[inline]
+fn small_floor() -> F {
+    (1.0e-10 as F).max(F::EPSILON)
+}
+
+/// The shortest norm still treated as non-zero: `√ε`.
+#[inline]
+fn near_zero_norm_floor() -> F {
+    F::EPSILON.sqrt()
+}
+
+/// A divisor floor that only keeps a norm away from exact zero.
+#[inline]
+fn positive_norm_floor() -> F {
+    F::MIN_POSITIVE
+}
+
+use crate::Objective;
 
 /// Parameters for the GENCAN call (matches `easygencan` defaults from `pgencan.f90`).
 pub struct GencanParams {
@@ -26,12 +51,6 @@ pub struct GencanParams {
     pub maxit: usize,
     pub maxfc: usize,
     pub delmin: F,
-    /// Fortran `iprint`. The driver logs through `log`, so nothing reads this.
-    #[allow(dead_code)]
-    pub iprint: i32,
-    /// Fortran `ncomp`. The CG subspace size is chosen inside the solver.
-    #[allow(dead_code)]
-    pub ncomp: usize,
 }
 
 impl Default for GencanParams {
@@ -41,8 +60,6 @@ impl Default for GencanParams {
             maxit: 20,
             maxfc: 200,     // 10 * maxit
             delmin: 1.0e-2, // Packmol easygencan default (gencan.f: delmin = 1.d-2)
-            iprint: 0,
-            ncomp: 50,
         }
     }
 }
@@ -50,18 +67,13 @@ impl Default for GencanParams {
 /// Result of a GENCAN run.
 pub struct GencanResult {
     pub f: F,
-    /// Projected-gradient sup-norm. Asserted by the optimizer tests; the
-    /// phase loop decides convergence from `fdist` / `frest` instead.
-    #[allow(dead_code)]
+    /// Projected-gradient sup-norm and the iteration count. Read by the
+    /// optimizer tests only; the phase loop decides convergence from
+    /// `fdist` / `frest` instead.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub gpsupn: F,
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub iter: usize,
-    #[allow(dead_code)]
-    pub fcnt: usize,
-    #[allow(dead_code)]
-    pub gcnt: usize,
-    #[allow(dead_code)]
-    pub cgcnt: usize,
     /// 0=converged(eucl), 1=converged(sup), 2=noFprogress, 3=noGprogress,
     /// 4=fSmall, 7=maxIter, 8=maxFeval, <0=error
     pub inform: i32,
@@ -152,15 +164,15 @@ mod tests {
     //!
     //! The `Objective` trait is the only contract `gencan` depends on, so we
     //! provide a hand-rolled `Quadratic` impl rather than poking at
-    //! `PackContext` internals. `fdist`/`frest` are reported as 0 so the
+    //! `PackSystem` internals. `fdist`/`frest` are reported as 0 so the
     //! Packmol-style early-exit check (`fdist < precision && frest < precision`)
     //! never fires when `precision = 0.0`; gencan then has to converge on its
     //! own gpsupn / maxit criterion.
 
+    use crate::Objective;
     use crate::eval::{EvalMode, EvalOutput};
-    use crate::objective::Objective;
     use crate::pack::gencan::{GencanParams, GencanWorkspace, gencan, pgencan};
-    use molrs::types::F;
+    use molrs::op::F;
 
     /// f(x) = 0.5 · Σ (xᵢ − μᵢ)²; ∇f = (x − μ); minimum at x = μ, f = 0.
     struct Quadratic {
@@ -189,7 +201,7 @@ mod tests {
                 EvalMode::FOnly => {
                     self.ncf += 1;
                 }
-                EvalMode::FAndGradient | EvalMode::GradientOnly | EvalMode::RestMol => {
+                EvalMode::FAndGradient | EvalMode::GradientOnly => {
                     self.ncf += 1;
                     self.ncg += 1;
                     if let Some(g) = gradient {
@@ -331,7 +343,7 @@ mod tests {
 
     // ── the seam markers the GENCAN stage declares ─────────────────────────────
 
-    /// Owner-side half of acceptance ac-008: what `GenCanStage` declares on the
+    /// Owner-side half of acceptance ac-008: what `GencanStage` declares on the
     /// stage seam belongs here, not in `stage::tests` (which knows only fakes).
     ///
     /// `Placed::None` because the stage seeds its own placements with `initial()`
@@ -340,12 +352,12 @@ mod tests {
     /// before chaining anything after this stage.
     #[test]
     fn gencan_stage_requires_none_guarantees_all() {
-        use crate::pack::gencan::solver::{GenCanStage, GencanSettings};
+        use crate::pack::gencan::solver::{GencanSettings, GencanStage};
         use crate::{Placed, Stage};
 
         // The declarations are construction-time constants: an empty system is
         // enough to read them, and using one keeps this test off the algorithm.
-        let stage = GenCanStage::new(GencanSettings::default(), Vec::new(), None, 0, 0);
+        let stage = GencanStage::new(GencanSettings::default(), Vec::new(), None, 0, 0);
 
         assert_eq!(
             stage.requires().placed,

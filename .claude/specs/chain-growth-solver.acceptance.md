@@ -25,7 +25,7 @@ criteria:
       src/stage.rs 定义 `pub trait Stage`（`name`/`requires`/`guarantees`/`run`，
       `run` 收 `&mut PackState`，返回 `Result<StageOutcome, PackError>`；
       Budget / StageOutcome 标 `#[non_exhaustive]`）。方法选择由调用方挑入口
-      （`GenCanPack` / `CbmcGrow` / `LatticeGrow`，或 `Pipeline::with_stage` 组合），
+      （`GencanPack` / `CbmcGrow` / `LatticeGrow`，或 `Pipeline::with_stage` 组合），
       不存在全局 solver 开关；`GrowConfig` /
       `GrowError` 定义在叶子文件 src/grow/config.rs（`grep -nE 'use crate::(target|entry|context)' src/grow/config.rs` 无命中）；
       公开结果是冻结的 `State`（`frame`/`fdist`/`intra`/`frest`/`converged`/`degraded`），

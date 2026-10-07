@@ -1,32 +1,32 @@
 //! The GENCAN outer machinery: per-phase scaffold and per-iteration step.
 //!
-//! Free functions pulled out of the packer main loop (phases A.4.1-A.4.3)
-//! and moved beside the optimizer they drive (engine-entry-split): the
-//! stage owns the phase loop, these own one phase and one iteration.
+//! Free functions beside the optimizer they drive: the stage owns the phase
+//! loop, these own one phase and one iteration.
 //! Step reports use [`super::STAGE_NAME`], the same string the stage reports.
 
-use molrs::types::F;
+use molrs::op::F;
 use rand::rngs::SmallRng;
 
-use crate::context::PackContext;
+use crate::Objective;
 use crate::eval::EvalMode;
-// The unscaled verdict is a shared primitive owned by the context layer, not
+use crate::system::PackSystem;
+// The unscaled verdict is a shared primitive owned by the system layer, not
 // by this stage: growth evaluates the same way, and the pipeline layer must
 // not import `gencan/`.
-use crate::context::pack_state::evaluate_unscaled;
-use crate::handler::{Handler, PhaseInfo, PhaseReport, StageInfo, StepInfo};
-use crate::numerics::objective_small_floor;
+use super::small_floor;
+use crate::callback::{Callback, PhaseProgress, PhaseReport, StageProgress, StepReport};
 use crate::optimizer::{ResolvedBinding, run_optimizer_bindings};
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::pack::initial::SwapState;
 use crate::pack::movebad::{MoveBadConfig, movebad};
+use crate::system::pack_state::evaluate_unscaled;
 
 /// Outcome of one main-loop iteration inside a packing phase.
 ///
 /// The per-iteration body runs movebad → in-loop optimizers → pgencan → radii
 /// schedule. `Continue`
 /// means "run the next iteration"; `Converged` means the convergence predicate
-/// fired inside this iteration; `EarlyStop` means a `Handler::should_stop()`
+/// fired inside this iteration; `EarlyStop` means a `Callback::should_stop()`
 /// returned true.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IterOutcome {
@@ -44,7 +44,7 @@ pub enum IterOutcome {
 /// 2. Per-target in-loop optimizer block (`run_optimizer_bindings`).
 /// 3. `pgencan` on the working coordinate vector.
 /// 4. Unscaled-radii statistics (`fdist` / `frest` / `fimp`).
-/// 5. Handler `on_step` notification; early stop if any handler opts in.
+/// 5. Callback `on_step` notification; early stop if any callback opts in.
 /// 6. Convergence check (`fdist < precision && frest < precision`).
 /// 7. Radii reduction schedule (only when `radscale > 1.0`).
 ///
@@ -57,19 +57,19 @@ pub fn run_iteration(
     max_loops: usize,
     is_all: bool,
     phase: usize,
-    phase_info: PhaseInfo,
+    phase_progress: PhaseProgress,
     precision: F,
     disable_movebad: bool,
     movebad_cfg: &MoveBadConfig,
     gencan_params: &GencanParams,
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     xwork: &mut [F],
     swap: &mut SwapState,
     flast: &mut F,
     fimp_prev: &mut F,
     radscale: &mut F,
     optimizer_bindings: &mut [ResolvedBinding<'_>],
-    handlers: &mut [Box<dyn Handler>],
+    callbacks: &mut [Box<dyn Callback>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
 ) -> IterOutcome {
@@ -105,7 +105,7 @@ pub fn run_iteration(
     // Packmol line 846: if(flast>0) fimp = -100*(fx-flast)/flast
     let mut fimp = if *flast > 0.0 {
         -100.0 * (fx_unscaled - *flast) / *flast
-    } else if fx_unscaled < objective_small_floor() {
+    } else if fx_unscaled < small_floor() {
         100.0 // already converged
     } else {
         F::INFINITY
@@ -115,18 +115,18 @@ pub fn run_iteration(
     *flast = fx_unscaled;
     *fimp_prev = fimp;
 
-    if !handlers.is_empty() {
-        let step_info = StepInfo {
+    if !callbacks.is_empty() {
+        let step = StepReport {
             // One stage per run until the pipeline lands; the name is the
             // stage's own, taken from the stage type so the two cannot drift.
-            stage: StageInfo {
+            stage: StageProgress {
                 index: 0,
                 total: 1,
                 name: super::STAGE_NAME,
             },
             loop_idx,
             max_loops,
-            phase: phase_info,
+            phase: phase_progress,
             fdist,
             frest,
             f: fx_unscaled,
@@ -134,11 +134,11 @@ pub fn run_iteration(
             radscale: *radscale,
             precision,
         };
-        for h in handlers.iter_mut() {
-            h.on_step(&step_info, sys);
+        for h in callbacks.iter_mut() {
+            h.on_step(&step, sys);
         }
 
-        if handlers.iter().any(|h| h.should_stop()) {
+        if callbacks.iter().any(|h| h.should_stop()) {
             log::debug!("  Early stop requested at loop {loop_idx}");
             return IterOutcome::EarlyStop;
         }
@@ -177,7 +177,7 @@ pub fn run_iteration(
 
 /// Outcome of one outer-loop phase.
 ///
-/// The per-phase scaffold covers handler phase-start notification, comptype
+/// The per-phase scaffold covers callback phase-start notification, comptype
 /// reconfiguration, radii reset, swap setup, pre-loop precision
 /// short-circuit, inner GENCAN loop, and swap restore / xwork-back copy.
 /// `Continue` means the outer phase loop should
@@ -199,7 +199,7 @@ pub enum PhaseOutcome {
 /// clone of `x`.
 ///
 /// The function takes the outer-loop state (`sys`, `x`, `swap`,
-/// optimizer bindings, `handlers`, `gencan_workspace`, `rng`) by `&mut` so that
+/// optimizer bindings, `callbacks`, `gencan_workspace`, `rng`) by `&mut` so that
 /// state persists across phases, exactly as the inlined body did.
 ///
 /// Returns `PhaseOutcome::Converged` **only** when the all-type phase
@@ -218,25 +218,25 @@ pub fn run_phase(
     disable_movebad: bool,
     movebad_cfg: &MoveBadConfig,
     gencan_params: &GencanParams,
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     x: &mut [F],
     swap: &mut SwapState,
     optimizer_bindings: &mut [ResolvedBinding<'_>],
-    handlers: &mut [Box<dyn Handler>],
+    callbacks: &mut [Box<dyn Callback>],
     gencan_workspace: &mut GencanWorkspace,
     rng: &mut SmallRng,
 ) -> PhaseOutcome {
     let is_all = phase == ntype;
 
-    let phase_info = PhaseInfo {
+    let phase_progress = PhaseProgress {
         phase,
         total_phases,
         molecule_type: if is_all { None } else { Some(phase) },
     };
 
-    // Reset handler state between phases (e.g. EarlyStopHandler stall counter)
-    for h in handlers.iter_mut() {
-        h.on_phase_start(&phase_info);
+    // Reset callback state between phases (e.g. EarlyStopCallback stall counter)
+    for h in callbacks.iter_mut() {
+        h.on_phase_start(&phase_progress);
     }
 
     // Set comptype for this phase
@@ -286,8 +286,8 @@ pub fn run_phase(
             frest: sys.frest,
             converged: true,
         };
-        for h in handlers.iter_mut() {
-            h.on_phase_end(&phase_info, &report);
+        for h in callbacks.iter_mut() {
+            h.on_phase_end(&phase_progress, &report);
         }
         if !is_all {
             swap.save_type(phase, &xwork, sys);
@@ -315,7 +315,7 @@ pub fn run_phase(
             max_loops,
             is_all,
             phase,
-            phase_info,
+            phase_progress,
             precision,
             disable_movebad,
             movebad_cfg,
@@ -327,7 +327,7 @@ pub fn run_phase(
             &mut fimp_prev,
             &mut radscale,
             optimizer_bindings,
-            handlers,
+            callbacks,
             gencan_workspace,
             rng,
         );
@@ -348,8 +348,8 @@ pub fn run_phase(
         frest: sys.frest,
         converged: converged_inner,
     };
-    for h in handlers.iter_mut() {
-        h.on_phase_end(&phase_info, &report);
+    for h in callbacks.iter_mut() {
+        h.on_phase_end(&phase_progress, &report);
     }
 
     // After per-type phase: save results + restore full x

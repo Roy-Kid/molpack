@@ -8,7 +8,7 @@ criteria:
       PackContext 上不再存在 xcart / atom_props / short_radius /
       short_radius_scale / latomnext / any_short_radius / any_fixed_atoms 字段；
       它们全部位于 PairInputs，经 `sys.inputs` 访问。
-      `grep -n "pub xcart\|pub atom_props\|pub latomnext" src/context/pack_context.rs`
+      `grep -n "pub xcart\|pub atom_props\|pub latomnext" src/system/pack_context.rs`
       的命中只出现在 PairInputs 的定义里。
     status: pending
   - id: ac-002
@@ -28,7 +28,7 @@ criteria:
       `self_separation_gradient_matches_finite_difference_through_the_objective`）；
       src/objective.rs 的 `compute_fg_parallel_matches_compute_g_serial_large_system`、
       `compute_fg_small_system_parallel_matches_serial` 与
-      src/gencan/entry.rs 的 `gencan_entry_is_deterministic` 通过（`--features rayon`）；
+      src/gencan/gencan_pack.rs 的 `gencan_pack_is_deterministic` 通过（`--features rayon`）；
       固定 seed 下五个官方 Packmol 例子（`--example pack_<name>`）收敛且 `State::frest == 0`。
       本条是 Task 1 的唯一功能判据——此步不动遍历，行为必须逐条不变。
     status: pending

@@ -1,6 +1,6 @@
 """Runtime-checkable duck-type protocols.
 
-These describe the contracts that user-defined handlers and restraints
+These describe the contracts that user-defined callbacks and restraints
 must satisfy. They are pure Python and never passed into Rust — the
 native extension extracts methods by name.
 """
@@ -9,35 +9,35 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from .molpack import StepInfo
+from .molpack import PackSystemView, StepReport
 
 
 @runtime_checkable
-class Handler(Protocol):
-    """Progress-handler contract.
+class Callback(Protocol):
+    """Progress-callback contract.
 
     All methods are optional. Missing ones are silently skipped by the
     native extension. Returning ``True`` from :meth:`on_step` requests
     early termination.
 
-    ``ctx`` mirrors the Rust trait's ``sys`` argument: a
-    :class:`StepContext` borrow guard valid only inside the callback
+    ``sys`` mirrors the Rust trait's ``sys`` argument: a
+    :class:`PackSystemView` borrow guard valid only inside the callback
     (touching it later raises ``RuntimeError``). Its ``positions``
     property copies the live coordinates into an owned ``(ntotat, 3)``
-    float64 NumPy array on access — handlers that never touch it pay
+    float64 NumPy array on access — callbacks that never touch it pay
     nothing. Atoms the growth solver has not placed yet sit at their
     sentinel positions.
 
-    ``info.stage`` says which stage of the run the callback came from
+    ``step.stage`` says which stage of the run the callback came from
     (``index`` / ``total`` / ``name``); a single-stage run reports
-    ``index == 0`` and ``total == 1``. A handler attached to an entry that
+    ``index == 0`` and ``total == 1``. A callback attached to an engine that
     is then handed to a ``Pipeline`` as a stage is *adopted* by the
     pipeline — it observes the whole run, not only that stage.
     """
 
     def on_start(self, ntotat: int, ntotmol: int) -> None: ...
 
-    def on_step(self, info: StepInfo, ctx) -> bool | None: ...
+    def on_step(self, step: StepReport, sys: PackSystemView) -> bool | None: ...
 
     def on_finish(self) -> None: ...
 

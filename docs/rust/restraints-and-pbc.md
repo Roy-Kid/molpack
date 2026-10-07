@@ -2,7 +2,7 @@
 
 Restraints are soft penalties that guide atoms into allowed regions. They can
 be attached to a target, to a subset of atoms on each target copy, or globally
-on the engine entry. Geometry is a molrs [`Region`](https://docs.rs/molcrafts-molrs)
+on the engine. Geometry is a molrs [`Region`](https://docs.rs/molcrafts-molrs)
 — `Sphere`, `Cuboid`, `Parallelepiped`, `HalfSpace`, `Cylinder`, `Ellipsoid`,
 `Polyhedron`, `SphereUnion`, and their `AndRegion` / `OrRegion` / `NotRegion`
 compositions — and molpack's one geometric restraint, `RegionRestraint`, says
@@ -13,7 +13,7 @@ compositions — and molpack's one geometric restraint, `RegionRestraint`, says
 ```rust
 use std::sync::Arc;
 use molpack::{RegionRestraint, Target};
-use molrs::spatial::region::Cuboid;
+use molrs::core::Cuboid;
 use ndarray::array;
 
 let cube = Cuboid::new(array![0.0, 0.0, 0.0], array![40.0, 40.0, 40.0]); // origin, lengths
@@ -33,7 +33,7 @@ Atom-subset restraints apply to selected atoms of every copy. Indices are
 ```rust
 use std::sync::Arc;
 use molpack::{RegionRestraint, Target};
-use molrs::spatial::region::HalfSpace;
+use molrs::core::HalfSpace;
 
 // z <= 2: the half-space behind the plane through (0, 0, 2) with normal +z.
 let below = HalfSpace::new([0.0, 0.0, 1.0], [0.0, 0.0, 2.0])?;
@@ -46,16 +46,16 @@ subtract 1 from each atom index.
 
 ## Global restraints
 
-Attach a restraint to every target through the engine entry:
+Attach a restraint to every target through the engine:
 
 ```rust
 use std::sync::Arc;
-use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
-use molrs::spatial::region::Sphere;
+use molpack::{GencanPack, PackEngine, RegionRestraint, Target};
+use molrs::core::Sphere;
 use ndarray::array;
 
 let ball = Sphere::new(array![20.0, 20.0, 20.0], 30.0);
-let result = GenCanPack::new()
+let result = GencanPack::new()
     .with_global_restraint(RegionRestraint(Arc::new(ball)))
     .run(&[a, b], 200)?;
 ```
@@ -65,13 +65,13 @@ packing.
 
 ## Periodic boxes
 
-Periodic boundary conditions are declared on the engine entry; a region only
+Periodic boundary conditions are declared on the engine; a region only
 confines:
 
 ```rust
-use molpack::{GenCanPack, PackEngine};
+use molpack::{GencanPack, PackEngine};
 
-let engine = GenCanPack::new().with_periodic_box([0.0; 3], [30.0; 3], [true; 3]);
+let engine = GencanPack::new().with_periodic_box([0.0; 3], [30.0; 3], [true; 3]);
 ```
 
 Per-axis periodicity is the third argument (`[true, true, false]` for a slab

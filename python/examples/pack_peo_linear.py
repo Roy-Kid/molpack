@@ -1,8 +1,9 @@
 """Open-space linear PEO melt.
 
-Chemistry is molrs (CGsmiles + conformer). Architecture is molpy: a CGsmiles topology grown by ``mp.Assembler`` with
-``mp.GrowthPlacer``. Packing is molpack: ``LatticeGrow`` at
-2.0 Å then ``GenCanPack.with_restart`` at 2.0 Å. Hydrogen packing radius
+Chemistry and architecture are molrs: CGsmiles + conformer for the unit, and
+a CGsmiles topology grown by ``molrs.builder.Assembler`` with
+``molrs.builder.GrowthPlacer``. Packing is molpack: ``LatticeGrow`` at
+2.0 Å then ``GencanPack.with_restart`` at 2.0 Å. Hydrogen packing radius
 defaults to 0.2 Å (``PEO_H_RADIUS=off`` restores ``tolerance/2``):
 hydrogens relax away in the first picoseconds of MD, so making them
 fight for space here only costs the heavy-atom packing.
@@ -19,11 +20,9 @@ import sys
 import time
 from pathlib import Path
 
-import molpy as mp
 import molrs
 import numpy as np
-from molpy.conformer import Conformer
-from molrs import Atomistic
+from molrs.core import Atomistic
 
 import molpack
 
@@ -37,16 +36,18 @@ EO_UNIT = "[<]OCC[>]"  # -O-CH2-CH2-, ports on O (<) and C (>)
 CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
 
 
-def _unit(name: str, body: str, seed: int) -> mp.Atomistic:
+def _unit(name: str, body: str, seed: int) -> Atomistic:
     """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
-    template = molrs.io.SmilesIR.from_fragment(body).to_template()
-    return Conformer(seed=seed).generate(template)[0]
+    template = molrs.io.smiles.SmilesIr.from_fragment(body).to_template()
+    return molrs.conformer.Conformer(seed=seed).generate(template)[0]
 
 
-def _grow(topology: str, library: dict[str, mp.Atomistic]) -> Atomistic:
+def _grow(topology: str, library: dict[str, Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
-    sites = mp.CGSmilesIR(topology).to_coarsegrain()
-    return mp.Assembler(library, mp.GrowthPlacer()).assemble(sites, mp.Atomistic)
+    sites = molrs.io.cgsmiles.CgSmilesIr(topology).to_coarsegrain()
+    return molrs.builder.Assembler(library, molrs.builder.GrowthPlacer()).assemble(
+        sites, Atomistic
+    )
 
 
 def linear_topology(n: int) -> str:
@@ -82,18 +83,22 @@ def pack_linear(n: int, n_mol: int, density: float, seed: int):
     print(f"  template     : {n_at} atoms, {n_bd} bonds  ({shape})")
     print(f"  copies       : {n_mol}   density {density} g/cm³")
     target = _target(polymer, n_mol, "lin-PEO")
-    progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "0") != "0"
+    log_level = (
+        "progress"
+        if os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "0") != "0"
+        else "quiet"
+    )
     prior = molpack.TorsionPrior.three_state_from_c_inf(PEO_C_INF, TET)
     print(
         "  lattice      : LatticeGrow occupancy-guard @ 2.0 Å → "
-        "GenCanPack.with_restart @ 2.0 Å"
+        "GencanPack.with_restart @ 2.0 Å"
     )
     grown = (
         molpack.LatticeGrow(prior)
         .with_seed(seed)
         .with_tolerance(2.0)
         .with_density(density)
-        .with_progress(progress)
+        .with_log_level(log_level)
         .run([target], max_loops=max(40, n_mol * 8))
     )
     print(
@@ -102,11 +107,11 @@ def pack_linear(n: int, n_mol: int, density: float, seed: int):
         f"intra scored {grown.intra.scored:.3f} Å"
     )
     pushed = (
-        molpack.GenCanPack()
+        molpack.GencanPack()
         .with_restart(grown)
         .with_seed(seed)
         .with_tolerance(2.0)
-        .with_progress(progress)
+        .with_log_level(log_level)
         .run([target], max_loops=80)
     )
     print(f"  push-off     : converged={pushed.converged}  fdist={pushed.fdist:.4e}")
@@ -119,25 +124,25 @@ def main(argv: list[str] | None = None) -> None:
     n_mol = int(args[1]) if len(args) > 1 else 8
     density = float(args[2]) if len(args) > 2 else 0.5
     seed = int(args[3]) if len(args) > 3 else 42
-    print("── linear PEO (open space, molrs chemistry, molpy architecture) ──")
+    print("── linear PEO (open space, molrs chemistry and architecture) ──")
     t0 = time.perf_counter()
     packed = pack_linear(n, n_mol, density, seed).frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.Box.from_bounds(
+        packed.box = molrs.core.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec(str(OUT / "pack_peo_linear.mrec"), packed)
-    molrs.io.write_lammps_trajectory(
+    molrs.io.write_mrec_frame(str(OUT / "pack_peo_linear.mrec"), packed)
+    molrs.io.write_lammps_dump_trajectory(
         str(OUT / "pack_peo_linear.lammpstrj"),
         [packed],
         columns=["id", "element", "mol", "x", "y", "z"],
     )
-    if "bonds" in packed and packed["bonds"].nrows:
+    if "bonds" in packed and packed["bonds"].n_rows:
         molrs.io.write_lammps_dump_local(
             str(OUT / "pack_peo_linear.dump.local"), [packed]
         )

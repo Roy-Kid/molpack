@@ -3,18 +3,19 @@
 //! [`PyTarget`] describes one type of molecule to pack: its template
 //! geometry, topology, and the number of copies.
 //!
-//! The constructor accepts a real ``molrs.Frame`` (``molpy.Frame`` is the same
+//! The constructor accepts a real ``molrs.core.Frame`` (``molpy.Frame`` is the same
 //! class) carrying an ``"atoms"`` block. The frame crosses the
 //! language boundary **zero-copy** through its stable-FFI capsule (see
-//! [`crate::interop`]) — no dict marshalling, no consumer-side data type. The
+//! [`crate::molrs_capsule`]) — no dict marshalling, no consumer-side data type. The
 //! full frame, with topology, is handed to the core [`Target`], which owns the
 //! assembly.
+//!
+//! The target's typed options — [`PyAngle`], [`PyAxis`], [`PyCenteringMode`] —
+//! mirror the Rust types beside `Target` 1:1.
 
-use crate::constraint::{extract_collective_restraint, extract_restraint, try_region};
-use crate::helpers::NpF;
-use crate::types::{PyAngle, PyAxis, PyCenteringMode};
-use molpack::F;
-use molpack::target::Target;
+use crate::restraint::{extract_collective_restraint, extract_restraint, try_region};
+use molpack::{Angle, Axis, CenteringMode, Target};
+use molrs::op::F;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
@@ -22,9 +23,9 @@ use pyo3::types::PyAny;
 /// Build a [`Target`] from any frame-like Python object plus a copy count.
 ///
 /// Shared by [`PyTarget::new`] and the script loader. The frame is converted to
-/// a Rust [`molrs::Frame`] so the core retains its full topology.
+/// a Rust [`molrs::core::Frame`] so the core retains its full topology.
 pub(crate) fn target_from_frame(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Target> {
-    let rust_frame = crate::interop::owned_frame_from_py(frame)?;
+    let rust_frame = crate::molrs_capsule::owned_frame_from_py(frame)?;
     // `Target::new` panics on a frame without float coordinates; answer that
     // here as a Python error instead of a panic across the boundary.
     rust_frame
@@ -45,10 +46,10 @@ impl PyTarget {
     ///
     /// Parameters
     /// ----------
-    /// frame : molrs.Frame
+    /// frame : molrs.core.Frame
     ///     A frame with an ``"atoms"`` block (``x`` / ``y`` / ``z``
-    ///     columns). Resolved zero-copy via its FFI capsule — a plain ``dict``
-    ///     is no longer accepted; build a ``molrs.Frame`` first.
+    ///     columns). Resolved zero-copy via its FFI capsule; a plain ``dict``
+    ///     is refused.
     /// count : int
     ///     Number of copies to pack.
     ///
@@ -69,7 +70,7 @@ impl PyTarget {
 
     /// Override the per-copy total mass (amu) used by
     /// ``with_density`` when element symbols cannot provide one.
-    fn with_mass(&self, amu: crate::helpers::NpF) -> Self {
+    fn with_mass(&self, amu: F) -> Self {
         PyTarget {
             inner: self.inner.clone().with_mass(amu),
         }
@@ -79,7 +80,7 @@ impl PyTarget {
     ///
     /// Accepts:
     ///
-    /// * a molrs **region** (``molrs.Sphere``, ``Cuboid``, ``Parallelepiped``,
+    /// * a molrs **region** (``molrs.core.Sphere``, ``Cuboid``, ``Parallelepiped``,
     ///   ``HalfSpace``, ``Cylinder``, ``Ellipsoid``, ``Polyhedron``,
     ///   ``SphereUnion``, or a ``&`` / ``|`` / ``~`` composition) — lifted
     ///   through ``RegionRestraint``, so every atom must stay inside it;
@@ -234,7 +235,7 @@ impl PyTarget {
     ///
     /// Raises ``ValueError`` if the table is empty or a weight is outside
     /// ``[0, 1]`` or not finite.
-    fn with_special_bonds(&self, table: Vec<NpF>) -> PyResult<Self> {
+    fn with_special_bonds(&self, table: Vec<F>) -> PyResult<Self> {
         let table = validate_special_bonds(table)?;
         Ok(PyTarget {
             inner: self.inner.clone().with_special_bonds(table),
@@ -264,7 +265,7 @@ impl PyTarget {
     /// coordinates kept verbatim — the named chaining primitive: grow first,
     /// then pack the next stage around the frozen matrix.
     #[staticmethod]
-    fn fixed_from(result: &crate::result::PyState) -> Self {
+    fn fixed_from(result: &crate::state::PyState) -> Self {
         Self {
             inner: molpack::Target::fixed_from(&result.inner.frame),
         }
@@ -286,7 +287,7 @@ impl PyTarget {
         }
     }
 
-    fn fixed_at(&self, position: [NpF; 3]) -> Self {
+    fn fixed_at(&self, position: [F; 3]) -> Self {
         PyTarget {
             inner: self.inner.clone().fixed_at(position),
         }
@@ -373,10 +374,119 @@ fn check_positive(value: F, what: &str) -> PyResult<()> {
     Ok(())
 }
 
-/// Marshal a Python weight list into [`molpack::BondDistanceWeights`].
+/// Marshal a Python weight list into [`molrs::core::BondDistanceWeights`].
 ///
 /// Rejects empty, non-finite, or out-of-range entries with ``ValueError``.
 /// Fractional weights are legal here; growth refuses them later.
-fn validate_special_bonds(weights: Vec<NpF>) -> PyResult<molpack::BondDistanceWeights> {
-    molpack::BondDistanceWeights::new(weights).map_err(|e| PyValueError::new_err(e.to_string()))
+fn validate_special_bonds(weights: Vec<F>) -> PyResult<molrs::core::BondDistanceWeights> {
+    molrs::core::BondDistanceWeights::new(weights).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+// ── Target options ───────────────────────────────────────────────────────────
+
+/// Angular quantity with explicit units at the call site.
+///
+/// ```python
+/// from molpack import Angle
+/// Angle.from_degrees(30.0)
+/// Angle.from_radians(3.14159 / 6)
+/// ```
+#[pyclass(name = "Angle", frozen, eq, from_py_object)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct PyAngle {
+    pub(crate) inner: Angle,
+}
+
+#[pymethods]
+impl PyAngle {
+    /// Construct an angle from degrees.
+    #[classmethod]
+    #[pyo3(signature = (deg))]
+    fn from_degrees(_cls: &Bound<'_, pyo3::types::PyType>, deg: f64) -> Self {
+        Self {
+            inner: Angle::from_degrees(deg),
+        }
+    }
+
+    /// Construct an angle from radians.
+    #[classmethod]
+    #[pyo3(signature = (rad))]
+    fn from_radians(_cls: &Bound<'_, pyo3::types::PyType>, rad: f64) -> Self {
+        Self {
+            inner: Angle::from_radians(rad),
+        }
+    }
+
+    /// Zero rotation. Exposed as `Angle.ZERO`.
+    #[classattr]
+    #[allow(non_snake_case)]
+    fn ZERO() -> Self {
+        Self { inner: Angle::ZERO }
+    }
+
+    #[getter]
+    fn degrees(&self) -> f64 {
+        self.inner.degrees()
+    }
+
+    #[getter]
+    fn radians(&self) -> f64 {
+        self.inner.radians()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Angle.from_degrees({})", self.inner.degrees())
+    }
+}
+
+// ── Axis ───────────────────────────────────────────────────────────────────
+
+/// Cartesian axis selector.
+///
+/// ```python
+/// from molpack import Axis
+/// Axis.X / Axis.Y / Axis.Z
+/// ```
+#[pyclass(name = "Axis", eq, eq_int, from_py_object)]
+#[derive(Clone, Copy, PartialEq)]
+pub enum PyAxis {
+    X,
+    Y,
+    Z,
+}
+
+impl From<PyAxis> for Axis {
+    fn from(v: PyAxis) -> Self {
+        match v {
+            PyAxis::X => Axis::X,
+            PyAxis::Y => Axis::Y,
+            PyAxis::Z => Axis::Z,
+        }
+    }
+}
+
+// ── CenteringMode ──────────────────────────────────────────────────────────
+
+/// Centering behavior for a target's reference coordinates.
+///
+/// - ``AUTO``  : free targets centered, fixed targets kept in place (default).
+/// - ``CENTER``: always center.
+/// - ``OFF``   : keep input coordinates unchanged.
+#[pyclass(name = "CenteringMode", eq, eq_int, from_py_object)]
+#[derive(Clone, Copy, PartialEq)]
+#[allow(clippy::upper_case_acronyms)]
+pub enum PyCenteringMode {
+    AUTO,
+    CENTER,
+    OFF,
+}
+
+impl From<PyCenteringMode> for CenteringMode {
+    fn from(v: PyCenteringMode) -> Self {
+        match v {
+            PyCenteringMode::AUTO => CenteringMode::Auto,
+            PyCenteringMode::CENTER => CenteringMode::Center,
+            PyCenteringMode::OFF => CenteringMode::Off,
+        }
+    }
 }

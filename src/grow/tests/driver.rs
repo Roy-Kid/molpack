@@ -13,9 +13,9 @@
 
 use super::*;
 
-use crate::context::PackContext;
-use crate::handler::{Handler, StepInfo};
-use crate::restraint::AtomRestraint;
+use crate::AtomRestraint;
+use crate::callback::{Callback, StepReport};
+use crate::system::PackSystem;
 
 /// A restraint that refuses every point, so every growth attempt is a dead end.
 #[derive(Debug)]
@@ -30,15 +30,15 @@ impl AtomRestraint for RefuseEverywhere {
     }
 }
 
-/// Stops the driver after the first round, before a second chain could
-/// spend a rung that the old global ladder had queued.
+/// Stops the driver after the first round, before a second round could
+/// spend another rung.
 #[derive(Default)]
 struct StopAfterOne {
     seen: bool,
 }
 
-impl Handler for StopAfterOne {
-    fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {
+impl Callback for StopAfterOne {
+    fn on_step(&mut self, _step: &StepReport, _sys: &PackSystem) {
         self.seen = true;
     }
     fn should_stop(&self) -> bool {
@@ -93,8 +93,7 @@ fn an_unsatisfiable_hard_core_terminates_and_says_so() {
 }
 
 /// Two chains that both earn a rung in the same round each shrink their own
-/// core. The old ladder took one global rung per round, so the second chain
-/// waited and `degraded` counted one shrink.
+/// core, and `degraded` counts both shrinks.
 #[test]
 fn a_rung_shrinks_only_the_chain_that_earned_it() {
     let cfg = GrowConfig::new(TorsionPrior::Uniform)
@@ -103,14 +102,14 @@ fn a_rung_shrinks_only_the_chain_that_earned_it() {
     let frame = chain_frame(3, 1.53, true);
     let wedged = |frame| Target::new(frame, 1).with_restraint(RefuseEverywhere);
     let state = CbmcGrow::from_config(cfg)
-        .with_handler(Box::new(StopAfterOne::default()))
+        .with_callback(Box::new(StopAfterOne::default()))
         .with_seed(3)
         .with_tolerance(2.0)
         .with_periodic_box([0.0; 3], [20.0; 3], [true; 3])
         .run(&[wedged(frame.clone()), wedged(frame)], 1)
         .expect("both chains are refused, and the run still returns");
 
-    // One round, then the handler stops. A 3-bead template is a seed plus
+    // One round, then the callback stops. A 3-bead template is a seed plus
     // one step, so the abort force-places both for each chain (4) and each
     // chain has taken its own rung (2). A shared core would count 5.
     assert_eq!(

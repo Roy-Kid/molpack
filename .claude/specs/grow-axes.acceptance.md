@@ -27,7 +27,7 @@ criteria:
       且 conventions 禁止 golden / 逐位连续性测试。）
       `src/grow/tests/` 全部单测（`internal` / `field` / `prior` / `entry` / `driver`）在重构后全绿；
       新增一条 CbmcGrow 同种子确定性单测（同 seed 两次运行位置与裁决逐位相同，
-      形式同 `gencan/entry.rs::gencan_entry_is_deterministic`）通过。
+      形式同 `gencan/gencan_pack.rs::gencan_pack_is_deterministic`）通过。
     status: pending
 
   - id: ac-003

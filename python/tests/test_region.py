@@ -17,7 +17,7 @@ import molpack
 
 
 def _one_atom_frame(x=0.5, y=0.5, z=0.5):
-    return molrs.Frame(
+    return molrs.core.Frame(
         {
             "atoms": {
                 "x": np.array([x]),
@@ -33,36 +33,25 @@ class TestRegionAttach:
     def test_every_region_class_attaches(self):
         z = [0.0, 0.0, 0.0]
         regions = [
-            molrs.Sphere(z, 5.0),
-            molrs.Cuboid(z, [10.0, 10.0, 10.0]),
-            molrs.Parallelepiped.cube(10.0, z),
-            molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 8.0]),
-            molrs.Cylinder(z, [0.0, 0.0, 1.0], 4.0, 10.0),
-            molrs.Ellipsoid(z, [5.0, 6.0, 7.0]),
-            molrs.SphereUnion(np.array([[1.0, 1.0, 1.0], [3.0, 1.0, 1.0]]), 2.0),
-            ~molrs.Sphere(z, 1.0) & molrs.Cuboid(z, [10.0, 10.0, 10.0]),
+            molrs.core.Sphere(z, 5.0),
+            molrs.core.Cuboid(z, [10.0, 10.0, 10.0]),
+            molrs.core.Parallelepiped.cube(10.0, z),
+            molrs.core.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 8.0]),
+            molrs.core.Cylinder(z, [0.0, 0.0, 1.0], 4.0, 10.0),
+            molrs.core.Ellipsoid(z, [5.0, 6.0, 7.0]),
+            molrs.core.SphereUnion(np.array([[1.0, 1.0, 1.0], [3.0, 1.0, 1.0]]), 2.0),
+            ~molrs.core.Sphere(z, 1.0) & molrs.core.Cuboid(z, [10.0, 10.0, 10.0]),
         ]
         target = molpack.Target(_one_atom_frame(), 1)
         for region in regions:
             assert target.with_restraint(region) is not None, type(region)
             assert target.with_atom_restraint([0], region) is not None, type(region)
-            assert molpack.GenCanPack().with_global_restraint(region) is not None
+            assert molpack.GencanPack().with_global_restraint(region) is not None
 
     def test_region_is_lifted_not_duck_typed(self):
-        sphere = molrs.Sphere([0.0, 0.0, 0.0], 5.0)
+        sphere = molrs.core.Sphere([0.0, 0.0, 0.0], 5.0)
         assert not callable(getattr(sphere, "f", None))
         assert callable(sphere._ffi_regionref_capsule)
-
-    def test_no_molpack_geometry_classes(self):
-        for name in (
-            "StlRegion",
-            "InsideBoxRestraint",
-            "InsideSphereRestraint",
-            "OutsideSphereRestraint",
-            "AbovePlaneRestraint",
-            "BelowPlaneRestraint",
-        ):
-            assert not hasattr(molpack, name), name
 
     def test_non_region_without_f_fg_is_a_typeerror(self):
         with pytest.raises(TypeError, match="expected a restraint"):
@@ -73,31 +62,29 @@ class TestRegionPacking:
     def test_confines_inside_sphere(self):
         centre = [10.0, 10.0, 10.0]
         radius = 4.0
-        ball = molrs.Sphere(centre, radius)
+        ball = molrs.core.Sphere(centre, radius)
         target = molpack.Target(_one_atom_frame(), 8).with_restraint(ball)
         state = (
-            molpack.GenCanPack()
+            molpack.GencanPack()
             .with_seed(3)
             .with_tolerance(2.0)
             .with_precision(1e-4)
-            .with_progress(False)
             .run([target], max_loops=200)
         )
         # Every atom centre stays inside the sphere (a soft wall: allow the
         # sub-tolerance excursion the precision permits).
-        assert molrs.Sphere(centre, radius + 0.5).contains(state.positions).all()
+        assert molrs.core.Sphere(centre, radius + 0.5).contains(state.positions).all()
 
     def test_void_of_a_sphere_union_is_respected(self):
         beads = np.array([[10.0, 10.0, 10.0]])
-        polymer = molrs.SphereUnion(beads, 4.0)
-        void = ~polymer & molrs.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
+        polymer = molrs.core.SphereUnion(beads, 4.0)
+        void = ~polymer & molrs.core.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
         target = molpack.Target(_one_atom_frame(), 6).with_restraint(void)
         state = (
-            molpack.GenCanPack()
+            molpack.GencanPack()
             .with_seed(5)
             .with_tolerance(2.0)
             .with_precision(1e-4)
-            .with_progress(False)
             .run([target], max_loops=200)
         )
         d = np.linalg.norm(state.positions - beads[0], axis=1)

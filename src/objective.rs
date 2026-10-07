@@ -1,46 +1,14 @@
 //! Objective function and gradient computation.
 //! Exact port of `computef.f90`, `computeg.f90`, `fparc.f90`, `gparc.f90`.
 
-use crate::context::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackContext};
+use crate::GroupEvaluation;
 use crate::euler::{compcart, eulerrmat, eulerrmat_derivatives};
 use crate::eval::{EvalMode, EvalOutput};
-use crate::restraint::GroupCtx;
-use molrs::spatial::simbox::Mic;
-use molrs::types::F;
+use crate::system::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackSystem};
+use molrs::core::Mic;
+use molrs::op::F;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
-
-impl PackContext {
-    /// Unified objective evaluation entrypoint.
-    #[inline]
-    pub fn evaluate(&mut self, x: &[F], mode: EvalMode, gradient: Option<&mut [F]>) -> EvalOutput {
-        let mut f_total = 0.0;
-        match mode {
-            EvalMode::FOnly => {
-                f_total = compute_f(x, self);
-            }
-            EvalMode::GradientOnly => {
-                if let Some(g) = gradient {
-                    compute_g(x, self, g);
-                } else {
-                    debug_assert!(false, "GradientOnly mode requires gradient buffer");
-                }
-            }
-            EvalMode::FAndGradient | EvalMode::RestMol => {
-                if let Some(g) = gradient {
-                    f_total = compute_fg(x, self, g);
-                } else {
-                    debug_assert!(false, "FAndGradient/RestMol mode requires gradient buffer");
-                }
-            }
-        }
-        EvalOutput {
-            f_total,
-            fdist_max: self.fdist,
-            frest_max: self.frest,
-        }
-    }
-}
 
 #[derive(Clone, Copy)]
 enum ExpandMode {
@@ -62,7 +30,7 @@ enum ExpandMode {
 /// Minimum-image state pulled out once per objective evaluation.
 ///
 /// A `Copy` value rather than a borrow or a clone of the cell. The pair loops
-/// hold `&mut PackContext`, so borrowing `sys.simbox` would conflict, and
+/// hold `&mut PackSystem`, so borrowing `sys.simbox` would conflict, and
 /// cloning it costs two `Array2` allocations on a path rebuilt constantly.
 /// `Mic::simplified` folds a non-periodic cell into a variant that returns the
 /// displacement untouched, so a free-boundary pack — the common case — pays
@@ -73,7 +41,7 @@ struct PbcConstants {
 }
 
 #[inline(always)]
-fn pbc_constants(sys: &PackContext) -> PbcConstants {
+fn pbc_constants(sys: &PackSystem) -> PbcConstants {
     PbcConstants {
         mic: sys.simbox.mic().simplified(),
     }
@@ -87,7 +55,7 @@ fn pbc_wrap_delta(dx: F, dy: F, dz: F, pbc: &PbcConstants) -> (F, F, F) {
 }
 
 // Parallel pair evaluation is user-selected via
-// `PackEngine::with_parallel_eval(true)` → `PackContext::parallel_pair_eval`.
+// `PackEngine::with_parallel_eval(true)` → `PackSystem::parallel_pair_eval`.
 // The library does not attempt to auto-detect when rayon pays off: the
 // crossover is workload-shaped (call frequency, work-per-call,
 // movebad proportion) rather than something inferrable from a single
@@ -97,16 +65,16 @@ fn pbc_wrap_delta(dx: F, dy: F, dz: F, pbc: &PbcConstants) -> (F, F, F) {
 /// inside `fparc` / `gparc` / `fgparc` (and the rayon variants `fparc_stats`
 /// and `fgparc_into`).
 ///
-/// Before this type, each of those four kernels had the same 15-line
-/// prologue: read `atom_props[icart]`, derive `fixed_i`, `use_short_i`,
-/// `shrad_i`, `shscl_i`, and cache `any_fixed_atoms` / `any_short_radius`
-/// as `has_fixed` / `has_short`. Drift between the four copies would
-/// silently change kernel behaviour — centralising it here means one
-/// edit site. The struct is `#[inline(always)]`-constructed so the call
-/// compiles to the same loads the inlined prologue produced.
+/// It is the one home of the kernels' shared prologue: read
+/// `atom_props[icart]`, derive `fixed_i`, `use_short_i`, `shrad_i`,
+/// `shscl_i`, and cache `any_fixed_atoms` / `any_short_radius` as
+/// `has_fixed` / `has_short`. Four copies of that prologue could drift and
+/// silently change kernel behaviour; one struct is one edit site. It is
+/// `#[inline(always)]`-constructed so the call compiles to the same loads an
+/// inlined prologue would.
 #[derive(Clone, Copy)]
 struct AtomHotState {
-    props: crate::context::AtomProps,
+    props: crate::system::AtomProps,
     /// Cached `sys.any_short_radius` — guards the cold short-radius fetch.
     has_short: bool,
     /// Atom `i` itself is fixed — used only together with the `j`-fixed
@@ -121,7 +89,7 @@ struct AtomHotState {
 
 impl AtomHotState {
     #[inline(always)]
-    fn load(icart: usize, sys: &PackContext) -> Self {
+    fn load(icart: usize, sys: &PackSystem) -> Self {
         let props = sys.atom_props[icart];
         let has_short = sys.any_short_radius;
         let has_fixed = sys.any_fixed_atoms;
@@ -163,7 +131,7 @@ impl AtomHotState {
 /// The packer hits this path on every outer iteration when it re-evaluates at
 /// unscaled radii after `pgencan` returns, since radius mutation does not
 /// invalidate the cache key.
-pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
+pub(crate) fn compute_f(x: &[F], sys: &mut PackSystem) -> F {
     sys.debug_assert_atom_props_sync();
     sys.increment_ncf();
     sys.fdist = 0.0;
@@ -205,7 +173,7 @@ pub fn compute_f(x: &[F], sys: &mut PackContext) -> F {
 ///
 /// Takes the geometry-cache fast path when `x` and the cell grid match the
 /// last expansion — the Cartesian rebuild and linked-cell rebuild are skipped.
-pub fn compute_fg(x: &[F], sys: &mut PackContext, g: &mut [F]) -> F {
+pub(crate) fn compute_fg(x: &[F], sys: &mut PackSystem, g: &mut [F]) -> F {
     sys.debug_assert_atom_props_sync();
     sys.increment_ncf();
     sys.increment_ncg();
@@ -281,7 +249,7 @@ fn pair_term<const GRAD: bool, const VIOLATION: bool>(
     hot: &AtomHotState,
     xi: [F; 3],
     jcart: usize,
-    sys: &PackContext,
+    sys: &PackSystem,
     pbc: &PbcConstants,
 ) -> Option<PairContribution> {
     let props_j = sys.atom_props[jcart];
@@ -369,13 +337,13 @@ fn pair_term<const GRAD: bool, const VIOLATION: bool>(
 /// Returns `(penalty_sum, fdist_max)`. The caller aggregates `fdist_max`
 /// across pair traversal and updates `sys.fdist` once at the end, so the
 /// inner loop keeps a data dependency on a local register instead of an
-/// `&mut PackContext` field.
+/// `&mut PackSystem` field.
 ///
 /// The per-atom reads go through `sys.atom_props` — an AoS mirror that
 /// packs the ten or so hot fields into one cache line per atom (see
 /// [`AtomProps`]).
 #[inline(always)]
-fn fparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstants) -> (F, F) {
+fn fparc(icart: usize, first_jcart: u32, sys: &mut PackSystem, pbc: &PbcConstants) -> (F, F) {
     let mut result = 0.0;
     let mut local_fdist: F = 0.0;
     let mut jcart_id = first_jcart;
@@ -408,7 +376,7 @@ fn fparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstan
 
 /// Compute gradient `g` from current system state.
 /// Port of `computeg.f90`.
-pub fn compute_g(x: &[F], sys: &mut PackContext, g: &mut [F]) {
+pub(crate) fn compute_g(x: &[F], sys: &mut PackSystem, g: &mut [F]) {
     sys.debug_assert_atom_props_sync();
     sys.increment_ncg();
     // Zero Cartesian gradient
@@ -453,14 +421,14 @@ pub fn compute_g(x: &[F], sys: &mut PackContext, g: &mut [F]) {
 /// difference between a serial and a parallel run is whether Phase A iterates
 /// with `iter` or `par_iter` — see [`expand_reduce`]. There is no second
 /// algorithm, and the resulting cell lists are bit-identical either way.
-fn expand_molecules(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
+fn expand_molecules(x: &[F], sys: &mut PackSystem, mode: ExpandMode) -> F {
     // Cheap serial pass: one descriptor per active molecule (pure index
     // arithmetic, no trig), reusing the persistent workspace buffer.
     let mut descs = std::mem::take(&mut sys.work.mol_descs);
     fill_active_mol_descs(&mut descs, sys);
 
     // Move the per-atom write targets out of `sys` so Phase A can share
-    // `&PackContext` immutably while each molecule writes its own disjoint slots
+    // `&PackSystem` immutably while each molecule writes its own disjoint slots
     // through raw pointers (constraint reads — coor, restraints, iratom — stay on
     // the shared borrow). Sound for the serial `iter` path too: it just runs the
     // per-molecule closures sequentially.
@@ -513,10 +481,10 @@ fn expand_molecules(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
         frest_atom: frest_atom.as_mut_ptr(),
     };
 
-    // Run Phase A in an inner scope so the shared `&PackContext` borrow (held by
+    // Run Phase A in an inner scope so the shared `&PackSystem` borrow (held by
     // the closure) is released before we move the buffers back into `sys`.
     let (f_total, frest_max) = {
-        let sys_ro: &PackContext = sys;
+        let sys_ro: &PackSystem = sys;
         // Phase A, per molecule — independent, so it runs under `iter`/`par_iter`.
         let body = |&(itype, icart0, ilubar, ilugan): &(usize, usize, usize, usize)| -> (F, F) {
             let (v1, v2, v3) = eulerrmat(x[ilugan], x[ilugan + 1], x[ilugan + 2]);
@@ -538,10 +506,10 @@ fn expand_molecules(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
                 if start == end {
                     continue;
                 }
-                // Value (F / FG): same `.f` call order as the legacy serial loop.
+                // Value (F / FG): the same `.f` call order as the serial loop.
                 if matches!(mode, ExpandMode::F | ExpandMode::FG) {
                     let mut fplus = 0.0;
-                    for &irest in &sys_ro.iratom_data[start..end] {
+                    for &irest in &sys_ro.iratom_indices[start..end] {
                         fplus += sys_ro.restraints[irest].f(&pos, scale, scale2);
                     }
                     f_local += fplus;
@@ -559,7 +527,7 @@ fn expand_molecules(x: &[F], sys: &mut PackContext, mode: ExpandMode) -> F {
                 if matches!(mode, ExpandMode::G | ExpandMode::FG) {
                     // SAFETY: disjoint slot, as above.
                     let gc = unsafe { slots.gxcar_at(icart) };
-                    for &irest in &sys_ro.iratom_data[start..end] {
+                    for &irest in &sys_ro.iratom_indices[start..end] {
                         let _ = sys_ro.restraints[irest].fg(&pos, scale, scale2, gc);
                     }
                 }
@@ -635,7 +603,7 @@ where
 /// `ilugan` (the Euler-angle offset) starts at `ntotmol*3`, which is correct for
 /// both full and per-type compact `x` (`SwapState::set_type` shrinks `ntotmol`
 /// to the phase's molecule count).
-fn fill_active_mol_descs(descs: &mut Vec<(usize, usize, usize, usize)>, sys: &PackContext) {
+fn fill_active_mol_descs(descs: &mut Vec<(usize, usize, usize, usize)>, sys: &PackSystem) {
     descs.clear();
     let mut ilubar = 0usize;
     let mut ilugan = sys.ntotmol * 3;
@@ -655,11 +623,11 @@ fn fill_active_mol_descs(descs: &mut Vec<(usize, usize, usize, usize)>, sys: &Pa
 }
 
 #[inline(always)]
-fn accumulate_constraint_value(icart: usize, pos: &[F; 3], sys: &mut PackContext) -> F {
+fn accumulate_constraint_value(icart: usize, pos: &[F; 3], sys: &mut PackSystem) -> F {
     let mut fplus = 0.0;
     let start = sys.iratom_offsets[icart];
     let end = sys.iratom_offsets[icart + 1];
-    for &irest in &sys.iratom_data[start..end] {
+    for &irest in &sys.iratom_indices[start..end] {
         fplus += sys.restraints[irest].f(pos, sys.scale, sys.scale2);
     }
     if fplus > sys.frest {
@@ -672,20 +640,20 @@ fn accumulate_constraint_value(icart: usize, pos: &[F; 3], sys: &mut PackContext
 }
 
 #[inline(always)]
-fn accumulate_constraint_gradient(icart: usize, pos: &[F; 3], sys: &mut PackContext) {
+fn accumulate_constraint_gradient(icart: usize, pos: &[F; 3], sys: &mut PackSystem) {
     let start = sys.iratom_offsets[icart];
     let end = sys.iratom_offsets[icart + 1];
     let scale = sys.scale;
     let scale2 = sys.scale2;
     let gc = &mut sys.work.gxcar[icart];
-    for &irest in &sys.iratom_data[start..end] {
+    for &irest in &sys.iratom_indices[start..end] {
         // fg returns the penalty value too; discard it — only gradient accumulation matters here
         let _ = sys.restraints[irest].fg(pos, scale, scale2, gc);
     }
 }
 
 #[inline]
-fn accumulate_constraint_gradient_from_xcart(sys: &mut PackContext) {
+fn accumulate_constraint_gradient_from_xcart(sys: &mut PackSystem) {
     let mut icart = 0usize;
 
     for itype in 0..sys.ntype {
@@ -709,7 +677,7 @@ fn accumulate_constraint_gradient_from_xcart(sys: &mut PackContext) {
 /// restraint's function value, returning the accumulated penalty. Used by the
 /// `compute_f` cache fast path when the Cartesian expansion can be skipped.
 #[inline]
-fn accumulate_constraint_values_from_xcart(sys: &mut PackContext) -> F {
+fn accumulate_constraint_values_from_xcart(sys: &mut PackSystem) -> F {
     let mut f = 0.0;
     let mut icart = 0usize;
 
@@ -734,7 +702,7 @@ fn accumulate_constraint_values_from_xcart(sys: &mut PackContext) -> F {
 /// Combined F+G counterpart to [`accumulate_constraint_gradient_from_xcart`].
 /// Used by the `compute_fg` cache fast path.
 #[inline]
-fn accumulate_constraint_values_and_gradients_from_xcart(sys: &mut PackContext) -> F {
+fn accumulate_constraint_values_and_gradients_from_xcart(sys: &mut PackSystem) -> F {
     let mut f = 0.0;
     let mut icart = 0usize;
 
@@ -760,7 +728,7 @@ fn accumulate_constraint_values_and_gradients_from_xcart(sys: &mut PackContext) 
 /// Starting `icart` of free type `itype` — prefix sum of `nmols·natoms` over
 /// preceding types. Cheap (`ntype` is small) and used only by collective terms.
 #[inline]
-fn type_icart_start(sys: &PackContext, itype: usize) -> usize {
+fn type_icart_start(sys: &PackSystem, itype: usize) -> usize {
     let mut start = 0usize;
     for t in 0..itype {
         start += sys.nmols[t] * sys.natoms[t];
@@ -777,7 +745,7 @@ fn type_icart_start(sys: &PackContext, itype: usize) -> usize {
 /// the gradient-only path, which shares the `fg` accumulator, cannot disturb the
 /// convergence verdict — the same split the per-atom
 /// `accumulate_constraint_value` / `_gradient` pair keeps.
-fn accumulate_collective_f(sys: &PackContext) -> (F, F) {
+fn accumulate_collective_f(sys: &PackSystem) -> (F, F) {
     if sys.collective.is_empty() {
         return (0.0, 0.0);
     }
@@ -796,14 +764,14 @@ fn accumulate_collective_f(sys: &PackContext) -> (F, F) {
         if len == 0 {
             continue;
         }
-        let ctx = GroupCtx {
+        let evaluation = GroupEvaluation {
             scale,
             scale2,
             natoms_per_copy: sys.natoms[itype],
             cell: &sys.simbox,
             mic,
         };
-        let v = r.f(&sys.xcart[start..start + len], ctx);
+        let v = r.f(&sys.xcart[start..start + len], evaluation);
         total += v;
         if r.is_bound() {
             bound_max = bound_max.max(v);
@@ -818,7 +786,7 @@ fn accumulate_collective_f(sys: &PackContext) -> (F, F) {
 /// Returns `(summed penalty, worst bound penalty)` — see
 /// [`accumulate_collective_f`]. Used by `compute_fg` (both numbers) and
 /// `compute_g` (both discarded, so the gradient path leaves the verdict alone).
-fn accumulate_collective_fg(sys: &mut PackContext) -> (F, F) {
+fn accumulate_collective_fg(sys: &mut PackSystem) -> (F, F) {
     if sys.collective.is_empty() {
         return (0.0, 0.0);
     }
@@ -847,10 +815,10 @@ fn accumulate_collective_fg(sys: &mut PackContext) -> (F, F) {
     // Split borrow: coordinates are read in place and the coupled gradient is
     // accumulated straight into the scatter buffer. The restraint contract is
     // `+=` into `grads`, which is exactly what `gxcar` wants, so neither the
-    // coordinates nor the gradients need a staging copy — they used to cost
-    // two allocations plus two passes per evaluation per group, ~200 us for a
+    // coordinates nor the gradients need a staging copy — one would cost two
+    // allocations plus two passes per evaluation per group, ~200 us for a
     // 30k-atom species, on a path GENCAN calls thousands of times.
-    let PackContext {
+    let PackSystem {
         xcart,
         work,
         simbox,
@@ -862,7 +830,7 @@ fn accumulate_collective_fg(sys: &mut PackContext) -> (F, F) {
         if len == 0 {
             continue;
         }
-        let ctx = GroupCtx {
+        let evaluation = GroupEvaluation {
             scale,
             scale2,
             natoms_per_copy,
@@ -871,7 +839,7 @@ fn accumulate_collective_fg(sys: &mut PackContext) -> (F, F) {
         };
         let v = r.fg(
             &xcart[start..start + len],
-            ctx,
+            evaluation,
             &mut work.gxcar[start..start + len],
         );
         total += v;
@@ -886,7 +854,7 @@ fn accumulate_collective_fg(sys: &mut PackContext) -> (F, F) {
 }
 
 #[inline(always)]
-fn insert_atom_in_cell(icart: usize, pos: &[F; 3], sys: &mut PackContext) {
+fn insert_atom_in_cell(icart: usize, pos: &[F; 3], sys: &mut PackSystem) {
     let icell = sys.grid.cell_of(&sys.simbox, *pos);
     sys.latomnext[icart] = sys.latomfirst[icell];
     sys.latomfirst[icell] = icart as u32;
@@ -898,12 +866,12 @@ fn insert_atom_in_cell(icart: usize, pos: &[F; 3], sys: &mut PackContext) {
         sys.lcellfirst = icell as u32;
     }
 
-    // `ibtype` / `ibmol` are set once at context construction and mirrored
+    // `ibtype` / `ibmol` are set once at system construction and mirrored
     // into `atom_props`.
 }
 
 #[inline(always)]
-fn accumulate_pair_f(sys: &mut PackContext) -> F {
+fn accumulate_pair_f(sys: &mut PackSystem) -> F {
     #[cfg(feature = "rayon")]
     if sys.parallel_pair_eval && !sys.move_flag {
         let (f, fdist_max) = accumulate_pair_f_parallel(sys);
@@ -950,7 +918,7 @@ fn accumulate_pair_f(sys: &mut PackContext) -> F {
 }
 
 #[cfg(feature = "rayon")]
-fn accumulate_pair_f_parallel(sys: &PackContext) -> (F, F) {
+fn accumulate_pair_f_parallel(sys: &PackSystem) -> (F, F) {
     let pbc = pbc_constants(sys);
     sys.active_cells
         .par_iter()
@@ -987,7 +955,7 @@ fn accumulate_pair_f_parallel(sys: &PackContext) -> (F, F) {
 }
 
 #[inline(always)]
-fn accumulate_pair_g(sys: &mut PackContext) {
+fn accumulate_pair_g(sys: &mut PackSystem) {
     let pbc = pbc_constants(sys);
     let mut icell_id = sys.lcellfirst;
     while icell_id != NONE_IDX {
@@ -1012,7 +980,7 @@ fn accumulate_pair_g(sys: &mut PackContext) {
 }
 
 #[inline(always)]
-fn accumulate_pair_fg(sys: &mut PackContext) -> F {
+fn accumulate_pair_fg(sys: &mut PackSystem) -> F {
     #[cfg(feature = "rayon")]
     if sys.parallel_pair_eval && !sys.move_flag {
         let (f, fdist_max) = accumulate_pair_fg_parallel(sys);
@@ -1061,14 +1029,14 @@ fn accumulate_pair_fg(sys: &mut PackContext) -> F {
 }
 
 /// Base pointer into the per-worker scratch gradient buffer
-/// ([`crate::context::WorkBuffers::grad_partials`]). `*mut [F; 3]` is not
+/// ([`crate::system::WorkBuffers::grad_partials`]). `*mut [F; 3]` is not
 /// `Send`/`Sync`; this wrapper asserts each worker only ever dereferences its
 /// own `[t*ntotat .. (t+1)*ntotat)` region, which is disjoint across the
 /// concurrently-running tasks (keyed by the unique rayon pool thread index).
 #[cfg(feature = "rayon")]
 #[derive(Clone, Copy)]
 struct PartialPtr {
-    base: *mut [F; 3],
+    start: *mut [F; 3],
     ntotat: usize,
 }
 // SAFETY: see type doc — regions are keyed by the unique pool thread index, so
@@ -1083,18 +1051,18 @@ impl PartialPtr {
     /// `t` must be the calling worker's unique pool index and `i < ntotat`.
     #[inline(always)]
     unsafe fn slot<'a>(self, t: usize, i: usize) -> &'a mut [F; 3] {
-        unsafe { &mut *self.base.add(t * self.ntotat + i) }
+        unsafe { &mut *self.start.add(t * self.ntotat + i) }
     }
 }
 
 /// Parallel counterpart to [`accumulate_pair_fg`]. rayon work-steals over
 /// `active_cells` using the **same 13-neighbor half-stencil the serial path
-/// walks** ([`PackContext::neighbor_cells`]), so each unordered pair is
+/// walks** ([`PackSystem::neighbor_cells`]), so each unordered pair is
 /// visited exactly once — none of the ~2× redundant distance work an
 /// atom-centric full-stencil pass incurs.
 ///
 /// Race freedom *without* that redundancy comes from per-worker scratch buffers
-/// ([`crate::context::WorkBuffers::grad_partials`]): worker `t` accumulates
+/// ([`crate::system::WorkBuffers::grad_partials`]): worker `t` accumulates
 /// every `gi += d` / `gj -= d` half-stencil write into its own private region
 /// `[t*ntotat .. (t+1)*ntotat)`, so no two concurrently-running tasks touch the
 /// same slot even though a half-stencil writes into neighbor cells. After the
@@ -1108,11 +1076,11 @@ impl PartialPtr {
 /// `parallel_equivalence` tests pin. Gated on `!move_flag` by the caller (the
 /// per-atom `fdist_atom` bookkeeping is intentionally skipped).
 #[cfg(feature = "rayon")]
-fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
+fn accumulate_pair_fg_parallel(sys: &mut PackSystem) -> (F, F) {
     let ntotat = sys.ntotat;
     let nthreads = rayon::current_num_threads().max(1);
 
-    // Per-worker scratch: take it out of `sys` so the context can be shared
+    // Per-worker scratch: take it out of `sys` so the system can be shared
     // immutably across tasks while each worker writes its own region through a
     // raw pointer. Sized to `nthreads * ntotat` and zeroed in parallel (each
     // worker clears its own region).
@@ -1125,9 +1093,9 @@ fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
         .for_each(|region| region.fill([0.0; 3]));
 
     let pbc = pbc_constants(sys);
-    let sys_ro: &PackContext = sys;
+    let sys_ro: &PackSystem = sys;
     let pptr = PartialPtr {
-        base: partials.as_mut_ptr(),
+        start: partials.as_mut_ptr(),
         ntotat,
     };
 
@@ -1204,7 +1172,7 @@ fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
 /// same `gi += d` / `gj -= d` writes (each unordered pair once), but the writes
 /// land in worker `t`'s private scratch region via `pptr` instead of
 /// `sys.work.gxcar`, and the `move_flag` per-atom bookkeeping is omitted (the
-/// caller gates on `!move_flag`). Reads a shared `&PackContext`; returns
+/// caller gates on `!move_flag`). Reads a shared `&PackSystem`; returns
 /// `(penalty_sum, fdist_max)`.
 ///
 /// `gi` (slot `icart`) and `gj` (slot `jcart`) are always distinct atoms — the
@@ -1215,7 +1183,7 @@ fn accumulate_pair_fg_parallel(sys: &mut PackContext) -> (F, F) {
 fn fgparc_into(
     icart: usize,
     first_jcart: u32,
-    sys: &PackContext,
+    sys: &PackSystem,
     pptr: PartialPtr,
     t: usize,
     pbc: &PbcConstants,
@@ -1261,7 +1229,7 @@ fn fgparc_into(
 /// Atom-pair gradient accumulation into `sys.work.gxcar`.
 /// Port of `gparc.f90`.
 #[inline(always)]
-fn gparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstants) {
+fn gparc(icart: usize, first_jcart: u32, sys: &mut PackSystem, pbc: &PbcConstants) {
     let mut jcart_id = first_jcart;
     let xi = sys.xcart[icart];
     let hot = AtomHotState::load(icart, sys);
@@ -1290,7 +1258,7 @@ fn gparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstan
 /// Returns `(penalty_sum, fdist_max)`. Caller reduces `fdist_max` locally
 /// and writes `sys.fdist` once after the cell walk completes.
 #[inline(always)]
-fn fgparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConstants) -> (F, F) {
+fn fgparc(icart: usize, first_jcart: u32, sys: &mut PackSystem, pbc: &PbcConstants) -> (F, F) {
     let mut result = 0.0;
     let mut local_fdist: F = 0.0;
     let mut jcart_id = first_jcart;
@@ -1333,7 +1301,7 @@ fn fgparc(icart: usize, first_jcart: u32, sys: &mut PackContext, pbc: &PbcConsta
 
 #[cfg(feature = "rayon")]
 #[inline(always)]
-fn fparc_stats(icart: usize, first_jcart: u32, sys: &PackContext, pbc: &PbcConstants) -> (F, F) {
+fn fparc_stats(icart: usize, first_jcart: u32, sys: &PackSystem, pbc: &PbcConstants) -> (F, F) {
     let mut result: F = 0.0;
     let mut fdist_max: F = 0.0;
     let mut jcart_id = first_jcart;
@@ -1358,12 +1326,11 @@ fn fparc_stats(icart: usize, first_jcart: u32, sys: &PackContext, pbc: &PbcConst
 /// Project each active molecule's atom Cartesian gradient onto its own 6 DOF
 /// (COM + Euler), writing only its own **disjoint** `g[ilubar..]` / `g[ilugan..]`
 /// slots. Because no slot is summed across molecules and each molecule's
-/// accumulation order matches the legacy serial loop's (same atoms, same axis
-/// order), the result is **bit-identical** whether Phase A iterates with `iter`
+/// accumulation order is fixed (same atoms, same axis order), the result is **bit-identical** whether Phase A iterates with `iter`
 /// or `par_iter` — the only difference between the serial and parallel paths
 /// (see [`project_for_each`]). The dominant cost is `eulerrmat_derivatives`
 /// (trig) per molecule.
-fn project_cartesian_gradient(x: &[F], sys: &mut PackContext, g: &mut [F]) {
+fn project_cartesian_gradient(x: &[F], sys: &mut PackSystem, g: &mut [F]) {
     g.iter_mut().for_each(|v| *v = 0.0);
 
     let mut descs = std::mem::take(&mut sys.work.mol_descs);
@@ -1391,9 +1358,9 @@ fn project_cartesian_gradient(x: &[F], sys: &mut PackContext, g: &mut [F]) {
     }
     let gptr = GPtr(g.as_mut_ptr());
 
-    // Inner scope so the shared `&PackContext` borrow ends before `sys` is reused.
+    // Inner scope so the shared `&PackSystem` borrow ends before `sys` is reused.
     {
-        let sys_ro: &PackContext = sys;
+        let sys_ro: &PackSystem = sys;
         let body = |&(itype, icart0, ilubar, ilugan): &(usize, usize, usize, usize)| {
             let beta = x[ilugan];
             let gama = x[ilugan + 1];
@@ -1460,29 +1427,26 @@ where
 }
 
 #[inline]
-fn matches_cached_geometry(x: &[F], sys: &PackContext) -> bool {
+fn matches_cached_geometry(x: &[F], sys: &PackSystem) -> bool {
     sys.work
         .matches_cached_geometry(x, &sys.comptype, sys.init1, sys.geometry_key())
 }
 
 #[inline]
-fn update_cached_geometry(x: &[F], sys: &mut PackContext) {
+fn update_cached_geometry(x: &[F], sys: &mut PackSystem) {
     sys.work
         .update_cached_geometry(x, &sys.comptype, sys.init1, sys.geometry_key());
 }
 
-// ── Phase A.5 — Objective trait ────────────────────────────────────────────
+// ── Objective trait ─────────────────────────────────────────────────────────
 //
-// `Objective` is the abstraction the packer's GENCAN loop will talk to. At
-// this checkpoint the trait is defined and implemented for `PackContext` but
-// no call site has been rewired yet (`pgencan` still takes `&mut PackContext`
-// directly). Phase A.6 swaps `pgencan`'s signature to `&mut dyn Objective`.
-//
-// The trait is intentionally shaped to match what the GENCAN loop reads and
-// writes today — no speculative extra methods.
+// `Objective` is what the GENCAN loop (`pack::gencan`: `gencan`, the line
+// search and the CG step) talks to, as `&mut dyn Objective`; `PackSystem`
+// implements it. The trait is shaped to match what that loop reads and
+// writes — no speculative extra methods.
 
 /// Abstracts the packer's objective function so the optimizer can talk to
-/// any `(f, g)` oracle, not just `PackContext`.
+/// any `(f, g)` oracle, not just `PackSystem`.
 ///
 /// Implementors are responsible for:
 /// - Returning `f`, worst-atom distance violation (`fdist`), worst-molecule
@@ -1492,7 +1456,7 @@ fn update_cached_geometry(x: &[F], sys: &mut PackContext) {
 ///
 /// The trait does **not** own bounds (`l`, `u`): those are problem-specific
 /// and the caller (e.g. `pgencan::build_bounds`) builds them from the
-/// concrete context it has in hand.
+/// concrete system it has in hand.
 ///
 /// It is public (re-exported at the crate root) as the extension hook for
 /// custom objectives.
@@ -1531,13 +1495,12 @@ pub trait Objective {
 
     /// Fill `l` and `u` (each of length `x.len()` at the `pgencan` entry)
     /// with per-variable bounds. The default implementation sets every
-    /// variable to `[-1e20, +1e20]` (effectively unbounded); `PackContext`
+    /// variable to `[-1e20, +1e20]` (effectively unbounded); `PackSystem`
     /// overrides it to add the Euler-angle bounds implied by
     /// `constrain_rotation`.
     ///
-    /// Landed in A.6 so `pgencan` no longer needs `&mut PackContext` for
-    /// anything beyond evaluation — bounds construction is now behind the
-    /// trait too.
+    /// Bounds construction sits behind the trait, so `pgencan` needs
+    /// `&mut PackSystem` for nothing beyond evaluation.
     fn bounds(&self, l: &mut [F], u: &mut [F]) {
         debug_assert_eq!(l.len(), u.len(), "bounds: l/u length mismatch");
         l.fill(-1.0e20);
@@ -1545,10 +1508,34 @@ pub trait Objective {
     }
 }
 
-impl Objective for PackContext {
+impl Objective for PackSystem {
     #[inline]
     fn evaluate(&mut self, x: &[F], mode: EvalMode, gradient: Option<&mut [F]>) -> EvalOutput {
-        PackContext::evaluate(self, x, mode, gradient)
+        let mut f_total = 0.0;
+        match mode {
+            EvalMode::FOnly => {
+                f_total = compute_f(x, self);
+            }
+            EvalMode::GradientOnly => {
+                if let Some(g) = gradient {
+                    compute_g(x, self, g);
+                } else {
+                    debug_assert!(false, "GradientOnly mode requires gradient buffer");
+                }
+            }
+            EvalMode::FAndGradient => {
+                if let Some(g) = gradient {
+                    f_total = compute_fg(x, self, g);
+                } else {
+                    debug_assert!(false, "FAndGradient mode requires gradient buffer");
+                }
+            }
+        }
+        EvalOutput {
+            f_total,
+            fdist_max: self.fdist,
+            frest_max: self.frest,
+        }
     }
 
     #[inline]
@@ -1563,17 +1550,17 @@ impl Objective for PackContext {
 
     #[inline]
     fn ncf(&self) -> usize {
-        PackContext::ncf(self)
+        PackSystem::ncf(self)
     }
 
     #[inline]
     fn ncg(&self) -> usize {
-        PackContext::ncg(self)
+        PackSystem::ncg(self)
     }
 
     #[inline]
     fn reset_eval_counters(&mut self) {
-        PackContext::reset_eval_counters(self);
+        PackSystem::reset_eval_counters(self);
     }
 
     /// Port of `gencan::build_bounds` (pre-A.6). COM variables (first `n/2`)
@@ -1609,12 +1596,12 @@ impl Objective for PackContext {
 #[cfg(test)]
 mod objective_trait_tests {
     use super::*;
-    use crate::PackContext;
+    use crate::PackSystem;
 
-    /// Pins `<PackContext as Objective>::evaluate` against the inherent
-    /// `PackContext::evaluate`: calling through a `&mut dyn Objective` must
+    /// Pins `<PackSystem as Objective>::evaluate` against the inherent
+    /// `PackSystem::evaluate`: calling through a `&mut dyn Objective` must
     /// return byte-identical `EvalOutput` and leave identical `fdist` /
-    /// `frest` state when fed the same empty-molecule context.
+    /// `frest` state when fed the same empty-molecule system.
     ///
     /// With `ntotmol=0`, `x` is empty; `evaluate(FOnly)` runs the full
     /// constraints-container dispatch on empty state and returns
@@ -1623,8 +1610,8 @@ mod objective_trait_tests {
     /// forwarding to the wrong method) would fail loudly.
     #[test]
     fn dyn_objective_matches_inherent_evaluate() {
-        fn build(ntotat: usize) -> PackContext {
-            let mut sys = PackContext::new(ntotat, 0, 0);
+        fn build(ntotat: usize) -> PackSystem {
+            let mut sys = PackSystem::new(ntotat, 0, 0);
             sys.radius.fill(0.75);
             sys.radius_ini.fill(1.5);
             sys.work.radiuswork.resize(ntotat, 0.0);
@@ -1634,7 +1621,7 @@ mod objective_trait_tests {
         let x: Vec<F> = Vec::new();
 
         let mut via_inherent = build(4);
-        let out_inherent = PackContext::evaluate(&mut via_inherent, &x, EvalMode::FOnly, None);
+        let out_inherent = PackSystem::evaluate(&mut via_inherent, &x, EvalMode::FOnly, None);
 
         let mut via_trait_owner = build(4);
         let out_trait = {
@@ -1671,27 +1658,28 @@ mod objective_trait_tests {
 }
 
 /// Numerical-equivalence test: `compute_fg` with
-/// `PackContext::parallel_pair_eval = true` must produce the same `f`,
+/// `PackSystem::parallel_pair_eval = true` must produce the same `f`,
 /// `fdist`, and full gradient as the serial path. Guards against any
 /// float-summation reordering regression inside the rayon reduce +
 /// parallel merge.
 ///
 /// Parallelism is user-opt-in via `with_parallel_eval(bool)`
-/// → `PackContext::parallel_pair_eval`. These tests flip the flag
+/// → `PackSystem::parallel_pair_eval`. These tests flip the flag
 /// explicitly so the parallel code path is actually exercised instead
 /// of relying on a size heuristic.
 #[cfg(all(test, feature = "rayon"))]
 mod parallel_equivalence_tests {
+    use crate::PackSystem;
     use crate::objective::{compute_f, compute_fg};
-    use crate::{F, PackContext};
+    use molrs::op::F;
 
-    /// A synthetic water-in-a-box context: enough molecules that the
+    /// A synthetic water-in-a-box system: enough molecules that the
     /// parallel reduce actually splits the pair loop.
-    fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackContext, Vec<F>) {
+    fn build_water_box(n_mols: usize, box_side: F, seed: u64) -> (PackSystem, Vec<F>) {
         let atoms_per_mol = 3usize;
         let ntotat = n_mols * atoms_per_mol;
         let ntype = 1usize;
-        let mut sys = PackContext::new(ntotat, n_mols, ntype);
+        let mut sys = PackSystem::new(ntotat, n_mols, ntype);
         sys.ntype_with_fixed = ntype;
         sys.nmols = vec![n_mols];
         sys.natoms = vec![atoms_per_mol];
@@ -1713,19 +1701,18 @@ mod parallel_equivalence_tests {
             }
         }
         sys.iratom_offsets = vec![0; ntotat + 1];
-        sys.iratom_data.clear();
+        sys.iratom_indices.clear();
 
         let pad: F = 3.0;
         let side = box_side + 2.0 * pad;
         let origin = [-pad, -pad, -pad];
-        let mut origin_arr = molrs::types::F3::zeros(3);
+        let mut origin_arr = molrs::op::F3::zeros(3);
         for k in 0..3 {
             origin_arr[k] = origin[k];
         }
-        sys.simbox =
-            molrs::spatial::simbox::SimBox::cube(side, origin_arr, [false; 3]).expect("cell");
+        sys.simbox = molrs::core::SimBox::cube(side, origin_arr, [false; 3]).expect("cell");
         let cell_side: F = 2.0;
-        sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, cell_side);
+        sys.grid = molrs::core::CellGrid::for_cutoff(&sys.simbox, cell_side);
         sys.resize_cell_arrays();
 
         sys.sizemin = origin;
@@ -1829,7 +1816,7 @@ mod parallel_equivalence_tests {
         }
     }
 
-    // ── pack-level parity: full GenCanPack run, serial vs parallel ──────────
+    // ── pack-level parity: full GencanPack run, serial vs parallel ──────────
 
     use rand::RngExt;
     use rand::SeedableRng;
@@ -1843,14 +1830,15 @@ mod parallel_equivalence_tests {
 /// must not be allowed to lie on its own image.
 #[cfg(test)]
 mod self_image_tests {
+    use crate::PackSystem;
     use crate::objective::compute_f;
-    use crate::{F, PackContext};
+    use molrs::op::F;
 
     /// One rigid copy with conformer `coor` (centred at the origin), its COM
     /// at the centre of a `side` Å cube, radii 1 Å (contact at 2 Å).
-    fn one_copy(coor: &[[F; 3]], side: F, pbc: bool) -> (PackContext, Vec<F>) {
+    fn one_copy(coor: &[[F; 3]], side: F, pbc: bool) -> (PackSystem, Vec<F>) {
         let na = coor.len();
-        let mut sys = PackContext::new(na, 1, 1);
+        let mut sys = PackSystem::new(na, 1, 1);
         sys.ntype_with_fixed = 1;
         sys.nmols = vec![1];
         sys.natoms = vec![na];
@@ -1867,10 +1855,10 @@ mod self_image_tests {
             sys.ibmol[icart] = 0;
         }
         sys.iratom_offsets = vec![0; na + 1];
-        sys.iratom_data.clear();
-        let origin = molrs::types::F3::zeros(3);
-        sys.simbox = molrs::spatial::simbox::SimBox::cube(side, origin, [pbc; 3]).expect("cell");
-        sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, 2.0);
+        sys.iratom_indices.clear();
+        let origin = molrs::op::F3::zeros(3);
+        sys.simbox = molrs::core::SimBox::cube(side, origin, [pbc; 3]).expect("cell");
+        sys.grid = molrs::core::CellGrid::for_cutoff(&sys.simbox, 2.0);
         sys.resize_cell_arrays();
         sys.sizemin = [0.0; 3];
         sys.sizemax = [side; 3];

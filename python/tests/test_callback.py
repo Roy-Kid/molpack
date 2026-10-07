@@ -1,0 +1,277 @@
+"""Tests for Python-defined packing callbacks (``with_callback`` on the engines)."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import molrs
+import numpy as np
+import pytest
+
+import molpack
+
+
+def _two_water_frame() -> molrs.core.Frame:
+    """Two trivially distinct atoms so packing has something to do."""
+    return molrs.core.Frame(
+        {
+            "atoms": {
+                "x": np.array([0.0, 1.5]),
+                "y": np.array([0.0, 0.0]),
+                "z": np.array([0.0, 0.0]),
+                "element": ["O", "H"],
+            }
+        }
+    )
+
+
+def _packer() -> molpack.GencanPack:
+    return molpack.GencanPack().with_inner_iterations(5)
+
+
+@dataclass
+class CallLog:
+    started: bool = False
+    finished: bool = False
+    ntotat: int = 0
+    ntotmol: int = 0
+    steps: list = field(default_factory=list)
+
+    def on_start(self, ntotat: int, ntotmol: int) -> None:
+        self.started = True
+        self.ntotat = ntotat
+        self.ntotmol = ntotmol
+
+    def on_step(self, step: molpack.StepReport, sys: molpack.PackSystemView) -> None:
+        self.steps.append((step.phase, step.loop_idx, step.fdist, step.frest))
+
+    def on_finish(self) -> None:
+        self.finished = True
+
+
+class TestCallbackHooks:
+    def test_lifecycle_methods_are_called(self):
+        log = CallLog()
+        # 30 copies in a 6³ box forces the outer loop to actually
+        # iterate — a too-easy setup converges during init and
+        # `on_step` never fires.
+        target = molpack.Target(_two_water_frame(), count=30).with_restraint(
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+        )
+        _packer().with_callback(log).with_seed(1).run([target], max_loops=5)
+
+        assert log.started is True
+        assert log.finished is True
+        # 30 copies × 2 atoms per copy → 60 atoms; 30 molecules.
+        assert log.ntotat == 60
+        assert log.ntotmol == 30
+        assert len(log.steps) >= 1
+
+    def test_step_info_fields_are_readable(self):
+        captured: list[tuple] = []
+
+        class Grabber:
+            def on_step(
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
+            ) -> None:
+                captured.append(
+                    (
+                        step.loop_idx,
+                        step.max_loops,
+                        step.phase,
+                        step.total_phases,
+                        step.molecule_type,
+                        step.fdist,
+                        step.frest,
+                        step.improvement_pct,
+                        step.radscale,
+                        step.precision,
+                    )
+                )
+
+        target = molpack.Target(_two_water_frame(), count=2).with_restraint(
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+        )
+        _packer().with_callback(Grabber()).with_seed(1).run([target], max_loops=2)
+
+        assert captured, "expected at least one on_step call"
+        first = captured[0]
+        assert isinstance(first[0], int)  # loop_idx
+        assert first[1] == 2  # max_loops
+        assert first[2] >= 0  # phase
+        assert first[3] >= 1  # total_phases
+        # molecule_type is None for the final all-types phase, int otherwise
+        assert first[4] is None or isinstance(first[4], int)
+        assert all(isinstance(v, float) for v in first[5:10])
+
+    def test_methods_are_optional(self):
+        """Callback with *no* methods must not crash."""
+
+        class Empty:
+            pass
+
+        target = molpack.Target(_two_water_frame(), count=2).with_restraint(
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+        )
+        result = (
+            _packer().with_callback(Empty()).with_seed(1).run([target], max_loops=2)
+        )
+        assert result.natoms == 4
+
+
+class TestCallbackEarlyStop:
+    def test_returning_true_halts_pack(self):
+        steps_seen: list[int] = []
+
+        class StopAfterOne:
+            def on_step(
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
+            ) -> bool:
+                steps_seen.append(step.loop_idx)
+                return True  # request immediate stop
+
+        target = molpack.Target(_two_water_frame(), count=4).with_restraint(
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
+        )
+        _packer().with_callback(StopAfterOne()).with_seed(1).run([target], max_loops=50)
+
+        # The per-phase compaction loop itself runs through its callback
+        # pass before checking should_stop; we just assert that we did
+        # NOT run the full 50 outer loops.
+        assert len(steps_seen) < 50, (
+            f"early stop was ignored; saw {len(steps_seen)} steps"
+        )
+
+
+class TestGencanEarlyStop:
+    """``GencanPack.with_early_stop`` — on by default, switchable off."""
+
+    @staticmethod
+    def _loops_per_phase(packer: molpack.GencanPack, max_loops: int) -> list[int]:
+        # Forty atoms at 2 A tolerance in a 3 A cube can never pack, so
+        # every phase stalls and only the early stop can end it before
+        # max_loops.
+        seen: dict[int, int] = {}
+
+        class Count:
+            def on_step(
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
+            ) -> None:
+                seen[step.phase] = seen.get(step.phase, 0) + 1
+
+        target = molpack.Target(_two_water_frame(), count=20).with_restraint(
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [3.0, 3.0, 3.0])
+        )
+        result = (
+            packer.with_callback(Count())
+            .with_seed(1)
+            .run([target], max_loops=max_loops)
+        )
+        assert not result.converged
+        return list(seen.values())
+
+    def test_default_stops_a_stalled_phase(self):
+        loops = self._loops_per_phase(_packer(), max_loops=60)
+        assert loops and all(n < 60 for n in loops), loops
+
+    def test_disabled_runs_every_phase_to_max_loops(self):
+        loops = self._loops_per_phase(_packer().with_early_stop(False), max_loops=60)
+        assert loops and all(n == 60 for n in loops), loops
+
+
+class TestCallbackErrorPropagation:
+    def test_exception_in_on_step_is_reraised(self):
+        class Explodes:
+            def on_step(
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
+            ) -> None:
+                raise ValueError("boom from callback")
+
+        target = molpack.Target(_two_water_frame(), count=2).with_restraint(
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+        )
+        with pytest.raises(ValueError, match="boom from callback"):
+            _packer().with_callback(Explodes()).with_seed(1).run([target], max_loops=5)
+
+    def test_exception_in_on_start_is_reraised(self):
+        class ExplodesEarly:
+            def on_start(self, ntotat: int, ntotmol: int) -> None:
+                raise RuntimeError("boom from on_start")
+
+        target = molpack.Target(_two_water_frame(), count=2).with_restraint(
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+        )
+        with pytest.raises(RuntimeError, match="boom from on_start"):
+            _packer().with_callback(ExplodesEarly()).with_seed(1).run(
+                [target], max_loops=5
+            )
+
+
+class TestMultipleCallbacks:
+    def test_each_callback_is_called(self):
+        log1 = CallLog()
+        log2 = CallLog()
+        target = molpack.Target(_two_water_frame(), count=2).with_restraint(
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+        )
+        _packer().with_callback(log1).with_callback(log2).with_seed(1).run(
+            [target], max_loops=2
+        )
+
+        assert log1.started and log2.started
+        assert log1.finished and log2.finished
+        assert len(log1.steps) == len(log2.steps) >= 1
+
+
+class TestPackSystemView:
+    def test_positions_are_owned_copies(self):
+        frames: list = []
+
+        class Recorder:
+            def on_step(
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
+            ) -> None:
+                frames.append((step.loop_idx, sys.positions))
+
+        target = molpack.Target(_two_water_frame(), count=30).with_restraint(
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+        )
+        _packer().with_callback(Recorder()).with_seed(1).run([target], max_loops=5)
+
+        assert frames, "expected at least one on_step call"
+        loop_idx, arr = frames[0]
+        assert isinstance(loop_idx, int)
+        assert arr.shape == (60, 3)
+        assert arr.dtype == np.float64
+        assert np.isfinite(arr).all()
+        if len(frames) >= 2:
+            assert frames[0][1] is not frames[1][1]
+
+    def test_system_view_expires_after_callback(self):
+        stashed: list = []
+
+        class Stasher:
+            def on_step(
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
+            ) -> None:
+                if not stashed:
+                    assert sys.natoms == 8
+                stashed.append(sys)
+
+        target = molpack.Target(_two_water_frame(), count=4).with_restraint(
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+        )
+        _packer().with_callback(Stasher()).with_seed(1).run([target], max_loops=2)
+
+        assert stashed
+        with pytest.raises(RuntimeError, match="expired"):
+            _ = stashed[0].positions
+        assert "expired" in repr(stashed[0])
+
+    def test_callback_ignoring_the_system_view_still_works(self):
+        log = CallLog()
+        target = molpack.Target(_two_water_frame(), count=4).with_restraint(
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+        )
+        _packer().with_callback(log).with_seed(1).run([target], max_loops=2)
+        assert log.finished is True

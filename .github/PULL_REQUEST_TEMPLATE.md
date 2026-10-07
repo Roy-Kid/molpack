@@ -18,18 +18,12 @@ Fixes #
 
 <!-- How did you verify this? Check all that apply. -->
 
-- [ ] `cargo test -p molcrafts-molpack --lib --features cli,ff` passes
-- [ ] `cargo test -p molcrafts-molpack --doc --features cli,ff` passes
+- [ ] `cargo test -p molcrafts-molpack --lib --features cli` passes
+- [ ] `cargo test -p molcrafts-molpack --doc --features cli` passes
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings` clean
 - [ ] `cargo fmt --check` clean
 - [ ] New behaviour has a unit test in the module that owns it
 - [ ] Python tests pass (`cd python && pytest`)
-
-## Breaking changes
-
-<!-- Does this change any public API? If yes, describe what callers need to update. -->
-
-None / <!-- describe -->
 
 ## Notes for reviewer
 

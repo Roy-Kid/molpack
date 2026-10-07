@@ -15,11 +15,14 @@
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
-use molpack::{F, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target, XYZHandler};
+use molpack::{
+    GencanPack, PackEngine, ProgressCallback, RegionRestraint, Target, XyzTrajectoryCallback,
+};
+use molrs::op::F;
 use std::sync::Arc;
 
-use molrs::io::data::pdb::read_pdb_frame;
-use molrs::spatial::region::{Cuboid, HalfSpace, NotRegion};
+use molrs::core::{Cuboid, HalfSpace, NotRegion};
+use molrs::io::read_pdb;
 use ndarray::array;
 
 // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
@@ -61,8 +64,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .expect("file path has no parent")
         .to_path_buf();
-    let water = read_pdb_frame(base.join("water.pdb"))?;
-    let lipid = read_pdb_frame(base.join("palmitoil.pdb"))?;
+    let water = read_pdb(base.join("water.pdb"))?;
+    let lipid = read_pdb(base.join("palmitoil.pdb"))?;
 
     let water_low = Target::new(water.clone(), 50)
         .with_restraint(inside_box([0.0, 0.0, -10.0], [40.0, 40.0, 0.0]))
@@ -85,14 +88,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_name("lipid_high");
 
     let targets = vec![water_low, water_high, lipid_low, lipid_high];
-    let mut packer = GenCanPack::new();
+    let mut packer = GencanPack::new();
     if std::env::var_os("MOLPACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.with_handler(Box::new(ProgressHandler::new()));
+        packer = packer.with_callback(Box::new(ProgressCallback::new()));
     }
     if std::env::var_os("MOLPACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.with_handler(Box::new(XYZHandler::new(out_dir.join("bilayer.xyz"), 10)));
+        packer = packer.with_callback(Box::new(XyzTrajectoryCallback::new(
+            out_dir.join("bilayer.xyz"),
+            10,
+        )));
     }
 
     packer.run(&targets, 800)?;

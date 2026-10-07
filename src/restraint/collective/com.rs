@@ -3,7 +3,7 @@
 //!
 //! The packer hands a collective restraint one flat, **copy-major** coordinate
 //! slice per species, so copy `c` owns `coords[c·m .. (c+1)·m]` for
-//! `m = GroupCtx::natoms_per_copy`. That is the only fact this module needs; it
+//! `m = GroupEvaluation::natoms_per_copy`. That is the only fact this module needs; it
 //! is what lets a term reason about *molecules* instead of atoms.
 //!
 //! A copy's atoms are always contiguous in space, so the centroid needs no
@@ -20,27 +20,21 @@
 //! masses are genuinely absent for coarse-grained beads and for targets built
 //! from bare coordinates.
 
-use molrs::types::F;
+use molrs::op::F;
+use molrs::op::centroid;
 
-/// Geometric centroid of every copy: `R_c = (1/m) Σ_{i∈c} r_i`.
+/// Geometric centroid of every copy: `R_c = (1/m) Σ_{i∈c} r_i`, molrs's
+/// [`centroid`] at unit weights.
 ///
 /// Returns one site per copy, in copy order. Empty when `m == 0`.
 pub(super) fn centroids(coords: &[[F; 3]], m: usize) -> Vec<[F; 3]> {
     if m == 0 {
         return Vec::new();
     }
-    let inv_m = 1.0 / m as F;
+    let unit_weights = vec![1.0; m];
     coords
         .chunks_exact(m)
-        .map(|copy| {
-            let mut c = [0.0 as F; 3];
-            for atom in copy {
-                c[0] += atom[0];
-                c[1] += atom[1];
-                c[2] += atom[2];
-            }
-            [c[0] * inv_m, c[1] * inv_m, c[2] * inv_m]
-        })
+        .map(|copy| centroid(copy, &unit_weights).expect("m unit weights sum to m > 0"))
         .collect()
 }
 

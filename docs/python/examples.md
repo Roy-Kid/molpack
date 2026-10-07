@@ -3,39 +3,40 @@
 Packmol workloads ported to Python live under `python/examples/`. The five
 `.inp` analogues are regression-tested against the equivalent Rust example
 (same RNG seed → identical final coordinates). Polymer scenes sit beside
-them: chemistry from molrs SMILES + molpy `PolymerBuilder`, packing from
-molpack — no hand-placed coordinates.
+them: chemistry and architecture from molrs (CGsmiles units + conformer,
+grown by `molrs.builder.Assembler`), packing from molpack — no hand-placed
+coordinates.
 
 | Script                | Packmol analogue  | What it shows |
 |-----------------------|-------------------|---------------|
-| `pack_water_cube.py`  | —                 | hello-world: 100 waters in a box, frame via `molrs.Frame` |
+| `pack_water_cube.py`  | —                 | hello-world: 100 waters in a box, frame via `molrs.core.Frame` |
 | `pack_mixture.py`     | `mixture.inp`     | two species co-packed in one box |
 | `pack_bilayer.py`     | `bilayer.inp`     | atom-subset restraints for layer-molecule orientation |
 | `pack_interface.py`   | `interface.inp`   | fixed reference molecule + two solvents |
 | `pack_spherical.py`   | `spherical.inp`   | nested spheres, double-layer shell |
 | `pack_solvprotein.py` | `solvprotein.inp` | fixed solute solvated by water + ions |
 | `pack_ion_dispersion.py` | —              | `SelfSeparation`: stop one species clustering, with a no-restraint control |
-| `pack_peo_linear.py`  | —                 | open-space linear PEO: `LatticeGrow` @ 2.0 Å then `GenCanPack.with_restart` |
+| `pack_peo_linear.py`  | —                 | open-space linear PEO: `LatticeGrow` @ 2.0 Å then `GencanPack.with_restart` |
 | `pack_peo_mix.py`     | —                 | linear + 4-arm star, two `Target`s, one box, one `LatticeGrow.run` |
-| `pack_peo_topo.py`    | —                 | 4-arm star (`LatticeGrow`) and ring (named reject, then `GenCanPack`) |
-| `pack_peo_mesh.py`    | —                 | linear PEO inside a branched mesh cavity (a `molrs.Polyhedron` masks `LatticeGrow` sites) |
-| `pack_peo_void.py`    | —                 | linear PEO through the solvent-accessible void of a bead-spring frame (`~molrs.SphereUnion`) |
+| `pack_peo_topo.py`    | —                 | 4-arm star (`LatticeGrow`) and ring (named reject, then `GencanPack`) |
+| `pack_peo_mesh.py`    | —                 | linear PEO inside a branched mesh cavity (a `molrs.core.Polyhedron` masks `LatticeGrow` sites) |
+| `pack_peo_void.py`    | —                 | linear PEO through the solvent-accessible void of a bead-spring frame (`~molrs.core.SphereUnion`) |
 
-Install molpack once; the `molrs` dependency comes with it. The
-`pack_peo_*.py` scenes also need molpy, on the same 0.15 line — the `molpy`
-extra pins it:
+Install molpack once; the `molrs` dependency comes with it, and every
+script needs nothing else:
 
 ```bash
-pip install molcrafts-molpack            # Packmol ports, water cube, ions
-pip install "molcrafts-molpack[molpy]"   # + the pack_peo_*.py polymer scenes
+pip install molcrafts-molpack
 ```
 
 Each script is standalone: no shared helper. `pack_water_cube.py` builds
-its frame in memory with `molrs.Frame` (no PDB file). The Packmol-port
+its frame in memory with `molrs.core.Frame` (no PDB file). The Packmol-port
 scripts load PDB files via `molrs.io.read_pdb`. The `pack_peo_*.py`
 scenes build polymers from CGsmiles units
-(`molrs.io.SmilesIR.from_fragment(body).to_template()`) grown by molpy
-instead. Writes go through molrs (`molrs.io.write_mrec`, `write_lammps_trajectory`,
+(`molrs.io.smiles.SmilesIr.from_fragment(body).to_template()`, given 3D
+coordinates by `molrs.conformer.Conformer`) grown by
+`molrs.builder.Assembler` with `molrs.builder.GrowthPlacer` instead. Writes
+go through molrs (`molrs.io.write_mrec_frame`, `write_lammps_dump_trajectory`,
 `write_lammps_dump_local`).
 
 ## Running
@@ -54,7 +55,7 @@ python examples/pack_peo_void.py frame.data 25 200 42
 ```
 
 Set `MOLPACK_EXAMPLE_PROGRESS=0` to suppress the per-iteration progress log.
-Open-space PEO defaults `LatticeGrow` then `GenCanPack.with_restart` at 2.0 Å.
+Open-space PEO defaults `LatticeGrow` then `GencanPack.with_restart` at 2.0 Å.
 
 `pack_peo_mesh.py` runs `LatticeGrow` alone. Its cavity is the shipped
 `examples/pack_peo/dendrite.stl` — a watertight dendrite, a trunk that forks
@@ -68,7 +69,7 @@ Three things that scene makes concrete:
 
 - **The push-off is the wrong follow-up at melt density in a cavity.** It has
   nowhere to put the overlap it resolves except through the wall: on this scene
-  `GenCanPack.with_restart` spent 1 h 45 min moving `fdist` 3.99 → 3.28 while
+  `GencanPack.with_restart` spent 1 h 45 min moving `fdist` 3.99 → 3.28 while
   `frest` went 0.42 → 6.43 — worst excursion 6.5 Å → 25 Å. Residual contacts at
   melt density are honest, and the force field downstream removes them.
 - **A template owes the grower its topology, not its geometry.** Bond lengths,
@@ -88,7 +89,7 @@ Each example writes its outputs to `python/examples/out/` (created on
 demand, git-ignored) — the path is script-relative, so the working
 directory does not matter:
 
-- `{stem}.mrec` — molrs scientific record (`molrs.io.write_mrec`)
+- `{stem}.mrec` — molrs scientific record (`molrs.io.write_mrec_frame`)
 - `{stem}.lammpstrj` — LAMMPS dump custom (OVITO particle topology)
 - `{stem}.dump.local` — LAMMPS dump local bonds (`batom1`/`batom2`), for
   OVITO [Load trajectory](https://www.ovito.org/manual/reference/pipelines/modifiers/load_trajectory.html)
@@ -99,14 +100,14 @@ A molrs region answers the two region questions for a batch of points, so
 a caller can check what the packer was told to enforce:
 
 ```python
-cavity = molrs.Polyhedron(molrs.io.read_stl("dendrite.stl"))
+cavity = molrs.core.Polyhedron(molrs.io.read_stl("dendrite.stl"))
 inside = cavity.contains(state.positions)   # (n,) bool
 depth = cavity.distance(state.positions)    # (n,) Å, negative inside
 ```
 
 `pack_peo_void.py` needs no mesh at all: it reads a LAMMPS data file with
 `molrs.io.read_lammps_data`, takes the bonded atoms as the polymer, builds
-`molrs.SphereUnion(centers, bead_radius + probe, box=...)` and grows PEO
+`molrs.core.SphereUnion(centers, bead_radius + probe, box=...)` and grows PEO
 inside `~polymer` — the solvent-accessible void, periodic like the frame.
 
 ## Example: mixture
@@ -115,17 +116,17 @@ The `pack_mixture.py` example reproduces Packmol's classic `mixture.inp`:
 
 ```python
 import molrs
-from molpack import GenCanPack, Target
+from molpack import GencanPack, Target
 
 water_frame = molrs.io.read_pdb("water.pdb")
 urea_frame  = molrs.io.read_pdb("urea.pdb")
 
-box = molrs.Cuboid([0, 0, 0], [40, 40, 40])
+box = molrs.core.Cuboid([0, 0, 0], [40, 40, 40])
 
 water = Target(water_frame, count=1000).with_name("water").with_restraint(box)
 urea  = Target(urea_frame,  count=400).with_name("urea").with_restraint(box)
 
-packer = GenCanPack().with_tolerance(2.0).with_seed(1_234_567)
+packer = GencanPack().with_tolerance(2.0).with_seed(1_234_567)
 result = packer.run([water, urea], max_loops=400)
 print(f"converged={result.converged}  natoms={result.natoms}")
 ```
@@ -135,9 +136,9 @@ print(f"converged={result.converged}  natoms={result.natoms}")
 ```python
 import molrs
 import numpy as np
-from molpack import GenCanPack, Target
+from molpack import GencanPack, Target
 
-frame = molrs.Frame({
+frame = molrs.core.Frame({
     "atoms": {
         "x": np.array([0.00,  0.9572, -0.2400]),
         "y": np.array([0.00,  0.0000,  0.9266]),
@@ -147,9 +148,9 @@ frame = molrs.Frame({
 })
 
 water = Target(frame, count=100).with_name("water").with_restraint(
-    molrs.Cuboid([0, 0, 0], [30, 30, 30])
+    molrs.core.Cuboid([0, 0, 0], [30, 30, 30])
 )
-packer = GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
+packer = GencanPack().with_tolerance(2.0).with_seed(42)
 result = packer.run([water], max_loops=200)
 print(f"converged={result.converged}  natoms={result.natoms}")
 ```

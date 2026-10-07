@@ -1,11 +1,10 @@
 //! Typed bindings for the growth statistics inputs: `TorsionPrior` and
-//! `AnglePrior`. The growth knobs themselves live on the `CbmcGrow` entry.
+//! `AnglePrior`. The growth knobs themselves live on the `CbmcGrow` engine.
 
 use molpack::grow::{AnglePrior, TorsionPrior};
 use pyo3::prelude::*;
 
-use crate::helpers::NpF;
-use molpack::F;
+use molrs::op::F;
 
 /// Geometric torsion prior — the mandatory statistics input of growth.
 #[pyclass(name = "TorsionPrior", frozen, from_py_object)]
@@ -28,7 +27,7 @@ impl PyTorsionPrior {
     /// von-Mises-like spread of concentration `kappa` around the template's
     /// own torsion values.
     #[staticmethod]
-    fn template(kappa: NpF) -> Self {
+    fn template(kappa: F) -> Self {
         Self {
             inner: TorsionPrior::Template { kappa },
         }
@@ -36,7 +35,7 @@ impl PyTorsionPrior {
 
     /// RIS-style discrete states as `(angle_rad, weight)` pairs.
     #[staticmethod]
-    fn states(states: Vec<(NpF, NpF)>) -> Self {
+    fn states(states: Vec<(F, F)>) -> Self {
         Self {
             inner: TorsionPrior::States(
                 states.into_iter().map(|(a, w)| (a as F, w as F)).collect(),
@@ -47,7 +46,7 @@ impl PyTorsionPrior {
     /// Three-state trans/gauche± prior calibrated from a target
     /// characteristic ratio (PEO: `three_state_from_c_inf(5.5, 1.9106)`).
     #[staticmethod]
-    fn three_state_from_c_inf(c_inf: NpF, theta_rad: NpF) -> Self {
+    fn three_state_from_c_inf(c_inf: F, theta_rad: F) -> Self {
         Self {
             inner: TorsionPrior::three_state_from_c_inf(c_inf, theta_rad),
         }
@@ -77,7 +76,7 @@ impl PyAnglePrior {
 
     /// Discrete worm-like chain with tilt `kappa`.
     #[staticmethod]
-    fn wlc(kappa: NpF) -> Self {
+    fn wlc(kappa: F) -> Self {
         Self {
             inner: AnglePrior::Wlc { kappa },
         }
@@ -86,7 +85,7 @@ impl PyAnglePrior {
     /// WLC tilt calibrated from a target characteristic ratio
     /// (Kremer–Grest melts: `wlc_from_c_inf(1.76)`).
     #[staticmethod]
-    fn wlc_from_c_inf(c_inf: NpF) -> Self {
+    fn wlc_from_c_inf(c_inf: F) -> Self {
         Self {
             inner: AnglePrior::wlc_from_c_inf(c_inf),
         }

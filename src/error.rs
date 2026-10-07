@@ -1,4 +1,4 @@
-use molrs::types::F;
+use molrs::op::F;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -25,7 +25,7 @@ pub enum PackError {
     TemplateColumns { detail: String },
     /// The declared periodic box has a non-positive `max - min` on at least
     /// one axis.
-    InvalidPBCBox { min: [F; 3], max: [F; 3] },
+    InvalidPbcBox { min: [F; 3], max: [F; 3] },
     /// A declared packing cell is unusable, or contradicts a periodic box.
     InvalidCell { detail: String },
     /// A restraint was declared open along a periodic lattice direction,
@@ -35,19 +35,19 @@ pub enum PackError {
         axis: usize,
         restraint: &'static str,
     },
-    /// A target was handed to a growth entry (`CbmcGrow`) but cannot be
+    /// A target was handed to a growth engine (`CbmcGrow`) but cannot be
     /// grown. Growth consumes the template's bond graph; molpack neither
     /// guesses missing chemistry nor silently falls back to rigid-body
     /// packing.
     Grow {
         target: usize,
-        source: crate::grow_error::GrowError,
+        source: crate::grow::GrowError,
     },
     /// `with_density` combined with an explicit box or cell — the two are
     /// competing definitions of the same volume.
     DensityConflictsWithBox,
     /// A seeded run's free targets do not match the seed's placement shape
-    /// (`GenCanPack::with_restart` — total free atoms expected vs carried).
+    /// (`GencanPack::with_restart` — total free atoms expected vs carried).
     SeedMismatch { expected: usize, got: usize },
     /// `with_density` needs every target's mass, and this target's elements
     /// cannot provide one (nor did `Target::with_mass`). Named error, not a
@@ -56,14 +56,14 @@ pub enum PackError {
     /// A stage was chained where its entry precondition cannot hold: nothing
     /// before it leaves the placements the stage declares it needs
     /// (`Stage::requires`). Reported before any stage runs and before any
-    /// handler is notified.
+    /// callback is notified.
     StageOrder {
         /// The offending stage's `Stage::name`.
         stage: &'static str,
         /// The precondition that was not met, rendered (e.g. `"placed: all"`).
         needs: &'static str,
     },
-    /// A preset entry carrying a non-default *shared* setting was handed to
+    /// A preset engine carrying a non-default *shared* setting was handed to
     /// `Pipeline::with_stage`. The shared settings are one ruler for the whole
     /// run; two stages each holding one would leave the shared objective with
     /// no single ruler, and picking a winner silently is the debt this error
@@ -135,7 +135,7 @@ impl fmt::Display for PackError {
                  which image the atom is in. Make axis {axis} non-periodic, bound \
                  the restraint along it, or drop it."
             ),
-            PackError::InvalidPBCBox { min, max } => write!(
+            PackError::InvalidPbcBox { min, max } => write!(
                 f,
                 "Invalid PBC box: min={:?}, max={:?} (all max-min components must be > 0)",
                 min, max
@@ -156,7 +156,7 @@ impl fmt::Display for PackError {
             PackError::StageOrder { stage, needs } => write!(
                 f,
                 "stage `{stage}` requires {needs} but nothing before it placed the \
-                 molecules; put a placing stage (GenCanPack, CbmcGrow, LatticeGrow) \
+                 molecules; put a placing stage (GencanPack, CbmcGrow, LatticeGrow) \
                  in front of it"
             ),
             PackError::PresetSettingsInsidePipeline { stage, knob } => write!(
@@ -197,7 +197,7 @@ impl fmt::Display for PackError {
             PackError::SeedMismatch { expected, got } => write!(
                 f,
                 "seeded run: the free targets declare {expected} atoms but the seed \
-                 carries {got} — a seeded GenCanPack must receive the same free \
+                 carries {got} — a seeded GencanPack must receive the same free \
                  targets the seed result was packed from"
             ),
         }

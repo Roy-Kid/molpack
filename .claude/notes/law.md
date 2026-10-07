@@ -366,28 +366,43 @@ language would fork the user base and the parser.
   keyword (engine-entry-split ruling).
 
 <!-- mol:law:id:molrs-pins-manual -->
-## P3. molrs path and version pins are managed manually
+## P3. molrs path, version and partner refs are managed manually
 
-**Principle.** The `../molrs/molrs` path dependency and its version
-line are edited by a human, deliberately.
+**Principle.** The `../molrs/molrs` path dependency, its version line,
+and the partner refs in `.github/partners.env` are edited by a human,
+deliberately. On `dev` the ref is molrs's `dev` branch: partners are
+tracked, not pinned (owner ruling 2026-10-07). `scripts/partners.py`
+resolves it -- molrs's same-named branch first, so a coordinated change
+lands as same-named branches -- for CI and the hooks alike, and verifies
+it -- the ref resolves, every path dependency lands in a checkout CI
+makes, the lock files match. A release commit names a molrs tag.
 
 **Never**
 
-- Never automate the pin check in pre-commit hooks or CI.
-- Never let a hook or script rewrite `Cargo.toml` / `pyproject.toml`
-  pins.
+- Never let a hook or script rewrite `Cargo.toml` / `pyproject.toml` /
+  `.github/partners.env`.
+- Never check a partner out in CI or a hook other than through
+  `scripts/partners.py` (`resolve`, `run`).
 
 <!-- mol:law:id:local-gates-prek-tox -->
 ## P4. Local gates are prek + tox
 
 **Principle.** Hooks use prek (pre-commit-compatible config); Python
-isolation is tox from the `python/` `dev` dependency group.
+isolation is tox from the `python/` `dev` dependency group. Gate commands
+are spelled in `.pre-commit-config.yaml` and `ci.yml`. `scripts/` holds the
+hook plumbing only: `hook-run.sh` (dispatch to a compute node on the
+MolCrafts cluster) and `partners.py` (CI's sibling layout at the resolved
+partner commits).
 
 **Never**
 
-- Never add a project `scripts/` test wrapper.
+- Never add a project `scripts/` test wrapper, or move a gate's command
+  into `scripts/`.
 - Never hand-write a local hook where a registry-hosted one exists
-  (`doublify/pre-commit-rust`, `astral-sh/ruff`).
+  (`doublify/pre-commit-rust`, `astral-sh/ruff`) -- unless the gate
+  compiles: those run through `scripts/hook-run.sh` in the partner layout
+  (clippy), which a registry hook cannot.
+- Never `git commit --no-verify` / `git push --no-verify`.
 - Never run Python binding tests any way other than
   `uv run --directory python --group dev tox -e py` (non-editable,
   sibling molrs path install + maturin wheel + pytest).
@@ -426,7 +441,7 @@ hydrogens, and stereo centers enter only as user data at the boundary
   aromaticity, element symbols); `molrs::perceive` may only produce
   data the user passes in.
 
-**Derived guidance.** The in-loop optimizer (`GenCanPack::with_optimizer`) is an optional
+**Derived guidance.** The in-loop optimizer (`GencanPack::with_optimizer`) is an optional
 enhancement and must never become a solver dependency. Dependencies
 follow policy (§ 6).
 
@@ -437,7 +452,7 @@ follow policy (§ 6).
 interchangeable implementations of one seam; they share lifecycle and
 infrastructure, never each other's internals.
 
-**Intent.** Shared: lifecycle stages ①②⑤, `PackContext` / `PackState`
+**Intent.** Shared: lifecycle stages ①②⑤, `PackSystem` / `PackState`
 (live run), the shared objective, frozen public `State`. Not shared:
 drivers.
 
@@ -491,9 +506,9 @@ installed `molcrafts-molrs` wheel; both must embed the same molrs
 
 - Never hard-code a capsule name; take the versioned names
   (`molrs.FrameRef/<line>`) from `molrs_ffi::abi`.
-- Never bypass the three gates: `molpack/version.py` (wheel metadata at
-  `import molpack`), `interop::check_abi` (`molrs._ffi_abi_token()` at
-  extension init), and the versioned capsule names.
+- Never bypass the two gates: `molrs_capsule::check_abi` (`molrs._ffi_abi_token()`
+  at extension init — the one import-time version check) and the versioned
+  capsule names. Never add a second, metadata-based version check beside it.
 
 <!-- add further project invariants below, one `<!-- mol:law:id:<slug> -->` each,
      using the same Principle / Intent / Never / Derived guidance template. -->

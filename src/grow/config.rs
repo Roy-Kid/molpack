@@ -1,12 +1,12 @@
 //! Leaf configuration for growth.
 //!
-//! The `CbmcGrow` entry carries a [`GrowConfig`], so this file must stay a
-//! **leaf**: importing `target` / `entry` / `context` from here would close
-//! a dependency cycle between the entry layer and the growth module. Only
+//! The `CbmcGrow` engine carries a [`GrowConfig`], so this file must stay a
+//! **leaf**: importing `target` / `pipeline` / `system` from here would close
+//! a dependency cycle between the engine layer and the growth module. Only
 //! sibling leaves (`prior`) and `molrs` types are allowed.
 
-use molrs::BondDistanceWeights;
-use molrs::types::F;
+use molrs::core::BondDistanceWeights;
+use molrs::op::F;
 
 use crate::grow::prior::{AnglePrior, TorsionPrior};
 

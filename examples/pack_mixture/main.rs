@@ -22,11 +22,13 @@
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
-use molpack::{GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target, XYZHandler};
+use molpack::{
+    GencanPack, PackEngine, ProgressCallback, RegionRestraint, Target, XyzTrajectoryCallback,
+};
 use std::sync::Arc;
 
-use molrs::io::data::pdb::read_pdb_frame;
-use molrs::spatial::region::Cuboid;
+use molrs::core::Cuboid;
+use molrs::io::read_pdb;
 use ndarray::array;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -35,8 +37,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .expect("file path has no parent")
         .to_path_buf();
-    let water = read_pdb_frame(base.join("water.pdb"))?;
-    let urea = read_pdb_frame(base.join("urea.pdb"))?;
+    let water = read_pdb(base.join("water.pdb"))?;
+    let urea = read_pdb(base.join("urea.pdb"))?;
 
     let box_restraint = RegionRestraint(Arc::new(Cuboid::new(
         array![0.0, 0.0, 0.0],
@@ -51,14 +53,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(box_restraint)
         .with_name("urea");
 
-    let mut packer = GenCanPack::new();
+    let mut packer = GencanPack::new();
     if std::env::var_os("MOLPACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.with_handler(Box::new(ProgressHandler::new()));
+        packer = packer.with_callback(Box::new(ProgressCallback::new()));
     }
     if std::env::var_os("MOLPACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.with_handler(Box::new(XYZHandler::new(out_dir.join("mixture.xyz"), 10)));
+        packer = packer.with_callback(Box::new(XyzTrajectoryCallback::new(
+            out_dir.join("mixture.xyz"),
+            10,
+        )));
     }
 
     let targets = vec![water_target, urea_target];

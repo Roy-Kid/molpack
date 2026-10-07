@@ -1,4 +1,4 @@
-//! Leaf configuration for the lattice growth entry.
+//! Leaf configuration for the lattice growth engine.
 //!
 //! Same leaf discipline as [`GrowConfig`](crate::grow::config::GrowConfig):
 //! only the sibling `prior` module and `molrs` types may be imported here.

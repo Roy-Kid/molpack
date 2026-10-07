@@ -6,7 +6,7 @@
 //! * [`StageFactory`] — "given the resolved setup, what stages do you
 //!   contribute?" Everything a [`Pipeline`](super::Pipeline) needs from the
 //!   things it was handed: their target validation, their shared settings,
-//!   the handlers they carry, and their stages. A preset entry implements it,
+//!   the callbacks they carry, and their stages. A preset engine implements it,
 //!   and so does `Pipeline` itself, which is what makes pipelines nest.
 //! * [`PackEngine`] — the runnable surface: the shared `with_*` builders and
 //!   [`run`](PackEngine::run). `run` is a **required** method with no
@@ -17,19 +17,19 @@
 //! [`EngineSetup`] lives here because both its producer (the lifecycle) and
 //! its only consumer ([`StageFactory::stages`]) do: one fact, one home.
 
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::core::SimBox;
+use molrs::op::F;
 
-use crate::entry::setup::CellDecl;
-use crate::entry::{PackSettings, State};
-use crate::error::PackError;
-use crate::handler::{Handler, LogLevel};
-use crate::stage::Stage;
-use crate::target::Target;
+use crate::PackError;
+use crate::Stage;
+use crate::Target;
+use crate::callback::{Callback, LogLevel};
+use crate::pack_space::CellDecl;
+use crate::{PackSettings, State};
 
 /// Everything the lifecycle resolved before handing control to the stages:
 /// the run's shared settings, the targets (post-broadcast), the space, and
-/// the context shape. Borrowed — valid only inside [`StageFactory::stages`].
+/// the system shape. Borrowed — valid only inside [`StageFactory::stages`].
 pub struct EngineSetup<'a> {
     /// The run's shared settings — the one ruler.
     ///
@@ -52,14 +52,14 @@ pub struct EngineSetup<'a> {
 ///
 /// The unit a [`Pipeline`](super::Pipeline) composes: it validates the
 /// targets it will be given, states the shared settings it carries, hands
-/// over its handlers, and builds its stages once the setup is resolved.
+/// over its callbacks, and builds its stages once the setup is resolved.
 ///
 /// Implement this to plug a new algorithm into a pipeline without giving it
 /// its own lifecycle. Implement [`PackEngine`] on top when it should also be
 /// runnable on its own.
 pub trait StageFactory {
     /// Reject targets this factory cannot handle — by name, never by
-    /// silently switching to another algorithm. Called before any context is
+    /// silently switching to another algorithm. Called before any system is
     /// built.
     fn validate_targets(&self, _targets: &[Target]) -> Result<(), PackError> {
         Ok(())
@@ -73,13 +73,13 @@ pub trait StageFactory {
     /// ([`PackError::PresetSettingsInsidePipeline`]).
     fn settings(&self) -> &PackSettings;
 
-    /// Surrender the handlers this factory carries. Default: none.
+    /// Surrender the callbacks this factory carries. Default: none.
     ///
     /// A pipeline **adopts** them — it never drops them — and they then
     /// observe the whole run, not just the stage that carried them in. The
-    /// counterpart rule is the one above: handlers are adopted, non-default
+    /// counterpart rule is the one above: callbacks are adopted, non-default
     /// shared settings are refused by name.
-    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
+    fn take_callbacks(&mut self) -> Vec<Box<dyn Callback>> {
         Vec::new()
     }
 
@@ -100,8 +100,8 @@ impl<T: StageFactory + ?Sized> StageFactory for Box<T> {
     fn settings(&self) -> &PackSettings {
         (**self).settings()
     }
-    fn take_handlers(&mut self) -> Vec<Box<dyn Handler>> {
-        (**self).take_handlers()
+    fn take_callbacks(&mut self) -> Vec<Box<dyn Callback>> {
+        (**self).take_callbacks()
     }
     fn stages(&mut self, setup: &EngineSetup<'_>) -> Result<Vec<Box<dyn Stage>>, PackError> {
         (**self).stages(setup)
@@ -114,12 +114,12 @@ impl<T: StageFactory + ?Sized> StageFactory for Box<T> {
 /// exactly one place, [`Pipeline`](super::Pipeline), and every other
 /// implementor delegates to it (`Pipeline::single(self).run(targets, n)`).
 /// Consuming `self` makes an engine one shot by construction, which is what
-/// makes its handler set impossible to lose silently.
+/// makes its callback set impossible to lose silently.
 pub trait PackEngine: StageFactory + Sized {
     /// Mutate the shared settings (used by the provided `with_*` builders).
     fn settings_mut(&mut self) -> &mut PackSettings;
-    /// The engine's handler set.
-    fn handlers_mut(&mut self) -> &mut Vec<Box<dyn Handler>>;
+    /// The engine's callback set.
+    fn callbacks_mut(&mut self) -> &mut Vec<Box<dyn Callback>>;
 
     // ── Shared builders (bound once, forwarded to `PackSettings`) ────────
 
@@ -155,8 +155,8 @@ pub trait PackEngine: StageFactory + Sized {
         self.settings_mut().log.frequency = n.max(1);
         self
     }
-    fn with_handler(mut self, handler: Box<dyn Handler>) -> Self {
-        self.handlers_mut().push(handler);
+    fn with_callback(mut self, callback: Box<dyn Callback>) -> Self {
+        self.callbacks_mut().push(callback);
         self
     }
     /// Declare the packing cell by lengths and angles (script `cell`).
@@ -189,12 +189,12 @@ pub trait PackEngine: StageFactory + Sized {
             distance < tolerance,
             "short tolerance distance {distance} must be smaller than the tolerance {tolerance}"
         );
-        // Stored halved: the context wants the per-atom short radius.
+        // Stored halved: the system wants the per-atom short radius.
         self.settings_mut().short_tolerance = Some((distance / 2.0, scale));
         self
     }
     /// Broadcast a restraint to every target at run time.
-    fn with_global_restraint(mut self, r: impl crate::restraint::AtomRestraint + 'static) -> Self {
+    fn with_global_restraint(mut self, r: impl crate::AtomRestraint + 'static) -> Self {
         self.settings_mut()
             .global_restraints
             .push(std::sync::Arc::new(r));

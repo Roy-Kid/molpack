@@ -30,12 +30,13 @@
 //! InternalTree BFS projected onto not-H atoms (linear is the `d = 2`
 //! degeneracy).
 
-use molrs::store::frame::Frame;
-use molrs::types::F;
+use molrs::core::Frame;
+use molrs::op::F;
 
 use crate::grow::GrowError;
-use crate::grow::internal::{InternalTree, cross, dihedral, dot, norm, sub, wrap_pi};
+use crate::grow::internal::{InternalTree, wrap_pi};
 use crate::grow::lattice::saw::DiamondLattice;
+use molrs::op::vec3::{cross, dihedral, dot, norm, sub};
 
 /// The template's heavy-atom tree, InternalTree BFS order, plus decoration
 /// hooks (one per InternalTree variable, on a backbone site).
@@ -388,7 +389,7 @@ pub(crate) fn decorate_chain(
         if let Some(j) = *hooked {
             let (_, li, var, offset) = bb.hooks[j].expect("hooked step");
             let site = &tree.step_sites(k)[li];
-            // `nerf` is the exact inverse of `dihedral`, so the torsion that
+            // `place_from_internal_coords` is the exact inverse of `dihedral`, so the torsion that
             // aims this step at the site is just the site's own dihedral in
             // the frame the step is placed from: measuring the zero-torsion
             // placement first would only ever return zero.
@@ -405,7 +406,7 @@ pub(crate) fn decorate_chain(
         // their references; every backbone atom the step placed — the hooked
         // one, a branch sibling, an alignment atom — is its route point. The
         // torsion above still decides where the pendants sit, so it is chosen
-        // the same way — it just no longer has to carry the backbone.
+        // the same way — it just does not carry the backbone.
         for s in tree.step_sites(k) {
             if let Some(j) = bb.index_of[s.atom] {
                 coords[s.atom] = wb[j];
@@ -423,9 +424,9 @@ pub(crate) fn decorate_chain(
 #[allow(clippy::needless_range_loop)]
 mod tests {
     use super::*;
-    use molrs::BondDistanceWeights;
+    use molrs::core::BondDistanceWeights;
 
-    use molrs::store::frame::Frame;
+    use molrs::core::Frame;
     use ndarray::Array1;
 
     /// The all-atom default hydrogen flags, from the `element` column.
@@ -433,13 +434,13 @@ mod tests {
         frame
             .get("atoms")
             .and_then(|b| b.get("element"))
-            .and_then(molrs::store::block::Column::as_string)
+            .and_then(molrs::core::Column::as_string)
             .map(|c| c.iter().map(|e| e.eq_ignore_ascii_case("H")).collect())
             .unwrap_or_default()
     }
 
     use crate::grow::lattice::saw::T_STEPS;
-    use crate::testutil::frame_from_parts;
+    use crate::test_fixtures::frame_from_parts;
 
     fn zigzag(n: usize, bond_len: F) -> (Vec<[F; 3]>, Vec<(u32, u32)>) {
         let theta = 109.5 * std::f64::consts::PI as F / 180.0;

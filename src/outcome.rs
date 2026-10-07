@@ -1,6 +1,6 @@
 //! What a stage reports about its own successful run.
 //!
-//! A leaf so the stage seam and the handler can both name it. The run's
+//! A leaf so the stage seam and the callback can both name it. The run's
 //! verdict is not here: it lives on the state the stage just finished
 //! writing.
 

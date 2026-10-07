@@ -2,45 +2,38 @@
 //! `src/grow/`; nothing here runs a growth to completion.
 
 mod driver;
-mod entry;
 mod field;
 mod internal;
 mod prior;
+mod refusals;
 
-// Integration tests for the chain-growth solver spec
+// Fixtures for the chain-growth solver tests
 // (`.claude/specs/chain-growth-solver.md`), running on the `CbmcGrow`
-// entry (`.claude/specs/engine-entry-split.md`).
+// engine.
 //
-// ── Section: Task 1 — named rejections + result surface ───────────────────
+// ── Section: named rejections + result surface ────────────────────────────
 //
-// Covers the entry seam: the named `GrowError` rejections (no silent
+// Covers the engine seam: the named `GrowError` rejections (no silent
 // degradation, spec principle 3) and `State::degraded`. NO growth
 // algorithm is exercised here. The rigid-placement layout contract lives in
 // `RigidView`'s own tests (`rigid_view_layout` /
 // `rigid_view_set_com_out_of_range_panics`).
-//
-// Later sections: Task 2 (internal-coordinate round-trips + random-vars
-// invariants), Task 3 (overlap field), Task 4 (torsion priors / C∞
-// calibration — RED until `src/grow/prior.rs` grows `sample` +
-// `three_state_from_c_inf`). Growth driver + chain statistics +
-// determinism land with Tasks 5-10.
 
 use crate::grow::field::{BlockKind, OverlapField, Probe};
 
 use crate::grow::internal::InternalTree;
-use crate::testutil::{chain_bonds, frame_from_parts, zigzag_coords};
+use crate::test_fixtures::{chain_bonds, frame_from_parts, zigzag_coords};
 
 use crate::grow::{GrowConfig, GrowError, TorsionPrior};
 
-use crate::{
-    CbmcGrow, F, GenCanPack, IntraResidual, PackEngine, PackError, RegionRestraint, Target,
-};
+use crate::{CbmcGrow, GencanPack, IntraResidual, PackEngine, PackError, RegionRestraint, Target};
+use molrs::op::F;
 
-use molrs::BondDistanceWeights;
+use molrs::core::BondDistanceWeights;
 
-use molrs::store::block::Block;
+use molrs::core::Block;
 
-use molrs::store::frame::Frame;
+use molrs::core::Frame;
 
 use ndarray::Array1;
 
@@ -50,7 +43,7 @@ use rand::{RngExt, SeedableRng};
 
 use std::sync::Arc;
 
-/// Zigzag bead chain as a `molrs::Frame` (see [`zigzag_coords`] /
+/// Zigzag bead chain as a `molrs::core::Frame` (see [`zigzag_coords`] /
 /// [`frame_from_parts`]).
 fn chain_frame(n: usize, bond_len: F, with_bonds: bool) -> Frame {
     let bonds = if with_bonds {
@@ -223,10 +216,9 @@ fn ring_tail_parts() -> (Vec<[F; 3]>, Vec<(u32, u32)>) {
     (coords, bonds)
 }
 
-// ── Section: Task 4 — TorsionPrior: sampling + C∞ calibration ──────────────
+// ── Section: TorsionPrior — sampling + C∞ calibration ─────────────────────
 //
-// RED via compile failure until `src/grow/prior.rs` grows the frozen Task 4
-// surface (spec Design §4a′):
+// The prior's sampling surface (spec Design §4a′):
 //
 //   TorsionPrior::sample(&self, template_value: F, rng: &mut impl rand::Rng) -> F
 //   TorsionPrior::three_state_from_c_inf(c_inf: F, theta: F) -> TorsionPrior
@@ -261,40 +253,34 @@ fn sampled_c_n(prior: &TorsionPrior, n_beads: usize, bond: F, n_samples: usize, 
     sum_r2 / n_samples as F / ((n_beads - 1) as F * bond * bond)
 }
 
-// ── Section: Task 5 — GrowStage: constructive growth end-to-end ───────────
+// ── Section: GrowStage — constructive growth end-to-end ───────────────────
 //
-// Exercises `src/grow/driver.rs` (spec Design §4, Task 5): the `GrowConfig`
+// Exercises `src/grow/driver.rs` (spec Design §4): the `GrowConfig`
 // builder surface, the `GrowError::{NoBox, TriclinicCell, FixedTarget}`
 // rejections, and the constructive all-grow pack itself.
 //
-// Mixed grow+gencan composition in one call is gone with the monolithic
-// entry (engine-entry-split); the explicit chain over a fixed matrix is
-// covered by `grow_then_gencan_chaining_over_fixed_matrix` below.
+// Grow and GENCAN compose as an explicit chain over a fixed matrix:
+// `grow_then_gencan_chaining_over_fixed_matrix` below.
 
-// ── Section: Tasks 6-7 — restraint hard rejection + handler wiring ─────────
+// ── Section: restraint hard rejection + callback wiring ───────────────────
 //
-// runtime-RED until Task 6 (growth currently IGNORES `AtomRestraint`s during
-// placement, so a restrained Grow pack scatters atoms outside the region and
-// reports frest > 0) and Task 7 (growth currently emits NO `on_step` events
-// and never polls `should_stop`).
-//
-// Task 6 contract (spec Design §3, ac-007): every candidate atom position is
+// Restraint contract (spec Design §3, ac-007): every candidate atom position is
 // checked against the target's restraints via the existing
 // `AtomRestraint::f`; `f > 0` is a hard rejection, same treatment as a
 // hard-core violation. `frest == 0.0` thereby becomes a CONSTRUCTIVE
 // guarantee, exactly like `fdist == 0.0` — strict zero, not `< precision`.
 //
-// Task 7 contract (spec Design §4g): one `StepInfo` per growth round with
+// Callback contract (spec Design §4g): one `StepReport` per growth round with
 // `loop_idx` = round number (1-based, strictly increasing), `radscale` =
 // current hard-core scale (1.0 while undegraded), and fdist/frest = 0.0
-// while the hard-rejection regime holds. `Handler::should_stop() == true`
+// while the hard-rejection regime holds. `Callback::should_stop() == true`
 // aborts growth: `pack` still returns Ok, with `converged == false`.
 
-// ── Section: push-off — the explicit free-target chain (门槛 2) ────────────
+// ── Section: push-off — the explicit free-target chain ────────────────────
 //
-// When growth ends unconverged (degraded > 0), the entry says so and stops.
+// When growth ends unconverged (degraded > 0), the engine says so and stops.
 // The rigid push-off is the user-explicit chain (placement-seeding spec):
-// the SAME free targets go to `GenCanPack::with_restart(&grown)`, whose
+// the SAME free targets go to `GencanPack::with_restart(&grown)`, whose
 // phases continue on the coor/x growth wrote (Auhl slow push-off /
 // Theodorou–Suter staged relaxation, spec §5.4/§5.7). The seeded run must
 // (i) NOT run `initial()` — that re-randomizes every COM/Euler and
@@ -302,32 +288,29 @@ fn sampled_c_n(prior: &TorsionPrior, n_beads: usize, bond: F, n_samples: usize, 
 // phases with movebad disabled, so molecules move by rigid-body descent
 // only.
 
-// ── Section: Tasks 8-10 — density-resolved box, CG angle prior ─────────────
+// ── Section: density-resolved box, CG angle prior ─────────────────────────
 //
-// Task 8 (spec §7, ac-005): `with_density(rho)` on the shared engine
+// Density (spec §7, ac-005): `with_density(rho)` on the shared engine
 // settings resolves in stage ① to a CUBIC periodic box `[0, L]³` (all axes
-// periodic) with `L = cbrt(total_mass_amu / (N_A · rho) · 1e24)` Å (rho in
-// g/cm³), the total mass summing over ALL targets × their counts. Masses
-// default to element lookup; `Target::with_mass(amu)` overrides the per-copy
-// total (the only route for element-"X" targets). Named errors:
+// periodic) with `L³ = total_mass / (N_A · rho)` cm³, converted to Å³ by the
+// unit registry (masses in g/mol, rho in g/cm³), the total mass summing over
+// ALL targets × their counts. Masses default to element lookup;
+// `Target::with_mass(amu)` overrides the per-copy total (the only route for
+// element-"X" targets). Named errors:
 // `PackError::DensityConflictsWithBox` (density + explicit box/cell) and
 // `PackError::UnknownMass { target }` (density given, a target's mass
 // unresolvable, no override). Density is solver-agnostic: it belongs to the
 // shared engine settings, not to `GrowConfig`.
 //
-// Task 9's in-pack Grow+Gencan composition is gone with the monolithic
-// entry (engine-entry-split): the explicit chain over a fixed matrix is
+// Grow and GENCAN compose as an explicit chain over a fixed matrix:
 // `grow_then_gencan_chaining_over_fixed_matrix` below.
 //
-// Task 10, CG half (spec §4a′/§5.5, ac-011): `AnglePrior` makes the bond
+// CG angle prior (spec §4a′/§5.5, ac-011): `AnglePrior` makes the bond
 // angle a sampling degree of freedom. `AnglePrior::Template` (the default)
 // copies template angles verbatim — the AA behavior; `AnglePrior::Wlc`
 // (via `wlc_from_c_inf`) is the CG path, calibrated so a discrete worm-like
 // chain reproduces c∞ = (1+⟨cosθ′⟩)/(1−⟨cosθ′⟩), ⟨cosθ′⟩ = (c∞−1)/(c∞+1),
 // where θ′ is the bond-deflection angle.
-
-// The Task 10 CG surface (compile-RED until `AnglePrior` lands in
-// `src/grow/prior.rs` and is re-exported from `crate::grow`).
 
 fn cube_tris(lo: [F; 3], hi: [F; 3]) -> Vec<[[F; 3]; 3]> {
     let p = |x, y, z| [x, y, z];
@@ -349,4 +332,4 @@ fn cube_tris(lo: [F; 3], hi: [F; 3]) -> Vec<[[F; 3]; 3]> {
     ]
 }
 
-// ── Section: the stage identity carried on StepInfo ───────────────────────
+// ── Section: the stage identity carried on StepReport ───────────────────────

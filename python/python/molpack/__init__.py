@@ -1,6 +1,8 @@
 """molpack — Packmol-grade molecular packing with Python bindings."""
 
-from ._protocols import Handler, Restraint
+from importlib.metadata import version as _dist_version
+
+from ._protocols import Callback, Restraint
 from .molpack import (
     Angle,
     AnglePrior,
@@ -13,20 +15,20 @@ from .molpack import (
     ExponentialPoint,
     GaussianPlane,
     GaussianPoint,
-    GenCanPack,
+    GencanPack,
     IntraResidual,
-    InvalidPBCBoxError,
+    InvalidPbcBoxError,
     LatticeGrow,
     MaxIterationsError,
     NoTargetsError,
     PackError,
+    PackSystemView,
     Pipeline,
     ScriptJob,
     SelfSeparation,
-    StageInfo,
+    StageProgress,
     State,
-    StepContext,
-    StepInfo,
+    StepReport,
     TabulatedPlane,
     TabulatedPoint,
     Target,
@@ -36,7 +38,11 @@ from .molpack import (
     num_threads,
     rayon_enabled,
 )
-from .version import MOLRS_MINOR, check_molrs_version, version
+
+# The installed wheel's version. The molrs compatibility check is the
+# extension's import-time ABI handshake (`molrs_capsule::check_abi`), which runs
+# when `.molpack` is imported above.
+version: str = _dist_version("molcrafts-molpack")
 
 __all__ = [
     # Typed values
@@ -57,15 +63,15 @@ __all__ = [
     "SelfSeparation",
     # Core
     "Target",
-    "GenCanPack",
+    "GencanPack",
     "CbmcGrow",
     "LatticeGrow",
     "Pipeline",
     "State",
     "IntraResidual",
-    "StepInfo",
-    "StageInfo",
-    "StepContext",
+    "StepReport",
+    "StageProgress",
+    "PackSystemView",
     # Script loader (`.inp` input)
     "ScriptJob",
     "load_script",
@@ -74,7 +80,7 @@ __all__ = [
     "num_threads",
     "init_thread_pool",
     # Duck-type protocols
-    "Handler",
+    "Callback",
     "Restraint",
     # Errors
     "PackError",
@@ -82,8 +88,6 @@ __all__ = [
     "MaxIterationsError",
     "NoTargetsError",
     "EmptyMoleculeError",
-    "InvalidPBCBoxError",
-    "MOLRS_MINOR",
-    "check_molrs_version",
+    "InvalidPbcBoxError",
     "version",
 ]

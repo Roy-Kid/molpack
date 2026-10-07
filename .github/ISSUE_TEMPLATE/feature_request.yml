@@ -1,5 +1,5 @@
 name: Feature Request
-description: Propose a new restraint type, handler, in-loop optimizer, or API change
+description: Propose a new restraint type, callback, in-loop optimizer, or API change
 labels: ["enhancement"]
 body:
   - type: markdown
@@ -15,7 +15,7 @@ body:
       label: Category
       options:
         - New Restraint type
-        - New Handler
+        - New Callback
         - New in-loop optimizer
         - API change (engine entries / Target)
         - Performance

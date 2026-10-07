@@ -9,15 +9,15 @@
 //! **grown** into place, one torsion at a time, inside the final box.
 //!
 //! Growth is therefore a *peer* of the GENCAN path, not a component of it:
-//! it consumes the same [`PackContext`](crate::PackContext) (same radii, same
+//! it consumes the same [`PackSystem`](crate::PackSystem) (same radii, same
 //! restraints, same cell), is judged by the same objective, and is selected
-//! by the [`CbmcGrow`](crate::CbmcGrow) entry. It never
+//! by the [`CbmcGrow`](crate::CbmcGrow) engine. It never
 //! calls the GENCAN internals, and the GENCAN path never calls it — the
-//! [`Stage`](crate::stage::Stage) seam is the only shared contract.
+//! [`Stage`](crate::Stage) seam is the only shared contract.
 //!
 //! The module is purely geometric: no force-field dependency, no `ff`
 //! feature. Conformer statistics come from user-supplied geometric priors
-//! ([`prior::TorsionPrior`] / [`prior::AnglePrior`]).
+//! ([`TorsionPrior`] / [`AnglePrior`]).
 //!
 //! # What growth delivers — and what it does not
 //!
@@ -29,7 +29,7 @@
 //! Rosenbluth selection has a known, characterizable bias (Consta et al.
 //! 1999), and equilibration is the downstream MD's job — the classic
 //! generate → push-off → equilibrate pipeline (Auhl et al. 2003). Push-off,
-//! when the caller wants it, is [`GenCanPack::with_restart`](crate::GenCanPack::with_restart)
+//! when the caller wants it, is [`GencanPack::with_restart`](crate::GencanPack::with_restart)
 //! on this run's [`State`](crate::State).
 //!
 //! # Round-snapshot semantics (part of the algorithm, not an implementation
@@ -42,29 +42,35 @@
 //! counter-based streams hashed per `(seed, molecule, stage, visit)`. Both
 //! choices exist so that a future parallel driver (parallel proposals +
 //! serial commits) is bit-identical to this serial one — see
-//! [`driver`] for the full contract.
+//! the growth driver (`grow/driver.rs`) for the full contract.
 
-pub mod config;
-pub mod driver;
-pub mod entry;
-pub mod field;
-pub mod internal;
-pub mod lattice;
+pub(crate) mod cbmc_grow;
+mod config;
+pub(crate) mod driver;
+mod error;
+pub(crate) mod field;
+pub(crate) mod internal;
+pub(crate) mod lattice;
 pub(crate) mod moves;
-pub mod prior;
+mod prior;
 #[cfg(test)]
 mod tests;
 
-pub use crate::grow_error::GrowError;
+// The engines (`CbmcGrow`, `LatticeGrow`) are published at the crate root;
+// this module publishes their configuration vocabulary. Leaves are private:
+// one path per item.
 pub use config::GrowConfig;
-pub use driver::GrowStage;
+pub use error::GrowError;
+pub use lattice::LatticeConfig;
 pub use prior::{AnglePrior, TorsionPrior};
 
-use molrs::store::frame::Frame;
-use molrs::types::F;
+pub(crate) use driver::GrowStage;
 
+use molrs::core::Frame;
+use molrs::op::F;
+
+use crate::Target;
 use crate::grow::internal::InternalTree;
-use crate::target::Target;
 
 /// Read the template's bond graph and coordinates for growth.
 ///
@@ -73,22 +79,19 @@ use crate::target::Target;
 /// (including `RingTemplate`):
 /// `NoAtomsBlock → MissingBondEndpoint → BondOutOfRange → NoBonds →
 /// TemplateTooSmall → Disconnected → RingTemplate`. Bond graphs come from
-/// `molrs::Topology::from_frame`; this function does not rebuild CSR.
+/// `molrs::core::Topology::from_frame`; this function does not rebuild CSR.
 pub(crate) fn topology_for_growth(
     frame: &Frame,
-) -> Result<(molrs::Topology, Vec<[F; 3]>), GrowError> {
+) -> Result<(molrs::core::Topology, Vec<[F; 3]>), GrowError> {
     let xyz = crate::template::coord_rows(&frame.coords().map_err(|_| GrowError::NoAtomsBlock)?);
     let n = xyz.len();
     // molrs treats a missing or empty bonds block as Ok with zero edges.
     // A still-failing `from_frame` names the column or the row; MolRsError
     // is never wrapped.
-    let topo = match molrs::Topology::from_frame(frame) {
+    let topo = match molrs::core::Topology::from_frame(frame) {
         Ok(topo) => topo,
-        Err(molrs::system::topology::TopologyError::EndpointOutOfRange {
-            row,
-            atom,
-            n_atoms,
-            ..
+        Err(molrs::core::TopologyError::EndpointOutOfRange {
+            row, atom, n_atoms, ..
         }) => {
             return Err(GrowError::BondOutOfRange {
                 row,
@@ -96,12 +99,12 @@ pub(crate) fn topology_for_growth(
                 n: n_atoms,
             });
         }
-        Err(molrs::system::topology::TopologyError::MissingEndpoint { column, .. }) => {
+        Err(molrs::core::TopologyError::MissingEndpoint { column, .. }) => {
             return Err(GrowError::MissingBondEndpoint { column });
         }
         Err(
-            molrs::system::topology::TopologyError::MissingBlock { .. }
-            | molrs::system::topology::TopologyError::NoRows { .. },
+            molrs::core::TopologyError::MissingBlock { .. }
+            | molrs::core::TopologyError::NoRows { .. },
         ) => return Err(GrowError::NoAtomsBlock),
     };
     if topo.n_bonds() == 0 {
@@ -142,14 +145,14 @@ pub(crate) fn tree_from_target(t: &Target) -> Result<InternalTree, GrowError> {
 /// nothing else, and the box must exist from the first atom. Named errors
 /// per spec principle 3.
 pub(crate) fn validate_grow_cell(
-    cell: Option<molrs::spatial::simbox::SimBox>,
-) -> Result<molrs::spatial::simbox::SimBox, GrowError> {
+    cell: Option<molrs::core::SimBox>,
+) -> Result<molrs::core::SimBox, GrowError> {
     let Some(simbox) = cell else {
         return Err(GrowError::NoBox);
     };
     // molrs's own classification — the one minimum image and the cell grid
     // use — so growth never accepts a box the rest of the run treats as tilted.
-    if !matches!(simbox.kind(), molrs::spatial::simbox::BoxKind::Ortho { .. }) {
+    if !matches!(simbox.kind(), molrs::core::BoxKind::Ortho { .. }) {
         return Err(GrowError::TriclinicCell);
     }
     Ok(simbox)

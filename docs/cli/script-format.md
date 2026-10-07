@@ -36,12 +36,10 @@ mode safe to run from another directory.
 | Keyword | Meaning |
 |---|---|
 | `avoid_overlap <yes\|no\|true\|false\|1\|0>` | Controls whether initial random placements are rejected when they overlap a fixed molecule. Default: on. Use `avoid_overlap no` only when you explicitly want Packmol's fixed-solute exclusion guard disabled. |
-| `filetype sdf` | Read SDF/MOL inputs through the CLI. Read-only. |
-| `filetype lammps_dump` | Read LAMMPS dump inputs and write `.lammpstrj` outputs. |
-| `filetype lammps_data` | Read LAMMPS data inputs. Read-only. |
+| `filetype <format>` | Any format in [Formats](formats.md) — `sdf`, `mol2`, `gro`, `cif`, `lammps_data`, `lammps_dump`, … — named or by extension. |
 
-Output format is inferred from the `output` extension. The extra molpack output
-extension is `.lammpstrj` for LAMMPS dump trajectories.
+Output format is inferred from the `output` file name and written by that
+format's molrs writer (see [Formats](formats.md)).
 
 ## Strict parsing
 

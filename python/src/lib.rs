@@ -5,17 +5,17 @@
 //! | Python class     | Rust wrapper         | Purpose                            |
 //! |------------------|----------------------|------------------------------------|
 //! | `Target`         | [`PyTarget`]         | Molecule specification for packing |
-//! | `GenCanPack`     | [`PyGenCanPack`]     | Rigid-body GENCAN packing entry    |
-//! | `CbmcGrow`       | [`PyCbmcGrow`]       | Chain-growth entry                 |
-//! | `LatticeGrow`    | [`PyLatticeGrow`]    | Lattice-growth entry               |
-//! | `Pipeline`       | [`PyPipeline`]       | Entries composed as stages         |
-//! | `State`     | [`PyState`]     | Frame + diagnostics from `run()`   |
+//! | `GencanPack`     | [`PyGencanPack`]     | Rigid-body GENCAN packing engine   |
+//! | `CbmcGrow`       | [`PyCbmcGrow`]       | Chain-growth engine                |
+//! | `LatticeGrow`    | [`PyLatticeGrow`]    | Lattice-growth engine              |
+//! | `Pipeline`       | [`PyPipeline`]       | Engines composed as stages         |
+//! | `State`          | [`PyState`]          | Frame + diagnostics from `run()`   |
 //! | `IntraResidual`  | [`PyIntraResidual`]  | Nested scored/exempted intra mins  |
-//! | `StepInfo`       | [`PyStepInfo`]       | Read-only snapshot for handlers    |
-//! | `StageInfo`      | [`PyStageInfo`]      | Which stage a callback came from   |
-//! | `StepContext`    | [`PyStepContext`]    | Callback-scoped live-context guard |
+//! | `StepReport`     | [`PyStepReport`]     | Read-only snapshot for callbacks   |
+//! | `StageProgress`  | [`PyStageProgress`]  | Which stage a callback came from   |
+//! | `PackSystemView` | [`PyPackSystemView`] | Callback-scoped live-system guard  |
 //!
-//! Geometric restraints are molrs region objects (`molrs.Sphere`, `Cuboid`,
+//! Geometric restraints are molrs region objects (`molrs.core.Sphere`, `Cuboid`,
 //! `Parallelepiped`, `HalfSpace`, `Cylinder`, `Ellipsoid`, `Polyhedron`,
 //! `SphereUnion`, or a `&` / `|` / `~` composition), resolved through their
 //! `molrs.RegionRef/<line>` capsule and lifted by `RegionRestraint` — this
@@ -24,37 +24,34 @@
 //! `fg(x, scale, scale2)` methods to `Target.with_restraint` — no dedicated
 //! class needed.
 //!
-//! Custom Python progress handlers are registered via the entries'
-//! `with_handler(obj)`; see the [`handler`] module for the method contract.
+//! Custom Python progress callbacks are registered via the engines'
+//! `with_callback(obj)`; see the [`callback`] module for the method contract.
 
 use pyo3::prelude::*;
 
-mod interop;
+mod molrs_capsule;
 
-mod helpers;
-use helpers::register_errors;
+mod errors;
+use errors::register_errors;
 
-mod types;
-use types::{PyAngle, PyAxis, PyCenteringMode};
-
-mod constraint;
-use constraint::{
+mod restraint;
+use restraint::{
     PyExponentialPlane, PyExponentialPoint, PyGaussianPlane, PyGaussianPoint, PySelfSeparation,
     PyTabulatedPlane, PyTabulatedPoint,
 };
 
-mod handler;
-use handler::{PyStageInfo, PyStepContext, PyStepInfo};
+mod callback;
+use callback::{PyPackSystemView, PyStageProgress, PyStepReport};
 
 mod grow;
 
 mod target;
-use target::PyTarget;
+use target::{PyAngle, PyAxis, PyCenteringMode, PyTarget};
 
-mod entry;
-use entry::{PyCbmcGrow, PyGenCanPack, PyLatticeGrow, PyPipeline};
-mod result;
-use result::{PyIntraResidual, PyState};
+mod packing_methods;
+use packing_methods::{PyCbmcGrow, PyGencanPack, PyLatticeGrow, PyPipeline};
+mod state;
+use state::{PyIntraResidual, PyState};
 
 mod parallel;
 use parallel::{init_thread_pool, num_threads, rayon_enabled};
@@ -68,7 +65,7 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // with the installed molcrafts-molrs wheel, so both must embed the same
     // molrs minor line (minor-line = ABI version). A mismatch must be a clear
     // ImportError here, not a capsule ValueError (or worse) mid-run.
-    interop::check_abi(m.py())?;
+    molrs_capsule::check_abi(m.py())?;
 
     m.add_class::<PyAngle>()?;
     m.add_class::<PyAxis>()?;
@@ -86,15 +83,15 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<grow::PyAnglePrior>()?;
 
     m.add_class::<PyTarget>()?;
-    m.add_class::<PyGenCanPack>()?;
+    m.add_class::<PyGencanPack>()?;
     m.add_class::<PyCbmcGrow>()?;
     m.add_class::<PyLatticeGrow>()?;
     m.add_class::<PyPipeline>()?;
     m.add_class::<PyState>()?;
     m.add_class::<PyIntraResidual>()?;
-    m.add_class::<PyStepInfo>()?;
-    m.add_class::<PyStageInfo>()?;
-    m.add_class::<PyStepContext>()?;
+    m.add_class::<PyStepReport>()?;
+    m.add_class::<PyStageProgress>()?;
+    m.add_class::<PyPackSystemView>()?;
 
     m.add_class::<PyScriptJob>()?;
     m.add_function(wrap_pyfunction!(load_script, m)?)?;

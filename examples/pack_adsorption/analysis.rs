@@ -9,7 +9,7 @@
 //! cannot show it — only conformational relaxation during packing can put
 //! every k-th bead on the surface while the segments between them arch away.
 
-use molpack::F;
+use molrs::op::F;
 
 /// Train / loop / tail counts and lengths over one chain layer.
 #[derive(Debug, Default)]

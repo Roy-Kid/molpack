@@ -6,8 +6,8 @@ mol_project:
   build:
     install: "cargo build --all-targets"
     check: "cargo fmt -- --check && cargo fmt --manifest-path python/Cargo.toml -- --check && cargo clippy --all-targets --all-features -- -D warnings && uv run --directory python --group typecheck ruff format --check python tests examples && uv run --directory python --group typecheck ruff check python tests examples && uv run --directory python --group typecheck ty check python tests examples"
-    test: "cargo test -p molcrafts-molpack --lib --features cli,ff,rayon"
-    test_single: "cargo test -p molcrafts-molpack --lib --features cli,ff,rayon -- {path}"
+    test: "cargo test -p molcrafts-molpack --lib --features cli,rayon"
+    test_single: "cargo test -p molcrafts-molpack --lib --features cli,rayon -- {path}"
   arch:
     style: layered
     rules_section: "## Law (never violated)"
@@ -17,7 +17,7 @@ mol_project:
     required: true
   ci:
     config: .github/workflows/ci.yml
-    local: "cargo test --lib --features cli,ff && cargo test --doc --features cli,ff && cargo check --all-targets --features cli,ff && cargo check --no-default-features && cargo check --features rayon && uv run --directory python --group dev tox -e py"
+    local: "scripts/partners.py run -- sh -c 'cargo test --locked --lib --features cli && cargo test --locked --doc --features cli && cargo check --locked --all-targets --features cli && cargo check --locked --no-default-features && cargo check --locked --features rayon && uv run --locked --python 3.12 --directory python --group dev tox -e py'"
   notes_path: .claude/notes/notes.md
   specs_path: .claude/specs/
 ---
@@ -32,7 +32,7 @@ mol_project:
 
 molpack builds initial molecular configurations: a faithful Rust port of
 Packmol (rigid-body GENCAN packing, `.inp`-compatible CLI) plus growth
-entries for dense polymer melts, exposed as the `molcrafts-molpack` crate,
+engines for dense polymer melts, exposed as the `molcrafts-molpack` crate,
 the `molpack` binary, and a PyO3 wheel. It serves MD practitioners who
 need a geometry-only starting structure; energy belongs to their force
 field downstream. Rust 1.91 / edition 2024, Python ≥ 3.12 via maturin,
@@ -40,7 +40,7 @@ sibling `../molrs` path dependency.
 
 ## Where things live
 
-- Source code: `src/` (library — lifecycle in `src/pipeline/`, the packing-algorithm seam in `src/stage.rs`, template reading (coordinates + rotatable-bond policy) in `src/template.rs`, run state in `src/context/pack_state.rs` + `src/context/rigid_view.rs`, post-stage checks in `src/invariant.rs`, restraints in `src/restraint/` — the molrs-region lift `region.rs` + `cell.rs`, `collective/`, and the crate-private `.inp` parity kernels in `geometric/`; regions themselves are `molrs::spatial::region`: molpack has no region type, no geometric restraint class and no file entry for one; CLI in `src/bin/molpack/`), `python/src/` (PyO3 wheel), `python/python/molpack/` (package)
+- Source code: `src/` (library — lifecycle in `src/pipeline/`, the packing-algorithm seam in `src/stage.rs`, template reading (coordinates + rotatable-bond policy) in `src/template.rs`, run state in `src/system/pack_state.rs` + `src/system/rigid_view.rs`, post-stage checks in `src/invariant.rs`, restraints in `src/restraint/` — the molrs-region lift `region.rs` + `cell.rs`, `collective/`, and the crate-private `.inp` parity kernels in `geometric/`; regions themselves are `molrs::core`: molpack has no region type, no geometric restraint class and no file entry for one; CLI in `src/bin/molpack/`), `python/src/` (PyO3 wheel), `python/python/molpack/` (package)
 - Tests: unit tests only, in-module (`#[cfg(test)]`), next to the code that owns the behaviour — there is no `tests/` directory, no `benches/`, no `regressions/`; Python binding tests in `python/tests/`; runnable scenes in `examples/` + `python/examples/`
 - Public documentation: `docs/` (Zensical site: Rust guide + `docs/python/`)
 - Passive project knowledge: `.claude/notes/` — `law.md` (rulebook), `conventions.md` (features, style, gates, layout, molrs sibling + ABI), `architecture.md` (blueprint via `/mol:map`), `notes.md` (decisions)
@@ -71,8 +71,8 @@ Project invariants (bodies in `law.md` § IX):
 
 - **No "packmol" in public identifiers.** The product is molpack; prose may cite Packmol, symbols may not.
 - **Configuration is `.inp` only.** Never a TOML / YAML / JSON config surface.
-- **molrs pins are manual.** Never automate the path / version pin check in hooks or CI.
-- **Local gates are prek + tox.** Never a project `scripts/` wrapper; Python isolation is `uv run --directory python --group dev tox -e py`.
+- **molrs refs are manual.** On `dev`, `.github/partners.env` tracks molrs's `dev` (or molrs's same-named branch; CONTRIBUTING.md "Partners"). Never let a hook or script rewrite a path / version / partner ref; hooks and CI only resolve and verify them.
+- **Local gates are prek + tox.** Gate commands live in `.pre-commit-config.yaml` / `ci.yml`, never in a `scripts/` test wrapper; `scripts/` holds only the hook dispatch and the partner layout. Python isolation is `uv run --directory python --group dev tox -e py`. Never `--no-verify`.
 - **Fork → PR.** Never push to `MolCrafts/molpack` master; `origin` = fork, `upstream` = MolCrafts.
 - **Solvers are pure geometry.** Never a force-field or chemistry-perception dependency on the solver seam; priors and chemistry are user data.
 - **Solvers are peers.** Never call another solver's driver; share lifecycle, context, objective, frozen `State` — the shared objective is the one ruler.
@@ -95,6 +95,6 @@ For non-trivial work, prefer:
 
 Build, feature, style, and gate details: `.claude/notes/conventions.md`.
 There is one test tier: `build.test` (in-module unit tests) plus
-`cargo test --doc`. End-to-end packing suites, Packmol regression runs and
-criterion benches were deleted on 2026-09-20 — the packing-quality measurement
-system is being redesigned; do not reintroduce one ad hoc.
+`cargo test --doc`. There are no end-to-end packing suites, Packmol
+regression runs or criterion benches — the packing-quality measurement
+system is being redesigned; do not introduce one ad hoc.

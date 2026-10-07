@@ -3,21 +3,21 @@
 
 use std::sync::Arc;
 
-use crate::F;
-use crate::PackContext;
+use crate::AtomRestraint;
+use crate::PackSystem;
 use crate::objective::{compute_f, compute_fg, compute_g};
-use crate::restraint::AtomRestraint;
 use crate::restraint::geometric::{
     AbovePlaneRestraint, BelowPlaneRestraint, InsideBoxRestraint, InsideCubeRestraint,
     InsideCylinderRestraint, InsideEllipsoidRestraint, InsideSphereRestraint, OutsideBoxRestraint,
     OutsideCubeRestraint, OutsideCylinderRestraint, OutsideEllipsoidRestraint,
     OutsideSphereRestraint,
 };
+use molrs::op::F;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
 /// Central finite-difference gradient for variable `i`.
-fn finite_diff(x: &[F], sys: &mut PackContext, i: usize, h: F) -> F {
+fn finite_diff(x: &[F], sys: &mut PackSystem, i: usize, h: F) -> F {
     let mut xp = x.to_vec();
     let mut xm = x.to_vec();
     xp[i] += h;
@@ -27,15 +27,15 @@ fn finite_diff(x: &[F], sys: &mut PackContext, i: usize, h: F) -> F {
     (fp - fm) / (2.0 * h)
 }
 
-/// Build a minimal PackContext for `nmol` single-atom molecules.
+/// Build a minimal PackSystem for `nmol` single-atom molecules.
 ///
 /// Also assigns distinct `ibmol[icart]` values so pair-penalty kernels do
 /// not skip atom pairs as "same molecule". The prior version left every
 /// atom at `ibmol=0`, which silently made `gradient_pair_penalty` test
 /// a no-op.
-fn single_atom_system(nmol: usize) -> PackContext {
+fn single_atom_system(nmol: usize) -> PackSystem {
     let ntotat = nmol;
-    let mut sys = PackContext::new(ntotat, nmol, 1);
+    let mut sys = PackSystem::new(ntotat, nmol, 1);
     sys.ntype_with_fixed = 1;
     sys.nmols = vec![nmol];
     sys.natoms = vec![1];
@@ -53,11 +53,11 @@ fn single_atom_system(nmol: usize) -> PackContext {
     sys
 }
 
-fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
+fn setup_cells(sys: &mut PackSystem, cell_n: usize, cell_len: F) {
     let side = cell_len * cell_n as F;
-    sys.simbox = molrs::spatial::simbox::SimBox::cube(side, molrs::types::F3::zeros(3), [false; 3])
-        .expect("cell");
-    sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
+    sys.simbox =
+        molrs::core::SimBox::cube(side, molrs::op::F3::zeros(3), [false; 3]).expect("cell");
+    sys.grid = molrs::core::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
     sys.resize_cell_arrays();
 }
 
@@ -78,7 +78,7 @@ fn check_restraint_gradient(
     let mut sys = single_atom_system(1);
     sys.restraints = vec![restraint];
     sys.iratom_offsets = vec![0, 1];
-    sys.iratom_data = vec![0];
+    sys.iratom_indices = vec![0];
     sys.init1 = true;
 
     let mut x = vec![0.0; 6];
@@ -205,7 +205,7 @@ fn gradient_pair_penalty() {
     let mut sys = single_atom_system(2);
     sys.restraints.clear();
     sys.iratom_offsets = vec![0, 0, 0];
-    sys.iratom_data.clear();
+    sys.iratom_indices.clear();
     setup_cells(&mut sys, 1, 10.0);
 
     // x = [com0(3), com1(3), euler0(3), euler1(3)]
@@ -243,7 +243,7 @@ fn gradient_box_constraint() {
         [1.0, 1.0, 1.0],
     ))];
     sys.iratom_offsets = vec![0, 1];
-    sys.iratom_data = vec![0];
+    sys.iratom_indices = vec![0];
     sys.init1 = true;
 
     let mut x = vec![0.0; 6];
@@ -274,7 +274,7 @@ fn gradient_sphere_constraint() {
     let mut sys = single_atom_system(1);
     sys.restraints = vec![Arc::new(InsideSphereRestraint::new([0.0, 0.0, 0.0], 3.0))];
     sys.iratom_offsets = vec![0, 1];
-    sys.iratom_data = vec![0];
+    sys.iratom_indices = vec![0];
     sys.init1 = true;
 
     let mut x = vec![0.0; 6];
@@ -305,7 +305,7 @@ fn gradient_above_plane_constraint() {
     let mut sys = single_atom_system(1);
     sys.restraints = vec![Arc::new(AbovePlaneRestraint::new([0.0, 0.0, 1.0], 5.0))];
     sys.iratom_offsets = vec![0, 1];
-    sys.iratom_data = vec![0];
+    sys.iratom_indices = vec![0];
     sys.init1 = true;
 
     let mut x = vec![0.0; 6];
@@ -348,7 +348,7 @@ fn gradient_inside_cylinder_constraint() {
         4.0,
     ))];
     sys.iratom_offsets = vec![0, 1];
-    sys.iratom_data = vec![0];
+    sys.iratom_indices = vec![0];
     sys.init1 = true;
 
     // Outside on every axis: x past the end cap, off the radial axis.
@@ -388,7 +388,7 @@ fn gradient_inside_ellipsoid_constraint() {
         1.0,
     ))];
     sys.iratom_offsets = vec![0, 1];
-    sys.iratom_data = vec![0];
+    sys.iratom_indices = vec![0];
     sys.init1 = true;
 
     // Outside the ellipsoid → penalty active. (3.5, 2.4, 1.7) lies just
@@ -433,7 +433,7 @@ fn gradient_outside_ellipsoid_constraint() {
         1.0,
     ))];
     sys.iratom_offsets = vec![0, 1];
-    sys.iratom_data = vec![0];
+    sys.iratom_indices = vec![0];
     sys.init1 = true;
 
     // Inside the ellipsoid → penalty active.
@@ -462,7 +462,7 @@ fn gradient_outside_ellipsoid_constraint() {
 
 #[test]
 fn gradient_with_rotations() {
-    let mut sys = PackContext::new(4, 2, 1);
+    let mut sys = PackSystem::new(4, 2, 1);
     sys.ntype_with_fixed = 1;
     sys.nmols = vec![2];
     sys.natoms = vec![2];
@@ -480,7 +480,7 @@ fn gradient_with_rotations() {
 
     sys.restraints.clear();
     sys.iratom_offsets = vec![0, 0, 0, 0, 0];
-    sys.iratom_data.clear();
+    sys.iratom_indices.clear();
 
     setup_cells(&mut sys, 2, 5.0);
 
@@ -519,7 +519,7 @@ fn gradient_with_rotations() {
 
 #[test]
 fn gradient_combined_constraint_and_pairs() {
-    let mut sys = PackContext::new(3, 3, 1);
+    let mut sys = PackSystem::new(3, 3, 1);
     sys.ntype_with_fixed = 1;
     sys.nmols = vec![3];
     sys.natoms = vec![1];
@@ -539,7 +539,7 @@ fn gradient_combined_constraint_and_pairs() {
         [5.0, 5.0, 5.0],
     ))];
     sys.iratom_offsets = vec![0, 1, 1, 1]; // only first atom has constraint
-    sys.iratom_data = vec![0];
+    sys.iratom_indices = vec![0];
 
     setup_cells(&mut sys, 1, 10.0);
 
@@ -573,7 +573,7 @@ fn gradient_combined_constraint_and_pairs() {
 
 #[test]
 fn fused_function_and_gradient_matches_separate_evaluation() {
-    let mut sys = PackContext::new(4, 2, 1);
+    let mut sys = PackSystem::new(4, 2, 1);
     sys.ntype_with_fixed = 1;
     sys.nmols = vec![2];
     sys.natoms = vec![2];
@@ -592,7 +592,7 @@ fn fused_function_and_gradient_matches_separate_evaluation() {
         [5.0, 5.0, 5.0],
     ))];
     sys.iratom_offsets = vec![0, 1, 1, 2, 2];
-    sys.iratom_data = vec![0, 0];
+    sys.iratom_indices = vec![0, 0];
     setup_cells(&mut sys, 2, 5.0);
 
     let x = vec![1.2, 1.0, 1.1, 2.4, 1.3, 1.2, 0.3, 0.5, 0.7, -0.4, 0.2, -0.6];
@@ -625,7 +625,7 @@ fn fused_function_and_gradient_matches_separate_evaluation() {
 
 #[test]
 fn collective_restraint_gradient_matches_finite_difference_through_the_objective() {
-    use crate::restraint::GaussianPlane;
+    use crate::GaussianPlane;
 
     // Five monatomic molecules strung along z, biased toward a Gaussian
     // profile about the plane z = 0. The gradient of a distribution-matching
@@ -678,11 +678,11 @@ fn collective_restraint_gradient_matches_finite_difference_through_the_objective
 // multi-atom copies deliberately.
 #[test]
 fn self_separation_gradient_matches_finite_difference_through_the_objective() {
-    use crate::restraint::SelfSeparation;
+    use crate::SelfSeparation;
 
     let nmol = 3;
     let natoms = 3;
-    let mut sys = PackContext::new(nmol * natoms, nmol, 1);
+    let mut sys = PackSystem::new(nmol * natoms, nmol, 1);
     sys.ntype_with_fixed = 1;
     sys.nmols = vec![nmol];
     sys.natoms = vec![natoms];
@@ -698,7 +698,7 @@ fn self_separation_gradient_matches_finite_difference_through_the_objective() {
     sys.sync_atom_props();
     sys.restraints.clear();
     sys.iratom_offsets = vec![0; nmol * natoms + 1];
-    sys.iratom_data.clear();
+    sys.iratom_indices.clear();
     sys.init1 = false;
     setup_cells(&mut sys, 4, 6.0);
 
@@ -741,7 +741,7 @@ fn self_separation_gradient_matches_finite_difference_through_the_objective() {
 
 #[test]
 fn an_inactive_species_contributes_no_collective_gradient() {
-    use crate::restraint::GaussianPlane;
+    use crate::GaussianPlane;
 
     let nmol = 4;
     let mut sys = single_atom_system(nmol);
@@ -781,15 +781,15 @@ fn an_inactive_species_contributes_no_collective_gradient() {
 // silently reported as a successful pack.
 
 /// Three monatomic copies strung along x at `spacing`, with `SelfSeparation`.
-fn separation_system(spacing: F, d_min: F) -> (PackContext, Vec<F>) {
-    use crate::restraint::SelfSeparation;
+fn separation_system(spacing: F, d_min: F) -> (PackSystem, Vec<F>) {
+    use crate::SelfSeparation;
 
     let nmol = 3;
     let mut sys = single_atom_system(nmol);
     sys.init1 = false;
     sys.restraints.clear();
     sys.iratom_offsets = vec![0; nmol + 1];
-    sys.iratom_data.clear();
+    sys.iratom_indices.clear();
     setup_cells(&mut sys, 4, 8.0);
     sys.collective = vec![(0usize, Arc::new(SelfSeparation::new(d_min, 1.0)) as Arc<_>)];
 
@@ -845,14 +845,14 @@ fn a_distribution_restraint_stays_out_of_the_verdict() {
     // The asymmetry that makes the above safe: a Wasserstein penalty is always
     // positive for a finite sample, so if it counted toward `frest` no pack
     // carrying one could ever converge.
-    use crate::restraint::GaussianPlane;
+    use crate::GaussianPlane;
 
     let nmol = 4;
     let mut sys = single_atom_system(nmol);
     sys.init1 = false;
     sys.restraints.clear();
     sys.iratom_offsets = vec![0; nmol + 1];
-    sys.iratom_data.clear();
+    sys.iratom_indices.clear();
     setup_cells(&mut sys, 4, 8.0);
     sys.collective = vec![(
         0usize,

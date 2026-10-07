@@ -45,11 +45,12 @@
 
 use std::path::PathBuf;
 
-use molpack::{F, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target};
+use molpack::{GencanPack, PackEngine, ProgressCallback, RegionRestraint, Target};
+use molrs::op::F;
 use std::sync::Arc;
 
-use molrs::io::data::pdb::read_pdb_frame;
-use molrs::spatial::region::{Cuboid, NotRegion, Sphere};
+use molrs::core::{Cuboid, NotRegion, Sphere};
+use molrs::io::read_pdb;
 use ndarray::array;
 
 // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
@@ -81,8 +82,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .expect("file path has no parent")
         .to_path_buf();
-    let water = read_pdb_frame(base.join("water.pdb"))?;
-    let lipid = read_pdb_frame(base.join("palmitoil.pdb"))?;
+    let water = read_pdb(base.join("water.pdb"))?;
+    let lipid = read_pdb(base.join("palmitoil.pdb"))?;
 
     let origin = [0.0, 0.0, 0.0];
 
@@ -115,9 +116,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Target order matches Packmol: water_inner → lipid_inner → lipid_outer → water_outer
     let targets = vec![water_inner, lipid_inner, lipid_outer, water_outer];
-    let mut packer = GenCanPack::new();
+    let mut packer = GencanPack::new();
     if std::env::var_os("MOLPACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.with_handler(Box::new(ProgressHandler::new()));
+        packer = packer.with_callback(Box::new(ProgressCallback::new()));
     }
 
     // Match spherical-comment.inp defaults:

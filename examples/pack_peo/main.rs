@@ -26,10 +26,16 @@
 
 use molpack::grow::{GrowConfig, TorsionPrior};
 use molpack::{
-    CbmcGrow, F, GenCanPack, Handler, LatticeGrow, PackContext, PackEngine, State, StepInfo, Target,
+    Callback, CbmcGrow, GencanPack, LatticeGrow, PackEngine, PackSystem, State, StepReport, Target,
 };
-use molrs::store::block::Block;
-use molrs::store::frame::Frame;
+use molrs::core::Block;
+use molrs::core::Frame;
+use molrs::core::Mic;
+use molrs::core::UnitFactor;
+use molrs::core::constants::AVOGADRO;
+use molrs::op::F;
+use molrs::op::centroid;
+use molrs::op::vec3::{add, cross, dot, norm, scale, sub};
 use ndarray::Array1;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -43,12 +49,12 @@ struct Ladder {
     last_hist: Vec<usize>,
 }
 
-struct LadderHandler {
+struct LadderCallback {
     state: Arc<Mutex<Ladder>>,
     trace: Option<std::io::BufWriter<std::fs::File>>,
 }
 
-impl LadderHandler {
+impl LadderCallback {
     fn new(state: Arc<Mutex<Ladder>>, trace_path: Option<&str>) -> Self {
         let trace = trace_path.map(|p| {
             let f = std::fs::File::create(p).expect("PEO_TRACE");
@@ -56,7 +62,7 @@ impl LadderHandler {
             use std::io::Write;
             let _ = writeln!(
                 w,
-                "round,elapsed_s,n_placed,frac,n_done,placed_min,placed_med,placed_max,min_inter,max_overlap,handler_fdist"
+                "round,elapsed_s,n_placed,frac,n_done,placed_min,placed_med,placed_max,min_inter,max_overlap,callback_fdist"
             );
             w
         });
@@ -64,28 +70,28 @@ impl LadderHandler {
     }
 }
 
-impl Handler for LadderHandler {
-    fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
+impl Callback for LadderCallback {
+    fn on_step(&mut self, step: &StepReport, sys: &PackSystem) {
         {
             let mut s = self.state.lock().expect("ladder");
-            s.rounds = info.loop_idx;
-            if info.radscale < 1.0 && s.first_drop.is_none() {
-                s.first_drop = Some((info.loop_idx, info.radscale));
+            s.rounds = step.loop_idx;
+            if step.radscale < 1.0 && s.first_drop.is_none() {
+                s.first_drop = Some((step.loop_idx, step.radscale));
             }
-            if info.radscale < s.rad_min {
-                s.rad_min = info.radscale;
+            if step.radscale < s.rad_min {
+                s.rad_min = step.radscale;
             }
-            if info.loop_idx == 1 || info.loop_idx.is_multiple_of(200) {
+            if step.loop_idx == 1 || step.loop_idx.is_multiple_of(200) {
                 eprintln!(
                     "    round {:>5}  radscale={:.3}  ({:.1}s)",
-                    info.loop_idx,
-                    info.radscale,
+                    step.loop_idx,
+                    step.radscale,
                     s.start.elapsed().as_secs_f64()
                 );
             }
         }
-        let every = if info.loop_idx < 100 { 1 } else { 20 };
-        if self.trace.is_some() && (info.loop_idx == 1 || info.loop_idx.is_multiple_of(every)) {
+        let every = if step.loop_idx < 100 { 1 } else { 20 };
+        if self.trace.is_some() && (step.loop_idx == 1 || step.loop_idx.is_multiple_of(every)) {
             let snap = placed_snapshot(sys);
             if let Some(w) = self.trace.as_mut() {
                 use std::io::Write;
@@ -99,7 +105,7 @@ impl Handler for LadderHandler {
                 let _ = writeln!(
                     w,
                     "{},{:.3},{},{:.4},{},{},{},{},{:.4},{:.4},{:.4e}",
-                    info.loop_idx,
+                    step.loop_idx,
                     elapsed,
                     snap.n_placed,
                     snap.frac,
@@ -109,7 +115,7 @@ impl Handler for LadderHandler {
                     snap.placed_max,
                     snap.min_inter,
                     snap.max_overlap,
-                    info.fdist
+                    step.fdist
                 );
             }
             self.state.lock().expect("ladder").last_hist = snap.per_chain;
@@ -130,10 +136,10 @@ struct PlacedSnap {
 }
 
 fn is_placed(p: [F; 3]) -> bool {
-    p[0] * p[0] + p[1] * p[1] + p[2] * p[2] > 1e-16
+    dot(p, p) > 1e-16
 }
 
-fn placed_snapshot(sys: &PackContext) -> PlacedSnap {
+fn placed_snapshot(sys: &PackSystem) -> PlacedSnap {
     let na = sys.natoms.first().copied().unwrap_or(0);
     let n_chains = sys.nmols.first().copied().unwrap_or(0);
     let base0 = sys.idfirst.first().copied().unwrap_or(0);
@@ -224,8 +230,7 @@ fn print_closest_scored(pos: &[[F; 3]], bonds: &[(usize, usize)], elem: &[String
         let (d, parent) = hops_and_parent(i);
         for j in (i + 1)..na {
             if d[j] >= 4 {
-                let dr = vsub(pos[i], pos[j]);
-                let r = (dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2]).sqrt();
+                let r = norm(sub(pos[i], pos[j]));
                 pairs.push((r, i, j, d[j], path_str(i, j, &parent)));
             }
         }
@@ -246,11 +251,12 @@ fn print_closest_scored(pos: &[[F; 3]], bonds: &[(usize, usize)], elem: &[String
     }
 }
 
-fn min_inter_placed(sys: &PackContext, placed: &[usize], l: F) -> (F, F) {
+fn min_inter_placed(sys: &PackSystem, placed: &[usize], l: F) -> (F, F) {
     if placed.len() < 2 {
         return (F::INFINITY, 0.0);
     }
     let na = sys.natoms.first().copied().unwrap_or(1);
+    let mic = Mic::ortho([l; 3]);
     let cut = 4.0 as F;
     let nc = ((l / cut).floor() as usize).max(1);
     let cell = |p: [F; 3]| -> (usize, usize, usize) {
@@ -282,8 +288,8 @@ fn min_inter_placed(sys: &PackContext, placed: &[usize], l: F) -> (F, F) {
                                     if j <= i || i / na == j / na {
                                         continue;
                                     }
-                                    let d = min_image(vsub(sys.xcart[i], sys.xcart[j]), l);
-                                    let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                                    let d = mic.apply(sub(sys.xcart[i], sys.xcart[j]));
+                                    let r = norm(d);
                                     if r < best {
                                         best = r;
                                     }
@@ -309,27 +315,16 @@ const FLORY_R2_PER_M: F = 0.805; // ⟨R²⟩₀/M, Å²·mol/g (Fetters via Eve
 
 // ── synthetic all-atom PEO ─────────────────────────────────────────────────
 
-fn vadd(a: [F; 3], b: [F; 3]) -> [F; 3] {
-    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-}
-fn vsub(a: [F; 3], b: [F; 3]) -> [F; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-fn vscale(a: [F; 3], s: F) -> [F; 3] {
-    [a[0] * s, a[1] * s, a[2] * s]
-}
-fn vnorm(a: [F; 3]) -> F {
-    (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
-}
-fn vunit(a: [F; 3]) -> [F; 3] {
-    vscale(a, 1.0 / vnorm(a))
-}
-fn vcross(a: [F; 3], b: [F; 3]) -> [F; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
+/// The template's unit vectors: `a · (1/|a|)`, a multiply by the reciprocal.
+///
+/// Kept local rather than `molrs::op::vec3::normalize` (which divides each
+/// component by `|a|`) on purpose (module-responsibility ruling 10): the two
+/// differ in the last bit, and these directions place every synthesized atom,
+/// so they fix the bits of the template and of every packed coordinate and
+/// report number derived from it. Changing it is a change to the pinned
+/// output, not a refactor.
+fn unit(a: [F; 3]) -> [F; 3] {
+    scale(a, 1.0 / norm(a))
 }
 
 /// All-atom H-(CH₂-CH₂-O)ₙ-H in an all-trans zigzag: 7n + 2 atoms.
@@ -352,7 +347,7 @@ fn synthesize_peo(dp: usize) -> Frame {
         } else {
             [alpha.cos(), 0.0, -alpha.sin()]
         };
-        bb.push(vadd(bb[i - 1], vscale(dir, b)));
+        bb.push(add(bb[i - 1], scale(dir, b)));
     }
 
     let mut pos: Vec<[F; 3]> = Vec::with_capacity(7 * dp + 2);
@@ -361,7 +356,7 @@ fn synthesize_peo(dp: usize) -> Frame {
     let mut bb_index = vec![0u32; nb];
 
     // Terminal H on the first carbon, pointing back along -x.
-    pos.push(vadd(bb[0], [-1.10, 0.0, 0.0]));
+    pos.push(add(bb[0], [-1.10, 0.0, 0.0]));
     elem.push("H");
 
     let beta = (109.47_f64.to_radians() as F) / 2.0;
@@ -379,23 +374,23 @@ fn synthesize_peo(dp: usize) -> Frame {
         if !is_o {
             // Two hydrogens, tetrahedral off the backbone plane.
             let prev = if i == 0 {
-                vsub(p, [1.0, 0.0, 0.0])
+                sub(p, [1.0, 0.0, 0.0])
             } else {
                 bb[i - 1]
             };
             let next = if i + 1 < nb {
                 bb[i + 1]
             } else {
-                vadd(p, [1.0, 0.0, 0.0])
+                add(p, [1.0, 0.0, 0.0])
             };
-            let d1 = vunit(vsub(prev, p));
-            let d2 = vunit(vsub(next, p));
-            let bis = vunit(vscale(vadd(d1, d2), -1.0));
-            let n = vunit(vcross(d1, d2));
+            let d1 = unit(sub(prev, p));
+            let d2 = unit(sub(next, p));
+            let bis = unit(scale(add(d1, d2), -1.0));
+            let n = unit(cross(d1, d2));
             for sgn in [1.0 as F, -1.0] {
-                let dir = vunit(vadd(vscale(bis, beta.cos()), vscale(n, sgn * beta.sin())));
+                let dir = unit(add(scale(bis, beta.cos()), scale(n, sgn * beta.sin())));
                 let h = pos.len() as u32;
-                pos.push(vadd(p, vscale(dir, 1.10)));
+                pos.push(add(p, scale(dir, 1.10)));
                 elem.push("H");
                 bonds.push((idx, h));
             }
@@ -404,7 +399,7 @@ fn synthesize_peo(dp: usize) -> Frame {
     // Terminal H on the last oxygen.
     let last_o = bb_index[nb - 1];
     let h = pos.len() as u32;
-    pos.push(vadd(bb[nb - 1], [1.0, 0.0, 0.0]));
+    pos.push(add(bb[nb - 1], [1.0, 0.0, 0.0]));
     elem.push("H");
     bonds.push((last_o, h));
 
@@ -456,12 +451,9 @@ fn synthesize_peo(dp: usize) -> Frame {
 
 // ── report metrics ─────────────────────────────────────────────────────────
 
-fn min_image(d: [F; 3], l: F) -> [F; 3] {
-    std::array::from_fn(|k| d[k] - (d[k] / l).round() * l)
-}
-
 /// Bond-graph unwrap of one chain under the minimum image.
 fn unwrap_chain(xyz: &[[F; 3]], bonds: &[(usize, usize)], l: F) -> Vec<[F; 3]> {
+    let mic = Mic::ortho([l; 3]);
     let n = xyz.len();
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
     for &(i, j) in bonds {
@@ -476,8 +468,8 @@ fn unwrap_chain(xyz: &[[F; 3]], bonds: &[(usize, usize)], l: F) -> Vec<[F; 3]> {
     while let Some(a) = queue.pop() {
         for &b in &adj[a] {
             if !seen[b] {
-                let d = min_image(vsub(xyz[b], un[a]), l);
-                un[b] = vadd(un[a], d);
+                let d = mic.apply(sub(xyz[b], un[a]));
+                un[b] = add(un[a], d);
                 seen[b] = true;
                 queue.push(b);
             }
@@ -488,15 +480,7 @@ fn unwrap_chain(xyz: &[[F; 3]], bonds: &[(usize, usize)], l: F) -> Vec<[F; 3]> {
 
 fn radius_of_gyration(un: &[[F; 3]]) -> F {
     let n = un.len() as F;
-    let mut c = [0.0 as F; 3];
-    for p in un {
-        for k in 0..3 {
-            c[k] += p[k];
-        }
-    }
-    for v in c.iter_mut() {
-        *v /= n;
-    }
+    let c = centroid(un, &vec![1.0; un.len()]).expect("a chain has atoms");
     let mut s = 0.0;
     for p in un {
         for k in 0..3 {
@@ -508,6 +492,7 @@ fn radius_of_gyration(un: &[[F; 3]]) -> F {
 
 /// Minimum inter-molecular distance via a uniform grid (minimum image).
 fn min_inter_distance(pos: &[[F; 3]], na: usize, l: F) -> F {
+    let mic = Mic::ortho([l; 3]);
     let cut = 4.0 as F;
     let nc = ((l / cut).floor() as usize).max(1);
     let cell = |p: [F; 3]| -> (usize, usize, usize) {
@@ -538,8 +523,8 @@ fn min_inter_distance(pos: &[[F; 3]], na: usize, l: F) -> F {
                                     if j <= i || i / na == j / na {
                                         continue;
                                     }
-                                    let d = min_image(vsub(pos[i], pos[j]), l);
-                                    let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                                    let d = mic.apply(sub(pos[i], pos[j]));
+                                    let r2 = dot(d, d);
                                     if r2 < best {
                                         best = r2;
                                     }
@@ -564,6 +549,7 @@ fn density_fluctuation(pos: &[[F; 3]], l: F, d: F, seed: u64) -> F {
         state ^= state << 17;
         (state >> 11) as F / (1u64 << 53) as F
     };
+    let mic = Mic::ortho([l; 3]);
     let m = 400;
     let d2 = d * d;
     let (mut s1, mut s2) = (0.0 as F, 0.0 as F);
@@ -571,8 +557,8 @@ fn density_fluctuation(pos: &[[F; 3]], l: F, d: F, seed: u64) -> F {
         let c = [rng() * l, rng() * l, rng() * l];
         let mut count = 0usize;
         for &p in pos {
-            let dd = min_image(vsub(p, c), l);
-            if dd[0] * dd[0] + dd[1] * dd[1] + dd[2] * dd[2] < d2 {
+            let dd = mic.apply(sub(p, c));
+            if dot(dd, dd) < d2 {
                 count += 1;
             }
         }
@@ -608,7 +594,7 @@ fn report(
         .frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::block::Column::as_string)
+        .and_then(molrs::core::Column::as_string)
     {
         let names: Vec<String> = elem.iter().take(na).map(|s| s.to_string()).collect();
         print_closest_scored(&pos[..na], bonds, &names, na);
@@ -639,8 +625,8 @@ fn report(
         for u in &unwrapped {
             if s + 1 < u.len() {
                 for i in (0..u.len() - s).step_by(s.max(1)) {
-                    let d = vsub(u[i + s], u[i]);
-                    acc += d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                    let d = sub(u[i + s], u[i]);
+                    acc += dot(d, d);
                     cnt += 1;
                 }
             }
@@ -682,19 +668,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let template_path = args.get(11);
 
     let frame = match template_path {
-        Some(p) => molrs::io::data::pdb::read_pdb_frame(p)?,
+        Some(p) => molrs::io::read_pdb(p)?,
         None => synthesize_peo(dp),
     };
-    let na = frame.get("atoms").and_then(|a| a.nrows()).unwrap_or(0);
+    let na = frame.get("atoms").and_then(|a| a.n_rows()).unwrap_or(0);
     let bonds: Vec<(usize, usize)> = {
         let b = frame.get("bonds").expect("template bonds");
         let i = b
             .get("atomi")
-            .and_then(molrs::store::block::Column::as_uint)
+            .and_then(molrs::core::Column::as_uint)
             .expect("bonds.atomi");
         let j = b
             .get("atomj")
-            .and_then(molrs::store::block::Column::as_uint)
+            .and_then(molrs::core::Column::as_uint)
             .expect("bonds.atomj");
         i.iter()
             .zip(j.iter())
@@ -704,12 +690,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let m_chain: F = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::block::Column::as_string)
+        .and_then(molrs::core::Column::as_string)
         .map(|e| {
             e.iter()
                 .filter_map(|s| {
                     use std::str::FromStr;
-                    molpack::Element::from_str(s.trim())
+                    molrs::core::Element::from_str(s.trim())
                         .ok()
                         .map(|el| el.atomic_mass() as F)
                 })
@@ -717,12 +703,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .unwrap_or(0.0);
     let rg_ideal = (FLORY_R2_PER_M * m_chain / 6.0).sqrt();
-    let total_g = n_chains as F * m_chain / 6.022_140_76e23;
-    let l = (total_g / density * 1e24).cbrt();
+    let total_g = n_chains as F * m_chain / AVOGADRO;
+    static CM3_TO_ANGSTROM3: UnitFactor = UnitFactor::new("cm^3", "angstrom^3");
+    let l = (total_g / density * CM3_TO_ANGSTROM3.get()).cbrt();
     let tmpl_elem: Vec<String> = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::block::Column::as_string)
+        .and_then(molrs::core::Column::as_string)
         .map(|e| e.iter().map(|s| s.to_string()).collect())
         .unwrap_or_default();
     let tmpl_pos: Vec<[F; 3]> = frame
@@ -749,7 +736,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let h_idx: Vec<usize> = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::block::Column::as_string)
+        .and_then(molrs::core::Column::as_string)
         .map(|e| {
             e.iter()
                 .enumerate()
@@ -837,13 +824,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .with_seed(seed)
                 .with_tolerance(tolerance)
                 .with_density(density)
-                .with_handler(Box::new(LadderHandler::new(
+                .with_callback(Box::new(LadderCallback::new(
                     Arc::clone(&ladder),
                     trace_path.as_deref(),
                 )))
                 .run(&[target], max_loops)?
         }
-        "rigid" => GenCanPack::new()
+        "rigid" => GencanPack::new()
             .with_seed(seed)
             .with_tolerance(tolerance)
             .with_periodic_box([0.0; 3], [l, l, l], [true; 3])
@@ -857,7 +844,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let push_tol: F = 2.0;
             let h_push: F = h_radius.unwrap_or(0.05);
             println!(
-                "  Auhl         : CbmcGrow all-parallel @ {grow_tol} Å → GenCanPack @ {push_tol} Å (H={h_push})"
+                "  Auhl         : CbmcGrow all-parallel @ {grow_tol} Å → GencanPack @ {push_tol} Å (H={h_push})"
             );
             let cfg = GrowConfig::new(TorsionPrior::three_state_from_c_inf(PEO_C_INF, TET))
                 .with_trials(trials)
@@ -896,13 +883,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 grown
             } else {
                 let p0 = Instant::now();
-                let pushed = GenCanPack::new()
+                let pushed = GencanPack::new()
                     .with_restart(&grown)
                     .with_seed(seed)
                     .with_tolerance(push_tol)
                     .run(&[t_push], 30)?;
                 let pp = pushed.positions();
-                let d0 = vnorm(vsub(pp[0], gp[0]));
+                let d0 = norm(sub(pp[0], gp[0]));
                 println!(
                     "  push-off     : {:.3} s  converged={}  fdist={:.4e}  degraded={}  atom0 moved {:.3} Å",
                     p0.elapsed().as_secs_f64(),
@@ -919,7 +906,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let push_tol: F = 2.0;
             let h_push: F = h_radius.unwrap_or(0.05);
             println!(
-                "  lattice      : LatticeGrow occupancy-guard → GenCanPack @ {push_tol} Å (H={h_push})"
+                "  lattice      : LatticeGrow occupancy-guard → GencanPack @ {push_tol} Å (H={h_push})"
             );
             let g0 = Instant::now();
             let grown = LatticeGrow::new(TorsionPrior::three_state_from_c_inf(PEO_C_INF, TET))
@@ -946,7 +933,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 grown
             } else {
                 let p0 = Instant::now();
-                let pushed = GenCanPack::new()
+                let pushed = GencanPack::new()
                     .with_restart(&grown)
                     .with_seed(seed)
                     .with_tolerance(push_tol)
@@ -965,7 +952,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Grow one conformer, then rigid-pack N copies (not seeded push-off).
             let h_r: F = h_radius.unwrap_or(0.05);
             println!(
-                "  grow1        : 1 chain (serial, H={h_r} Å, tol=2.0) → GenCanPack × {n_chains} @ {density} g/cm³"
+                "  grow1        : 1 chain (serial, H={h_r} Å, tol=2.0) → GencanPack × {n_chains} @ {density} g/cm³"
             );
             let mut t1 = Target::new(synthesize_peo(dp), 1).with_name("peo");
             if !h_idx.is_empty() {
@@ -996,7 +983,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tn = tn.with_atom_radius(&h_idx, h_r);
             }
             let p0 = Instant::now();
-            let packed = GenCanPack::new()
+            let packed = GencanPack::new()
                 .with_seed(seed)
                 .with_tolerance(2.0)
                 .with_density(density)
