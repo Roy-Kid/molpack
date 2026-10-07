@@ -17,7 +17,7 @@ mol_project:
     required: true
   ci:
     config: .github/workflows/ci.yml
-    local: "cargo test --lib --features cli && cargo test --doc --features cli && cargo check --all-targets --features cli && cargo check --no-default-features && cargo check --features rayon && uv run --directory python --group dev tox -e py"
+    local: "scripts/partners.py run -- sh -c 'cargo test --locked --lib --features cli && cargo test --locked --doc --features cli && cargo check --locked --all-targets --features cli && cargo check --locked --no-default-features && cargo check --locked --features rayon && uv run --locked --python 3.12 --directory python --group dev tox -e py'"
   notes_path: .claude/notes/notes.md
   specs_path: .claude/specs/
 ---
@@ -71,8 +71,8 @@ Project invariants (bodies in `law.md` § IX):
 
 - **No "packmol" in public identifiers.** The product is molpack; prose may cite Packmol, symbols may not.
 - **Configuration is `.inp` only.** Never a TOML / YAML / JSON config surface.
-- **molrs pins are manual.** Never automate the path / version pin check in hooks or CI.
-- **Local gates are prek + tox.** Never a project `scripts/` wrapper; Python isolation is `uv run --directory python --group dev tox -e py`.
+- **molrs pins are manual.** Never let a hook or script rewrite a path / version / partner pin; hooks and CI only verify them (`.github/partners.env`).
+- **Local gates are prek + tox.** Gate commands live in `.pre-commit-config.yaml` / `ci.yml`, never in a `scripts/` test wrapper; `scripts/` holds only the hook dispatch and the partner layout. Python isolation is `uv run --directory python --group dev tox -e py`. Never `--no-verify`.
 - **Fork → PR.** Never push to `MolCrafts/molpack` master; `origin` = fork, `upstream` = MolCrafts.
 - **Solvers are pure geometry.** Never a force-field or chemistry-perception dependency on the solver seam; priors and chemistry are user data.
 - **Solvers are peers.** Never call another solver's driver; share lifecycle, context, objective, frozen `State` — the shared objective is the one ruler.

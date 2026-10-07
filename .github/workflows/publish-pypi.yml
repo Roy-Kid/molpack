@@ -10,10 +10,9 @@ permissions:
   contents: read
   id-token: write
 
-# The molrs release tag of the line Cargo.toml pins (`version = "0.16"`);
-# the same tag publish-crate.yml builds and tests against.
-env:
-  MOLRS_GIT_REF: v0.16.0
+# molrs is checked out at the commit .github/partners.env pins -- the same
+# one ci.yml and publish-crate.yml build against; a release commit pins the
+# molrs release tag of the line Cargo.toml names.
 
 # Build matrix produces one wheel per OS per supported Python (3.12, 3.13),
 # matching `requires-python = ">=3.12"` in pyproject.toml. Linux + macOS only;
@@ -38,12 +37,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: MolCrafts/molrs
-          ref: ${{ env.MOLRS_GIT_REF }}
-          path: molrs
+          path: molpack
+      - name: Partner pins
+        run: grep -E '^[A-Z][A-Z0-9_]*=' molpack/.github/partners.env >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
         with:
-          path: molpack
+          repository: ${{ env.MOLRS_REPOSITORY }}
+          ref: ${{ env.MOLRS_REF }}
+          path: molrs
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -53,7 +54,7 @@ jobs:
           working-directory: molpack/python
           manylinux: auto
           command: build
-          args: --release --out dist --interpreter python${{ matrix.python-version }}
+          args: --release --locked --out dist --interpreter python${{ matrix.python-version }}
       - uses: actions/upload-artifact@v7
         with:
           name: wheels-linux-${{ matrix.python-version }}
@@ -67,12 +68,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: MolCrafts/molrs
-          ref: ${{ env.MOLRS_GIT_REF }}
-          path: molrs
+          path: molpack
+      - name: Partner pins
+        run: grep -E '^[A-Z][A-Z0-9_]*=' molpack/.github/partners.env >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
         with:
-          path: molpack
+          repository: ${{ env.MOLRS_REPOSITORY }}
+          ref: ${{ env.MOLRS_REF }}
+          path: molrs
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -81,7 +84,7 @@ jobs:
         with:
           working-directory: molpack/python
           command: build
-          args: --release --out dist --interpreter python${{ matrix.python-version }} --target universal2-apple-darwin
+          args: --release --locked --out dist --interpreter python${{ matrix.python-version }} --target universal2-apple-darwin
       - uses: actions/upload-artifact@v7
         with:
           name: wheels-macos-${{ matrix.python-version }}
@@ -92,12 +95,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: MolCrafts/molrs
-          ref: ${{ env.MOLRS_GIT_REF }}
-          path: molrs
+          path: molpack
+      - name: Partner pins
+        run: grep -E '^[A-Z][A-Z0-9_]*=' molpack/.github/partners.env >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
         with:
-          path: molpack
+          repository: ${{ env.MOLRS_REPOSITORY }}
+          ref: ${{ env.MOLRS_REF }}
+          path: molrs
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:

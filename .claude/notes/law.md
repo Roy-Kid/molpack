@@ -368,26 +368,40 @@ language would fork the user base and the parser.
 <!-- mol:law:id:molrs-pins-manual -->
 ## P3. molrs path and version pins are managed manually
 
-**Principle.** The `../molrs/molrs` path dependency and its version
-line are edited by a human, deliberately.
+**Principle.** The `../molrs/molrs` path dependency, its version line,
+and the partner commits in `.github/partners.env` (the molrs / molpy
+commits CI and the pre-push hooks build against) are edited by a human,
+deliberately. Hooks and CI verify them -- every pinned ref exists, every
+path dependency lands in a checkout CI makes, the lock files match -- and
+never change them (owner ruling 2026-10-06, replacing "never automate the
+pin check": an unverified pin is how CI went red on things no hook ran).
 
 **Never**
 
-- Never automate the pin check in pre-commit hooks or CI.
-- Never let a hook or script rewrite `Cargo.toml` / `pyproject.toml`
-  pins.
+- Never let a hook or script rewrite `Cargo.toml` / `pyproject.toml` /
+  `.github/partners.env` pins.
+- Never check a partner out by branch name in CI or a hook; the commit
+  comes from `.github/partners.env`.
 
 <!-- mol:law:id:local-gates-prek-tox -->
 ## P4. Local gates are prek + tox
 
 **Principle.** Hooks use prek (pre-commit-compatible config); Python
-isolation is tox from the `python/` `dev` dependency group.
+isolation is tox from the `python/` `dev` dependency group. Gate commands
+are spelled in `.pre-commit-config.yaml` and `ci.yml`. `scripts/` holds the
+hook plumbing only: `hook-run.sh` (dispatch to a compute node on the
+MolCrafts cluster) and `partners.py` (CI's sibling layout at the pinned
+commits).
 
 **Never**
 
-- Never add a project `scripts/` test wrapper.
+- Never add a project `scripts/` test wrapper, or move a gate's command
+  into `scripts/`.
 - Never hand-write a local hook where a registry-hosted one exists
-  (`doublify/pre-commit-rust`, `astral-sh/ruff`).
+  (`doublify/pre-commit-rust`, `astral-sh/ruff`) -- unless the gate
+  compiles: those run through `scripts/hook-run.sh` in the pinned layout
+  (clippy), which a registry hook cannot.
+- Never `git commit --no-verify` / `git push --no-verify`.
 - Never run Python binding tests any way other than
   `uv run --directory python --group dev tox -e py` (non-editable,
   sibling molrs path install + maturin wheel + pytest).

@@ -70,10 +70,14 @@ frame (the PyO3 `target_from_frame` helper) and lowers scripts with
 - An ignored test is a failing test. No `ignore` doctest fence, no `#[ignore]`:
   the `no-ignored-tests` prek hook (commit stage, mirrored in CI `lint`) rejects
   both. Uncompiled illustration is a `text` fence.
-- `uv run --directory python --group dev tox -e py` — Python wheel, isolated and non-editable (`maturin develop` is not the gate).
+- `uv run --locked --python 3.12 --directory python --group dev tox -e py` — Python wheel, isolated and non-editable (`maturin develop` is not the gate).
 - CI parity (pre-push hooks in `.pre-commit-config.yaml`, mirrored by
-  `mol_project.ci.local`): lib tests, doc tests, `--all-targets` check (bin +
-  examples must compile), `--no-default-features` / `rayon` checks, then tox.
+  `mol_project.ci.local`): commit hooks on `--all-files`, partner pins, lock
+  files, docs, clippy, ty, lib tests, doc tests, `--all-targets` check (bin +
+  examples must compile), `--no-default-features` / `rayon` checks, then tox
+  -- the compiling ones in CI's layout at the `.github/partners.env` commits,
+  all `--locked`. CONTRIBUTING.md "Hooks" has the stage table and the
+  cluster dispatch.
 
 ## Repo layout
 

@@ -22,10 +22,14 @@ workspace/
 The root `Cargo.toml` uses a path dependency on `../molrs/molrs`. With the
 sibling layout above everything resolves automatically.
 
-**Version pins:** a local build uses the sibling checkout `../molrs`. The
-version fields name the **0.16.*** minor line (see `Cargo.toml` and
-`python/pyproject.toml`). On GitHub, CI checks out `MolCrafts/molrs` on the
-same branch: `master` or `dev`.
+**Version pins:** a local build uses the sibling checkouts (`../molrs`, and
+`../molpy` for the Python tests). The version fields name the **0.16.***
+minor line (see `Cargo.toml` and `python/pyproject.toml`). CI, and the
+pre-push hooks, build against `MolCrafts/molrs` and `MolCrafts/molpy` at the
+commits `.github/partners.env` pins, in a layout of their own -- not your
+siblings. `Cargo.lock`, `python/Cargo.lock` and `python/uv.lock` are committed
+and every cargo / uv call in the gates is `--locked`; bumping a pin means
+relocking in the same commit (the recipe is in `.github/partners.env`).
 The Python wheel checks this on ``import molpack`` — a molrs minor mismatch is an
 ``ImportError``, not a later FFI segfault.
 
@@ -44,28 +48,65 @@ cargo build -p molcrafts-molpack
 
 ## Running tests
 
-prek pre-push and CI run the **same** commands (no project `scripts/` wrappers):
+prek pre-push and CI run the **same** commands (spelled out in
+`.pre-commit-config.yaml` and `.github/workflows/ci.yml`):
 
 ```bash
 # Rust — same as CI "rust tests" job. Behaviour lives in `#[cfg(test)]`
 # modules next to the code; there is no tests/ directory.
-cargo test --lib --features cli
-cargo test --doc --features cli
-cargo check --all-targets --features cli      # bin + examples must compile
-cargo check --no-default-features && cargo check --features rayon
+cargo test --locked --lib --features cli
+cargo test --locked --doc --features cli
+cargo check --locked --all-targets --features cli      # bin + examples must compile
+cargo check --locked --no-default-features && cargo check --locked --features rayon
 
 # Python — tox isolated env (tox itself from python/ dependency-group dev)
-uv run --directory python --group dev tox -e py
+uv run --locked --python 3.12 --directory python --group dev tox -e py
 ```
+
+Against your sibling checkouts these are a quick loop; the gate is the same
+command in CI's layout: `scripts/partners.py run -- <command>`.
 
 For a quick local edit loop you may still `maturin develop` in a personal
 venv; **do not** rely on that for the gate — pre-push always uses
 `uv run --directory python --group dev tox -e py`.
 
+## Hooks
+
+`prek install` installs both hook types from `.pre-commit-config.yaml`; every
+command in `.github/workflows/ci.yml` has a hook. **Never `git commit
+--no-verify` or `git push --no-verify`, and never merge a red pull request.**
+
+- **pre-commit** (staged files, nothing compiles, in place): file hygiene
+  (whitespace, final newline, YAML/TOML, merge markers, line endings), ruff
+  format + ruff (`python/`), rustfmt, and the no-ignored-tests guard.
+- **pre-push**:
+  - the pre-commit hooks again on `--all-files` (CI `lint` runs them so);
+  - `scripts/partners.py check` — every pin in `.github/partners.env` exists
+    on its remote, every path dependency (`../molrs`, `../../molpy`, ...)
+    lands in a checkout CI makes, and no workflow spells a partner ref of its
+    own;
+  - the three lock files are current against the pinned molrs/molpy;
+  - the docs build (`zensical build --clean --strict` from the `doc` group)
+    when docs/ or zensical.toml changed;
+  - clippy (`--all-targets --all-features -D warnings`), ty, the rust tests
+    and tox -- each in CI's sibling layout (`scripts/partners.py run`: a copy
+    of this tree next to molrs and molpy at their pinned commits), `--locked`,
+    on the toolchain `rust-toolchain.toml` pins (1.99.0, the same as molrs)
+    and Python 3.12.
+- **Dispatch on the MolCrafts cluster:** the compiling gates go through
+  `scripts/hook-run.sh`, which hands the command to `$MOLCRAFTS_HOOK_RUNNER`
+  when that is set and it is not already inside a Slurm job. The cluster's
+  shared `core.hooksPath` sets it to `.build-alloc/hookrun`, which runs the
+  command on a compute node (allocation `$USER-hooks`; it fails after 20
+  minutes without a node, never passes) and sets `$MOLCRAFTS_PARTNER_CACHE` so
+  the pinned checkouts and their `target/` stay warm between pushes.
+  Everything else runs in place, so a commit never waits for Slurm. Elsewhere
+  nothing sets the variables: every hook runs locally, in a temp layout.
+
 ## Code style
 
-- `cargo fmt` / `clippy` / `ruff` / `ty` — commit-stage prek hooks
-- pre-push: rust tests + `uv run … tox -e py` (mirrors CI)
+- `cargo fmt` / `ruff` — commit-stage prek hooks; `clippy` / `ty` — pre-push
+- pre-push: clippy, ty, rust tests + `uv run … tox -e py` (mirrors CI; see [Hooks](#hooks))
 - Follow the immutability rule: return new values, never mutate in place
 - Keep files under ~400 lines; split at ~200 if the module grows beyond one concern
 - New public types must implement `Debug` and, where appropriate, `Clone`

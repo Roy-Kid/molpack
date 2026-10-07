@@ -6,28 +6,18 @@ on:
   pull_request:
     branches: [master, dev]
   workflow_call:
-    inputs:
-      mol_git_ref:
-        description: >-
-          molrs ref to check out. The publish workflows run on a
-          molpack tag, which names no molrs ref, so they pass the
-          release tag of the molrs line Cargo.toml pins.
-        type: string
-        required: false
-        default: ""
   workflow_dispatch:
 
-# Local builds use the sibling directories. GitHub has two branches, and
-# CI checks out MolCrafts/molrs on that same branch.
-# A pull request uses its head branch; a caller may name the ref instead.
+# MolCrafts/molrs and MolCrafts/molpy are checked out next to molpack at the
+# commits .github/partners.env pins -- the one place those pins live; the
+# publish workflows and the pre-push hooks (scripts/partners.py) read the same
+# file. Every command here has a hook in .pre-commit-config.yaml.
 env:
-  MOLRS_GIT_REPOSITORY: MolCrafts/molrs
-  MOL_GIT_REF: ${{ inputs.mol_git_ref || github.head_ref || github.ref_name }}
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
-
-# Lint: same as prek commit-stage hooks in .pre-commit-config.yaml.
-# Tests: same commands as prek pre-push hooks (no scripts/).
+  # uv builds molrs and molpack through maturin's PEP 517 hook; this makes
+  # those cargo builds --locked as well.
+  MATURIN_PEP517_ARGS: --locked
 
 jobs:
   lint:
@@ -36,15 +26,23 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: ${{ env.MOLRS_GIT_REPOSITORY }}
-          ref: ${{ env.MOL_GIT_REF }}
-          path: molrs
+          path: molpack
+      - name: Partner pins
+        run: grep -E '^[A-Z][A-Z0-9_]*=' molpack/.github/partners.env >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
         with:
-          path: molpack
-      - uses: dtolnay/rust-toolchain@stable
+          repository: ${{ env.MOLRS_REPOSITORY }}
+          ref: ${{ env.MOLRS_REF }}
+          path: molrs
+      # `ty check` walks examples/, which import molpy (typecheck group).
+      - uses: actions/checkout@v6
         with:
-          components: rustfmt, clippy
+          repository: ${{ env.MOLPY_REPOSITORY }}
+          ref: ${{ env.MOLPY_REF }}
+          path: molpy
+      # The toolchain molpack/rust-toolchain.toml pins.
+      - run: rustup toolchain install
+        working-directory: molpack
       - uses: mozilla-actions/sccache-action@v0.0.9
       # The committed .cargo/config.toml routes builds into ../molrs/target,
       # shared with the sibling molrs checkout.
@@ -52,26 +50,27 @@ jobs:
         with:
           workspaces: "molpack -> ../molrs/target"
       - uses: astral-sh/setup-uv@v7
-      - name: Rust fmt + clippy (pre-commit parity)
+      # File hygiene, ruff, rustfmt and the no-ignored-tests guard: the
+      # pre-commit stage of .pre-commit-config.yaml, on every file.
+      - name: Commit hooks (pre-commit parity)
+        working-directory: molpack
+        run: uvx pre-commit run --all-files --show-diff-on-failure
+      - name: Partner pins and path dependencies (pre-push parity)
+        working-directory: molpack
+        run: python3 scripts/partners.py check
+      - name: Lock files (pre-push parity)
         working-directory: molpack
         run: |
           set -euo pipefail
-          # Package roots only (avoid path-dep molrs noise from `cargo fmt --all`).
-          cargo fmt -- --check
-          cargo fmt --manifest-path python/Cargo.toml -- --check
-          cargo clippy --all-targets --all-features -- -D warnings
-      - name: No ignored tests (pre-commit parity)
+          cargo metadata --locked --format-version 1 >/dev/null
+          cargo metadata --locked --format-version 1 --manifest-path python/Cargo.toml >/dev/null
+          uv lock --check --directory python
+      - name: clippy (pre-push parity)
         working-directory: molpack
-        run: |
-          ! git grep -nE '```[a-z,_]*ignore|#\[ignore' -- src docs examples python/src
-      - name: Ruff + ty (pre-commit parity)
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: ty (pre-push parity)
         working-directory: molpack
-        run: |
-          set -euo pipefail
-          # Paths relative to python/ (matches local `cd python && ty check …`).
-          uv run --directory python --group typecheck ruff format --check python tests examples
-          uv run --directory python --group typecheck ruff check python tests examples
-          uv run --directory python --group typecheck ty check python tests examples
+        run: uv run --locked --python 3.12 --directory python --group typecheck ty check python tests examples
 
   test:
     name: rust tests
@@ -79,16 +78,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: ${{ env.MOLRS_GIT_REPOSITORY }}
-          ref: ${{ env.MOL_GIT_REF }}
-          path: molrs
+          path: molpack
+      - name: Partner pins
+        run: grep -E '^[A-Z][A-Z0-9_]*=' molpack/.github/partners.env >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
         with:
-          path: molpack
-      - uses: dtolnay/rust-toolchain@stable
+          repository: ${{ env.MOLRS_REPOSITORY }}
+          ref: ${{ env.MOLRS_REF }}
+          path: molrs
+      - run: rustup toolchain install
+        working-directory: molpack
       - uses: mozilla-actions/sccache-action@v0.0.9
-      # The committed .cargo/config.toml routes builds into ../molrs/target,
-      # shared with the sibling molrs checkout.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "molpack -> ../molrs/target"
@@ -98,12 +98,12 @@ jobs:
           set -euo pipefail
           # Behaviour lives in `#[cfg(test)]` modules next to the code; there is
           # no tests/ directory (see CLAUDE.md).
-          cargo test --lib --features cli
-          cargo test --doc --features cli
+          cargo test --locked --lib --features cli
+          cargo test --locked --doc --features cli
           # Every other target still has to compile: bin, examples.
-          cargo check --all-targets --features cli
-          cargo check --no-default-features
-          cargo check --features rayon
+          cargo check --locked --all-targets --features cli
+          cargo check --locked --no-default-features
+          cargo check --locked --features rayon
 
   python:
     name: python tests
@@ -111,16 +111,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          repository: ${{ env.MOLRS_GIT_REPOSITORY }}
-          ref: ${{ env.MOL_GIT_REF }}
+          path: molpack
+      - name: Partner pins
+        run: grep -E '^[A-Z][A-Z0-9_]*=' molpack/.github/partners.env >> "$GITHUB_ENV"
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ env.MOLRS_REPOSITORY }}
+          ref: ${{ env.MOLRS_REF }}
           path: molrs
       - uses: actions/checkout@v6
         with:
-          path: molpack
-      - uses: dtolnay/rust-toolchain@stable
+          repository: ${{ env.MOLPY_REPOSITORY }}
+          ref: ${{ env.MOLPY_REF }}
+          path: molpy
+      - run: rustup toolchain install
+        working-directory: molpack
       - uses: mozilla-actions/sccache-action@v0.0.9
-      # The committed .cargo/config.toml routes builds into ../molrs/target,
-      # shared with the sibling molrs checkout.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "molpack -> ../molrs/target"
@@ -130,4 +136,31 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - name: tox -e py via python dev group (isolated, non-editable)
         working-directory: molpack
-        run: uv run --directory python --group dev tox -e py
+        run: uv run --locked --python 3.12 --directory python --group dev tox -e py
+
+  # The docs site from the `doc` group, --strict: any warning fails. Same as
+  # the pre-push hook.
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: molpack
+      - name: Partner pins
+        run: grep -E '^[A-Z][A-Z0-9_]*=' molpack/.github/partners.env >> "$GITHUB_ENV"
+      # Metadata only: `--locked` checks python/uv.lock, whose path sources
+      # are these checkouts. Nothing compiles.
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ env.MOLRS_REPOSITORY }}
+          ref: ${{ env.MOLRS_REF }}
+          path: molrs
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ env.MOLPY_REPOSITORY }}
+          ref: ${{ env.MOLPY_REF }}
+          path: molpy
+      - uses: astral-sh/setup-uv@v7
+      - working-directory: molpack
+        run: uv run --isolated --locked --python 3.12 --project python --only-group doc zensical build --clean --strict

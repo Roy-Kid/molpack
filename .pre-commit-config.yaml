@@ -1,7 +1,20 @@
 # Managed by prek (drop-in pre-commit replacement): `prek install`
-# Lint on commit; test gates on pre-push (same commands as .github/workflows/ci.yml).
+# CI parity: every command in .github/workflows/ci.yml has a hook here.
+#
+#   pre-commit  file hygiene, ruff, rustfmt, no ignored tests: nothing
+#               compiles, so a commit never waits for a build (or for Slurm).
+#   pre-push    the commit hooks on --all-files (ci.yml lint runs them that
+#               way), the partner pins, the locks, the docs build, and the
+#               gates that compile -- clippy, ty, rust tests, tox -- in CI's
+#               sibling layout with molrs and molpy at the commits
+#               .github/partners.env pins (scripts/partners.py run), never
+#               the developer's ../molrs or ../molpy.
+#
+# Compiling gates go through scripts/hook-run.sh, which hands them to
+# $MOLCRAFTS_HOOK_RUNNER (a compute node on the MolCrafts cluster) when set and
+# runs them in place otherwise. See "Hooks" in CONTRIBUTING.md. Never --no-verify.
 default_install_hook_types: [pre-commit, pre-push]
-default_stages: [pre-commit, pre-push]
+default_stages: [pre-commit]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -27,8 +40,6 @@ repos:
     rev: v1.0
     hooks:
       - id: fmt
-      - id: clippy
-        args: ["--all-targets", "--all-features", "--", "-D", "warnings"]
 
   - repo: local
     hooks:
@@ -38,34 +49,95 @@ repos:
         language: pygrep
         entry: '```[a-z,_]*ignore|#\[ignore'
         files: ^(src|docs|examples|python/src)/.*\.(rs|md)$
-        stages: [pre-commit]
 
-      - id: ty
-        name: ty (Python type check)
+      # A commit checks its staged files only; ci.yml lint runs the hooks
+      # above on every file.
+      - id: all-files
+        name: commit hooks on --all-files (ci.yml lint)
+        entry: uvx pre-commit run --all-files --hook-stage pre-commit --show-diff-on-failure
         language: system
-        entry: sh -c 'cd python && ty check python tests examples'
-        files: ^python/
         pass_filenames: false
+        always_run: true
+        stages: [pre-push]
 
-      # CI parity (pre-push) — no scripts/; commands match ci.yml `test` + `python`
-      - id: rust-tests
-        name: rust tests (CI parity)
+      - id: partners
+        name: partner pins exist; path deps resolve in CI (ci.yml lint)
+        entry: python3 scripts/partners.py check
         language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      # The three lock files record the pinned molrs/molpy versions; every
+      # cargo and uv call below is --locked, so a stale one fails here first.
+      - id: locks
+        name: Cargo.lock + python/Cargo.lock + python/uv.lock current (ci.yml lint)
         entry: >-
-          sh -c 'cargo test --lib --features cli
-          && cargo test --doc --features cli
-          && cargo check --all-targets --features cli
-          && cargo check --no-default-features
-          && cargo check --features rayon'
+          python3 scripts/partners.py run -- sh -c
+          'cargo metadata --locked --format-version 1 >/dev/null
+          && cargo metadata --locked --format-version 1 --manifest-path python/Cargo.toml >/dev/null
+          && uv lock --check --directory python'
+        language: system
+        pass_filenames: false
+        files: ^(Cargo\.(toml|lock)|python/(Cargo\.(toml|lock)|pyproject\.toml|uv\.lock)|\.github/partners\.env)$
+        stages: [pre-push]
+
+      # The docs site, built from the `doc` group in a clean copy of the tree,
+      # --strict: any warning fails (ci.yml docs, Cloudflare Pages).
+      - id: docs
+        name: docs build (ci.yml docs)
+        entry: >-
+          python3 scripts/partners.py run --
+          uv run --isolated --locked --python 3.12 --project python --only-group doc
+          zensical build --clean --strict
+        language: system
+        pass_filenames: false
+        files: ^(docs/|zensical\.toml|python/pyproject\.toml|python/uv\.lock)
+        stages: [pre-push]
+
+      - id: clippy
+        name: clippy --all-targets --all-features (ci.yml lint)
+        entry: >-
+          scripts/hook-run.sh python3 scripts/partners.py run --
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+        language: system
+        pass_filenames: false
+        files: ^(src/|examples/|Cargo\.(toml|lock)|\.cargo/|rust-toolchain\.toml|\.github/partners\.env)
+        stages: [pre-push]
+
+      # Builds the molrs extension (editable) into the typecheck env. uv's
+      # maturin builds (molrs, molpack) get --locked through MATURIN_PEP517_ARGS.
+      - id: ty
+        name: ty (Python type check, ci.yml lint)
+        entry: >-
+          scripts/hook-run.sh python3 scripts/partners.py run --
+          env MATURIN_PEP517_ARGS=--locked uv run --locked --python 3.12 --directory python --group typecheck
+          ty check python tests examples
+        language: system
+        pass_filenames: false
+        files: ^(python/|\.github/partners\.env)
+        stages: [pre-push]
+
+      - id: rust-tests
+        name: rust tests (ci.yml test)
+        entry: >-
+          scripts/hook-run.sh python3 scripts/partners.py run -- sh -c
+          'cargo test --locked --lib --features cli
+          && cargo test --locked --doc --features cli
+          && cargo check --locked --all-targets --features cli
+          && cargo check --locked --no-default-features
+          && cargo check --locked --features rayon'
+        language: system
         pass_filenames: false
         always_run: true
         stages: [pre-push]
 
       - id: python-tests
-        name: python tests (tox isolated, non-editable)
+        name: python tests, tox isolated non-editable (ci.yml python)
+        entry: >-
+          scripts/hook-run.sh python3 scripts/partners.py run --
+          env MATURIN_PEP517_ARGS=--locked uv run --locked --python 3.12 --directory python --group dev tox -e py
         language: system
-        # tox comes from python/pyproject.toml dependency-group `dev`
-        entry: uv run --directory python --group dev tox -e py
         pass_filenames: false
         always_run: true
         stages: [pre-push]
