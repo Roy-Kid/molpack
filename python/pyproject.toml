@@ -174,7 +174,7 @@ commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import tomllib; from pathlib import Path; p=Path('{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text())['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,16), f'sibling molrs {{v}} not on 0.16.*'",
+    "import tomllib; from pathlib import Path; p=Path(r'{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text(encoding='utf-8'))['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,16), f'sibling molrs {{v}} not on 0.16.*'",
   ],
   [
     "{envpython}",
