@@ -3,7 +3,7 @@
 //! A leaf: the objective implements the call, and the context stores the
 //! maxima. This module reaches into neither.
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// Evaluation mode for the shared objective.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

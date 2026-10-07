@@ -4,7 +4,7 @@
 use molpack::grow::{AnglePrior, TorsionPrior};
 use pyo3::prelude::*;
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// Geometric torsion prior — the mandatory statistics input of growth.
 #[pyclass(name = "TorsionPrior", frozen, from_py_object)]

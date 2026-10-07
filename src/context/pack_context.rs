@@ -3,10 +3,10 @@
 use std::sync::Arc;
 
 use crate::restraint::{AtomRestraint, Restraint};
-use molrs::op::types::F;
-use molrs::spatial::SimBox;
-use molrs::spatial::neighbors::CellGrid;
-use molrs::system::Element;
+use molrs::core::CellGrid;
+use molrs::core::Element;
+use molrs::core::SimBox;
+use molrs::op::F;
 use ndarray::array;
 
 use super::geometry::GeometryKey;
@@ -1007,7 +1007,7 @@ mod geometry_cache_tests {
     use crate::PackContext;
     use crate::objective::{compute_f, compute_fg};
     use crate::testutil::inside_box;
-    use molrs::op::types::F;
+    use molrs::op::F;
 
     // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
 
@@ -1015,9 +1015,9 @@ mod geometry_cache_tests {
 
     fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
         let side = cell_len * cell_n as F;
-        sys.simbox = molrs::spatial::SimBox::cube(side, molrs::op::types::F3::zeros(3), [false; 3])
-            .expect("cell");
-        sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
+        sys.simbox =
+            molrs::core::SimBox::cube(side, molrs::op::F3::zeros(3), [false; 3]).expect("cell");
+        sys.grid = molrs::core::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
         sys.resize_cell_arrays();
     }
 

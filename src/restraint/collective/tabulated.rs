@@ -9,7 +9,7 @@
 //! built on the grid points and inverted by linear interpolation. The shared
 //! Wasserstein [`engine`](super::engine) then matches it like any other target.
 
-use molrs::op::types::F;
+use molrs::op::F;
 use molrs::op::vec3::normalize;
 
 use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg};

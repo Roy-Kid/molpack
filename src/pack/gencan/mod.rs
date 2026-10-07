@@ -2,7 +2,7 @@
 //!
 //! Reference: Birgin & Martinez, Comp.Opt.Appl. 23:101-125, 2002.
 
-use molrs::op::types::F;
+use molrs::op::F;
 mod cg;
 pub(super) mod entry;
 mod linesearch;
@@ -172,7 +172,7 @@ mod tests {
     use crate::Objective;
     use crate::eval::{EvalMode, EvalOutput};
     use crate::pack::gencan::{GencanParams, GencanWorkspace, gencan, pgencan};
-    use molrs::op::types::F;
+    use molrs::op::F;
 
     /// f(x) = 0.5 · Σ (xᵢ − μᵢ)²; ∇f = (x − μ); minimum at x = μ, f = 0.
     struct Quadratic {

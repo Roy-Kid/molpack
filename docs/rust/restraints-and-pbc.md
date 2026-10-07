@@ -13,7 +13,7 @@ compositions — and molpack's one geometric restraint, `RegionRestraint`, says
 ```rust
 use std::sync::Arc;
 use molpack::{RegionRestraint, Target};
-use molrs::spatial::region::Cuboid;
+use molrs::core::Cuboid;
 use ndarray::array;
 
 let cube = Cuboid::new(array![0.0, 0.0, 0.0], array![40.0, 40.0, 40.0]); // origin, lengths
@@ -33,7 +33,7 @@ Atom-subset restraints apply to selected atoms of every copy. Indices are
 ```rust
 use std::sync::Arc;
 use molpack::{RegionRestraint, Target};
-use molrs::spatial::region::HalfSpace;
+use molrs::core::HalfSpace;
 
 // z <= 2: the half-space behind the plane through (0, 0, 2) with normal +z.
 let below = HalfSpace::new([0.0, 0.0, 1.0], [0.0, 0.0, 2.0])?;
@@ -51,7 +51,7 @@ Attach a restraint to every target through the engine entry:
 ```rust
 use std::sync::Arc;
 use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
-use molrs::spatial::region::Sphere;
+use molrs::core::Sphere;
 use ndarray::array;
 
 let ball = Sphere::new(array![20.0, 20.0, 20.0], 30.0);

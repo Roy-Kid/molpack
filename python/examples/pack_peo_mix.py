@@ -18,7 +18,7 @@ from pathlib import Path
 
 import molrs
 import numpy as np
-from molrs.system import Atomistic
+from molrs.core import Atomistic
 
 import molpack
 
@@ -35,13 +35,13 @@ CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
 
 def _unit(name: str, body: str, seed: int) -> Atomistic:
     """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
-    template = molrs.io.smiles.SmilesIR.from_fragment(body).to_template()
+    template = molrs.io.smiles.SmilesIr.from_fragment(body).to_template()
     return molrs.conformer.Conformer(seed=seed).generate(template)[0]
 
 
 def _grow(topology: str, library: dict[str, Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
-    sites = molrs.io.smiles.CGSmilesIR(topology).to_coarsegrain()
+    sites = molrs.io.cgsmiles.CgSmilesIr(topology).to_coarsegrain()
     return molrs.builder.Assembler(library, molrs.builder.GrowthPlacer()).assemble(
         sites, Atomistic
     )
@@ -157,14 +157,14 @@ def main(argv: list[str] | None = None) -> None:
     packed = pack_mix(n, arm_length, n_linear, n_star, density, seed).frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.spatial.Box.from_bounds(
+        packed.box = molrs.core.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec(str(OUT / "pack_peo_mix.mrec"), packed)
+    molrs.io.write_mrec_frame(str(OUT / "pack_peo_mix.mrec"), packed)
     molrs.io.write_lammps_trajectory(
         str(OUT / "pack_peo_mix.lammpstrj"),
         [packed],

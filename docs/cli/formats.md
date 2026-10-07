@@ -1,9 +1,12 @@
 # Formats
 
-The CLI reads molecule templates with `molrs::io::read_frame` and writes the
-final packed structure with `molrs::io::write_frame` to the path named by the
-script's `output` keyword. molpack keeps no format table of its own: the
-formats below are molrs's, and a new molrs format is a new molpack format.
+The CLI reads each molecule template with the molrs reader of its format
+(`molrs::io::read_pdb`, `read_xyz`, …) and writes the final packed structure
+with the molrs writer of the output's format to the path named by the
+script's `output` keyword. molrs names every door after its format and picks
+none for the caller, so the choice below — `filetype`, else the file name —
+is the `.inp` grammar's, held once in `molpack::script::StructureFormat`;
+reading and writing each format is molrs's.
 
 The output format is inferred from the output file name. Input formats can be
 inferred from structure-file names or set globally with `filetype`, which

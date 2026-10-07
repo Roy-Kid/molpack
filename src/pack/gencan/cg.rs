@@ -4,7 +4,7 @@
 use super::{near_zero_norm_floor, positive_norm_floor, small_floor};
 use crate::Objective;
 use crate::eval::EvalMode;
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// Reusable CG work vectors, matching packmol `cg` workspace roles.
 pub struct CgScratch {

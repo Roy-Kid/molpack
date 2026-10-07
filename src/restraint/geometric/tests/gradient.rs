@@ -12,7 +12,7 @@ use crate::restraint::geometric::{
     OutsideCubeRestraint, OutsideCylinderRestraint, OutsideEllipsoidRestraint,
     OutsideSphereRestraint,
 };
-use molrs::op::types::F;
+use molrs::op::F;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -55,9 +55,9 @@ fn single_atom_system(nmol: usize) -> PackContext {
 
 fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
     let side = cell_len * cell_n as F;
-    sys.simbox = molrs::spatial::SimBox::cube(side, molrs::op::types::F3::zeros(3), [false; 3])
-        .expect("cell");
-    sys.grid = molrs::spatial::neighbors::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
+    sys.simbox =
+        molrs::core::SimBox::cube(side, molrs::op::F3::zeros(3), [false; 3]).expect("cell");
+    sys.grid = molrs::core::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
     sys.resize_cell_arrays();
 }
 

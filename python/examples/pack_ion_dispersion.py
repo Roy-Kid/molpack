@@ -55,7 +55,7 @@ def pack(*, separate: bool, show_progress: bool) -> tuple[np.ndarray, object]:
     """Pack water + ions once. ``separate`` toggles the one line under test."""
     water_frame = molrs.io.read_pdb(str(DATA / "water.pdb"))
     ion_frame = molrs.io.read_pdb(str(DATA / "sodium.pdb"))
-    box = molrs.spatial.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO))
+    box = molrs.core.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO))
 
     water = (
         molpack.Target(water_frame, count=N_WATER)
@@ -90,14 +90,14 @@ def write(name: str, result) -> None:
     packed = result.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.spatial.Box.from_bounds(
+        packed.box = molrs.core.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec(str(OUT / f"{name}.mrec"), packed)
+    molrs.io.write_mrec_frame(str(OUT / f"{name}.mrec"), packed)
     molrs.io.write_lammps_trajectory(
         str(OUT / f"{name}.lammpstrj"),
         [packed],

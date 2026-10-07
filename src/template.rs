@@ -4,16 +4,14 @@
 //! Crate-root leaf over molrs only. Coordinates are in Å (the crate's length
 //! unit, as carried by the frame — nothing is converted).
 
-use molrs::op::types::{F, FNx3};
-use molrs::perceive::rotatable::{
-    RotatableBond, UnknownBondPolicy, detect_rotatable_bonds_with_downstream,
-};
-use molrs::system::Atomistic;
+use molrs::core::Atomistic;
+use molrs::op::{F, Fnx3};
+use molrs::perceive::{RotatableBond, UnknownBondPolicy, perceive_rotatable_bonds_with_downstream};
 
-/// Coordinate rows of an `N × 3` array (as `molrs::store::Frame::coords` returns it), in
+/// Coordinate rows of an `N × 3` array (as `molrs::core::Frame::coords` returns it), in
 /// the array's row order — the `[x, y, z]` triples molpack's placement code
 /// works in.
-pub(crate) fn coord_rows(xyz: &FNx3) -> Vec<[F; 3]> {
+pub(crate) fn coord_rows(xyz: &Fnx3) -> Vec<[F; 3]> {
     xyz.rows().into_iter().map(|r| [r[0], r[1], r[2]]).collect()
 }
 
@@ -21,12 +19,12 @@ pub(crate) fn coord_rows(xyz: &FNx3) -> Vec<[F; 3]> {
 ///
 /// Formats that carry connectivity without orders — PDB `CONECT`, GROMACS
 /// `.top`, XYZ `Connct`, a hand-built coarse-grain frame — read back
-/// `BondType::Unknown`, because molrs reports what the file said rather than
+/// `BondOrder::Unknown`, because molrs reports what the file said rather than
 /// guessing. molpack's policy, held here once for every solver: an unclassed
 /// bond is a rotatable single bond ([`UnknownBondPolicy::AsSingle`]). A class
 /// the input did state is kept.
 pub(crate) fn rotatable_bonds(graph: &Atomistic) -> Vec<RotatableBond> {
-    detect_rotatable_bonds_with_downstream(graph, UnknownBondPolicy::AsSingle)
+    perceive_rotatable_bonds_with_downstream(graph, UnknownBondPolicy::AsSingle)
 }
 
 #[cfg(test)]
@@ -38,26 +36,24 @@ mod rotatable_tests {
 
     use super::rotatable_bonds;
     use crate::testutil::{chain_frame, chain_graph};
-    use molrs::system::Atomistic;
+    use molrs::core::Atomistic;
     use ndarray::Array1;
 
     /// A frame carrying connectivity but no `bond_type` column — a PDB `CONECT`
     /// list, a hand-built coarse-grain chain — reads back with every bond
-    /// `BondType::Unknown`, and molrs keeps it that way on purpose. Raw perception
+    /// `BondOrder::Unknown`, and molrs keeps it that way on purpose. Raw perception
     /// therefore finds nothing; `rotatable_bonds` supplies the single-bond
     /// fallback so it finds the same bonds a graph-built chain has.
     #[test]
     fn unclassed_bonds_fall_back_to_single() {
-        use molrs::perceive::rotatable::{
-            UnknownBondPolicy, detect_rotatable_bonds_with_downstream,
-        };
+        use molrs::perceive::{UnknownBondPolicy, perceive_rotatable_bonds_with_downstream};
 
         let from_frame = Atomistic::from_frame(&chain_frame(10, 1.54)).expect("graph");
         let from_graph = chain_graph(10);
 
         // The reader stays faithful: no stated class, so nothing is rotatable.
         assert_eq!(
-            detect_rotatable_bonds_with_downstream(&from_frame, UnknownBondPolicy::NotRotatable)
+            perceive_rotatable_bonds_with_downstream(&from_frame, UnknownBondPolicy::NotRotatable)
                 .len(),
             0,
             "an unstated bond class must not be inferred by the reader"

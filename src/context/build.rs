@@ -6,8 +6,8 @@
 //! shares one context construction; callable more than once — chained
 //! entries build one context per stage.
 
-use molrs::op::types::F;
-use molrs::system::Element;
+use molrs::core::Element;
+use molrs::op::F;
 
 use crate::PackError;
 use crate::context::PackContext;
@@ -333,7 +333,7 @@ mod short_radius_tests {
     use super::{ContextKnobs, build_context};
     use crate::PackError;
     use crate::Target;
-    use molrs::op::types::F;
+    use molrs::op::F;
 
     fn knobs() -> ContextKnobs {
         ContextKnobs {

@@ -11,15 +11,15 @@ import molpack
 
 
 def _col(frame, block: str, name: str) -> np.ndarray:
-    """Read a column from a ``molrs.store.Frame`` block as a numpy array."""
+    """Read a column from a ``molrs.core.Frame`` block as a numpy array."""
     return np.asarray(frame[block][name])
 
 
 def _make_frame(
     positions: np.ndarray,
     elements: list[str],
-) -> molrs.store.Frame:
-    return molrs.store.Frame(
+) -> molrs.core.Frame:
+    return molrs.core.Frame(
         {
             "atoms": {
                 "x": positions[:, 0].copy(),
@@ -35,7 +35,7 @@ def _make_tiny_pack() -> molpack.State:
     positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float64)
     frame = _make_frame(positions, ["O", "H"])
     target = molpack.Target(frame, 3).with_restraint(
-        molrs.spatial.Cuboid([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
+        molrs.core.Cuboid([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
     )
     packer = molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
     return packer.run([target], max_loops=50)
@@ -78,7 +78,7 @@ class TestState:
     def test_frame_is_molrs_frame_with_atoms(self):
         result = _make_tiny_pack()
         frame = result.frame
-        assert isinstance(frame, molrs.store.Frame)
+        assert isinstance(frame, molrs.core.Frame)
         for col in ("x", "y", "z", "element", "id", "mol_id"):
             assert len(_col(frame, "atoms", col)) == result.natoms
 
@@ -112,8 +112,8 @@ class TestFrameTopology:
     """End-to-end: a template's topology is replayed onto packed coordinates."""
 
     @staticmethod
-    def _diatomic_with_bond() -> molrs.store.Frame:
-        return molrs.store.Frame(
+    def _diatomic_with_bond() -> molrs.core.Frame:
+        return molrs.core.Frame(
             {
                 "atoms": {
                     "type": np.array(["A", "B"]),
@@ -130,7 +130,7 @@ class TestFrameTopology:
 
     def _pack(self, copies: int, box: bool = False) -> molpack.State:
         target = molpack.Target(self._diatomic_with_bond(), copies).with_restraint(
-            molrs.spatial.Cuboid([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
         )
         packer = (
             molpack.GenCanPack().with_tolerance(2.0).with_progress(False).with_seed(7)
@@ -143,7 +143,7 @@ class TestFrameTopology:
         result = self._pack(3)
         frame = result.frame
 
-        assert isinstance(frame, molrs.store.Frame)
+        assert isinstance(frame, molrs.core.Frame)
         assert np.array_equal(_col(frame, "atoms", "id"), np.arange(1, 7))
         assert np.array_equal(
             _col(frame, "atoms", "mol_id"), np.array([1, 1, 2, 2, 3, 3])
@@ -178,6 +178,6 @@ class TestFrameTopology:
 
     def test_assigned_box_persists_on_frame(self):
         result = self._pack(3)
-        result.frame.box = molrs.spatial.Box.cube(20.0)
+        result.frame.box = molrs.core.Box.cube(20.0)
         assert result.frame.box is not None
         assert np.allclose(np.asarray(result.frame.box.lengths), [20.0, 20.0, 20.0])

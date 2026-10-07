@@ -19,7 +19,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use molrs::op::types::F;
+use molrs::op::F;
 use rand::rngs::SmallRng;
 
 use crate::random::uniform01;

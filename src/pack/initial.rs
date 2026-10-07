@@ -12,8 +12,8 @@
 //!   8. Random angles
 //!   9. Phase 2: constraint-only GENCAN per type (reduced x!)
 
-use molrs::op::types::F;
-use molrs::spatial::SimBox;
+use molrs::core::SimBox;
+use molrs::op::F;
 use ndarray::array;
 use std::time::Instant;
 

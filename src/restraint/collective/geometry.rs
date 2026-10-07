@@ -16,7 +16,7 @@
 //! new `*_xi`/`*_scatter` pair plus its two `*_match_*` wrappers, reused by every
 //! distribution.
 
-use molrs::op::types::F;
+use molrs::op::F;
 use molrs::op::vec3::{dot, norm, sub};
 
 use super::engine::{wasserstein_grad, wasserstein_value};

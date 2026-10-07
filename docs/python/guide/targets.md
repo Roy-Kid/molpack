@@ -13,7 +13,7 @@ from molpack import Target
 target = Target(frame, count)
 ```
 
-- `frame` — a `molrs.store.Frame` (`molpy.Frame` is the same class), resolved
+- `frame` — a `molrs.core.Frame` (`molpy.Frame` is the same class), resolved
   zero-copy via its FFI capsule. Element symbols come from the `"element"`
   atom column, which every molrs reader (`molrs.io.read_pdb`,
   `molrs.io.read_xyz`, …) writes; a frame built in memory must carry it too.
@@ -26,13 +26,13 @@ A display label is optional:
 target = Target(frame, count).with_name("water")
 ```
 
-Build a frame in memory (no PDB file) with `molrs.store.Frame`:
+Build a frame in memory (no PDB file) with `molrs.core.Frame`:
 
 ```python
 import molrs
 import numpy as np
 
-frame = molrs.store.Frame({
+frame = molrs.core.Frame({
     "atoms": {
         "x": np.array([0.00,  0.96, -0.24]),
         "y": np.array([0.00,  0.00,  0.93]),
@@ -120,7 +120,7 @@ target = (
 import molrs
 
 target = target.with_restraint(
-    molrs.spatial.Cuboid([0, 0, 0], [40, 40, 40])   # a molrs region: origin, lengths
+    molrs.core.Cuboid([0, 0, 0], [40, 40, 40])   # a molrs region: origin, lengths
 )
 ```
 
@@ -129,8 +129,8 @@ Stack multiple restraints by calling `.with_restraint()` again:
 ```python
 target = (
     target
-    .with_restraint(molrs.spatial.Cuboid([0, 0, 0], [40, 40, 40]))
-    .with_restraint(~molrs.spatial.Sphere([20, 20, 20], 5.0))
+    .with_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(~molrs.core.Sphere([20, 20, 20], 5.0))
 )
 ```
 
@@ -139,7 +139,7 @@ target = (
 ```python
 target = target.with_atom_restraint(
     [30, 31],                                     # 0-based Rust-native indices
-    molrs.spatial.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 2.0]),   # z <= 2
+    molrs.core.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 2.0]),   # z <= 2
 )
 ```
 

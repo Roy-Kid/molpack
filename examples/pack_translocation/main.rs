@@ -57,10 +57,10 @@ use molpack::{
     CenteringMode, GenCanPack, OptimizeSelect, PackEngine, RegionRestraint, Target,
     TorsionMcOptimizer,
 };
-use molrs::op::types::F;
+use molrs::op::F;
 use std::sync::Arc;
 
-use molrs::spatial::region::{Cuboid, Cylinder, HalfSpace, NotRegion};
+use molrs::core::{Cuboid, Cylinder, HalfSpace, NotRegion};
 use ndarray::array;
 
 // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
@@ -291,7 +291,7 @@ fn report(
     );
 
     if let Some(path) = std::env::var_os("MOLPACK_TRANSLOCATION_XYZ") {
-        molrs::io::write_frame(&path, &result.frame, Some("xyz"))?;
+        molrs::io::write_xyz(&path, &result.frame)?;
         println!("wrote {}", std::path::Path::new(&path).display());
     }
     Ok(())

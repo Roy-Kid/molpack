@@ -1,17 +1,17 @@
 //! In-loop geometry optimizers driven by [`molrs::optimize::Optimizer`].
 //!
-//! Callers construct a molrs optimizer (`LBFGS` over a force-field potential,
-//! e.g. `LBFGS::new(Arc::new(SoftSpec::from_frame(..).potential(None)), ..)`
+//! Callers construct a molrs optimizer (`Lbfgs` over a force-field potential,
+//! e.g. `Lbfgs::new(Arc::new(SoftSpec::from_frame(..).potential(None)), ..)`
 //! for the soft overlap + 1-2 / 1-3 objective — both live in molrs's `ff`
 //! module, which the caller enables on its own molrs dependency — or molpack's
 //! [`TorsionMcOptimizer`]) and bind it with
 //! [`GenCanPack::with_optimizer`](crate::GenCanPack::with_optimizer) plus an
 //! [`OptimizeSelect`] that names which components to assemble each call.
 
-use molrs::op::types::F;
+use molrs::core::Frame;
+use molrs::core::Mic;
+use molrs::op::F;
 use molrs::optimize::{Optimizer, set_free_mask};
-use molrs::spatial::Mic;
-use molrs::store::Frame;
 
 use crate::Objective;
 use crate::context::PackContext;
@@ -31,7 +31,7 @@ pub enum OptimizeMode {
     Joint,
 }
 
-/// Which components to assemble into the Frame passed to [`Optimizer::run`].
+/// Which components to assemble into the Frame passed to [`Optimizer::minimize`].
 #[derive(Debug, Clone)]
 pub struct OptimizeSelect {
     pub names: Vec<String>,
@@ -253,7 +253,7 @@ fn optimize_group(
         let _ = set_free_mask(&mut frame, &free);
     }
 
-    if optimizer.run(&mut frame).is_err() {
+    if optimizer.minimize(&mut frame).is_err() {
         return;
     }
 
@@ -342,7 +342,7 @@ fn environment_atoms(
 
 #[cfg(test)]
 mod tests {
-    use molrs::spatial::SimBox;
+    use molrs::core::SimBox;
     use ndarray::array;
 
     use super::*;
@@ -380,14 +380,18 @@ mod tests {
     struct FrameSizes(std::sync::Arc<std::sync::Mutex<Vec<usize>>>);
 
     impl Optimizer for FrameSizes {
-        fn run(&mut self, frame: &mut Frame) -> Result<molrs::optimize::OptReport, String> {
+        fn minimize(
+            &mut self,
+            frame: &mut Frame,
+        ) -> Result<molrs::optimize::OptimizationReport, String> {
             let n = frame.coords().map_err(|e| e.to_string())?.nrows();
             self.0.lock().unwrap().push(n);
-            Ok(molrs::optimize::OptReport {
+            Ok(molrs::optimize::OptimizationReport {
                 converged: true,
                 n_steps: 0,
                 final_energy: 0.0,
                 final_fmax: 0.0,
+                final_grad_rms: 0.0,
             })
         }
     }
@@ -449,16 +453,19 @@ mod tests {
     #[test]
     fn joint_soft_lbfgs_over_two_species_converges() {
         use molrs::ff::potential::soft::SoftSpec;
-        use molrs::optimize::LBFGS;
+        use molrs::optimize::{Lbfgs, LbfgsSettings};
 
         use crate::{GenCanPack, PackEngine, Target};
 
         /// Counts the calls it forwards to the wrapped optimizer.
-        struct Counted(LBFGS, std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        struct Counted(Lbfgs, std::sync::Arc<std::sync::atomic::AtomicUsize>);
         impl Optimizer for Counted {
-            fn run(&mut self, frame: &mut Frame) -> Result<molrs::optimize::OptReport, String> {
+            fn minimize(
+                &mut self,
+                frame: &mut Frame,
+            ) -> Result<molrs::optimize::OptimizationReport, String> {
                 self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                self.0.run(frame)
+                self.0.minimize(frame)
             }
         }
 
@@ -470,12 +477,12 @@ mod tests {
             .with_name("water")
             .with_restraint(cube());
         // A coordinates-only group has no bonds: a pure soft-overlap push.
-        let soft = LBFGS::new(
+        let soft = Lbfgs::new(
             std::sync::Arc::new(SoftSpec::from_frame(&Frame::new()).potential(None)),
-            0.05,
-            200,
-            0.2,
-            8,
+            LbfgsSettings {
+                max_steps: 200,
+                ..LbfgsSettings::DEFAULT
+            },
         );
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let state = GenCanPack::new()

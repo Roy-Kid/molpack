@@ -1,11 +1,11 @@
 //! Python wrapper for the pack result.
 //!
 //! [`PyState`] is returned by every engine entry's ``run()``
-//! (`GenCanPack`, `CbmcGrow`): the packed ``molrs.store.Frame`` plus structured
+//! (`GenCanPack`, `CbmcGrow`): the packed ``molrs.core.Frame`` plus structured
 //! diagnostics (`converged` / `fdist` / `frest` / `degraded` / `intra`).
 
 use molpack::State;
-use molrs::op::types::F;
+use molrs::op::F;
 use numpy::IntoPyArray;
 use numpy::PyArray2;
 use pyo3::prelude::*;
@@ -39,7 +39,7 @@ impl PyIntraResidual {
 #[pyclass(name = "State", from_py_object)]
 pub struct PyState {
     pub(crate) inner: State,
-    /// The Python ``molrs.store.Frame`` exported once at pack time.
+    /// The Python ``molrs.core.Frame`` exported once at pack time.
     pub(crate) py_frame: Py<PyAny>,
 }
 
@@ -64,7 +64,7 @@ impl PyState {
             .into_pyarray(py)
     }
 
-    /// Packed ``molrs.store.Frame`` (same object every access).
+    /// Packed ``molrs.core.Frame`` (same object every access).
     ///
     /// Topology is replayed onto the packed coordinates. A periodic cell is
     /// present only if the engine declared one (``with_periodic_box``);
@@ -81,8 +81,8 @@ impl PyState {
         self.inner
             .frame
             .get("atoms")
-            .and_then(|atoms| atoms.get(molrs::store::keys::ELEMENT))
-            .and_then(molrs::store::Column::as_string)
+            .and_then(|atoms| atoms.get(molrs::core::keys::ELEMENT))
+            .and_then(molrs::core::Column::as_string)
             .map(|column| column.iter().cloned().collect())
             .ok_or_else(|| {
                 pyo3::exceptions::PyKeyError::new_err("the packed frame has no element column")

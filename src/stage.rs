@@ -6,7 +6,7 @@ use crate::context::{PackState, Placed};
 
 use crate::Target;
 pub use crate::outcome::StageOutcome;
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// One packing algorithm, selected by picking its engine entry
 /// ([`GenCanPack`](crate::GenCanPack), [`CbmcGrow`](crate::CbmcGrow),

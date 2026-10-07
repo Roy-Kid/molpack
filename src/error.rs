@@ -1,4 +1,4 @@
-use molrs::op::types::F;
+use molrs::op::F;
 use std::fmt;
 
 #[derive(Debug, Clone)]

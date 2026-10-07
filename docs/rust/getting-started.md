@@ -13,7 +13,7 @@ A Rust packing job has three parts:
 ```rust
 use std::sync::Arc;
 use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
-use molrs::spatial::region::Cuboid;
+use molrs::core::Cuboid;
 use ndarray::array;
 
 let water_positions = [
@@ -36,7 +36,7 @@ let natoms = result.natoms();
 println!("packed {natoms} atoms");
 ```
 
-`run()` returns a `State`. The packed `molrs::store::Frame` is its `frame`
+`run()` returns a `State`. The packed `molrs::core::Frame` is its `frame`
 field, alongside the convergence diagnostics:
 
 ```rust

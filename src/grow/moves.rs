@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use molrs::op::types::F;
+use molrs::op::F;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 

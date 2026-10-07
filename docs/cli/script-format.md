@@ -36,10 +36,10 @@ mode safe to run from another directory.
 | Keyword | Meaning |
 |---|---|
 | `avoid_overlap <yes\|no\|true\|false\|1\|0>` | Controls whether initial random placements are rejected when they overlap a fixed molecule. Default: on. Use `avoid_overlap no` only when you explicitly want Packmol's fixed-solute exclusion guard disabled. |
-| `filetype <format>` | Any format `molrs::io::read_frame` reads — `sdf`, `mol2`, `gro`, `cif`, `lammps_data`, `lammps_dump`, … — named or by extension. See [Formats](formats.md). |
+| `filetype <format>` | Any format in [Formats](formats.md) — `sdf`, `mol2`, `gro`, `cif`, `lammps_data`, `lammps_dump`, … — named or by extension. |
 
-Output format is inferred from the `output` file name, through
-`molrs::io::write_frame` (see [Formats](formats.md)).
+Output format is inferred from the `output` file name and written by that
+format's molrs writer (see [Formats](formats.md)).
 
 ## Strict parsing
 

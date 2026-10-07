@@ -10,7 +10,7 @@ use crate::grow::config::GrowConfig;
 use crate::grow::prior::{AnglePrior, TorsionPrior};
 use crate::grow::validate_grow_cell;
 use crate::pipeline::{EngineSetup, PackEngine, Pipeline, StageFactory};
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// Configurational-bias chain growth (CBMC-style constructive packing) as
 /// its own entry.

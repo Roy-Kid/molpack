@@ -98,7 +98,7 @@ src/
 `target` / `template` / `restraint` / `region` are pure data — no driver imports.
 `template.rs` owns `coord_rows` (Å) and `rotatable_bonds` (an unclassed
 bond is a rotatable single bond — for growth and the torsion optimizer alike).
-Bond graphs are `molrs::system::Topology`;
+Bond graphs are `molrs::core::Topology`;
 molpack does not ship a parallel Topology type.
 `pipeline/` is the only module that imports everything else; `entry/`
 shrank to settings + space + result and imports nothing from `pipeline/` —
@@ -299,7 +299,7 @@ fn run_iteration(loop_idx, radscale, optimizer_bindings):
     //    COM/Euler indexing covers every molecule.
     for binding in optimizer_bindings:
         assemble a Frame per selection (moving copies + frozen neighbours)
-        binding.optimizer.run(&mut frame)
+        binding.optimizer.minimize(&mut frame)
         map the displacement back into each copy's reference conformer
         revert the copy if the packing objective got worse
     // 3. GENCAN — bound-constrained quasi-Newton solve.
@@ -437,5 +437,5 @@ atoms into their regions before pair conflicts matter.
 | What does the initial pre-fit do? | `pack/initial.rs::initial`, `pack/restmol.rs::restmol` |
 | How is precision-based termination tested? | `pack/gencan/search.rs::converged` (Packmol's `packmolprecision`) |
 | What does `movebad` do? | `pack/movebad.rs::movebad` |
-| How is torsion MC wired in? | `optimizer/torsion_mc.rs::TorsionMcOptimizer::run`, called from `optimizer/mod.rs::run_optimizer_bindings` |
+| How is torsion MC wired in? | `optimizer/torsion_mc.rs::TorsionMcOptimizer::minimize`, called from `optimizer/mod.rs::run_optimizer_bindings` |
 | Where does periodic boundary wrap apply? | `context/pack_context.rs::pbc_distance` |

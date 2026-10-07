@@ -1,7 +1,7 @@
 //! Handler trait and built-in handlers for packing progress callbacks.
 
-use molrs::op::types::F;
-use molrs::spatial::SimBox;
+use molrs::core::SimBox;
+use molrs::op::F;
 
 use std::time::Instant;
 
@@ -191,8 +191,8 @@ pub trait Handler: Send {
 /// coordinates-only frame the final result falls back to (`atoms`: `id`,
 /// 1-based `mol_id`, `x`/`y`/`z`, `element`) with the step in the frame's
 /// `step` meta key, written by molrs's extended XYZ writer
-/// (`molrs::io::data::xyz::write_xyz_frame`); molpack keeps no XYZ format
-/// code of its own. Needs the `io` feature.
+/// (`molrs::io::xyz::XyzWriter`); molpack keeps no XYZ format code of its
+/// own. Needs the `io` feature.
 #[cfg(feature = "io")]
 pub struct XYZHandler {
     path: std::path::PathBuf,
@@ -229,7 +229,7 @@ impl XYZHandler {
 
     /// The snapshot as a frame: the coordinates-only frame of `xcart`, one
     /// `atoms` row per entry, with the step in its meta.
-    fn snapshot(step: usize, sys: &PackContext) -> molrs::store::Frame {
+    fn snapshot(step: usize, sys: &PackContext) -> molrs::core::Frame {
         let elements = (0..sys.xcart.len())
             .map(|i| {
                 sys.elements
@@ -247,10 +247,13 @@ impl XYZHandler {
     }
 
     fn write_snapshot(&mut self, step: usize, sys: &PackContext) {
+        use molrs::io::writer::{FrameWriter, Writer};
+
         self.open();
         let frame = Self::snapshot(step, sys);
         let Some(ref mut w) = self.file else { return };
-        let written = molrs::io::data::xyz::write_xyz_frame(w, &frame)
+        let written = molrs::io::xyz::XyzWriter::new(&mut *w)
+            .write(&frame)
             .and_then(|()| std::io::Write::flush(w));
         if let Err(e) = written {
             log::warn!("XYZHandler: writing {}: {e}", self.path.display());

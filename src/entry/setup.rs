@@ -8,9 +8,10 @@
 
 use std::sync::Arc;
 
-use molrs::op::types::F;
-use molrs::spatial::SimBox;
-use molrs::system::Element;
+use molrs::core::Element;
+use molrs::core::SimBox;
+use molrs::core::constants::{ANGSTROM3_PER_CM3, AVOGADRO};
+use molrs::op::F;
 use ndarray::array;
 
 use crate::AtomRestraint;
@@ -177,7 +178,8 @@ pub(crate) fn resolve_pack_space(
             };
             total_amu += per_copy * t.count.max(1) as F;
         }
-        let l = (total_amu / (rho * molrs::units::constants::AVOGADRO) * 1e24).cbrt();
+        // rho in g/cm³, the mass in g/mol: the volume in cm³, then in Å³.
+        let l = (total_amu / (rho * AVOGADRO) * ANGSTROM3_PER_CM3).cbrt();
         Some(([0.0; 3], [l, l, l], [true; 3]))
     } else {
         None
@@ -344,7 +346,7 @@ mod region_under_wrap_tests {
 
     use crate::AtomRestraint;
     use crate::{GenCanPack, PackEngine, PackError, RegionRestraint, Target};
-    use molrs::spatial::region::{AndRegion, Cuboid, HalfSpace, NotRegion, Region, Sphere};
+    use molrs::core::{AndRegion, Cuboid, HalfSpace, NotRegion, Region, Sphere};
     use ndarray::array;
 
     fn one_atom(n: usize) -> Target {

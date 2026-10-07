@@ -20,7 +20,7 @@ harness-layout rows.
 | `rayon` | `rayon` + `molrs/rayon` (parallel evaluation) |
 
 There is no `ff` feature: the in-loop `Optimizer` seam is always on, and a
-caller binding a molrs force-field optimizer (`LBFGS` over a `Potential`)
+caller binding a molrs force-field optimizer (`Lbfgs` over a `Potential`)
 enables `ff` on its own molrs dependency. molpack's tests do the same through
 a molrs dev-dependency with `ff` on.
 
@@ -86,9 +86,9 @@ frame (the PyO3 `target_from_frame` helper) and lowers scripts with
 | `.claude/specs/` | active feature specs, indexed in `INDEX.md`; deleted on close |
 | `.claude/notes/` | passive knowledge: `law.md`, `conventions.md`, `architecture.md`, `notes.md` |
 
-Template geometry is read with `molrs::Frame::coords` (Å); the crate-root leaf
+Template geometry is read with `molrs::core::Frame::coords` (Å); the crate-root leaf
 `src/template.rs` holds only `coord_rows` (array → `[x, y, z]` rows) and the
-rotatable-bond policy. Bond graphs are `molrs::system::Topology`; molpack does not re-export that type.
+rotatable-bond policy. Bond graphs are `molrs::core::Topology`; molpack does not re-export that type.
 
 Skills and agents come from the `mol` plugin (`molcrafts-harness`); the repo
 carries no project-local `.claude/skills/` or `.claude/agents/` (the former

@@ -32,8 +32,8 @@ pub use surface::{
     AbovePlaneRestraint, BelowPlaneRestraint, InsideCylinderRestraint, OutsideCylinderRestraint,
 };
 
-use molrs::op::types::F;
-use molrs::spatial::region::{HalfSpace, Region};
+use molrs::core::{HalfSpace, Region};
+use molrs::op::F;
 
 /// Does the plane with normal `normal` repeat along `shift`? Asked of molrs's
 /// [`HalfSpace::repeats_along`]; a zero normal bounds nothing, so it repeats

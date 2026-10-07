@@ -5,8 +5,8 @@ use crate::GroupCtx;
 use crate::context::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackContext};
 use crate::euler::{compcart, eulerrmat, eulerrmat_derivatives};
 use crate::eval::{EvalMode, EvalOutput};
-use molrs::op::types::F;
-use molrs::spatial::Mic;
+use molrs::core::Mic;
+use molrs::op::F;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
@@ -1676,7 +1676,7 @@ mod objective_trait_tests {
 mod parallel_equivalence_tests {
     use crate::PackContext;
     use crate::objective::{compute_f, compute_fg};
-    use molrs::op::types::F;
+    use molrs::op::F;
 
     /// A synthetic water-in-a-box context: enough molecules that the
     /// parallel reduce actually splits the pair loop.
@@ -1711,13 +1711,13 @@ mod parallel_equivalence_tests {
         let pad: F = 3.0;
         let side = box_side + 2.0 * pad;
         let origin = [-pad, -pad, -pad];
-        let mut origin_arr = molrs::op::types::F3::zeros(3);
+        let mut origin_arr = molrs::op::F3::zeros(3);
         for k in 0..3 {
             origin_arr[k] = origin[k];
         }
-        sys.simbox = molrs::spatial::SimBox::cube(side, origin_arr, [false; 3]).expect("cell");
+        sys.simbox = molrs::core::SimBox::cube(side, origin_arr, [false; 3]).expect("cell");
         let cell_side: F = 2.0;
-        sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, cell_side);
+        sys.grid = molrs::core::CellGrid::for_cutoff(&sys.simbox, cell_side);
         sys.resize_cell_arrays();
 
         sys.sizemin = origin;
@@ -1837,7 +1837,7 @@ mod parallel_equivalence_tests {
 mod self_image_tests {
     use crate::PackContext;
     use crate::objective::compute_f;
-    use molrs::op::types::F;
+    use molrs::op::F;
 
     /// One rigid copy with conformer `coor` (centred at the origin), its COM
     /// at the centre of a `side` Å cube, radii 1 Å (contact at 2 Å).
@@ -1861,9 +1861,9 @@ mod self_image_tests {
         }
         sys.iratom_offsets = vec![0; na + 1];
         sys.iratom_data.clear();
-        let origin = molrs::op::types::F3::zeros(3);
-        sys.simbox = molrs::spatial::SimBox::cube(side, origin, [pbc; 3]).expect("cell");
-        sys.grid = molrs::spatial::neighbors::CellGrid::for_cutoff(&sys.simbox, 2.0);
+        let origin = molrs::op::F3::zeros(3);
+        sys.simbox = molrs::core::SimBox::cube(side, origin, [pbc; 3]).expect("cell");
+        sys.grid = molrs::core::CellGrid::for_cutoff(&sys.simbox, 2.0);
         sys.resize_cell_arrays();
         sys.sizemin = [0.0; 3];
         sys.sizemax = [side; 3];

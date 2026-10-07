@@ -52,11 +52,12 @@ cat mixture.inp | molpack
 | Addition | Description |
 |---|---|
 | `avoid_overlap <no\|false\|0>` | Disable the default fixed-solute initial-placement guard. Leave it on unless you need to reproduce a less guarded initialization. |
-| `filetype <format>` | Any format `molrs::io::read_frame` reads (`sdf`, `mol2`, `gro`, `cif`, `lammps_data`, `lammps_dump`, …), named or by extension. |
+| `filetype <format>` | Any format in [Formats](docs/cli/formats.md) (`sdf`, `mol2`, `gro`, `cif`, `lammps_data`, `lammps_dump`, …), named or by extension. |
 
 Unknown top-level keywords are rejected instead of ignored. Files are read and
-written through `molrs::io::{read_frame, write_frame}`; the output format is
-inferred from the `output` file name.
+written through the molrs reader and writer of their format
+(`molpack::script::StructureFormat`); the output format is inferred from the
+`output` file name.
 
 ## Quick start
 
@@ -65,7 +66,7 @@ inferred from the `output` file name.
 ```rust
 use std::sync::Arc;
 use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
-use molrs::spatial::region::Cuboid;
+use molrs::core::Cuboid;
 use ndarray::array;
 
 let positions = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
@@ -82,7 +83,7 @@ let target = Target::from_coords(&positions, &radii, 100)
 // `GenCanPack::new().run(...)` is a complete call; `200` is the outer-loop
 // budget.
 //
-// `run` returns a `State`: the packed, topology-complete `molrs::store::Frame`
+// `run` returns a `State`: the packed, topology-complete `molrs::core::Frame`
 // in `.frame`, plus `fdist`, `frest`, `converged`, `degraded`.
 let result = GenCanPack::new().run(&[target], 200)?;
 let frame = result.frame;
@@ -99,7 +100,7 @@ frame = molrs.io.read_pdb("water.pdb")
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(molrs.spatial.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]))
 )
 result = GenCanPack().run([water], max_loops=200)
 frame = result.frame

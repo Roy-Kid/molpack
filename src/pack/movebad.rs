@@ -7,7 +7,7 @@ use crate::eval::EvalMode;
 use crate::pack::gencan::GencanWorkspace;
 use crate::pack::restmol::restmol;
 use crate::random::uniform01;
-use molrs::op::types::F;
+use molrs::op::F;
 use rand::Rng;
 
 pub struct MoveBadConfig<'a> {

@@ -4,7 +4,7 @@
 //! both geometries; only ξ and its gradient (supplied by [`geometry`](super::geometry))
 //! differ.
 
-use molrs::op::types::F;
+use molrs::op::F;
 use molrs::op::vec3::normalize;
 
 use super::engine::probit;

@@ -35,7 +35,7 @@
 
 use std::fmt;
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 use crate::Objective;
 use crate::context::DEFAULT_SCALE2;

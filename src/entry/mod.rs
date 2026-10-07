@@ -27,7 +27,7 @@ pub(crate) mod setup;
 pub(crate) use result::positions_in_target_order;
 pub use result::{IntraResidual, State};
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 use crate::LogLevel;
 use setup::{CellDecl, PeriodicSpec};

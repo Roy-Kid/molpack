@@ -6,7 +6,7 @@ structured convergence diagnostics, or when you are extending molpack itself.
 ```rust
 use std::sync::Arc;
 use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
-use molrs::spatial::region::Cuboid;
+use molrs::core::Cuboid;
 use ndarray::array;
 
 let positions = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
@@ -55,12 +55,12 @@ Feature flags:
 
 | Feature | Enables |
 |---|---|
-| `io` | Template reading and output writing through `molrs::io::{read_frame, write_frame}`, and `XYZHandler`. |
+| `io` | Template reading and output writing through the molrs reader and writer of each file's format (`script::StructureFormat`), and `XYZHandler`. |
 | `cli` | The `molpack` binary plus `io`. |
 | `rayon` | Parallel objective evaluation. |
 
 molpack has no `ff` feature: a force-field optimizer bound through
-`with_optimizer` (molrs's `LBFGS`) needs molrs's `ff` feature on your own
+`with_optimizer` (molrs's `Lbfgs`) needs molrs's `ff` feature on your own
 `molcrafts-molrs` dependency.
 
 ## Pages

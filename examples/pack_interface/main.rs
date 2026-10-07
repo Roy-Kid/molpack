@@ -30,11 +30,11 @@ use molpack::{
     Angle, CenteringMode, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target,
     XYZHandler,
 };
-use molrs::op::types::F;
+use molrs::op::F;
 use std::sync::Arc;
 
-use molrs::io::data::pdb::read_pdb_frame;
-use molrs::spatial::region::Cuboid;
+use molrs::core::Cuboid;
+use molrs::io::read_pdb;
 use ndarray::array;
 
 // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
@@ -52,9 +52,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .expect("file path has no parent")
         .to_path_buf();
-    let water = read_pdb_frame(base.join("water.pdb"))?;
-    let chloroform = read_pdb_frame(base.join("chloroform.pdb"))?;
-    let t3 = read_pdb_frame(base.join("t3.pdb"))?;
+    let water = read_pdb(base.join("water.pdb"))?;
+    let chloroform = read_pdb(base.join("chloroform.pdb"))?;
+    let t3 = read_pdb(base.join("t3.pdb"))?;
 
     let water_target = Target::new(water, 100)
         .with_restraint(inside_box([-20.0, 0.0, 0.0], [0.0, 39.0, 39.0]))

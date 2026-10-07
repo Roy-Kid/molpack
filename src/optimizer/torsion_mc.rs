@@ -3,17 +3,17 @@
 //! Lives in molpack (not molrs): uses packer-local geometry helpers and
 //! self-avoidance scoring on a Frame assembled by the packer.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 
-use molrs::op::superpose::centroid;
-use molrs::op::types::F;
-use molrs::op::{rigid, vec3};
-use molrs::optimize::{OptReport, Optimizer};
-use molrs::perceive::rotatable::{RotatableBond, atom_id_to_index};
-use molrs::store::Frame;
-use molrs::system::Atomistic;
-use molrs::system::{BondDistanceWeights, Topology};
+use molrs::core::Frame;
+use molrs::core::{Atomistic, NodeId};
+use molrs::core::{BondDistanceWeights, Topology};
+use molrs::op::F;
+use molrs::op::centroid;
+use molrs::op::{axis_angle, rotation_about, transform_point, vec3};
+use molrs::optimize::{OptimizationReport, Optimizer};
+use molrs::perceive::RotatableBond;
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
@@ -25,7 +25,7 @@ use crate::random::uniform01_core;
 /// Largest torsion change one proposal makes (radians).
 const MAX_DELTA: F = (PI / 6.0) as F;
 
-/// Implements [`Optimizer`]: each `run` proposes rotations about rotatable
+/// Implements [`Optimizer`]: each `minimize` proposes rotations about rotatable
 /// bonds on the Frame's free atoms and accepts against self-avoidance energy
 /// (plus optional soft contact with fixed environment atoms present in the
 /// Frame). Packing non-harm is enforced by the packer after write-back.
@@ -51,7 +51,13 @@ impl TorsionMcOptimizer {
     /// coarse-grained model states its own table with
     /// [`with_special_bonds`](Self::with_special_bonds).
     pub fn new(graph: &Atomistic) -> Self {
-        let id_to_idx = atom_id_to_index(graph);
+        // Atoms by their position in `Atomistic::atoms`, the order the
+        // rotatable bonds' indices use.
+        let id_to_idx: HashMap<NodeId, usize> = graph
+            .atoms()
+            .enumerate()
+            .map(|(idx, (id, _))| (id, idx))
+            .collect();
         let edges: Vec<[usize; 2]> = graph
             .bonds()
             .map(|(_, b)| [id_to_idx[&b.nodes[0]], id_to_idx[&b.nodes[1]]])
@@ -108,13 +114,14 @@ impl TorsionMcOptimizer {
 }
 
 impl Optimizer for TorsionMcOptimizer {
-    fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String> {
+    fn minimize(&mut self, frame: &mut Frame) -> Result<OptimizationReport, String> {
         if self.bonds.is_empty() {
-            return Ok(OptReport {
+            return Ok(OptimizationReport {
                 converged: true,
                 n_steps: 0,
                 final_energy: 0.0,
                 final_fmax: 0.0,
+                final_grad_rms: 0.0,
             });
         }
         let xyz = frame.coords().map_err(|e| e.to_string())?;
@@ -125,7 +132,7 @@ impl Optimizer for TorsionMcOptimizer {
         let free: Vec<bool> = match frame
             .get("atoms")
             .and_then(|a| a.get("free"))
-            .and_then(molrs::store::Column::as_bool)
+            .and_then(molrs::core::Column::as_bool)
         {
             Some(col) if col.len() == n => col.iter().copied().collect(),
             _ => vec![true; n],
@@ -185,11 +192,12 @@ impl Optimizer for TorsionMcOptimizer {
 
         let out = ndarray::Array2::from(best);
         frame.set_coords(out.view()).map_err(|e| e.to_string())?;
-        Ok(OptReport {
+        Ok(OptimizationReport {
             converged: accepts > 0 || self.steps == 0,
             n_steps: self.steps,
             final_energy: best_e,
             final_fmax: 0.0,
+            final_grad_rms: 0.0,
         })
     }
 }
@@ -231,17 +239,17 @@ fn rotate_around_bond(coords: &mut [[F; 3]], bond: &RotatableBond, angle: F) {
     if vec3::normalize(axis).is_none() {
         return;
     }
-    let Some(rotation) = rigid::axis_angle(axis, angle) else {
+    let Some(rotation) = axis_angle(axis, angle) else {
         return;
     };
-    let motion = rigid::about(rotation, j);
+    let motion = rotation_about(rotation, j);
     for &idx in &bond.downstream {
-        coords[idx] = rigid::apply(&motion, coords[idx]);
+        coords[idx] = transform_point(&motion, coords[idx]);
     }
 }
 
 /// Shift the free atoms so their centroid (molrs's
-/// [`centroid`](molrs::op::superpose::centroid), unit weights) sits at the
+/// [`centroid`](molrs::op::centroid), unit weights) sits at the
 /// origin. No free atom: nothing moves.
 fn recenter_free(coords: &mut [[F; 3]], free: &[bool]) {
     let points: Vec<[F; 3]> = coords

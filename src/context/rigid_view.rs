@@ -63,8 +63,8 @@
 
 use crate::context::PackContext;
 use crate::euler::{compcart, eulerrmat};
-use molrs::op::superpose::centroid;
-use molrs::op::types::F;
+use molrs::op::F;
+use molrs::op::centroid;
 use molrs::op::vec3::sub;
 
 /// The rigid placement vector of one run: three COM plus three Euler values
@@ -310,7 +310,7 @@ mod tests {
     use crate::context::RigidView as ContextRigidView;
     use crate::euler::{compcart, eulerrmat};
     use crate::{PackContext, RigidView};
-    use molrs::op::types::F;
+    use molrs::op::F;
 
     /// The crate-root re-export and the `context` path name one type, not two.
     /// Compile-time only.

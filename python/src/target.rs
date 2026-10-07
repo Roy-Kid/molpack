@@ -3,7 +3,7 @@
 //! [`PyTarget`] describes one type of molecule to pack: its template
 //! geometry, topology, and the number of copies.
 //!
-//! The constructor accepts a real ``molrs.store.Frame`` (``molpy.Frame`` is the same
+//! The constructor accepts a real ``molrs.core.Frame`` (``molpy.Frame`` is the same
 //! class) carrying an ``"atoms"`` block. The frame crosses the
 //! language boundary **zero-copy** through its stable-FFI capsule (see
 //! [`crate::interop`]) — no dict marshalling, no consumer-side data type. The
@@ -13,7 +13,7 @@
 use crate::restraint::{extract_collective_restraint, extract_restraint, try_region};
 use crate::types::{PyAngle, PyAxis, PyCenteringMode};
 use molpack::Target;
-use molrs::op::types::F;
+use molrs::op::F;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
@@ -21,7 +21,7 @@ use pyo3::types::PyAny;
 /// Build a [`Target`] from any frame-like Python object plus a copy count.
 ///
 /// Shared by [`PyTarget::new`] and the script loader. The frame is converted to
-/// a Rust [`molrs::store::Frame`] so the core retains its full topology.
+/// a Rust [`molrs::core::Frame`] so the core retains its full topology.
 pub(crate) fn target_from_frame(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Target> {
     let rust_frame = crate::interop::owned_frame_from_py(frame)?;
     // `Target::new` panics on a frame without float coordinates; answer that
@@ -44,10 +44,10 @@ impl PyTarget {
     ///
     /// Parameters
     /// ----------
-    /// frame : molrs.store.Frame
+    /// frame : molrs.core.Frame
     ///     A frame with an ``"atoms"`` block (``x`` / ``y`` / ``z``
     ///     columns). Resolved zero-copy via its FFI capsule — a plain ``dict``
-    ///     is no longer accepted; build a ``molrs.store.Frame`` first.
+    ///     is no longer accepted; build a ``molrs.core.Frame`` first.
     /// count : int
     ///     Number of copies to pack.
     ///
@@ -78,7 +78,7 @@ impl PyTarget {
     ///
     /// Accepts:
     ///
-    /// * a molrs **region** (``molrs.spatial.Sphere``, ``Cuboid``, ``Parallelepiped``,
+    /// * a molrs **region** (``molrs.core.Sphere``, ``Cuboid``, ``Parallelepiped``,
     ///   ``HalfSpace``, ``Cylinder``, ``Ellipsoid``, ``Polyhedron``,
     ///   ``SphereUnion``, or a ``&`` / ``|`` / ``~`` composition) — lifted
     ///   through ``RegionRestraint``, so every atom must stay inside it;
@@ -372,11 +372,10 @@ fn check_positive(value: F, what: &str) -> PyResult<()> {
     Ok(())
 }
 
-/// Marshal a Python weight list into [`molrs::system::BondDistanceWeights`].
+/// Marshal a Python weight list into [`molrs::core::BondDistanceWeights`].
 ///
 /// Rejects empty, non-finite, or out-of-range entries with ``ValueError``.
 /// Fractional weights are legal here; growth refuses them later.
-fn validate_special_bonds(weights: Vec<F>) -> PyResult<molrs::system::BondDistanceWeights> {
-    molrs::system::BondDistanceWeights::new(weights)
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+fn validate_special_bonds(weights: Vec<F>) -> PyResult<molrs::core::BondDistanceWeights> {
+    molrs::core::BondDistanceWeights::new(weights).map_err(|e| PyValueError::new_err(e.to_string()))
 }

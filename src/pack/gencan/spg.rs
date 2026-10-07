@@ -3,7 +3,7 @@
 
 use crate::Objective;
 use crate::eval::EvalMode;
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// Reusable buffers for SPG line search.
 ///

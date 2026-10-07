@@ -36,7 +36,7 @@ use crate::{
     RestraintsSatisfied, Stage, StageFactory, StageOutcome, State, StepInfo, Target, Until,
     Violation,
 };
-use molrs::op::types::F;
+use molrs::op::F;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 

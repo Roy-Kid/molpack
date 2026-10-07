@@ -31,10 +31,10 @@ Optional features (crate defaults to none enabled):
 | Feature | Purpose |
 |---|---|
 | `cli` | `molpack` binary + clap (implies `io`) |
-| `io` | Template reading / output writing via `molrs::io::{read_frame, write_frame}`, and `XYZHandler` |
+| `io` | Template reading / output writing through the molrs reader and writer of each file's format (`script::StructureFormat`), and `XYZHandler` |
 | `rayon` | Parallel objective evaluation |
 
-A force-field optimizer bound through `with_optimizer` (e.g. molrs's `LBFGS`)
+A force-field optimizer bound through `with_optimizer` (e.g. molrs's `Lbfgs`)
 needs molrs's `ff` feature; enable it on your own `molcrafts-molrs` dependency.
 
 ```toml
@@ -50,7 +50,7 @@ For notebooks and pipelines (Python 3.12+):
 pip install molcrafts-molpack
 ```
 
-`molcrafts-molrs` is installed as a dependency and provides `molrs.store.Frame` plus
+`molcrafts-molrs` is installed as a dependency and provides `molrs.core.Frame` plus
 PDB / XYZ readers. The wheel itself is I/O-free — pass frames in, get frames
 out.
 

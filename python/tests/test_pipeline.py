@@ -52,10 +52,10 @@ ENTRY_NAMES = (GenCanPack.__name__, CbmcGrow.__name__, LatticeGrow.__name__)
 # ── fixtures ──────────────────────────────────────────────────────────────
 
 
-def _water_frame() -> molrs.store.Frame:
+def _water_frame() -> molrs.core.Frame:
     """Rigid water template — the exact literals of ``tests/pipeline.rs``'s
     ``water()`` fixture, so the Rust and Python goldens describe one run."""
-    return molrs.store.Frame(
+    return molrs.core.Frame(
         {
             "atoms": {
                 "x": np.array([0.0, 0.96, -0.24], dtype=np.float64),
@@ -73,7 +73,7 @@ def _water_targets(count: int = 60) -> list[Target]:
     return [
         Target(_water_frame(), count)
         .with_name("water")
-        .with_restraint(molrs.spatial.Cuboid([0.0, 0.0, 0.0], [14.0, 14.0, 14.0]))
+        .with_restraint(molrs.core.Cuboid([0.0, 0.0, 0.0], [14.0, 14.0, 14.0]))
     ]
 
 
@@ -84,11 +84,11 @@ _CHAIN_X = (0.0, 1.2, 2.4, 3.6, 4.8)
 _CHAIN_Z = (0.0, 0.9, 0.0, 0.9, 0.0)
 
 
-def _chain_frame() -> molrs.store.Frame:
+def _chain_frame() -> molrs.core.Frame:
     """Bonded 5-bead chain — the smallest growable fixture ``test_grow.py``
     uses, with the coordinates pinned to literals."""
     n = len(_CHAIN_X)
-    return molrs.store.Frame(
+    return molrs.core.Frame(
         {
             "atoms": {
                 "x": np.array(_CHAIN_X, dtype=np.float64),

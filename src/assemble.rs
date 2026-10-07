@@ -1,4 +1,4 @@
-//! Build a topology-complete [`molrs::store::Frame`] from packed coordinates.
+//! Build a topology-complete [`molrs::core::Frame`] from packed coordinates.
 //!
 //! The numeric core packs *coordinates only*; topology (bonds/angles/dihedrals/
 //! impropers) and per-atom metadata ride along on each [`Target`]'s source
@@ -11,11 +11,11 @@
 //! every binding gets identical output: bindings only marshal the frame across
 //! the language boundary, never re-derive it.
 
-use molrs::op::types::{F, Idx};
-use molrs::store::Block;
-use molrs::store::keys;
-use molrs::store::schema::block_names::ATOMS;
-use molrs::store::schema::{self, RowKind};
+use molrs::core::Block;
+use molrs::core::keys;
+use molrs::core::schema::block_names::ATOMS;
+use molrs::core::schema::{self, RowKind};
+use molrs::op::{F, Idx};
 use ndarray::{Array1, Array2};
 
 use crate::PackError;
@@ -55,7 +55,7 @@ const NOT_CARRIED: [&str; 9] = [
 pub(crate) fn assemble_frame(
     targets: &[Target],
     positions: &[[F; 3]],
-) -> Result<molrs::store::Frame, PackError> {
+) -> Result<molrs::core::Frame, PackError> {
     if targets.iter().all(|t| t.template.is_some()) {
         let counts: Vec<usize> = targets.iter().map(|t| t.count).collect();
         topology_frame(targets, &counts, positions)
@@ -79,9 +79,9 @@ pub(crate) fn check_templates(targets: &[Target]) -> Result<(), PackError> {
 /// The topology-complete frame, with `counts[i]` copies of `targets[i]`.
 ///
 /// Each target's replayed template is copied with
-/// [`Frame::replicate`](molrs::store::Frame::replicate) (endpoints offset per
+/// [`Frame::replicate`](molrs::core::Frame::replicate) (endpoints offset per
 /// copy) and the per-target parts are joined with
-/// [`Frame::concat`](molrs::store::Frame::concat), which shifts every part's
+/// [`Frame::concat`](molrs::core::Frame::concat), which shifts every part's
 /// endpoints past the rows of the parts before it — a column one template
 /// lacks is null on the other templates' rows. `id` / `mol_id` and the
 /// coordinates are then written over the joined frame.
@@ -89,8 +89,8 @@ fn topology_frame(
     targets: &[Target],
     counts: &[usize],
     positions: &[[F; 3]],
-) -> Result<molrs::store::Frame, PackError> {
-    let mut parts: Vec<molrs::store::Frame> = Vec::with_capacity(targets.len());
+) -> Result<molrs::core::Frame, PackError> {
+    let mut parts: Vec<molrs::core::Frame> = Vec::with_capacity(targets.len());
     let mut groups: Vec<(usize, usize)> = Vec::with_capacity(targets.len());
     for (target, &count) in targets.iter().zip(counts) {
         let one = replayed(target_template(target))?;
@@ -99,10 +99,10 @@ fn topology_frame(
     }
     let mol_ids = mol_ids(groups);
 
-    let (blocks, _, _) = molrs::store::Frame::concat(&parts)
+    let (blocks, _, _) = molrs::core::Frame::concat(&parts)
         .map_err(column_error)?
         .into_inner();
-    let mut frame = molrs::store::Frame::new();
+    let mut frame = molrs::core::Frame::new();
     for (name, mut block) in blocks {
         let nrows = block.nrows().unwrap_or(0);
         insert_front(&mut block, keys::ID, 0, (1..=nrows as Idx).collect())?;
@@ -123,7 +123,7 @@ fn topology_frame(
 /// One copy of what a template contributes: its carried atom columns (the row
 /// count kept even when nothing is carried) and every canonical relation block
 /// of the molrs schema it has, without the per-row `id` that is regenerated.
-fn replayed(template: &molrs::store::Frame) -> Result<molrs::store::Frame, PackError> {
+fn replayed(template: &molrs::core::Frame) -> Result<molrs::core::Frame, PackError> {
     let atoms = template.get(ATOMS).expect("template has an 'atoms' block");
     let carried: Vec<&str> = atoms.keys().filter(|k| !NOT_CARRIED.contains(k)).collect();
     let carried = if carried.is_empty() {
@@ -134,7 +134,7 @@ fn replayed(template: &molrs::store::Frame) -> Result<molrs::store::Frame, PackE
     } else {
         atoms.select_columns(&carried).map_err(column_error)?
     };
-    let mut one = molrs::store::Frame::new();
+    let mut one = molrs::core::Frame::new();
     one.insert(ATOMS, carried);
     for (name, table) in template.iter() {
         let is_relation = schema::block(name)
@@ -148,7 +148,7 @@ fn replayed(template: &molrs::store::Frame) -> Result<molrs::store::Frame, PackE
     Ok(one)
 }
 
-fn coords_only_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::store::Frame {
+fn coords_only_frame(targets: &[Target], positions: &[[F; 3]]) -> molrs::core::Frame {
     let elements = targets
         .iter()
         .flat_map(|t| std::iter::repeat_n(&t.elements, t.count).flatten().cloned())
@@ -184,7 +184,7 @@ pub(crate) fn coords_frame(
     positions: &[[F; 3]],
     elements: Vec<String>,
     mol_ids: Array1<Idx>,
-) -> molrs::store::Frame {
+) -> molrs::core::Frame {
     let n = positions.len();
     let mut atoms = Block::new();
     let inserted = atoms
@@ -194,7 +194,7 @@ pub(crate) fn coords_frame(
         .and_then(|()| atoms.insert(keys::ELEMENT, Array1::from_vec(elements).into_dyn()));
     inserted.expect("one element and one molecule ID per position");
 
-    let mut frame = molrs::store::Frame::new();
+    let mut frame = molrs::core::Frame::new();
     frame.insert(ATOMS, atoms);
     frame
 }
@@ -204,12 +204,12 @@ fn xyz(positions: &[[F; 3]]) -> Array2<F> {
     Array2::from(positions.to_vec())
 }
 
-fn target_template(target: &Target) -> &molrs::store::Frame {
+fn target_template(target: &Target) -> &molrs::core::Frame {
     target.template.as_ref().expect("target has a template")
 }
 
 /// Insert a generated column and move it to `index`.
-fn insert_front<T: molrs::store::BlockDtype>(
+fn insert_front<T: molrs::core::BlockDtype>(
     block: &mut Block,
     key: &str,
     index: usize,
@@ -228,10 +228,10 @@ fn column_error(err: impl std::fmt::Display) -> PackError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use molrs::store::Column;
+    use molrs::core::Column;
     use ndarray::ArrayD;
 
-    fn col_uint(frame: &molrs::store::Frame, block: &str, key: &str) -> Vec<Idx> {
+    fn col_uint(frame: &molrs::core::Frame, block: &str, key: &str) -> Vec<Idx> {
         frame
             .get(block)
             .unwrap()
@@ -243,7 +243,7 @@ mod tests {
             .collect()
     }
 
-    fn col_str(frame: &molrs::store::Frame, block: &str, key: &str) -> Vec<String> {
+    fn col_str(frame: &molrs::core::Frame, block: &str, key: &str) -> Vec<String> {
         frame
             .get(block)
             .unwrap()
@@ -255,7 +255,7 @@ mod tests {
             .collect()
     }
 
-    fn diatomic() -> molrs::store::Frame {
+    fn diatomic() -> molrs::core::Frame {
         let mut atoms = Block::new();
         atoms
             .insert(
@@ -281,13 +281,13 @@ mod tests {
         bonds
             .insert("atomj", Array1::from_vec(vec![1 as Idx]).into_dyn())
             .unwrap();
-        let mut frame = molrs::store::Frame::new();
+        let mut frame = molrs::core::Frame::new();
         frame.insert("atoms", atoms);
         frame.insert("bonds", bonds);
         frame
     }
 
-    fn argon() -> molrs::store::Frame {
+    fn argon() -> molrs::core::Frame {
         let mut atoms = Block::new();
         atoms
             .insert(
@@ -300,7 +300,7 @@ mod tests {
                 .insert(c, Array1::from_vec(vec![0.0 as F]).into_dyn())
                 .unwrap();
         }
-        let mut frame = molrs::store::Frame::new();
+        let mut frame = molrs::core::Frame::new();
         frame.insert("atoms", atoms);
         frame
     }
@@ -387,7 +387,7 @@ mod tests {
         assert!(frame.get("bonds").is_none());
     }
 
-    fn col_i16(frame: &molrs::store::Frame, block: &str, key: &str) -> Vec<i16> {
+    fn col_i16(frame: &molrs::core::Frame, block: &str, key: &str) -> Vec<i16> {
         let column = frame.get(block).unwrap().get(key).unwrap();
         match column {
             Column::Int16(h) => h.array().iter().copied().collect(),

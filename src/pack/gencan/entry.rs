@@ -1,6 +1,6 @@
 //! `GenCanPack` — the rigid-body GENCAN packing entry.
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 use crate::PackError;
 use crate::Stage;

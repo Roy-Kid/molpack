@@ -16,9 +16,9 @@
 //! Insertion and removal are both O(1) amortised — the growth driver retracts
 //! and regrows constantly, so removal cannot be a rebuild.
 
-use molrs::op::types::F;
-use molrs::spatial::neighbors::CellGrid;
-use molrs::spatial::{Mic, SimBox};
+use molrs::core::CellGrid;
+use molrs::core::{Mic, SimBox};
+use molrs::op::F;
 
 /// A placed-atom field over an orthorhombic, optionally periodic box.
 ///

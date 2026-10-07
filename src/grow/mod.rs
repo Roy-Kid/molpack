@@ -66,8 +66,8 @@ pub use prior::{AnglePrior, TorsionPrior};
 
 pub(crate) use driver::GrowStage;
 
-use molrs::op::types::F;
-use molrs::store::Frame;
+use molrs::core::Frame;
+use molrs::op::F;
 
 use crate::Target;
 use crate::grow::internal::InternalTree;
@@ -79,18 +79,18 @@ use crate::grow::internal::InternalTree;
 /// (including `RingTemplate`):
 /// `NoAtomsBlock → MissingBondEndpoint → BondOutOfRange → NoBonds →
 /// TemplateTooSmall → Disconnected → RingTemplate`. Bond graphs come from
-/// `molrs::system::Topology::from_frame`; this function does not rebuild CSR.
+/// `molrs::core::Topology::from_frame`; this function does not rebuild CSR.
 pub(crate) fn topology_for_growth(
     frame: &Frame,
-) -> Result<(molrs::system::Topology, Vec<[F; 3]>), GrowError> {
+) -> Result<(molrs::core::Topology, Vec<[F; 3]>), GrowError> {
     let xyz = crate::template::coord_rows(&frame.coords().map_err(|_| GrowError::NoAtomsBlock)?);
     let n = xyz.len();
     // molrs treats a missing or empty bonds block as Ok with zero edges.
     // A still-failing `from_frame` names the column or the row; MolRsError
     // is never wrapped.
-    let topo = match molrs::system::Topology::from_frame(frame) {
+    let topo = match molrs::core::Topology::from_frame(frame) {
         Ok(topo) => topo,
-        Err(molrs::system::TopologyError::EndpointOutOfRange {
+        Err(molrs::core::TopologyError::EndpointOutOfRange {
             row, atom, n_atoms, ..
         }) => {
             return Err(GrowError::BondOutOfRange {
@@ -99,12 +99,12 @@ pub(crate) fn topology_for_growth(
                 n: n_atoms,
             });
         }
-        Err(molrs::system::TopologyError::MissingEndpoint { column, .. }) => {
+        Err(molrs::core::TopologyError::MissingEndpoint { column, .. }) => {
             return Err(GrowError::MissingBondEndpoint { column });
         }
         Err(
-            molrs::system::TopologyError::MissingBlock { .. }
-            | molrs::system::TopologyError::NoRows { .. },
+            molrs::core::TopologyError::MissingBlock { .. }
+            | molrs::core::TopologyError::NoRows { .. },
         ) => return Err(GrowError::NoAtomsBlock),
     };
     if topo.n_bonds() == 0 {
@@ -145,14 +145,14 @@ pub(crate) fn tree_from_target(t: &Target) -> Result<InternalTree, GrowError> {
 /// nothing else, and the box must exist from the first atom. Named errors
 /// per spec principle 3.
 pub(crate) fn validate_grow_cell(
-    cell: Option<molrs::spatial::SimBox>,
-) -> Result<molrs::spatial::SimBox, GrowError> {
+    cell: Option<molrs::core::SimBox>,
+) -> Result<molrs::core::SimBox, GrowError> {
     let Some(simbox) = cell else {
         return Err(GrowError::NoBox);
     };
     // molrs's own classification — the one minimum image and the cell grid
     // use — so growth never accepts a box the rest of the run treats as tilted.
-    if !matches!(simbox.kind(), molrs::spatial::BoxKind::Ortho { .. }) {
+    if !matches!(simbox.kind(), molrs::core::BoxKind::Ortho { .. }) {
         return Err(GrowError::TriclinicCell);
     }
     Ok(simbox)

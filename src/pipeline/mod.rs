@@ -6,7 +6,7 @@ mod engine;
 #[cfg(test)]
 mod tests;
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 use crate::Invariant;
 use crate::PackError;

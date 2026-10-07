@@ -73,7 +73,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
   - `IntraOverlapTerm`：**同分子**、排除深度之外的对，用同一半径与 scale，自带排除表感知的
     cell 遍历（不改 `pair_term` 热循环——`examples_batch` 逐位风险）；没有它，链只有弹簧
     没有分子内斥力，会自穿；
-  - `BondTerm`、`Angle13Term`、`Dihedral14Term`：距离弹簧，成键对来自 `molrs::Topology`
+  - `BondTerm`、`Angle13Term`、`Dihedral14Term`：距离弹簧，成键对来自 `molrs::core::Topology`
     （直接消费，不从 `grow::internal` 取、不 import `topology_for_growth`——避免 refine → grow 的跨族边）；
   - `ChiralTerm`（签名体积，数据）、`RestraintTerm`（既有 `AtomRestraint::f/fg`）。
   所有项无量纲化到 overlap 项的自然尺度（`tol⁴`）：`E_bond = k_b · tol⁴ · Σ ((d − d₀)/d₀)²`，
@@ -116,12 +116,12 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
 | `src/refine/ladder.rs` | 半径调度，走 `PackContext::set_radius` | ≤ 150 |
 | `src/objective/cartesian.rs`（前置拆分产物） | `bin_xcart_into_cells`、`accumulate_cartesian_fg` | ≤ 200 |
 
-- **依赖方向**：`refine/*` → `stage` / `context::pack_state` / `molrs::Topology` / `objective::cartesian` /
+- **依赖方向**：`refine/*` → `stage` / `context::pack_state` / `molrs::core::Topology` / `objective::cartesian` /
   `gencan::{spg, cg}` / `restraint`。允许 `refine → gencan::{spg, cg}`：原则 2 与
   `chain-growth-solver.acceptance.md:30` 点名禁止的是 `pgencan / run_phase / run_iteration`
   这些刚体驱动，不是线搜索原语；本 spec 的验收 grep 把同一条禁令扩到 `src/refine/`，并
   追加 `gencan::solver / phases / entry / mod::gencan(` 四项。
-- **不**从 `grow::internal` 取键图（跨族边）；refine 直接消费 `molrs::Topology`，永不 import `topology_for_growth`。
+- **不**从 `grow::internal` 取键图（跨族边）；refine 直接消费 `molrs::core::Topology`，永不 import `topology_for_growth`。
 - `gencan/mod.rs`（987 行）本 spec 一行不加；若将来要复用其外循环，先把
   `tn_linesearch`（:611-987）拆到 `gencan/tnls.rs`，那是独立的 hygiene 改动。
 - `Term` trait 住 `refine/terms.rs`，不进 `restraint/`：约束是逐点谓词，项是全局可加能量。

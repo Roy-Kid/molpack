@@ -41,7 +41,7 @@
 //! ```rust,no_run
 //! use std::sync::Arc;
 //! use molpack::{GenCanPack, PackEngine, RegionRestraint, Target};
-//! use molrs::spatial::region::Cuboid;
+//! use molrs::core::Cuboid;
 //! use ndarray::array;
 //!
 //! let positions = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
@@ -83,7 +83,7 @@
 //! | Target  | [`Target`], [`CenteringMode`], [`Angle`], [`Axis`], [`Placement`] |
 //! | Run state | [`PackContext`], [`RigidView`] |
 //! | Stage seam (Rust-only) | [`Stage`], [`Requires`], [`Guarantees`], [`StageOutcome`], [`Budget`], [`PackState`], [`Placed`] |
-//! | Per-atom restraints | [`AtomRestraint`], [`RegionRestraint`] (over [`molrs::spatial::region::Region`]), [`CellRestraint`] |
+//! | Per-atom restraints | [`AtomRestraint`], [`RegionRestraint`] (over [`molrs::core::Region`]), [`CellRestraint`] |
 //! | Group restraints | [`Restraint`], [`GroupCtx`], [`GaussianPlane`], [`GaussianPoint`], [`ExponentialPlane`], [`ExponentialPoint`], [`TabulatedPlane`], [`TabulatedPoint`], [`SelfSeparation`] |
 //! | Handler trait + built-ins | [`Handler`], [`LammpsLogHandler`], [`ProgressHandler`], [`EarlyStopHandler`], `XYZHandler` (feature `io`), [`StepInfo`], [`StageInfo`], [`PhaseInfo`], [`PhaseReport`] |
 //! | Objective | [`Objective`], [`EvalMode`], [`EvalOutput`] |
@@ -95,8 +95,8 @@
 //! - `rayon` — opt into the parallel evaluator (also forwards to `molrs`'s
 //!   `rayon`).
 //! - `io` — pull in molrs's `io` module so `script::Script::build` reads the
-//!   template files through `molrs::io::read_frame` (PDB, XYZ, SDF/MOL,
-//!   LAMMPS, and every other format that function knows) and hands back a
+//!   template files through the molrs reader of each one's
+//!   [`script::StructureFormat`] (PDB, XYZ, SDF/MOL, LAMMPS, …) and hands back a
 //!   `script::BuildResult`, and so `XYZHandler` can write its trajectory
 //!   through molrs's extended XYZ writer. PyO3 / WASM / embedding hosts that
 //!   bring their own loader leave this off and use [`script::Script::lower`]
@@ -104,10 +104,10 @@
 //! - `cli` — build the `molpack` binary (pulls in `clap` and implies `io`).
 //!
 //! A force-field optimizer bound through [`GenCanPack::with_optimizer`]
-//! (molrs's `LBFGS` over a `Potential`) needs molrs's `ff` feature, which the
+//! (molrs's `Lbfgs` over a `Potential`) needs molrs's `ff` feature, which the
 //! caller turns on in its own molrs dependency; molpack has no `ff` feature.
 //!
-//! Precision is fixed at `f64` via `molrs::op::types::F`.
+//! Precision is fixed at `f64` via `molrs::op::F`.
 
 mod assemble;
 pub mod context;

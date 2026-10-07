@@ -1,6 +1,6 @@
 //! Run invariants: [`Invariant`](crate::Invariant) and its documentation.
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 use crate::context::PackState;
 
@@ -119,7 +119,7 @@ impl Layers {
 /// # Writing your own
 ///
 /// Same shape as [`AtomRestraint`](crate::AtomRestraint) and molrs's
-/// [`Region`](molrs::spatial::region::Region): implement the `pub trait` on
+/// [`Region`](molrs::core::Region): implement the `pub trait` on
 /// your own `pub struct` and hand it to
 /// [`Pipeline::with_guarded`](crate::Pipeline::with_guarded) in a
 /// `Vec<Box<dyn Invariant>>`. No wrapper enum, no registry.
@@ -232,7 +232,7 @@ mod tests {
     //! ```
 
     use crate::{Invariant, Layers, PackContext, PackState, RestraintsSatisfied};
-    use molrs::op::types::F;
+    use molrs::op::F;
 
     // ── the ladder, in rung order ─────────────────────────────────────────────
 

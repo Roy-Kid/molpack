@@ -8,7 +8,7 @@ use crate::restraint::geometric::{
     OutsideCubeRestraint, OutsideCylinderRestraint, OutsideEllipsoidRestraint,
     OutsideSphereRestraint,
 };
-use molrs::op::types::F;
+use molrs::op::F;
 
 const TOL: F = 1e-6;
 const SCALE: F = 1.0;

@@ -25,8 +25,8 @@ use std::path::PathBuf;
 use molpack::{GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target, XYZHandler};
 use std::sync::Arc;
 
-use molrs::io::data::pdb::read_pdb_frame;
-use molrs::spatial::region::Cuboid;
+use molrs::core::Cuboid;
+use molrs::io::read_pdb;
 use ndarray::array;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -35,8 +35,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .expect("file path has no parent")
         .to_path_buf();
-    let water = read_pdb_frame(base.join("water.pdb"))?;
-    let urea = read_pdb_frame(base.join("urea.pdb"))?;
+    let water = read_pdb(base.join("water.pdb"))?;
+    let urea = read_pdb(base.join("urea.pdb"))?;
 
     let box_restraint = RegionRestraint(Arc::new(Cuboid::new(
         array![0.0, 0.0, 0.0],

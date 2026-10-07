@@ -14,7 +14,7 @@
 //! rotations would change the bits. Changing them is a change to Packmol
 //! parity, not a refactor.
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// Compute rotation matrix columns from Euler angles.
 /// Port of Fortran `eulerrmat`.
@@ -120,7 +120,7 @@ mod tests {
     //! eulerrmat_derivatives.
 
     use crate::euler::{compcart, eulerfixed, eulerrmat, eulerrmat_derivatives};
-    use molrs::op::types::F;
+    use molrs::op::F;
 
     const TOL: F = 1e-6;
     const PI: F = std::f64::consts::PI as F;

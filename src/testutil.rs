@@ -3,12 +3,12 @@
 
 use std::sync::Arc;
 
-use molrs::op::types::F;
-use molrs::spatial::region::Cuboid;
-use molrs::store::Block;
-use molrs::store::Frame;
-use molrs::system::Atom;
-use molrs::system::Atomistic;
+use molrs::core::Atom;
+use molrs::core::Atomistic;
+use molrs::core::Block;
+use molrs::core::Cuboid;
+use molrs::core::Frame;
+use molrs::op::F;
 use ndarray::{Array1, Array2, array};
 
 use crate::RegionRestraint;
@@ -41,7 +41,7 @@ pub(crate) fn chain_bonds(n: usize) -> Vec<(u32, u32)> {
         .collect()
 }
 
-/// Coordinates + explicit bond list as a `molrs::store::Frame`: an atoms block with
+/// Coordinates + explicit bond list as a `molrs::core::Frame`: an atoms block with
 /// `x`/`y`/`z` and, unless `bonds` is empty, a bonds block with `atomi`/`atomj`.
 /// Deliberately no `bond_type` column — the shape a PDB CONECT list or a
 /// hand-built coarse-grain frame has.
@@ -65,7 +65,7 @@ pub(crate) fn frame_from_parts(coords: &[[F; 3]], bonds: &[(u32, u32)]) -> Frame
     frame
 }
 
-/// A bonded zigzag bead chain as a `molrs::store::Frame`.
+/// A bonded zigzag bead chain as a `molrs::core::Frame`.
 pub(crate) fn chain_frame(n: usize, bond_len: F) -> Frame {
     frame_from_parts(&zigzag_coords(n, bond_len), &chain_bonds(n))
 }

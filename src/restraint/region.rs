@@ -1,14 +1,14 @@
 //! The one geometric restraint: stay inside a molrs region.
 //!
-//! Geometry is molrs's ([`molrs::spatial::region`]: shapes, meshes, unions
+//! Geometry is molrs's ([`molrs::core`]: shapes, meshes, unions
 //! of spheres, and their `And` / `Or` / `Not` compositions). What is
 //! molpack's is the penalty that turns a region's signed distance into a
 //! term of the shared objective, and that is all this type is.
 
 use std::sync::Arc;
 
-use molrs::op::types::F;
-use molrs::spatial::region::Region;
+use molrs::core::Region;
+use molrs::op::F;
 
 use super::AtomRestraint;
 
@@ -36,7 +36,7 @@ use super::AtomRestraint;
 /// use std::sync::Arc;
 /// use molpack::RegionRestraint;
 /// use molpack::AtomRestraint;
-/// use molrs::spatial::region::Sphere;
+/// use molrs::core::Sphere;
 /// use ndarray::array;
 ///
 /// let ball = RegionRestraint(Arc::new(Sphere::new(array![0.0, 0.0, 0.0], 5.0)));
@@ -83,7 +83,7 @@ impl AtomRestraint for RegionRestraint {
     /// Both halves of the rule come from the region itself: it repeats along
     /// `shift` (molrs [`Region::repeats_along`]), or it is bounded along it.
     ///
-    /// [`Region::repeats_along`]: molrs::spatial::region::Region::repeats_along
+    /// [`Region::repeats_along`]: molrs::core::Region::repeats_along
     fn holds_along(&self, shift: [F; 3]) -> bool {
         self.0.repeats_along(shift) || self.bounded_along(shift)
     }
@@ -92,7 +92,7 @@ impl AtomRestraint for RegionRestraint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use molrs::spatial::region::{AndRegion, Cuboid, NotRegion, Sphere};
+    use molrs::core::{AndRegion, Cuboid, NotRegion, Sphere};
     use ndarray::array;
 
     fn ball() -> RegionRestraint {

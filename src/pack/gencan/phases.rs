@@ -5,7 +5,7 @@
 //! stage owns the phase loop, these own one phase and one iteration.
 //! Step reports use [`super::STAGE_NAME`], the same string the stage reports.
 
-use molrs::op::types::F;
+use molrs::op::F;
 use rand::rngs::SmallRng;
 
 use crate::Objective;

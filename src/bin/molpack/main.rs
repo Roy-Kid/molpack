@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use molpack::script::{self, BuildResult, ScriptError};
+use molpack::script::{self, BuildResult, ScriptError, StructureFormat};
 use molpack::{LogLevel, PackEngine};
 
 #[derive(Parser, Debug)]
@@ -129,10 +129,7 @@ fn run(src: &str, base_dir: &std::path::Path, parallel: bool) -> Result<(), Scri
     }
 
     let frame = entry.run(&targets, nloop)?.frame;
-    molrs::io::write_frame(&output, &frame, None).map_err(|e| ScriptError::Io {
-        path: output.clone(),
-        message: format!("writing output: {e}"),
-    })?;
+    StructureFormat::resolve(&output, None)?.write(&output, &frame)?;
     println!("Output written to: {}", output.display());
 
     Ok(())

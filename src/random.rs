@@ -7,7 +7,7 @@
 //! growth goldens that pin it bit for bit — never moves when another
 //! algorithm changes how many numbers it draws.
 
-use molrs::op::types::F;
+use molrs::op::F;
 use rand::Rng;
 use rand::RngExt;
 

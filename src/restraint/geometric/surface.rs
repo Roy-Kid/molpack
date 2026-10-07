@@ -5,7 +5,7 @@
 //! `crate::restraint` path.
 
 use crate::AtomRestraint;
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// Packmol kind 10 — quadratic penalty forcing atom above plane `n·x >= d`.
 #[derive(Debug, Clone, Copy)]

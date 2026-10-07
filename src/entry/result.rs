@@ -2,8 +2,8 @@
 //! carries, the intra-molecular residual [`IntraResidual`], and the
 //! coordinate reordering that assembles the frame in target-declared order.
 
-use molrs::op::types::F;
-use molrs::spatial::SimBox;
+use molrs::core::SimBox;
+use molrs::op::F;
 
 use crate::Target;
 use crate::context::RigidView;
@@ -53,7 +53,7 @@ enum IntraSkip {
     Identity,
     /// `Topology::from_frame` `NotFound` / `Validation`: omit the target.
     Omit,
-    /// Per-atom skip lists from [`molrs::system::Topology::exclusions`] (sorted,
+    /// Per-atom skip lists from [`molrs::core::Topology::exclusions`] (sorted,
     /// root-inclusive).
     Partners(Vec<Vec<usize>>),
 }
@@ -66,7 +66,7 @@ impl IntraResidual {
     /// Spec 05 reads `Target.special_bonds` (no longer broadcasts depth 3).
     ///
     /// A missing template or a zero-edge bond graph is identity exemption
-    /// only (`i == j` skipped; every `i != j` scored). [`molrs::system::Topology::from_frame`]
+    /// only (`i == j` skipped; every `i != j` scored). [`molrs::core::Topology::from_frame`]
     /// errors `NotFound` and `Validation` omit that target — neither class is
     /// updated — so a broken 1-2 is not reported as scored.
     pub fn from_targets(targets: &[Target], positions: &[[F; 3]], simbox: &SimBox) -> Self {
@@ -84,7 +84,7 @@ impl IntraResidual {
             let span = ncopy * n;
             let skip = match target.template.as_ref() {
                 None => IntraSkip::Identity,
-                Some(frame) => match molrs::system::Topology::from_frame(frame) {
+                Some(frame) => match molrs::core::Topology::from_frame(frame) {
                     Ok(topo) if topo.n_bonds() == 0 => IntraSkip::Identity,
                     Ok(topo) => IntraSkip::Partners(topo.exclusions(table)),
                     Err(_) => IntraSkip::Omit,
@@ -143,7 +143,7 @@ pub struct State {
     /// The packed system: an `atoms` block with `id` and `mol_id` (both
     /// 1-based, unsigned), `x` / `y` / `z` (Å) and each template's carried
     /// columns, plus the templates' relation blocks and the resolved cell.
-    pub frame: molrs::store::Frame,
+    pub frame: molrs::core::Frame,
     /// The verbatim placement solution, for cross-entry seeding
     /// (`GenCanPack::with_restart`).
     pub(crate) placements: Placements,
@@ -217,10 +217,10 @@ mod tests {
     use super::IntraResidual;
     use crate::Target;
     use crate::testutil::{chain_bonds, frame_from_parts};
-    use molrs::spatial::SimBox;
-    use molrs::system::BondDistanceWeights;
+    use molrs::core::BondDistanceWeights;
+    use molrs::core::SimBox;
 
-    use molrs::op::types::F;
+    use molrs::op::F;
     use ndarray::array;
 
     fn along_x(n: usize) -> Vec<[F; 3]> {

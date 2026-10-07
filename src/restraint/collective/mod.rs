@@ -56,8 +56,8 @@
 //! `grads` have equal length, one entry per atom in the group, in the packer's
 //! own order: **copy-major, atom-minor**.
 
-use molrs::op::types::F;
-use molrs::spatial::{Mic, SimBox};
+use molrs::core::{Mic, SimBox};
+use molrs::op::F;
 
 // ============================================================================
 // Evaluation context
@@ -83,7 +83,7 @@ pub struct GroupCtx<'a> {
     /// search over the group — builds its own [`CellGrid`] from this, the same
     /// primitive and the same box the pair loop uses.
     ///
-    /// [`CellGrid`]: molrs::spatial::neighbors::CellGrid
+    /// [`CellGrid`]: molrs::core::CellGrid
     pub cell: &'a SimBox,
     /// Minimum-image convention in force, derived from [`cell`](Self::cell).
     /// [`Mic::Free`] when no axis wraps.
@@ -163,8 +163,8 @@ pub use tabulated::{TabulatedPlane, TabulatedPoint};
 #[cfg(test)]
 pub(super) mod testutil {
     use super::{GroupCtx, Restraint};
-    use molrs::op::types::F;
-    use molrs::spatial::{Mic, SimBox};
+    use molrs::core::{Mic, SimBox};
+    use molrs::op::F;
 
     /// Deterministic xorshift64* uniform in `[lo, hi)` — no external dep.
     pub(crate) fn rng_uniform(seed: &mut u64, lo: F, hi: F) -> F {
@@ -180,7 +180,7 @@ pub(super) mod testutil {
     /// A free-boundary cube big enough to hold the test coordinates; the
     /// partitioning a restraint builds from it must not change any answer.
     pub(crate) fn free_box(side: F) -> SimBox {
-        SimBox::cube(side, molrs::op::types::F3::zeros(3), [false; 3]).expect("test box")
+        SimBox::cube(side, molrs::op::F3::zeros(3), [false; 3]).expect("test box")
     }
 
     /// Unit scales, free boundaries, `natoms_per_copy` atoms per copy.

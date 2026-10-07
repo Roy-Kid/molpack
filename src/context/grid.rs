@@ -5,9 +5,9 @@
 //! same box and the same coverage. Living here keeps those stages from
 //! depending on the rigid-body driver.
 
-use molrs::op::types::F;
-use molrs::spatial::SimBox;
-use molrs::spatial::neighbors::CellGrid;
+use molrs::core::CellGrid;
+use molrs::core::SimBox;
+use molrs::op::F;
 
 use crate::context::{NONE_IDX, PackContext};
 
@@ -111,9 +111,9 @@ mod tests {
     use super::install_resolved_cell;
     use crate::PackContext;
     use crate::objective::compute_f;
-    use molrs::op::types::F;
-    use molrs::op::types::F3;
-    use molrs::spatial::SimBox;
+    use molrs::core::SimBox;
+    use molrs::op::F;
+    use molrs::op::F3;
 
     const DISCALE: F = 1.1;
 

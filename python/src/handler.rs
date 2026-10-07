@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::errors::stash_err;
 use molpack::PackContext;
 use molpack::{Handler, StepInfo};
-use molrs::op::types::F;
+use molrs::op::F;
 use numpy::IntoPyArray;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;

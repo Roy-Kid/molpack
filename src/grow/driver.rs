@@ -41,8 +41,8 @@
 //! force-completed exactly as on a handler abort, each forced placement counted
 //! in `degraded`, and the outcome is `converged == false`.
 
-use molrs::op::types::F;
-use molrs::spatial::SimBox;
+use molrs::core::SimBox;
+use molrs::op::F;
 
 use crate::PackError;
 use crate::Target;

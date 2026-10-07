@@ -29,7 +29,7 @@ use crate::restraint::extract_restraint;
 use crate::result::PyState;
 use crate::target::PyTarget;
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// Shared entry knobs mirrored on the Python side; the Rust entry is built
 /// at `run()` time.

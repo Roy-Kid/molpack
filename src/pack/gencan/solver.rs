@@ -4,8 +4,8 @@
 //! lifecycle the growth stages implement, judged by
 //! the same shared-objective ruler, selected by the same seam.
 
-use molrs::op::types::F;
-use molrs::spatial::SimBox;
+use molrs::core::SimBox;
+use molrs::op::F;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
@@ -309,7 +309,7 @@ impl Stage for GenCanStage {
 
 #[cfg(test)]
 mod tests {
-    use molrs::spatial::SimBox;
+    use molrs::core::SimBox;
     use ndarray::Array1;
 
     use super::*;
@@ -413,16 +413,17 @@ mod tests {
         }
 
         impl molrs::optimize::Optimizer for CountingOptimizer {
-            fn run(
+            fn minimize(
                 &mut self,
-                _frame: &mut molrs::store::Frame,
-            ) -> Result<molrs::optimize::OptReport, String> {
+                _frame: &mut molrs::core::Frame,
+            ) -> Result<molrs::optimize::OptimizationReport, String> {
                 self.calls.fetch_add(1, Ordering::Relaxed);
-                Ok(molrs::optimize::OptReport {
+                Ok(molrs::optimize::OptimizationReport {
                     converged: true,
                     n_steps: 0,
                     final_energy: 0.0,
                     final_fmax: 0.0,
+                    final_grad_rms: 0.0,
                 })
             }
         }

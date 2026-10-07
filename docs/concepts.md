@@ -171,12 +171,12 @@ request simply does not converge, and the run reports it through `frest`.
 Geometry is not molpack's. A region — a sphere, a box, a triclinic cell, a
 half-space, a cylinder, an ellipsoid, a solid bounded by a watertight
 triangle mesh, a union of spheres around a set of atoms — is a
-[`molrs::spatial::region::Region`], a solid with a signed distance to its
+[`molrs::core::Region`], a solid with a signed distance to its
 boundary:
 
 ```text
 pub trait Region: Send + Sync + Debug {
-    fn bounds(&self) -> FNx3;                       // 3×2 AABB
+    fn bounds(&self) -> Fnx3;                       // 3×2 AABB
     fn distance(&self, x: &[F; 3]) -> F;           // < 0 inside, > 0 outside
     fn distance_grad(&self, x: &[F; 3]) -> [F; 3] { /* default FD */ }
     fn contains_point(&self, x: &[F; 3]) -> bool { self.distance(x) <= 0.0 }
@@ -215,7 +215,7 @@ The seam is molrs's `Optimizer` trait, one method over a `Frame`:
 
 ```text
 pub trait Optimizer: Send + Sync {
-    fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String>;
+    fn minimize(&mut self, frame: &mut Frame) -> Result<OptimizationReport, String>;
 }
 ```
 

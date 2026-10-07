@@ -17,7 +17,7 @@ well.
 ### Step 1 — define the struct
 
 ```rust
-use molrs::op::types::F;
+use molrs::op::F;
 # use molpack::AtomRestraint;
 
 #[derive(Debug, Clone, Copy)]
@@ -41,7 +41,7 @@ pub struct PlaneTether {
 ### Step 2 — implement `AtomRestraint`
 
 ```rust
-# use molrs::op::types::F;
+# use molrs::op::F;
 # use molpack::AtomRestraint;
 # #[derive(Debug)]
 # pub struct PlaneTether { pub normal: [F; 3], pub offset: F, pub k: F }
@@ -80,7 +80,7 @@ Three contracts that all restraints must obey:
 ### Step 3 — write a gradient test
 
 ```no_run
-# use molrs::op::types::F;
+# use molrs::op::F;
 # use molpack::AtomRestraint;
 # #[derive(Debug)] pub struct PlaneTether { pub normal: [F; 3], pub offset: F, pub k: F }
 # impl AtomRestraint for PlaneTether {
@@ -112,7 +112,7 @@ kinks).
 ### Step 4 — use it
 
 ```no_run
-# use molrs::op::types::F;
+# use molrs::op::F;
 # use molpack::AtomRestraint;
 # #[derive(Debug, Clone, Copy)] pub struct PlaneTether { pub normal: [F; 3], pub offset: F, pub k: F }
 # impl AtomRestraint for PlaneTether {
@@ -121,7 +121,7 @@ kinks).
 # }
 use std::sync::Arc;
 use molpack::{RegionRestraint, Target};
-use molrs::spatial::region::Cuboid;
+use molrs::core::Cuboid;
 use ndarray::array;
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 
@@ -188,13 +188,13 @@ copy), and pack.
 ## Custom `Region`
 
 A region is molrs vocabulary: implement
-[`molrs::spatial::region::Region`] and lift it with
+[`molrs::core::Region`] and lift it with
 [`RegionRestraint`](crate::RegionRestraint). Goal: a conical region with
 apex at origin, axis along +z, half-angle 30°.
 
 ```rust
-use molrs::spatial::region::Region;
-use molrs::op::types::{F, FNx3};
+use molrs::core::Region;
+use molrs::op::{F, Fnx3};
 use ndarray::Array2;
 
 #[derive(Debug, Clone, Copy)]
@@ -205,7 +205,7 @@ pub struct Cone {
 }
 
 impl Region for Cone {
-    fn bounds(&self) -> FNx3 {
+    fn bounds(&self) -> Fnx3 {
         // Unbounded along the axis; ±∞ is the honest answer.
         let mut b = Array2::zeros((3, 2));
         for d in 0..3 {
@@ -234,18 +234,18 @@ impl Region for Cone {
 ### Compose with built-ins
 
 ```no_run
-# use molrs::spatial::region::Region;
-# use molrs::op::types::{F, FNx3};
+# use molrs::core::Region;
+# use molrs::op::{F, Fnx3};
 # use ndarray::Array2;
 # #[derive(Debug, Clone, Copy)]
 # pub struct Cone { pub apex: [F; 3], pub axis: [F; 3], pub half_angle_cos: F }
 # impl Region for Cone {
-#     fn bounds(&self) -> FNx3 { Array2::zeros((3, 2)) }
+#     fn bounds(&self) -> Fnx3 { Array2::zeros((3, 2)) }
 #     fn distance(&self, _x: &[F; 3]) -> F { 0.0 }
 # }
 use std::sync::Arc;
 use molpack::{RegionRestraint, Target};
-use molrs::spatial::region::{AndRegion, Sphere};
+use molrs::core::{AndRegion, Sphere};
 use ndarray::array;
 # let (pos, rad) = (&[[0.0; 3]][..], &[1.0][..]);
 
@@ -270,13 +270,13 @@ across the wheel boundary.
 For hot-path use, override `distance_grad` analytically. The cone above:
 
 ```rust
-# use molrs::spatial::region::Region;
-# use molrs::op::types::{F, FNx3};
+# use molrs::core::Region;
+# use molrs::op::{F, Fnx3};
 # use ndarray::Array2;
 # #[derive(Debug, Clone, Copy)]
 # pub struct Cone { pub apex: [F; 3], pub axis: [F; 3], pub half_angle_cos: F }
 # impl Region for Cone {
-#     fn bounds(&self) -> FNx3 { Array2::zeros((3, 2)) }
+#     fn bounds(&self) -> Fnx3 { Array2::zeros((3, 2)) }
 #     fn distance(&self, _x: &[F; 3]) -> F { 0.0 }
 fn distance_grad(&self, x: &[F; 3]) -> [F; 3] {
     let dx = x[0] - self.apex[0];
@@ -309,7 +309,7 @@ objective evolution.
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use molpack::{Handler, PackContext, StepInfo};
-use molrs::op::types::F;
+use molrs::op::F;
 
 pub struct CsvHandler { writer: BufWriter<File> }
 
@@ -372,7 +372,7 @@ worse. The seam is molrs's `Optimizer` trait — one method, which relaxes a
 
 ```text
 pub trait Optimizer: Send + Sync {
-    fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String>;
+    fn minimize(&mut self, frame: &mut Frame) -> Result<OptimizationReport, String>;
 }
 ```
 
@@ -381,12 +381,12 @@ Monte-Carlo sampling of rotations about a molecule's rotatable bonds.
 ("Metropolis Monte-Carlo" means propose a random move, then accept it with
 probability `min(1, exp(-ΔE / T))` — downhill moves always pass, uphill ones
 sometimes do, which is what lets the search escape a bad local shape.) molrs
-ships `LBFGS`, a force-field minimizer. Anything else implementing the trait
+ships `Lbfgs`, a force-field minimizer. Anything else implementing the trait
 drops into the same slot.
 
 The trait, its molpack implementation, and the `GenCanPack::with_optimizer`
 binder are always compiled. Binding a molrs force-field optimizer such as
-`LBFGS` needs molrs's `ff` module: turn on `ff` in your own `molcrafts-molrs`
+`Lbfgs` needs molrs's `ff` module: turn on `ff` in your own `molcrafts-molrs`
 dependency (molpack has no `ff` feature of its own).
 
 ![Flexible chains packed inside a spherical cavity](assets/images/paper-confinement-sphere.png)
@@ -416,9 +416,9 @@ Two conventions the packer relies on:
   every atom is free.
 
 ```rust
-use molrs::store::Frame;
-use molrs::optimize::{OptReport, Optimizer};
-use molrs::op::types::{F, FNx3};
+use molrs::core::Frame;
+use molrs::optimize::{OptimizationReport, Optimizer};
+use molrs::op::{F, Fnx3};
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 
@@ -437,7 +437,7 @@ impl JiggleOptimizer {
 }
 
 /// Toy score (Å²): squared distance of the free atoms from the origin.
-fn score(coords: &FNx3, free: &[bool]) -> F {
+fn score(coords: &Fnx3, free: &[bool]) -> F {
     coords
         .rows()
         .into_iter()
@@ -448,7 +448,7 @@ fn score(coords: &FNx3, free: &[bool]) -> F {
 }
 
 impl Optimizer for JiggleOptimizer {
-    fn run(&mut self, frame: &mut Frame) -> Result<OptReport, String> {
+    fn minimize(&mut self, frame: &mut Frame) -> Result<OptimizationReport, String> {
         let mut best = frame.coords().map_err(|e| e.to_string())?;
         let n = best.nrows();
         let free: Vec<bool> = match frame
@@ -488,11 +488,12 @@ impl Optimizer for JiggleOptimizer {
         }
 
         frame.set_coords(best.view()).map_err(|e| e.to_string())?;
-        Ok(OptReport {
+        Ok(OptimizationReport {
             converged: accepted > 0,
             n_steps: self.steps,
             final_energy: best_score,
             final_fmax: 0.0,
+            final_grad_rms: 0.0,
         })
     }
 }
@@ -509,11 +510,11 @@ atom within `rcut` ångström as frozen context, so a chain folds against its
 real neighbours rather than empty space.
 
 ```no_run
-# use molrs::{store::Frame, optimize::{OptReport, Optimizer}, op::types::F};
+# use molrs::{core::Frame, optimize::{OptimizationReport, Optimizer}, op::F};
 # struct JiggleOptimizer;
 # impl JiggleOptimizer { fn new(_: usize, _: F, _: u64) -> Self { Self } }
 # impl Optimizer for JiggleOptimizer {
-#     fn run(&mut self, _: &mut Frame) -> Result<OptReport, String> { unimplemented!() }
+#     fn minimize(&mut self, _: &mut Frame) -> Result<OptimizationReport, String> { unimplemented!() }
 # }
 # let targets: Vec<molpack::Target> = Vec::new();
 use molpack::{GenCanPack, OptimizeSelect, PackEngine};
@@ -657,7 +658,7 @@ score.
 
 ```rust
 use molpack::{Budget, Guarantees, Handler, PackError, PackState, Placed, Requires, Stage, StageOutcome, Target};
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// Nudges every molecule by a fixed offset. Not useful — just the smallest
 /// thing that is still a stage.
@@ -723,7 +724,7 @@ hands the entry to the lifecycle as its sole stage source
 hand-composed pipeline runs, not a second implementation to keep in step.
 
 ```rust
-# struct ShakeStage { step: [molrs::op::types::F; 3] }
+# struct ShakeStage { step: [molrs::op::F; 3] }
 # impl molpack::Stage for ShakeStage {
 #     fn name(&self) -> &'static str { "shake" }
 #     fn requires(&self) -> molpack::Requires { molpack::Requires::new(molpack::Placed::All) }
@@ -736,7 +737,7 @@ hand-composed pipeline runs, not a second implementation to keep in step.
 # }
 use molpack::EngineSetup;
 use molpack::{Handler, PackEngine, PackError, PackSettings, Pipeline, Stage, StageFactory};
-use molrs::op::types::F;
+use molrs::op::F;
 
 pub struct ShakePack {
     settings: PackSettings,

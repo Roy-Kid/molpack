@@ -17,7 +17,7 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - `src/pipeline/bracket.rs` (141) — private handler bracket; `StageTagger` stamps the pipeline-owned stage position onto `StepInfo`
 - `src/pipeline/combinators.rs` (304) — `Until`/`OnViolation` plus the `Repeat`/`Guarded` stages and their factories
 - `src/invariant.rs` (459) — repair-cost ladder `Layers` (L0–L5), `Invariant` trait, `Violation`, `RestraintsSatisfied`
-- `src/template.rs` (102) — private crate-root leaf: `coord_rows` (rows of `molrs::Frame::coords`, Å) + `rotatable_bonds` (the one rotatable-bond policy); bond graphs are `molrs::Topology` (not re-exported)
+- `src/template.rs` (102) — private crate-root leaf: `coord_rows` (rows of `molrs::core::Frame::coords`, Å) + `rotatable_bonds` (the one rotatable-bond policy); bond graphs are `molrs::core::Topology` (not re-exported)
 - `src/context/pack_state.rs` (245) — live run object `PackState` (wraps `PackContext` + `Placed` + `RigidView`), `evaluate_unscaled`
 - `src/context/pack_state/tests.rs` (486) — in-crate unit tests for `PackState` + `evaluate_unscaled`
 - `src/context/rigid_view.rs` (773) — `RigidView` owns the rigid DOF (COM+Euler); `write_xcart` / `capture_from_xcart` / `install_seed`, bounds-checked accessors
@@ -49,7 +49,7 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - `src/pack/initial.rs` (600) — initial placement, `compute_dmax`, `SwapState`; `src/pack/restmol.rs` (115) single-molecule pre-fit; grid installation is `src/context/grid.rs`
 - `src/pack/movebad.rs` (270) — escape moves + `flash1` sort
 - `src/handler.rs` (749) — `Handler` trait + `StageInfo`/`StepInfo`/`PhaseInfo`/`PhaseReport` + four built-ins (`XYZHandler` — `io`-gated, written by molrs's extended XYZ writer —, `ProgressHandler`, `LammpsLogHandler`, `EarlyStopHandler` — the Packmol-aligned stop `GenCanPack` installs by default)
-- `src/assemble.rs` — topology-complete `molrs::store::Frame` assembly: per-target `Frame::replicate`, joined with `Frame::concat` (every canonical relation block); owns the one molecule-ID numbering (`mol_ids`) and the coordinates-only frame (`coords_frame`) that `XYZHandler` snapshots reuse; `src/template.rs` — template coordinates + the one rotatable-bond policy
+- `src/assemble.rs` — topology-complete `molrs::core::Frame` assembly: per-target `Frame::replicate`, joined with `Frame::concat` (every canonical relation block); owns the one molecule-ID numbering (`mol_ids`) and the coordinates-only frame (`coords_frame`) that `XYZHandler` snapshots reuse; `src/template.rs` — template coordinates + the one rotatable-bond policy
 - `src/euler.rs` (337) — Euler ↔ rotation matrix + derivatives (there is no separate validation module: the verdict is `State::fdist`/`frest`, and `RestraintsSatisfied` guards stages)
 - `src/error.rs` (207) — `PackError`, 17 variants
 - `src/optimizer/mod.rs` (373) + `torsion_mc.rs` (313) — in-loop optimizer seam (`OptimizeSelect`, `TorsionMcOptimizer`), always compiled
@@ -73,10 +73,10 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - **Shared settings + space** (`src/lib.rs:128`): `PackSettings` (`tolerance`/`precision`/`discale`/`seed`/`first_non_default_knob`); `entry::setup` is entirely `pub(crate)`
 - **Context** (`src/lib.rs:126`): `PackContext`, `RigidView` (`fresh`/`nmol`/`com`/`set_com`/`euler`/`set_euler`/`as_slice`/`as_mut_slice`/`write_xcart`/`capture_from_xcart`/`install_seed`)
 - **Handlers** (`src/lib.rs:134-137`): `Handler` (+ `on_stage_start`/`on_stage_end`), `LammpsLogHandler`, `ProgressHandler`, `EarlyStopHandler`, `XYZHandler` (`io`), `StepInfo`, `StageInfo`, `PhaseInfo`, `PhaseReport`
-- **Restraints** (`src/lib.rs`): `AtomRestraint`, `RegionRestraint` (over `molrs::spatial::region::Region`), `CellRestraint` (`AtomRestraint::declared_cell` → `Option<SimBox>`); the 14 Packmol-parity `*Restraint` structs are crate-private `.inp` kernels; collective `Restraint` + `GroupCtx` + six profile structs (`GaussianPlane`/`GaussianPoint`/`ExponentialPlane`/`ExponentialPoint`/`TabulatedPlane`/`TabulatedPoint`) and the `SelfSeparation` bound
-- **Targets** (`src/lib.rs:151`): `Target` (19 `with_*`, `from_coords`/`new`/`fixed_from(&State)`/`fixed_at`), `Angle`, `Axis`, `CenteringMode`, `Placement`; skip table via `with_special_bonds(molrs::system::BondDistanceWeights)`
-- **Objective / errors**: `Objective` (the one evaluation entry; `compute_f`/`compute_fg`/`compute_g` are `pub(crate)`), `EvalMode` (`FOnly`/`GradientOnly`/`FAndGradient`), `EvalOutput`; `PackError` (17 variants). No molrs re-exports: `F`, `Element`, `BondDistanceWeights`, `Optimizer`, `OptReport` are named at their molrs home
-- **Optimizer seam** (always on): `OptimizeMode`, `OptimizeSelect`, `TorsionMcOptimizer`, `GenCanPack::with_optimizer`, over molrs's `Optimizer` trait (concrete optimizers and `Potential` stay in molrs; a caller binding `LBFGS` enables molrs's `ff` itself — molpack has no `ff` feature)
+- **Restraints** (`src/lib.rs`): `AtomRestraint`, `RegionRestraint` (over `molrs::core::Region`), `CellRestraint` (`AtomRestraint::declared_cell` → `Option<SimBox>`); the 14 Packmol-parity `*Restraint` structs are crate-private `.inp` kernels; collective `Restraint` + `GroupCtx` + six profile structs (`GaussianPlane`/`GaussianPoint`/`ExponentialPlane`/`ExponentialPoint`/`TabulatedPlane`/`TabulatedPoint`) and the `SelfSeparation` bound
+- **Targets** (`src/lib.rs:151`): `Target` (19 `with_*`, `from_coords`/`new`/`fixed_from(&State)`/`fixed_at`), `Angle`, `Axis`, `CenteringMode`, `Placement`; skip table via `with_special_bonds(molrs::core::BondDistanceWeights)`
+- **Objective / errors**: `Objective` (the one evaluation entry; `compute_f`/`compute_fg`/`compute_g` are `pub(crate)`), `EvalMode` (`FOnly`/`GradientOnly`/`FAndGradient`), `EvalOutput`; `PackError` (17 variants). No molrs re-exports: `F`, `Element`, `BondDistanceWeights`, `Optimizer`, `OptimizationReport` are named at their molrs home
+- **Optimizer seam** (always on): `OptimizeMode`, `OptimizeSelect`, `TorsionMcOptimizer`, `GenCanPack::with_optimizer`, over molrs's `Optimizer` trait (concrete optimizers and `Potential` stay in molrs; a caller binding `Lbfgs` enables molrs's `ff` itself — molpack has no `ff` feature)
 - **Feature-gated**: `io` → `script::BuildResult`/`Script::build`, `XYZHandler`
 - **Namespaces**: `context` (layout constants, `AtomProps`, `WorkBuffers`, `GeometryKey`), `grow` (`GrowConfig`, `GrowError`, `LatticeConfig`, `TorsionPrior`, `AnglePrior`), `script`. Every other module is private; every public item has one path
 - **No `prelude`** — deleted in the 0.4.0 module refactor (it duplicated the root).
@@ -100,7 +100,7 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - `src/stage.rs` — **the seam**. Depends on `context`, `error`, `handler`, `target`, and re-exports `StageOutcome` from the `outcome` leaf. No `ff`, no algorithm module. `handler` reads `StageOutcome` from `outcome`, not from `stage`.
 - `src/pack/` (`gencan/`, `initial`, `movebad`, `restmol`) and `src/grow/` (`lattice/` a peer inside the family) — **algorithm families**. Each stage is a preset entry via `Pipeline::single`. A family does not call the other's driver. Cross-algorithm hand-off is caller-side (`Pipeline::with_stage` or `GenCanPack::with_restart`). `pack` and `euler` are `pub(crate)`.
 - `src/invariant.rs` — **guard leaf**; depends on `context` only (`PackState`).
-- `src/template.rs` — **pure leaf**; `std` + molrs `Frame` only. Bond graphs are `molrs::Topology`.
+- `src/template.rs` — **pure leaf**; `std` + molrs `Frame` only. Bond graphs are `molrs::core::Topology`.
 - `src/context/` (including `grid` and `geometry`), `src/objective.rs`, `src/eval.rs`, `src/restraint/` — **shared bottom layer**. `PackContext::evaluate` is implemented in `objective`. There is no `constraints` module. `GeometryKey` lives in `geometry.rs`.
 - `src/error.rs` — wraps `grow::GrowError` (`src/grow/error.rs`). `validate_grow_cell` returns `GrowError`; entries map `PackError::Grow`.
 - `src/grow/error.rs`, `src/outcome.rs` — leaves. Lattice-only faults stay variants of `GrowError`.

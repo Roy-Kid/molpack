@@ -38,8 +38,8 @@ class TestVersionedCapsuleGate:
     def test_same_line_frame_resolves(self) -> None:
         import numpy as np
 
-        frame = molrs.store.Frame()
-        block = molrs.store.Block()
+        frame = molrs.core.Frame()
+        block = molrs.core.Block()
         block.insert("x", np.array([0.0, 1.0]))
         block.insert("y", np.array([0.0, 0.0]))
         block.insert("z", np.array([0.0, 0.0]))
@@ -67,8 +67,8 @@ class TestRegionCapsuleGate:
     def _target(self):
         import numpy as np
 
-        frame = molrs.store.Frame()
-        block = molrs.store.Block()
+        frame = molrs.core.Frame()
+        block = molrs.core.Block()
         block.insert("x", np.array([0.0]))
         block.insert("y", np.array([0.0]))
         block.insert("z", np.array([0.0]))
@@ -87,5 +87,5 @@ class TestRegionCapsuleGate:
     def test_same_line_region_resolves(self) -> None:
         import numpy as np
 
-        region = molrs.spatial.Sphere(np.zeros(3), 5.0)
+        region = molrs.core.Sphere(np.zeros(3), 5.0)
         assert self._target().with_restraint(region) is not None

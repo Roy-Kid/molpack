@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 use super::{PackState, Placed, evaluate_unscaled};
 use crate::AtomRestraint;
@@ -125,9 +125,9 @@ fn six_dimers() -> (PackContext, Vec<F>) {
     ctx.sizemin = [0.0; 3];
     ctx.sizemax = [BOX; 3];
 
-    ctx.simbox = molrs::spatial::SimBox::cube(BOX, molrs::op::types::F3::zeros(3), [false; 3])
+    ctx.simbox = molrs::core::SimBox::cube(BOX, molrs::op::F3::zeros(3), [false; 3])
         .expect("cubic packing cell");
-    ctx.grid = molrs::spatial::neighbors::CellGrid::with_dims([2; 3], [false; 3]);
+    ctx.grid = molrs::core::CellGrid::with_dims([2; 3], [false; 3]);
     ctx.resize_cell_arrays();
     ctx.sync_atom_props();
 

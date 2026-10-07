@@ -14,8 +14,8 @@
 //! follow `pub trait X` + N concrete pub structs that `impl X`; user-defined
 //! structs `impl X` the same way. No `Builtin*` prefix, no wrapper, no builder.
 
-use molrs::op::types::F;
-use molrs::spatial::SimBox;
+use molrs::core::SimBox;
+use molrs::op::F;
 
 // ============================================================================
 // Trait
@@ -25,7 +25,7 @@ use molrs::spatial::SimBox;
 ///
 /// Geometry is not described by this trait. A region — a sphere, a box, a
 /// cell, a mesh-bounded solid, a union of spheres, or any `&` / `|` / `~`
-/// composition of them — is a molrs [`Region`](molrs::spatial::region::Region),
+/// composition of them — is a molrs [`Region`](molrs::core::Region),
 /// and the one public geometric restraint is [`RegionRestraint`]: stay inside
 /// that region. [`CellRestraint`] is the same lift over a primitive cell plus
 /// the lattice declaration the packer needs. User extensions `impl

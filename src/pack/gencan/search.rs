@@ -1,6 +1,6 @@
 //! GENCAN loop and the projected-gradient helpers it owns.
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 use super::linesearch::tn_linesearch;
 use super::positive_norm_floor;
@@ -495,7 +495,7 @@ struct NumericControls {
 #[inline]
 fn numeric_controls() -> NumericControls {
     // Packmol calibrates these constants for double precision, which is the
-    // active precision here (`F = molrs::op::types::F = f64`). The `.max(eps)`
+    // active precision here (`F = molrs::op::F = f64`). The `.max(eps)`
     // floors are a defensive lower bound on each finite-difference / "same
     // point" threshold; under f64 they are no-ops (every literal already sits
     // well above `f64::EPSILON`), but they keep the thresholds meaningful if

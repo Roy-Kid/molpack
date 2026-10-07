@@ -5,7 +5,7 @@
 //! `crate::restraint` path.
 
 use crate::AtomRestraint;
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// Packmol kind 2 — quadratic penalty forcing atom inside axis-aligned cube.
 #[derive(Debug, Clone, Copy)]

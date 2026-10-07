@@ -6,7 +6,7 @@
 //! wants force-field-derived weights computes them outside and passes the
 //! numbers in.
 
-use molrs::op::types::F;
+use molrs::op::F;
 use rand::Rng;
 
 use crate::grow::internal::wrap_pi;

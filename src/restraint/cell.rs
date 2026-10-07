@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use molrs::op::types::F;
-use molrs::spatial::SimBox;
-use molrs::spatial::region::Parallelepiped;
+use molrs::core::Parallelepiped;
+use molrs::core::SimBox;
+use molrs::op::F;
 use ndarray::array;
 
 use super::{AtomRestraint, RegionRestraint};

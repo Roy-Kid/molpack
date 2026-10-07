@@ -6,18 +6,20 @@
 //! writing output — stays in Python hands.
 //!
 //! The loader does **not** touch molecule files in Rust. Each
-//! ``structure``'s template is read on the Python side, defaulting to
-//! ``molrs.io.read_frame`` (format from the script's ``filetype`` or the
-//! file name) but pluggable via the ``read_frame`` argument. This keeps the
-//! PyO3 wheel free of ``molrs-io`` and lets users plug in their own loader
-//! (mdtraj, ASE, …) as long as it returns a ``molrs.store.Frame``.
+//! ``structure``'s template is read on the Python side, defaulting to the
+//! ``molrs.io`` reader of its [`StructureFormat`] (the script's ``filetype``,
+//! else the file name: ``molrs.io.read_pdb``, ``read_xyz``, …) but pluggable
+//! via the ``read_frame`` argument. This keeps the PyO3 wheel free of
+//! ``molrs-io`` and lets users plug in their own loader (mdtraj, ASE, …) as
+//! long as it returns a ``molrs.core.Frame``.
 
 use std::path::PathBuf;
 
 use pyo3::exceptions::{PyImportError, PyOSError};
 use pyo3::prelude::*;
+use pyo3::types::PyModule;
 
-use molpack::script::{self, ScriptPlan, StructurePlan};
+use molpack::script::{self, ScriptPlan, StructureFormat, StructurePlan};
 
 use crate::entry::PyGenCanPack;
 use crate::errors::script_error_to_pyerr;
@@ -85,9 +87,10 @@ impl PyScriptJob {
 ///     Callable ``(path: str, filetype: str | None) -> Frame`` used to
 ///     load each ``structure`` template. The returned object only needs
 ///     a ``frame["atoms"]`` block exposing ``x`` / ``y`` / ``z`` and an
-///     ``element`` column. Must be a :class:`molrs.store.Frame` (``molpy.Frame``
-///     is the same class). Defaults to ``molrs.io.read_frame``, which
-///     picks the format from ``filetype`` or the file name.
+///     ``element`` column. Must be a :class:`molrs.core.Frame` (``molpy.Frame``
+///     is the same class). Defaults to the ``molrs.io`` reader of the
+///     format ``filetype`` or the file name names (``read_pdb``,
+///     ``read_xyz``, …).
 ///
 /// Returns
 /// -------
@@ -116,8 +119,8 @@ pub fn load_script(
     let plan: ScriptPlan = script_ast.lower(&base_dir).map_err(script_error_to_pyerr)?;
 
     let loader = match read_frame {
-        Some(cb) => cb,
-        None => default_molrs_loader(py)?,
+        Some(callable) => TemplateLoader::Callable(callable),
+        None => TemplateLoader::Molrs(import_molrs_io(py)?),
     };
 
     let targets: Vec<PyTarget> = plan
@@ -140,17 +143,31 @@ pub fn load_script(
     })
 }
 
-/// Call the user-supplied loader with `(path, filetype)`, then build a
+/// How a template file becomes a frame: the caller's callable, or the
+/// `molrs.io` reader of the file's format.
+enum TemplateLoader<'py> {
+    Callable(Py<PyAny>),
+    Molrs(Bound<'py, PyModule>),
+}
+
+/// Read the structure's template through `loader`, then build a
 /// [`PyTarget`] from the returned frame and stamp on the structure's
 /// restraints / centering / fixed pose.
-fn build_target(
-    py: Python<'_>,
+fn build_target<'py>(
+    py: Python<'py>,
     sp: &StructurePlan,
     filetype: Option<&str>,
-    loader: &Py<PyAny>,
+    loader: &TemplateLoader<'py>,
 ) -> PyResult<PyTarget> {
     let path_str = sp.filepath.to_string_lossy().into_owned();
-    let frame_obj = loader.bind(py).call1((path_str, filetype))?;
+    let frame_obj = match loader {
+        TemplateLoader::Callable(callable) => callable.bind(py).call1((path_str, filetype))?,
+        TemplateLoader::Molrs(io) => {
+            let format =
+                StructureFormat::resolve(&sp.filepath, filetype).map_err(script_error_to_pyerr)?;
+            read_with_molrs(io, format, &path_str)?
+        }
+    };
 
     let target = target_from_frame(&frame_obj, sp.number)?;
     Ok(PyTarget {
@@ -158,15 +175,42 @@ fn build_target(
     })
 }
 
-/// The default loader: ``molrs.io.read_frame(path, format)``.
+/// ``molrs.io``, the default loader's home.
 ///
 /// Failures (e.g. ``molrs`` not installed) surface as :class:`ImportError`
 /// from the script-loading site.
-fn default_molrs_loader(py: Python<'_>) -> PyResult<Py<PyAny>> {
-    let molrs = py.import("molrs").map_err(|e| {
+fn import_molrs_io(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
+    py.import("molrs.io").map_err(|e| {
         PyImportError::new_err(format!(
             "loading template files needs `molcrafts-molrs` (or pass read_frame=...): {e}"
         ))
-    })?;
-    Ok(molrs.getattr("io")?.getattr("read_frame")?.unbind())
+    })
+}
+
+/// Read the first structure of `path` through the ``molrs.io`` reader of
+/// `format` — the Python twin of `StructureFormat::read`.
+fn read_with_molrs<'py>(
+    io: &Bound<'py, PyModule>,
+    format: StructureFormat,
+    path: &str,
+) -> PyResult<Bound<'py, PyAny>> {
+    let reader = match format {
+        StructureFormat::Pdb => "read_pdb",
+        StructureFormat::Xyz => "read_xyz",
+        StructureFormat::Sdf => "read_sdf",
+        StructureFormat::Mol2 => "read_mol2",
+        StructureFormat::Gro => "read_gro",
+        StructureFormat::Cif => "read_cif",
+        StructureFormat::VaspPoscar => "read_vasp_poscar",
+        StructureFormat::Xsf => "read_xsf",
+        StructureFormat::Cube => "read_cube",
+        StructureFormat::AmberInpcrd => "read_amber_inpcrd",
+        StructureFormat::LammpsData => "read_lammps_data",
+        StructureFormat::LammpsDump => {
+            // A dump is a trajectory: its first snapshot is the template.
+            let trajectory = io.getattr("read_lammps_trajectory")?.call1((path,))?;
+            return trajectory.call_method1("read_frame", (0,));
+        }
+    };
+    io.getattr(reader)?.call1((path,))
 }

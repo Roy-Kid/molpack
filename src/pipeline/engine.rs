@@ -17,8 +17,8 @@
 //! [`EngineSetup`] lives here because both its producer (the lifecycle) and
 //! its only consumer ([`StageFactory::stages`]) do: one fact, one home.
 
-use molrs::op::types::F;
-use molrs::spatial::SimBox;
+use molrs::core::SimBox;
+use molrs::op::F;
 
 use crate::PackError;
 use crate::Stage;

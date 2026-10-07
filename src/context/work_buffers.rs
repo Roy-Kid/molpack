@@ -1,7 +1,7 @@
 //! Reusable temporary buffers for objective/gradient and movebad paths.
 
 use super::geometry::GeometryKey;
-use molrs::op::types::F;
+use molrs::op::F;
 
 /// Reusable mutable buffers shared across packing iterations.
 pub struct WorkBuffers {

@@ -4,7 +4,7 @@
 //! Placement and the bad-move heuristic both call this. It calls neither
 //! of them.
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 use crate::Objective;
 use crate::context::PackContext;

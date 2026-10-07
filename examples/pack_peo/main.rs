@@ -28,13 +28,13 @@ use molpack::grow::{GrowConfig, TorsionPrior};
 use molpack::{
     CbmcGrow, GenCanPack, Handler, LatticeGrow, PackContext, PackEngine, State, StepInfo, Target,
 };
-use molrs::op::superpose::centroid;
-use molrs::op::types::F;
+use molrs::core::Block;
+use molrs::core::Frame;
+use molrs::core::Mic;
+use molrs::core::constants::{ANGSTROM3_PER_CM3, AVOGADRO};
+use molrs::op::F;
+use molrs::op::centroid;
 use molrs::op::vec3::{add, cross, dot, norm, scale, sub};
-use molrs::spatial::Mic;
-use molrs::store::Block;
-use molrs::store::Frame;
-use molrs::units::constants::AVOGADRO;
 use ndarray::Array1;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -593,7 +593,7 @@ fn report(
         .frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::Column::as_string)
+        .and_then(molrs::core::Column::as_string)
     {
         let names: Vec<String> = elem.iter().take(na).map(|s| s.to_string()).collect();
         print_closest_scored(&pos[..na], bonds, &names, na);
@@ -667,7 +667,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let template_path = args.get(11);
 
     let frame = match template_path {
-        Some(p) => molrs::io::data::pdb::read_pdb_frame(p)?,
+        Some(p) => molrs::io::read_pdb(p)?,
         None => synthesize_peo(dp),
     };
     let na = frame.get("atoms").and_then(|a| a.nrows()).unwrap_or(0);
@@ -675,11 +675,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let b = frame.get("bonds").expect("template bonds");
         let i = b
             .get("atomi")
-            .and_then(molrs::store::Column::as_uint)
+            .and_then(molrs::core::Column::as_uint)
             .expect("bonds.atomi");
         let j = b
             .get("atomj")
-            .and_then(molrs::store::Column::as_uint)
+            .and_then(molrs::core::Column::as_uint)
             .expect("bonds.atomj");
         i.iter()
             .zip(j.iter())
@@ -689,12 +689,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let m_chain: F = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::Column::as_string)
+        .and_then(molrs::core::Column::as_string)
         .map(|e| {
             e.iter()
                 .filter_map(|s| {
                     use std::str::FromStr;
-                    molrs::system::Element::from_str(s.trim())
+                    molrs::core::Element::from_str(s.trim())
                         .ok()
                         .map(|el| el.atomic_mass() as F)
                 })
@@ -703,11 +703,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(0.0);
     let rg_ideal = (FLORY_R2_PER_M * m_chain / 6.0).sqrt();
     let total_g = n_chains as F * m_chain / AVOGADRO;
-    let l = (total_g / density * 1e24).cbrt();
+    let l = (total_g / density * ANGSTROM3_PER_CM3).cbrt();
     let tmpl_elem: Vec<String> = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::Column::as_string)
+        .and_then(molrs::core::Column::as_string)
         .map(|e| e.iter().map(|s| s.to_string()).collect())
         .unwrap_or_default();
     let tmpl_pos: Vec<[F; 3]> = frame
@@ -734,7 +734,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let h_idx: Vec<usize> = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::store::Column::as_string)
+        .and_then(molrs::core::Column::as_string)
         .map(|e| {
             e.iter()
                 .enumerate()

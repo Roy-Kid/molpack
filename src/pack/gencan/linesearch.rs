@@ -1,6 +1,6 @@
 //! Truncated-Newton line search (`tnls` in Packmol `gencan.f`).
 
-use molrs::op::types::F;
+use molrs::op::F;
 
 use crate::Objective;
 use crate::eval::EvalMode;
