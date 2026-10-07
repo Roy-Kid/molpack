@@ -63,8 +63,6 @@ impl IntraResidual {
     /// target's [`Target::special_bonds`] and return the two class minima
     /// (Å, minimum image).
     ///
-    /// Spec 05 reads `Target.special_bonds` (no longer broadcasts depth 3).
-    ///
     /// A missing template or a zero-edge bond graph is identity exemption
     /// only (`i == j` skipped; every `i != j` scored). [`molrs::core::Topology::from_frame`]
     /// errors `NotFound` and `Validation` omit that target — neither class is

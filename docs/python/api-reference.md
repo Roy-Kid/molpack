@@ -356,8 +356,6 @@ Nested diagnostic on [`State`](#state). Empty class is `+∞`.
 - `.exempted : float` — minimum same-copy pair distance among pairs the
   table exempts (Å).
 
-There are no `min_intra_*` aliases.
-
 ---
 
 ## Chain-growth priors

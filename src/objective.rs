@@ -506,7 +506,7 @@ fn expand_molecules(x: &[F], sys: &mut PackSystem, mode: ExpandMode) -> F {
                 if start == end {
                     continue;
                 }
-                // Value (F / FG): same `.f` call order as the legacy serial loop.
+                // Value (F / FG): the same `.f` call order as the serial loop.
                 if matches!(mode, ExpandMode::F | ExpandMode::FG) {
                     let mut fplus = 0.0;
                     for &irest in &sys_ro.iratom_data[start..end] {
@@ -1326,8 +1326,7 @@ fn fparc_stats(icart: usize, first_jcart: u32, sys: &PackSystem, pbc: &PbcConsta
 /// Project each active molecule's atom Cartesian gradient onto its own 6 DOF
 /// (COM + Euler), writing only its own **disjoint** `g[ilubar..]` / `g[ilugan..]`
 /// slots. Because no slot is summed across molecules and each molecule's
-/// accumulation order matches the legacy serial loop's (same atoms, same axis
-/// order), the result is **bit-identical** whether Phase A iterates with `iter`
+/// accumulation order is fixed (same atoms, same axis order), the result is **bit-identical** whether Phase A iterates with `iter`
 /// or `par_iter` — the only difference between the serial and parallel paths
 /// (see [`project_for_each`]). The dominant cost is `eulerrmat_derivatives`
 /// (trig) per molecule.
@@ -1503,9 +1502,8 @@ pub trait Objective {
     /// overrides it to add the Euler-angle bounds implied by
     /// `constrain_rotation`.
     ///
-    /// Landed in A.6 so `pgencan` no longer needs `&mut PackSystem` for
-    /// anything beyond evaluation — bounds construction is now behind the
-    /// trait too.
+    /// Bounds construction sits behind the trait, so `pgencan` needs
+    /// `&mut PackSystem` for nothing beyond evaluation.
     fn bounds(&self, l: &mut [F], u: &mut [F]) {
         debug_assert_eq!(l.len(), u.len(), "bounds: l/u length mismatch");
         l.fill(-1.0e20);

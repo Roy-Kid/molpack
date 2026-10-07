@@ -172,23 +172,19 @@ fn bits(triple: (F, F, F)) -> (u64, u64, u64) {
     (triple.0.to_bits(), triple.1.to_bits(), triple.2.to_bits())
 }
 
-/// **The parity oracle: the pre-03 unscaled verdict, owned by this test file.**
+/// **The radius-swap oracle, owned by this test file.**
 ///
-/// This is the body of `gencan::phases::evaluate_unscaled` as it stood before
-/// stage-pipeline-03, transcribed verbatim from `src/gencan/phases.rs:33-45`
-/// (captured 2026-09-03 from commit ef87105): swap `radius_ini` into
-/// `radius` through `work.radiuswork`, evaluate `FOnly`, swap back. It reads
-/// neither `scale` nor `scale2`, which is precisely the asymmetry ac-003
-/// exists to remove.
+/// The unscaled verdict written out by hand: swap `radius_ini` into `radius`
+/// through `work.radiuswork`, evaluate `FOnly`, swap back. It touches neither
+/// `scale` nor `scale2`, so on fixtures that run at the default scales it must
+/// agree with [`evaluate_unscaled`] bit for bit.
 ///
-/// **Do not "simplify" this into a call to the production function.** The
-/// implementer deletes the original definition in this same spec, so a helper
-/// that forwarded to the merged `evaluate_unscaled` would make the two ac-004
-/// parity tests compare the implementation with itself and certify nothing.
-/// An oracle has to be a copy that stops moving; the copy is the point. If
-/// this body ever needs to change, the change is a behaviour change and must
-/// be argued for, not applied.
-fn legacy_unscaled(sys: &mut PackSystem, x: &[F]) -> (F, F, F) {
+/// **Do not "simplify" this into a call to the production function.** A
+/// helper that forwarded to `evaluate_unscaled` would make the two oracle
+/// tests compare the implementation with itself and certify nothing. An
+/// oracle has to be an independent copy; if this body ever needs to change,
+/// the change is a behaviour change and must be argued for, not applied.
+fn radius_swap_oracle(sys: &mut PackSystem, x: &[F]) -> (F, F, F) {
     sys.work.radiuswork.copy_from_slice(&sys.radius);
     // `i` is both the argument to the setter and the index into the source
     // array, so this is not a `needless_range_loop`.
@@ -402,17 +398,17 @@ fn evaluate_unscaled_restores_scale_and_radius() {
     );
 }
 
-// ── 7. ac-004: value parity with the pre-move implementation ───────────────
+// ── 7. ac-004: value parity with the radius-swap oracle ─────────────────────
 
 #[test]
-fn evaluate_unscaled_matches_legacy_on_gencan_fixture() {
+fn evaluate_unscaled_matches_the_oracle_on_gencan_fixture() {
     let (mut merged, x) = six_dimers();
     scale_radius(&mut merged, DISCALE);
-    let (mut legacy, _) = six_dimers();
-    scale_radius(&mut legacy, DISCALE);
+    let (mut oracle, _) = six_dimers();
+    scale_radius(&mut oracle, DISCALE);
 
     let got = evaluate_unscaled(&mut merged, &x);
-    let want = legacy_unscaled(&mut legacy, &x);
+    let want = radius_swap_oracle(&mut oracle, &x);
 
     assert_eq!(
         bits(got),
@@ -421,15 +417,15 @@ fn evaluate_unscaled_matches_legacy_on_gencan_fixture() {
     );
     assert_eq!(
         radius_bits(&merged),
-        radius_bits(&legacy),
-        "post-call radius must match the pre-move implementation bit for bit"
+        radius_bits(&oracle),
+        "post-call radius must match the oracle bit for bit"
     );
 }
 
 #[test]
-fn evaluate_unscaled_matches_legacy_on_growth_fixture() {
+fn evaluate_unscaled_matches_the_oracle_on_growth_fixture() {
     let (mut merged, x) = six_dimers();
-    let (mut legacy, _) = six_dimers();
+    let (mut oracle, _) = six_dimers();
     assert_eq!(
         radius_bits(&merged),
         merged
@@ -441,7 +437,7 @@ fn evaluate_unscaled_matches_legacy_on_growth_fixture() {
     );
 
     let got = evaluate_unscaled(&mut merged, &x);
-    let want = legacy_unscaled(&mut legacy, &x);
+    let want = radius_swap_oracle(&mut oracle, &x);
 
     assert_eq!(
         bits(got),
@@ -450,8 +446,8 @@ fn evaluate_unscaled_matches_legacy_on_growth_fixture() {
     );
     assert_eq!(
         radius_bits(&merged),
-        radius_bits(&legacy),
-        "post-call radius must match the pre-move implementation bit for bit"
+        radius_bits(&oracle),
+        "post-call radius must match the oracle bit for bit"
     );
 }
 

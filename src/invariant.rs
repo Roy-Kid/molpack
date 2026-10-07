@@ -94,8 +94,7 @@ impl Layers {
 /// | **L4** | Local overlaps between neighbours | The classic push-off: a short descent on the shared objective removes them. |
 /// | **L5** | Bond lengths and angles | The cheapest of all — the user's force field fixes these in the first steps of minimization. |
 ///
-/// The ladder is prose on [`Stage`](crate::Stage) no longer: it is [`Layers`],
-/// a bit set, and it lives here because [`Invariant::layer`] is its only
+/// The ladder is [`Layers`], a bit set, and it lives here because [`Invariant::layer`] is its only
 /// reader. A stage's own declarations ([`Requires`](crate::Requires) /
 /// [`Guarantees`](crate::Guarantees)) are still about placement shape and
 /// acquire no rung.

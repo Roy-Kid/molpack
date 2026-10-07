@@ -266,9 +266,8 @@ fn sampled_c_n(prior: &TorsionPrior, n_beads: usize, bond: F, n_samples: usize, 
 // builder surface, the `GrowError::{NoBox, TriclinicCell, FixedTarget}`
 // rejections, and the constructive all-grow pack itself.
 //
-// Mixed grow+gencan composition in one call is gone with the monolithic
-// entry (engine-entry-split); the explicit chain over a fixed matrix is
-// covered by `grow_then_gencan_chaining_over_fixed_matrix` below.
+// Grow and GENCAN compose as an explicit chain over a fixed matrix:
+// `grow_then_gencan_chaining_over_fixed_matrix` below.
 
 // ── Section: Tasks 6-7 — restraint hard rejection + callback wiring ─────────
 //
@@ -315,8 +314,7 @@ fn sampled_c_n(prior: &TorsionPrior, n_beads: usize, bond: F, n_samples: usize, 
 // unresolvable, no override). Density is solver-agnostic: it belongs to the
 // shared engine settings, not to `GrowConfig`.
 //
-// Task 9's in-pack Grow+Gencan composition is gone with the monolithic
-// entry (engine-entry-split): the explicit chain over a fixed matrix is
+// Grow and GENCAN compose as an explicit chain over a fixed matrix:
 // `grow_then_gencan_chaining_over_fixed_matrix` below.
 //
 // Task 10, CG half (spec §4a′/§5.5, ac-011): `AnglePrior` makes the bond

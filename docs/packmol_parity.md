@@ -93,9 +93,8 @@ cargo run --release --example pack_mixture --features io
 
 Each prints the same quantities a parity check needs — atom and molecule
 counts against the expanded target specs, and the violation metrics against
-tolerance / precision. The automated batch harness that used to assert them
-was retired with the rest of the end-to-end suites; the measurement system
-that replaces it is being designed.
+tolerance / precision. There is no automated batch harness for them; a
+measurement system for packing quality is being designed.
 
 ### Violation metrics
 

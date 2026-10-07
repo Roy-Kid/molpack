@@ -240,9 +240,7 @@ mod tests {
     use crate::Target;
 
     /// The entry lifecycle is deterministic: same targets, same seed,
-    /// bit-identical positions and verdict. (Bitwise parity against the
-    /// deleted `Molpack` path was proven before its removal —
-    /// engine-entry-split migration record.)
+    /// bit-identical positions and verdict.
     #[test]
     fn gencan_pack_is_deterministic() {
         let coords = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];

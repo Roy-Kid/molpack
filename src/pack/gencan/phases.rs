@@ -1,8 +1,7 @@
 //! The GENCAN outer machinery: per-phase scaffold and per-iteration step.
 //!
-//! Free functions pulled out of the packer main loop (phases A.4.1-A.4.3)
-//! and moved beside the optimizer they drive (engine-entry-split): the
-//! stage owns the phase loop, these own one phase and one iteration.
+//! Free functions beside the optimizer they drive: the stage owns the phase
+//! loop, these own one phase and one iteration.
 //! Step reports use [`super::STAGE_NAME`], the same string the stage reports.
 
 use molrs::op::F;

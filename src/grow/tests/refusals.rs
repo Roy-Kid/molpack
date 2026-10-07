@@ -365,11 +365,6 @@ fn ring_template_is_refused() {
 }
 
 /// The seeded chain's named rejections and composability.
-///
-/// (Bitwise parity of the free chain against the deleted
-/// `CbmcGrow::with_push_off` path was proven by a one-time migration test
-/// before that knob was removed — placement-seeding spec, numerical
-/// contract.)
 #[test]
 fn seeded_run_contract() {
     let grown = CbmcGrow::new(TorsionPrior::Uniform)
@@ -465,11 +460,6 @@ fn lattice_grow_empty_region_is_named() {
         "expected PackError::Grow(LatticeRegionEmpty), got {err:?}"
     );
 }
-
-// Bitwise parity of `CbmcGrow` against the deleted monolithic `Molpack`
-// path — pure grow AND the explicit push-off chain — was proven
-// test-for-test before that surface was removed (engine-entry-split
-// migration record). What stays is determinism on the entry itself:
 
 /// Same seed, same targets: bit-identical placements, for a pure grow and
 /// for the grow → `GencanPack::with_restart` push-off chain.

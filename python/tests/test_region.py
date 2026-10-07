@@ -53,17 +53,6 @@ class TestRegionAttach:
         assert not callable(getattr(sphere, "f", None))
         assert callable(sphere._ffi_regionref_capsule)
 
-    def test_no_molpack_geometry_classes(self):
-        for name in (
-            "StlRegion",
-            "InsideBoxRestraint",
-            "InsideSphereRestraint",
-            "OutsideSphereRestraint",
-            "AbovePlaneRestraint",
-            "BelowPlaneRestraint",
-        ):
-            assert not hasattr(molpack, name), name
-
     def test_non_region_without_f_fg_is_a_typeerror(self):
         with pytest.raises(TypeError, match="expected a restraint"):
             molpack.Target(_one_atom_frame(), 1).with_atom_restraint([0], object())

@@ -3,8 +3,8 @@
 //!
 //! Every entry needs the same answers before any algorithm runs: what box
 //! does the system live in, and which restraints apply to every target.
-//! This machinery moved out of the packer (engine-entry-split) so the entry
-//! lifecycle owns it once — never re-declared per algorithm.
+//! The entry lifecycle owns this machinery once — it is never re-declared
+//! per algorithm.
 
 use std::sync::Arc;
 
@@ -20,17 +20,8 @@ use crate::PackError;
 use crate::Target;
 use crate::restraint::cell::{simbox_from_lengths_angles, simbox_from_matrix};
 
-/// cm → Å; a density-sized box's volume converts by its cube.
-static CM_TO_ANGSTROM: UnitFactor = UnitFactor::new("cm", "angstrom");
-
-/// cm³ → Å³ as the cube of the exact length factor 1e8: `(1e8 · 1e8) · 1e8`
-/// rounds once, to the correctly rounded 1e24. The registry's own
-/// `cm^3` → `angstrom^3` comes out one ulp above it, which would move the
-/// last bit of a density-sized box.
-fn cm3_to_angstrom3() -> F {
-    let f = CM_TO_ANGSTROM.get();
-    f * f * f
-}
+/// cm³ → Å³: a density in g/cm³ sizes a box in Å³.
+static CM3_TO_ANGSTROM3: UnitFactor = UnitFactor::new("cm^3", "angstrom^3");
 
 pub(crate) type PeriodicSpec = ([F; 3], [F; 3], [bool; 3]);
 
@@ -160,10 +151,9 @@ pub(crate) struct ResolvedSpace {
 
 /// Resolve the caller's space declarations against the targets' own.
 ///
-/// Verbatim extraction of the packer's stage-① block (engine-entry-split;
-/// behavior-preserving, guarded by `examples_batch`): density → cubic box
-/// (mass over ALL targets), box/cell exclusivity, restraint-derived
-/// PBC/cell agreement, and the plane-across-periodic-axis rejection.
+/// Density → cubic box (mass over ALL targets), box/cell exclusivity,
+/// restraint-derived PBC/cell agreement, and the plane-across-periodic-axis
+/// rejection.
 pub(crate) fn resolve_pack_space(
     density: Option<F>,
     periodic_box: Option<PeriodicSpec>,
@@ -194,7 +184,7 @@ pub(crate) fn resolve_pack_space(
         // rho in g/cm³ and the masses in g/mol: Avogadro's number turns the
         // molar mass into grams, so the quotient is the volume in cm³, which
         // the unit registry converts to Å³.
-        let l = (total_amu / (rho * AVOGADRO) * cm3_to_angstrom3()).cbrt();
+        let l = (total_amu / (rho * AVOGADRO) * CM3_TO_ANGSTROM3.get()).cbrt();
         Some(([0.0; 3], [l, l, l], [true; 3]))
     } else {
         None
@@ -508,12 +498,12 @@ mod broadcast_tests {
 
 #[cfg(test)]
 mod density_box_tests {
-    use super::cm3_to_angstrom3;
+    use super::CM3_TO_ANGSTROM3;
 
-    /// The cube of the exact cm → Å factor is the correctly rounded 10²⁴,
-    /// the factor a density-sized box has always used.
+    /// The registry's cm³ → Å³ is the correctly rounded 10²⁴, so a
+    /// density-sized box is exact to the last bit.
     #[test]
     fn cm3_to_angstrom3_is_the_correctly_rounded_power_of_ten() {
-        assert_eq!(cm3_to_angstrom3(), 1e24);
+        assert_eq!(CM3_TO_ANGSTROM3.get(), 1e24);
     }
 }

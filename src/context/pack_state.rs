@@ -209,14 +209,8 @@ impl PackState {
 /// which is why the regression golden can pin this triple and be pinning it
 /// for the right reason.
 ///
-/// # A published path is withdrawn here (booked)
-///
-/// This function used to be `pub fn evaluate_unscaled` in
-/// `src/gencan/phases.rs`, reachable as
-/// `molpack::gencan::phases::evaluate_unscaled`. It lives here because the
-/// pipeline layer may not import `gencan/`, and it is `pub(crate)` because
-/// this chain does not pay for a published symbol before its seam lands —
-/// so the old path leaves the public surface.
+/// It lives here because the pipeline layer may not import `gencan/`, and it
+/// is `pub(crate)`: nothing outside the crate needs it.
 pub(crate) fn evaluate_unscaled(sys: &mut PackSystem, x: &[F]) -> (F, F, F) {
     let scale = sys.scale;
     let scale2 = sys.scale2;

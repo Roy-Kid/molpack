@@ -95,6 +95,6 @@ For non-trivial work, prefer:
 
 Build, feature, style, and gate details: `.claude/notes/conventions.md`.
 There is one test tier: `build.test` (in-module unit tests) plus
-`cargo test --doc`. End-to-end packing suites, Packmol regression runs and
-criterion benches were deleted on 2026-09-20 — the packing-quality measurement
-system is being redesigned; do not reintroduce one ad hoc.
+`cargo test --doc`. There are no end-to-end packing suites, Packmol
+regression runs or criterion benches — the packing-quality measurement
+system is being redesigned; do not introduce one ad hoc.

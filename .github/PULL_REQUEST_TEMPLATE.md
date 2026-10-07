@@ -25,12 +25,6 @@ Fixes #
 - [ ] New behaviour has a unit test in the module that owns it
 - [ ] Python tests pass (`cd python && pytest`)
 
-## Breaking changes
-
-<!-- Does this change any public API? If yes, describe what callers need to update. -->
-
-None / <!-- describe -->
-
 ## Notes for reviewer
 
 <!-- Anything that needs special attention or context. -->

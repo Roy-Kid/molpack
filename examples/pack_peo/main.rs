@@ -704,13 +704,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(0.0);
     let rg_ideal = (FLORY_R2_PER_M * m_chain / 6.0).sqrt();
     let total_g = n_chains as F * m_chain / AVOGADRO;
-    // cm³ → Å³ as the cube of the exact cm → Å factor (1e8), which rounds
-    // once to the correctly rounded 1e24; the registry's `cm^3` →
-    // `angstrom^3` is one ulp above it.
-    static CM_TO_ANGSTROM: UnitFactor = UnitFactor::new("cm", "angstrom");
-    let cm_to_angstrom = CM_TO_ANGSTROM.get();
-    let cm3_to_angstrom3 = cm_to_angstrom * cm_to_angstrom * cm_to_angstrom;
-    let l = (total_g / density * cm3_to_angstrom3).cbrt();
+    static CM3_TO_ANGSTROM3: UnitFactor = UnitFactor::new("cm^3", "angstrom^3");
+    let l = (total_g / density * CM3_TO_ANGSTROM3.get()).cbrt();
     let tmpl_elem: Vec<String> = frame
         .get("atoms")
         .and_then(|a| a.get("element"))

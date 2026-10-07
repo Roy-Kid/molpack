@@ -36,17 +36,13 @@ def _chain5():
 
 
 class TestGencanPackSurface:
-    def test_public_surface_is_state_not_pack_result(self):
+    def test_public_surface_is_state_and_restart(self):
         assert hasattr(molpack, "State")
-        assert not hasattr(molpack, "PackResult")
         engine = molpack.GencanPack()
         assert hasattr(engine, "with_restart")
-        assert not hasattr(engine, "seeded_from")
 
     def test_deterministic_under_seed(self):
-        # Same seed, same targets → bitwise-identical positions. (Parity
-        # against the deleted legacy `Molpack` was proven before its
-        # removal — engine-entry-split migration record.)
+        # Same seed, same targets → bitwise-identical positions.
         def pack():
             return (
                 molpack.GencanPack()

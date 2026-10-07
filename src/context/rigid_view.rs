@@ -387,9 +387,6 @@ mod tests {
     /// The view writes the Packmol flat-vector convention: COM of molecule `i` at
     /// `x[3*i .. 3*i+3]`, Euler of molecule `i` at
     /// `x[3*nmol + 3*i .. 3*nmol + 3*i + 3]`.
-    ///
-    /// Ported from `grow::tests::placements_view_layout`, which pinned the same
-    /// contract on the deleted `PlacementsMut`.
     #[test]
     fn rigid_view_layout() {
         let nmol = 3;
@@ -650,10 +647,9 @@ mod tests {
     /// A molecule index outside `0..nmol` is a programming error, not a runtime
     /// condition, and the view must say so.
     ///
-    /// Ported from `grow::tests::placements_view_rejects_bad_len`: the deleted
-    /// `PlacementsMut` could be handed a mis-sized backing slice, while
-    /// `RigidView::fresh` owns its buffer (illegal state unrepresentable), so the
-    /// only reachable length error left is an out-of-range molecule.
+    /// `RigidView::fresh` owns its buffer (a mis-sized backing slice is
+    /// unrepresentable), so the only reachable length error is an
+    /// out-of-range molecule.
     ///
     /// This needs an explicit `i < nmol` check on the accessors. The offset
     /// arithmetic alone does NOT catch it: `set_com(nmol, ..)` lands on

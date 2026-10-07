@@ -52,7 +52,7 @@ fn ffi_err(e: FfiError) -> PyErr {
 /// Clones the handle the capsule carries (two `Rc` bumps) onto the same store,
 /// so reads/writes through the returned handle are visible in the originating
 /// Python frame. The object must expose `_ffi_frameref_capsule()` — i.e. be a
-/// real `molrs.core.Frame` (a plain `dict` is no longer accepted).
+/// real `molrs.core.Frame` (a plain `dict` is refused).
 pub fn frame_from_py(obj: &Bound<'_, PyAny>) -> PyResult<FrameRef> {
     let capsule = capsule_from(obj, "_ffi_frameref_capsule")?;
     // The expected name carries the ABI line of the molrs this wheel embeds
@@ -169,14 +169,12 @@ pub fn check_abi(py: Python<'_>) -> PyResult<()> {
     let token = match molrs.getattr("_ffi_abi_token") {
         Ok(f) => f.call0()?,
         Err(_) => {
-            // Pre-0.14 wheels have no handshake — they are on an older line
-            // by definition (the token and the versioned capsule names were
-            // introduced together).
+            // A molrs without the token cannot be on molpack's line.
             return Err(pyo3::exceptions::PyImportError::new_err(format!(
                 "molpack embeds molrs ABI line {embedded}, but the installed \
-                 molcrafts-molrs predates the ABI handshake (≤0.13). Install \
-                 a matching wheel: pip install 'molcrafts-molrs>={embedded}.0,\
-                 <{next}' / 已安装的 molcrafts-molrs 过旧，请安装 {embedded}.* 版本。",
+                 molcrafts-molrs has no ABI token. Install a matching wheel: \
+                 pip install 'molcrafts-molrs>={embedded}.0,<{next}' / \
+                 已安装的 molcrafts-molrs 与 molpack 不匹配，请安装 {embedded}.* 版本。",
                 next = next_minor(embedded),
             )));
         }

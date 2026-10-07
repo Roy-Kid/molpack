@@ -2,9 +2,8 @@
 //! [`PackSystem`] (counts, per-copy conformers, radii, restraints, fixed
 //! placements, AoS sync, frame constants).
 //!
-//! Moved out of the packer builder (engine-entry-split) so every entry
-//! shares one system construction; callable more than once — chained
-//! entries build one system per stage.
+//! Every entry shares this one system construction; it is callable more
+//! than once — chained entries build one system per stage.
 
 use molrs::core::Element;
 use molrs::op::F;

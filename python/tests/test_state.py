@@ -98,11 +98,6 @@ class TestIntraResidual:
         assert isinstance(intra.scored, float)
         assert isinstance(intra.exempted, float)
 
-    def test_no_min_intra_aliases(self):
-        result = _make_tiny_pack()
-        assert not hasattr(result, "min_intra_scored")
-        assert not hasattr(result, "min_intra_exempt")
-
     def test_bonded_diatomic_scored_is_infinite(self):
         result = TestFrameTopology()._pack(1)
         assert result.intra.scored == math.inf

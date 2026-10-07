@@ -48,8 +48,8 @@ impl PyTarget {
     /// ----------
     /// frame : molrs.core.Frame
     ///     A frame with an ``"atoms"`` block (``x`` / ``y`` / ``z``
-    ///     columns). Resolved zero-copy via its FFI capsule — a plain ``dict``
-    ///     is no longer accepted; build a ``molrs.core.Frame`` first.
+    ///     columns). Resolved zero-copy via its FFI capsule; a plain ``dict``
+    ///     is refused.
     /// count : int
     ///     Number of copies to pack.
     ///
