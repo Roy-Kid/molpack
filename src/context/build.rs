@@ -1,31 +1,31 @@
 //! Stage ② of the entry lifecycle: lower targets into a fully built
-//! [`PackContext`] (counts, per-copy conformers, radii, restraints, fixed
+//! [`PackSystem`] (counts, per-copy conformers, radii, restraints, fixed
 //! placements, AoS sync, frame constants).
 //!
 //! Moved out of the packer builder (engine-entry-split) so every entry
-//! shares one context construction; callable more than once — chained
-//! entries build one context per stage.
+//! shares one system construction; callable more than once — chained
+//! entries build one system per stage.
 
 use molrs::core::Element;
 use molrs::op::F;
 
 use crate::PackError;
-use crate::context::PackContext;
+use crate::context::PackSystem;
 use crate::euler::{compcart, eulerfixed};
 use crate::target::{CenteringMode, Target};
 
-/// The three shared knobs context construction actually consumes.
+/// The three shared knobs system construction actually consumes.
 #[derive(Debug, Clone)]
-pub(crate) struct ContextKnobs {
+pub(crate) struct SystemKnobs {
     pub tolerance: F,
     pub short_tolerance: Option<(F, F)>,
     pub parallel_eval: bool,
 }
 
-/// Everything stage ② produces: the lowered context plus the counts the
-/// later stages need. See [`build_context`].
-pub(crate) struct BuiltContext {
-    pub(crate) sys: PackContext,
+/// Everything stage ② produces: the lowered system plus the counts the
+/// later stages need. See [`build_system`].
+pub(crate) struct BuiltSystem {
+    pub(crate) sys: PackSystem,
     pub(crate) maxmove_per_type: Vec<usize>,
     pub(crate) ntype: usize,
     pub(crate) ntype_with_fixed: usize,
@@ -83,7 +83,7 @@ impl AtomPropsTemplate {
     }
 
     /// Write atom `iatom` of the template onto context slot `icart`.
-    fn stamp(&self, sys: &mut PackContext, icart: usize, iatom: usize) {
+    fn stamp(&self, sys: &mut PackSystem, icart: usize, iatom: usize) {
         sys.radius[icart] = self.radii[iatom];
         sys.radius_ini[icart] = self.radii[iatom];
         sys.fscale[icart] = self.fscale[iatom];
@@ -108,14 +108,14 @@ fn reference_coords(target: &Target) -> &[[F; 3]] {
 }
 
 /// Stage ② of `pack_with_report`: lower targets into a fully built
-/// [`PackContext`] (counts, per-copy conformers, radii, restraints,
+/// [`PackSystem`] (counts, per-copy conformers, radii, restraints,
 /// fixed placements, AoS sync, frame constants). Callable more than once
 /// — the mixed-method composition builds one context for growth and one
 /// for the rigid stage (spec Design §6).
-pub(crate) fn build_context(
-    knobs: &ContextKnobs,
+pub(crate) fn build_system(
+    knobs: &SystemKnobs,
     targets: &[Target],
-) -> Result<BuiltContext, PackError> {
+) -> Result<BuiltSystem, PackError> {
     // Split into free and fixed targets
     let free_targets: Vec<&Target> = targets.iter().filter(|t| t.fixed_at.is_none()).collect();
     let fixed_targets: Vec<&Target> = targets.iter().filter(|t| t.fixed_at.is_some()).collect();
@@ -129,8 +129,8 @@ pub(crate) fn build_context(
     let ntotat_fixed: usize = fixed_targets.iter().map(|t| t.natoms()).sum();
     let ntotat = ntotat_free + ntotat_fixed;
 
-    // Build PackContext
-    let mut sys = PackContext::new(ntotat, ntotmol_free, ntype);
+    // Build PackSystem
+    let mut sys = PackSystem::new(ntotat, ntotmol_free, ntype);
     sys.ntype_with_fixed = ntype_with_fixed;
     sys.nfixedat = ntotat_fixed;
     // comptype is initialized with size ntype; resize to include fixed types
@@ -313,7 +313,7 @@ pub(crate) fn build_context(
     // objective kernels.
     sys.parallel_pair_eval = knobs.parallel_eval;
 
-    Ok(BuiltContext {
+    Ok(BuiltSystem {
         sys,
         maxmove_per_type,
         ntype,
@@ -327,16 +327,16 @@ pub(crate) fn build_context(
 #[cfg(test)]
 mod short_radius_tests {
     //! The short penalty is only meaningful as the tighter of the two radii,
-    //! so context construction refuses a short radius that is not shorter —
+    //! so system construction refuses a short radius that is not shorter —
     //! by target and atom index, never silently.
 
-    use super::{ContextKnobs, build_context};
+    use super::{SystemKnobs, build_system};
     use crate::PackError;
     use crate::Target;
     use molrs::op::F;
 
-    fn knobs() -> ContextKnobs {
-        ContextKnobs {
+    fn knobs() -> SystemKnobs {
+        SystemKnobs {
             tolerance: 4.0,
             short_tolerance: None,
             parallel_eval: false,
@@ -350,7 +350,7 @@ mod short_radius_tests {
     #[test]
     fn a_short_radius_below_the_radius_is_accepted() {
         let target = two_atoms(1).with_radius(2.0).with_short_radius(1.0);
-        assert!(build_context(&knobs(), &[target]).is_ok());
+        assert!(build_system(&knobs(), &[target]).is_ok());
     }
 
     #[test]
@@ -359,7 +359,7 @@ mod short_radius_tests {
             .with_radius(2.0)
             .with_atom_short_radius(&[1], 2.0);
 
-        let err = match build_context(&knobs(), &[target]) {
+        let err = match build_system(&knobs(), &[target]) {
             Err(e) => e,
             Ok(_) => panic!("a short radius equal to the radius must be refused"),
         };
@@ -383,6 +383,6 @@ mod short_radius_tests {
         // Default short radius (half the tolerance) exceeds this radius, but
         // the atom never asked for the short penalty, so nothing is refused.
         let target = two_atoms(1).with_radius(0.1);
-        assert!(build_context(&knobs(), &[target]).is_ok());
+        assert!(build_system(&knobs(), &[target]).is_ok());
     }
 }

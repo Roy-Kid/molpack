@@ -177,7 +177,10 @@ impl State {
     /// Number of atoms in the result.
     #[inline]
     pub fn natoms(&self) -> usize {
-        self.frame.get("atoms").and_then(|b| b.nrows()).unwrap_or(0)
+        self.frame
+            .get("atoms")
+            .and_then(|b| b.n_rows())
+            .unwrap_or(0)
     }
 }
 

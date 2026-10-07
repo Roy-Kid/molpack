@@ -13,7 +13,7 @@
 //! | `IntraResidual`  | [`PyIntraResidual`]  | Nested scored/exempted intra mins  |
 //! | `StepReport`       | [`PyStepReport`]       | Read-only snapshot for callbacks    |
 //! | `StageProgress`      | [`PyStageProgress`]      | Which stage a callback came from   |
-//! | `StepContext`    | [`PyStepContext`]    | Callback-scoped live-context guard |
+//! | `PackSystemView`    | [`PyPackSystemView`]    | Callback-scoped live-system guard |
 //!
 //! Geometric restraints are molrs region objects (`molrs.core.Sphere`, `Cuboid`,
 //! `Parallelepiped`, `HalfSpace`, `Cylinder`, `Ellipsoid`, `Polyhedron`,
@@ -41,7 +41,7 @@ use restraint::{
 };
 
 mod callback;
-use callback::{PyStageProgress, PyStepContext, PyStepReport};
+use callback::{PyPackSystemView, PyStageProgress, PyStepReport};
 
 mod grow;
 
@@ -91,7 +91,7 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyIntraResidual>()?;
     m.add_class::<PyStepReport>()?;
     m.add_class::<PyStageProgress>()?;
-    m.add_class::<PyStepContext>()?;
+    m.add_class::<PyPackSystemView>()?;
 
     m.add_class::<PyScriptJob>()?;
     m.add_function(wrap_pyfunction!(load_script, m)?)?;

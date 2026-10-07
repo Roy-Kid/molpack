@@ -1,6 +1,6 @@
 //! Evaluation mode and the numbers one objective call returns.
 //!
-//! A leaf: the objective implements the call, and the context stores the
+//! A leaf: the objective implements the call, and the system stores the
 //! maxima. This module reaches into neither.
 
 use molrs::op::F;
@@ -21,8 +21,8 @@ pub enum EvalMode {
 pub struct EvalOutput {
     /// Objective value. Zero when the mode did not ask for it.
     pub f_total: F,
-    /// Largest intermolecular contact violation left on the context.
+    /// Largest intermolecular contact violation left on the system.
     pub fdist_max: F,
-    /// Largest restraint violation left on the context.
+    /// Largest restraint violation left on the system.
     pub frest_max: F,
 }

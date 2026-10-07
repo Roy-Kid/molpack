@@ -41,7 +41,7 @@ running to `max_loops`. `with_early_stop(None)` restores Packmol's behaviour.
 
 `with_callback` is a `PackEngine` builder, so it works the same on `CbmcGrow`.
 Use callbacks for progress logs, trajectory snapshots, custom observation, and
-early stop. Callbacks receive an immutable `PackContext` view; they do
+early stop. Callbacks receive an immutable `PackSystem` view; they do
 not mutate engine state.
 
 ## Custom callbacks
@@ -49,13 +49,13 @@ not mutate engine state.
 Implement the `Callback` trait when you need structured events from a run:
 
 ```rust
-use molpack::{Callback, PackContext, StepReport};
+use molpack::{Callback, PackSystem, StepReport};
 
 #[derive(Debug)]
 struct WatchFdist;
 
 impl Callback for WatchFdist {
-    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, _sys: &PackSystem) {
         eprintln!("phase={} loop={} fdist={}", step.phase.phase, step.loop_idx, step.fdist);
     }
 }
@@ -73,18 +73,18 @@ Two further callbacks bracket a whole stage, the way `on_phase_start` /
 
 ```rust
 use molpack::StageProgress;
-use molpack::{Callback, PackContext, StageOutcome, StepReport};
+use molpack::{Callback, PackSystem, StageOutcome, StepReport};
 
 struct WatchStages;
 
 impl Callback for WatchStages {
-    fn on_step(&mut self, _step: &StepReport, _sys: &PackContext) {}
+    fn on_step(&mut self, _step: &StepReport, _sys: &PackSystem) {}
 
     fn on_stage_start(&mut self, stage: &StageProgress) {
         eprintln!("stage {}/{} ({}) starting", stage.index + 1, stage.total, stage.name);
     }
 
-    fn on_stage_end(&mut self, stage: &StageProgress, outcome: &StageOutcome, sys: &PackContext) {
+    fn on_stage_end(&mut self, stage: &StageProgress, outcome: &StageOutcome, sys: &PackSystem) {
         eprintln!(
             "stage {} converged={} degraded={} fdist={} frest={}",
             stage.name, outcome.converged, outcome.degraded, sys.fdist, sys.frest,
@@ -98,7 +98,7 @@ neither; they are the seam a caller that chains stages itself brackets each
 stage with. Note where the numbers come from:
 `StageOutcome` reports only what the stage alone knows (`converged`,
 `degraded`), while the violation maxima `fdist` and `frest` are read off the
-post-stage `PackContext`, so every algorithm is judged by the same objective.
+post-stage `PackSystem`, so every algorithm is judged by the same objective.
 
 See [Extending](../extending.md) for a full custom-callback walkthrough and for
 writing a stage of your own.

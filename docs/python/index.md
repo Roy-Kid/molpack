@@ -23,7 +23,7 @@ water = (
 
 packer = GencanPack().with_tolerance(2.0).with_seed(42)
 result = packer.run([water], max_loops=200)
-print(f"packed {result.frame['atoms'].nrows} atoms")
+print(f"packed {result.frame['atoms'].n_rows} atoms")
 ```
 
 ## Next steps

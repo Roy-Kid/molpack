@@ -14,7 +14,7 @@ use molrs::op::F;
 use molrs::optimize::{Optimizer, set_free_mask};
 
 use crate::Objective;
-use crate::context::PackContext;
+use crate::context::PackSystem;
 use crate::euler::eulerrmat;
 use crate::eval::EvalMode;
 use crate::target::centered_coords;
@@ -132,7 +132,7 @@ pub(crate) fn resolve_bindings<'a>(
 
 /// Run all bound optimizers (all-type phase only for clean COM/Euler indexing).
 pub(crate) fn run_optimizer_bindings(
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     xwork: &[F],
     bindings: &mut [ResolvedBinding<'_>],
 ) {
@@ -217,7 +217,7 @@ struct CopySpan {
 
 #[allow(clippy::too_many_arguments)]
 fn optimize_group(
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     xwork: &[F],
     xcart_snapshot: &[[F; 3]],
     mic: &Mic,

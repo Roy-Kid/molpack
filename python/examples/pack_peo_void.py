@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> None:
         "── PEO through the solvent-accessible void (LatticeGrow inside ~SphereUnion) ──"
     )
     print(
-        f"  frame        : {data.name}  {frame['atoms'].nrows} atoms, {select_polymer(frame).shape[0]} polymer beads"
+        f"  frame        : {data.name}  {frame['atoms'].n_rows} atoms, {select_polymer(frame).shape[0]} polymer beads"
     )
     print(
         f"  scale        : {sigma:g} Å/σ   sphere radius {BEAD_RADIUS_SIGMA * sigma + probe:.2f} Å"
@@ -168,12 +168,12 @@ def main(argv: list[str] | None = None) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     packed = grown.frame
     molrs.io.write_mrec_frame(str(OUT / "pack_peo_void.mrec"), packed)
-    molrs.io.write_lammps_trajectory(
+    molrs.io.write_lammps_dump_trajectory(
         str(OUT / "pack_peo_void.lammpstrj"),
         [packed],
         columns=["id", "element", "mol", "x", "y", "z"],
     )
-    if "bonds" in packed and packed["bonds"].nrows:
+    if "bonds" in packed and packed["bonds"].n_rows:
         molrs.io.write_lammps_dump_local(
             str(OUT / "pack_peo_void.dump.local"), [packed]
         )

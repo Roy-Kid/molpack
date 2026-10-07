@@ -36,7 +36,7 @@ scenes build polymers from CGsmiles units
 (`molrs.io.smiles.SmilesIr.from_fragment(body).to_template()`, given 3D
 coordinates by `molrs.conformer.Conformer`) grown by
 `molrs.builder.Assembler` with `molrs.builder.GrowthPlacer` instead. Writes
-go through molrs (`molrs.io.write_mrec_frame`, `write_lammps_trajectory`,
+go through molrs (`molrs.io.write_mrec_frame`, `write_lammps_dump_trajectory`,
 `write_lammps_dump_local`).
 
 ## Running

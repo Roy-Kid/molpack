@@ -7,13 +7,13 @@
 use molrs::op::F;
 
 use crate::Objective;
-use crate::context::PackContext;
+use crate::context::PackSystem;
 use crate::eval::EvalMode;
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
 
-/// Scoped state override for `restmol`; restores context on drop.
+/// Scoped state override for `restmol`; restores the system on drop.
 struct RestmolScope<'a> {
-    sys: &'a mut PackContext,
+    sys: &'a mut PackSystem,
     itype: usize,
     ntotmol: usize,
     nmols_itype: usize,
@@ -22,7 +22,7 @@ struct RestmolScope<'a> {
 }
 
 impl<'a> RestmolScope<'a> {
-    fn enter(sys: &'a mut PackContext, itype: usize) -> Self {
+    fn enter(sys: &'a mut PackSystem, itype: usize) -> Self {
         let saved = Self {
             ntotmol: sys.ntotmol,
             nmols_itype: sys.nmols[itype],
@@ -46,7 +46,7 @@ impl<'a> RestmolScope<'a> {
         saved
     }
 
-    fn ctx_mut(&mut self) -> &mut PackContext {
+    fn sys_mut(&mut self) -> &mut PackSystem {
         self.sys
     }
 }
@@ -75,7 +75,7 @@ pub fn restmol(
     itype: usize,
     ilubar: usize,
     x: &mut [F],
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     precision: F,
     gencan_maxit: usize,
     solve: bool,
@@ -92,7 +92,7 @@ pub fn restmol(
 
     {
         let mut scope = RestmolScope::enter(sys, itype);
-        let sys = scope.ctx_mut();
+        let sys = scope.sys_mut();
         if !solve {
             sys.evaluate(&xmol, EvalMode::FOnly, None);
         } else {

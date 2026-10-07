@@ -149,12 +149,12 @@ def main(argv: list[str] | None = None) -> None:
     molrs.io.write_mrec_frame(str(OUT / "pack_peo_mesh.mrec"), packed)
     # The frame carries the template's chemistry (mass, res_name, …); the dump
     # is for a viewer, so it gets the `dump custom` line a viewer reads.
-    molrs.io.write_lammps_trajectory(
+    molrs.io.write_lammps_dump_trajectory(
         str(OUT / "pack_peo_mesh.lammpstrj"),
         [packed],
         columns=["id", "element", "mol", "x", "y", "z"],
     )
-    if "bonds" in packed and packed["bonds"].nrows:
+    if "bonds" in packed and packed["bonds"].n_rows:
         molrs.io.write_lammps_dump_local(
             str(OUT / "pack_peo_mesh.dump.local"), [packed]
         )

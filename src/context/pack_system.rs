@@ -23,7 +23,7 @@ pub const ATOM_FLAG_SHORT: u32 = 1 << 1;
 /// instead of `Option<usize>` shrinks each slot from 16 B (unoptimized
 /// `Option<usize>`) to 4 B, which dominates the pair-kernel cache
 /// footprint where these arrays are traversed per atom visit. Valid
-/// indices must satisfy `idx < NONE_IDX`; `PackContext::new` debug-asserts
+/// indices must satisfy `idx < NONE_IDX`; `PackSystem::new` debug-asserts
 /// this for `ntotat` and `ncell_total`.
 pub const NONE_IDX: u32 = u32::MAX;
 
@@ -45,7 +45,7 @@ pub const NONE_IDX: u32 = u32::MAX;
 /// - private padding — u32 (4 bytes) to keep the struct multiple of 8.
 ///
 /// Cold-path fields (`short_radius`, `short_radius_scale`) stay in
-/// separate `Vec<F>`s on `PackContext` so the common "no short radius"
+/// separate `Vec<F>`s on `PackSystem` so the common "no short radius"
 /// workload does not pay to load them.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -74,13 +74,13 @@ const _: () = assert!(
 );
 
 /// Default quadratic-penalty scale (`scale2`) applied when no caller override
-/// is supplied — the packer seeds [`PackContext`] with it, and post-pack
+/// is supplied — the packer seeds [`PackSystem`] with it, and post-pack
 /// validation scores penalties on the same scale.
 pub(crate) const DEFAULT_SCALE2: F = 0.01;
 
 /// Full runtime context for one packing execution.
 /// All arrays are 0-based; Fortran 1-based arrays are shifted by -1.
-pub struct PackContext {
+pub struct PackSystem {
     // ---- Atom Cartesian coordinates (updated every function evaluation) ----
     /// Current Cartesian positions: `xcart[icart]` = `[x, y, z]`. Size: ntotat.
     pub xcart: Vec<[F; 3]>,
@@ -286,7 +286,7 @@ pub struct PackContext {
     ncg: usize,
 }
 
-impl PackContext {
+impl PackSystem {
     /// Allocate and zero-initialize all arrays.
     pub fn new(ntotat: usize, ntotmol: usize, ntype: usize) -> Self {
         let simbox =
@@ -683,7 +683,7 @@ impl PackContext {
 
     /// Forward neighbours of `icell` copied into a caller-owned buffer.
     ///
-    /// The serial pair loops mutate the context while walking the neighbour
+    /// The serial pair loops mutate the system while walking the neighbour
     /// list, so they cannot hold a borrow of it. Copying into a stack array
     /// keeps that allocation-free — the same thing the fixed `[usize; 13]`
     /// table gave for free when it was `Copy`.
@@ -731,8 +731,8 @@ impl PackContext {
 mod atom_props_tests {
     use super::*;
 
-    fn tiny_ctx(ntotat: usize) -> PackContext {
-        let mut sys = PackContext::new(ntotat, ntotat, 1);
+    fn tiny_system(ntotat: usize) -> PackSystem {
+        let mut sys = PackSystem::new(ntotat, ntotat, 1);
         for i in 0..ntotat {
             sys.ibmol[i] = i;
             sys.ibtype[i] = 0;
@@ -754,7 +754,7 @@ mod atom_props_tests {
 
     #[test]
     fn sync_atom_props_populates_mirror_and_flags() {
-        let mut sys = PackContext::new(3, 3, 1);
+        let mut sys = PackSystem::new(3, 3, 1);
         sys.ibmol = vec![10, 20, 30];
         sys.ibtype = vec![1, 2, 3];
         sys.fscale = vec![0.5, 0.25, 0.125];
@@ -781,7 +781,7 @@ mod atom_props_tests {
 
     #[test]
     fn set_radius_keeps_mirror_in_sync() {
-        let mut sys = tiny_ctx(4);
+        let mut sys = tiny_system(4);
         sys.set_radius(2, 7.25);
         assert_eq!(sys.radius[2], 7.25);
         assert_eq!(sys.atom_props[2].radius, 7.25);
@@ -793,7 +793,7 @@ mod atom_props_tests {
 
     #[test]
     fn set_fscale_keeps_mirror_in_sync() {
-        let mut sys = tiny_ctx(4);
+        let mut sys = tiny_system(4);
         sys.set_fscale(1, 0.125);
         assert_eq!(sys.fscale[1], 0.125);
         assert_eq!(sys.atom_props[1].fscale, 0.125);
@@ -802,7 +802,7 @@ mod atom_props_tests {
 
     #[test]
     fn set_fixed_atom_updates_mirror_flag_counter_and_summary() {
-        let mut sys = tiny_ctx(3);
+        let mut sys = tiny_system(3);
         assert!(!sys.any_fixed_atoms);
         assert_eq!(sys.n_fixed_atoms, 0);
 
@@ -830,7 +830,7 @@ mod atom_props_tests {
 
     #[test]
     fn set_use_short_radius_updates_mirror_flag_counter_and_summary() {
-        let mut sys = tiny_ctx(3);
+        let mut sys = tiny_system(3);
         sys.set_use_short_radius(2, true);
         assert!(sys.use_short_radius[2]);
         assert_eq!(sys.atom_props[2].flags & ATOM_FLAG_SHORT, ATOM_FLAG_SHORT);
@@ -847,7 +847,7 @@ mod atom_props_tests {
 
     #[test]
     fn set_fixed_and_short_flags_coexist_on_same_atom() {
-        let mut sys = tiny_ctx(2);
+        let mut sys = tiny_system(2);
         sys.set_fixed_atom(0, true);
         sys.set_use_short_radius(0, true);
         assert_eq!(
@@ -865,7 +865,7 @@ mod atom_props_tests {
 
     #[test]
     fn set_ibmol_and_set_ibtype_keep_mirror_in_sync() {
-        let mut sys = tiny_ctx(3);
+        let mut sys = tiny_system(3);
         sys.set_ibmol(1, 42);
         assert_eq!(sys.ibmol[1], 42);
         assert_eq!(sys.atom_props[1].ibmol, 42);
@@ -888,7 +888,7 @@ mod atom_props_tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "atom_props")]
     fn debug_invariant_catches_direct_fixedatom_write() {
-        let mut sys = tiny_ctx(2);
+        let mut sys = tiny_system(2);
         sys.fixedatom[0] = true; // bypass setter — simulates the bug class
         sys.debug_assert_atom_props_sync();
     }
@@ -897,7 +897,7 @@ mod atom_props_tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "atom_props")]
     fn debug_invariant_catches_direct_fscale_write() {
-        let mut sys = tiny_ctx(2);
+        let mut sys = tiny_system(2);
         sys.fscale[1] = 99.0;
         sys.debug_assert_atom_props_sync();
     }
@@ -908,7 +908,7 @@ mod atom_props_tests {
     /// forgetting to increment/decrement.
     #[test]
     fn counters_match_sync_after_mixed_mutations() {
-        let mut sys = tiny_ctx(10);
+        let mut sys = tiny_system(10);
         for i in [0usize, 3, 7] {
             sys.set_fixed_atom(i, true);
         }
@@ -931,8 +931,8 @@ mod atom_props_tests {
 mod neighbor_table_tests {
     use super::*;
 
-    fn ctx_with_grid(celldim: [u32; 3], pbc: [bool; 3]) -> PackContext {
-        let mut sys = PackContext::new(1, 1, 1);
+    fn ctx_with_grid(celldim: [u32; 3], pbc: [bool; 3]) -> PackSystem {
+        let mut sys = PackSystem::new(1, 1, 1);
         sys.simbox = SimBox::cube(10.0, array![0.0, 0.0, 0.0], pbc).expect("cell");
         sys.grid = CellGrid::with_dims(celldim, pbc);
         sys.resize_cell_arrays();
@@ -1004,7 +1004,7 @@ mod geometry_cache_tests {
 
     use std::sync::Arc;
 
-    use crate::PackContext;
+    use crate::PackSystem;
     use crate::objective::{compute_f, compute_fg};
     use crate::test_fixtures::inside_box;
     use molrs::op::F;
@@ -1013,7 +1013,7 @@ mod geometry_cache_tests {
 
     // ── setup helpers (mirror restraint::geometric::tests::gradient patterns) ──────────────────────
 
-    fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
+    fn setup_cells(sys: &mut PackSystem, cell_n: usize, cell_len: F) {
         let side = cell_len * cell_n as F;
         sys.simbox =
             molrs::core::SimBox::cube(side, molrs::op::F3::zeros(3), [false; 3]).expect("cell");
@@ -1022,8 +1022,8 @@ mod geometry_cache_tests {
     }
 
     /// Three single-atom molecules inside a 5³ box with a pair-overlap setup.
-    fn mixed_system() -> (PackContext, Vec<F>) {
-        let mut sys = PackContext::new(3, 3, 1);
+    fn mixed_system() -> (PackSystem, Vec<F>) {
+        let mut sys = PackSystem::new(3, 3, 1);
         sys.ntype_with_fixed = 1;
         sys.nmols = vec![3];
         sys.natoms = vec![1];
@@ -1055,7 +1055,7 @@ mod geometry_cache_tests {
         (sys, x)
     }
 
-    fn force_cache_miss(sys: &mut PackContext) {
+    fn force_cache_miss(sys: &mut PackSystem) {
         sys.work.cached_geometry = None;
     }
 

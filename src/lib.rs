@@ -22,7 +22,7 @@
 //!   path from a loaded structure to a packed box.
 //! - [`concepts`] — every abstraction defined in one place: `AtomRestraint`,
 //!   the molrs `Region` lift, `Callback`, `Objective`, `Target`, `PackEngine`,
-//!   `PackContext`; the scope equivalence law; the two-scale contract;
+//!   `PackSystem`; the scope equivalence law; the two-scale contract;
 //!   the direction-3 extension pattern.
 //! - [`architecture`] — module map, dependency graph, core-type
 //!   relationships, full `pack()` lifecycle diagram, hot-path
@@ -69,7 +69,7 @@
 //! Every public item has exactly one path. The crate root carries the
 //! vocabulary below; three namespaces carry the rest — [`context`] (the
 //! per-atom layout a custom objective or callback reads off a
-//! [`PackContext`]), [`grow`] (growth configuration and priors) and
+//! [`PackSystem`]), [`grow`] (growth configuration and priors) and
 //! [`script`] (the `.inp` loader). molrs types (`Frame`, `SimBox`, regions,
 //! the [`molrs::optimize::Optimizer`] trait, `F`) are named at their molrs
 //! home; molpack does not re-export them.
@@ -81,7 +81,7 @@
 //! | Stage combinators (Rust-only) | [`Until`], [`OnViolation`], [`Invariant`], [`Layers`], [`Violation`], [`RestraintsSatisfied`] |
 //! | Shared settings + space | [`PackSettings`] |
 //! | Target  | [`Target`], [`CenteringMode`], [`Angle`], [`Axis`], [`Placement`] |
-//! | Run state | [`PackContext`], [`RigidView`] |
+//! | Run state | [`PackSystem`], [`RigidView`] |
 //! | Stage seam (Rust-only) | [`Stage`], [`Requires`], [`Guarantees`], [`StageOutcome`], [`Budget`], [`PackState`], [`Placed`] |
 //! | Per-atom restraints | [`AtomRestraint`], [`RegionRestraint`] (over [`molrs::core::Region`]), [`CellRestraint`] |
 //! | Group restraints | [`Restraint`], [`GroupCtx`], [`GaussianPlane`], [`GaussianPoint`], [`ExponentialPlane`], [`ExponentialPoint`], [`TabulatedPlane`], [`TabulatedPoint`], [`SelfSeparation`] |
@@ -140,8 +140,8 @@ pub use callback::{
     Callback, EarlyStopCallback, LammpsLogCallback, LogLevel, PhaseProgress, PhaseReport,
     ProgressCallback, StageProgress, StepReport,
 };
-pub use context::pack_context::PackContext;
 pub use context::pack_state::{PackState, Placed};
+pub use context::pack_system::PackSystem;
 pub use context::rigid_view::RigidView;
 pub use error::PackError;
 pub use eval::{EvalMode, EvalOutput};

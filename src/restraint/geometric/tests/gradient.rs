@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::AtomRestraint;
-use crate::PackContext;
+use crate::PackSystem;
 use crate::objective::{compute_f, compute_fg, compute_g};
 use crate::restraint::geometric::{
     AbovePlaneRestraint, BelowPlaneRestraint, InsideBoxRestraint, InsideCubeRestraint,
@@ -17,7 +17,7 @@ use molrs::op::F;
 // ── helpers ────────────────────────────────────────────────────────────────
 
 /// Central finite-difference gradient for variable `i`.
-fn finite_diff(x: &[F], sys: &mut PackContext, i: usize, h: F) -> F {
+fn finite_diff(x: &[F], sys: &mut PackSystem, i: usize, h: F) -> F {
     let mut xp = x.to_vec();
     let mut xm = x.to_vec();
     xp[i] += h;
@@ -27,15 +27,15 @@ fn finite_diff(x: &[F], sys: &mut PackContext, i: usize, h: F) -> F {
     (fp - fm) / (2.0 * h)
 }
 
-/// Build a minimal PackContext for `nmol` single-atom molecules.
+/// Build a minimal PackSystem for `nmol` single-atom molecules.
 ///
 /// Also assigns distinct `ibmol[icart]` values so pair-penalty kernels do
 /// not skip atom pairs as "same molecule". The prior version left every
 /// atom at `ibmol=0`, which silently made `gradient_pair_penalty` test
 /// a no-op.
-fn single_atom_system(nmol: usize) -> PackContext {
+fn single_atom_system(nmol: usize) -> PackSystem {
     let ntotat = nmol;
-    let mut sys = PackContext::new(ntotat, nmol, 1);
+    let mut sys = PackSystem::new(ntotat, nmol, 1);
     sys.ntype_with_fixed = 1;
     sys.nmols = vec![nmol];
     sys.natoms = vec![1];
@@ -53,7 +53,7 @@ fn single_atom_system(nmol: usize) -> PackContext {
     sys
 }
 
-fn setup_cells(sys: &mut PackContext, cell_n: usize, cell_len: F) {
+fn setup_cells(sys: &mut PackSystem, cell_n: usize, cell_len: F) {
     let side = cell_len * cell_n as F;
     sys.simbox =
         molrs::core::SimBox::cube(side, molrs::op::F3::zeros(3), [false; 3]).expect("cell");
@@ -462,7 +462,7 @@ fn gradient_outside_ellipsoid_constraint() {
 
 #[test]
 fn gradient_with_rotations() {
-    let mut sys = PackContext::new(4, 2, 1);
+    let mut sys = PackSystem::new(4, 2, 1);
     sys.ntype_with_fixed = 1;
     sys.nmols = vec![2];
     sys.natoms = vec![2];
@@ -519,7 +519,7 @@ fn gradient_with_rotations() {
 
 #[test]
 fn gradient_combined_constraint_and_pairs() {
-    let mut sys = PackContext::new(3, 3, 1);
+    let mut sys = PackSystem::new(3, 3, 1);
     sys.ntype_with_fixed = 1;
     sys.nmols = vec![3];
     sys.natoms = vec![1];
@@ -573,7 +573,7 @@ fn gradient_combined_constraint_and_pairs() {
 
 #[test]
 fn fused_function_and_gradient_matches_separate_evaluation() {
-    let mut sys = PackContext::new(4, 2, 1);
+    let mut sys = PackSystem::new(4, 2, 1);
     sys.ntype_with_fixed = 1;
     sys.nmols = vec![2];
     sys.natoms = vec![2];
@@ -682,7 +682,7 @@ fn self_separation_gradient_matches_finite_difference_through_the_objective() {
 
     let nmol = 3;
     let natoms = 3;
-    let mut sys = PackContext::new(nmol * natoms, nmol, 1);
+    let mut sys = PackSystem::new(nmol * natoms, nmol, 1);
     sys.ntype_with_fixed = 1;
     sys.nmols = vec![nmol];
     sys.natoms = vec![natoms];
@@ -781,7 +781,7 @@ fn an_inactive_species_contributes_no_collective_gradient() {
 // silently reported as a successful pack.
 
 /// Three monatomic copies strung along x at `spacing`, with `SelfSeparation`.
-fn separation_system(spacing: F, d_min: F) -> (PackContext, Vec<F>) {
+fn separation_system(spacing: F, d_min: F) -> (PackSystem, Vec<F>) {
     use crate::SelfSeparation;
 
     let nmol = 3;

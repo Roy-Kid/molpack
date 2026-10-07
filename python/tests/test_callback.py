@@ -42,7 +42,7 @@ class CallLog:
         self.ntotat = ntotat
         self.ntotmol = ntotmol
 
-    def on_step(self, step: molpack.StepReport, ctx: molpack.StepContext) -> None:
+    def on_step(self, step: molpack.StepReport, sys: molpack.PackSystemView) -> None:
         self.steps.append((step.phase, step.loop_idx, step.fdist, step.frest))
 
     def on_finish(self) -> None:
@@ -72,7 +72,7 @@ class TestCallbackHooks:
 
         class Grabber:
             def on_step(
-                self, step: molpack.StepReport, ctx: molpack.StepContext
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
             ) -> None:
                 captured.append(
                     (
@@ -125,7 +125,7 @@ class TestCallbackEarlyStop:
 
         class StopAfterOne:
             def on_step(
-                self, step: molpack.StepReport, ctx: molpack.StepContext
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
             ) -> bool:
                 steps_seen.append(step.loop_idx)
                 return True  # request immediate stop
@@ -155,7 +155,7 @@ class TestGencanEarlyStop:
 
         class Count:
             def on_step(
-                self, step: molpack.StepReport, ctx: molpack.StepContext
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
             ) -> None:
                 seen[step.phase] = seen.get(step.phase, 0) + 1
 
@@ -183,7 +183,7 @@ class TestCallbackErrorPropagation:
     def test_exception_in_on_step_is_reraised(self):
         class Explodes:
             def on_step(
-                self, step: molpack.StepReport, ctx: molpack.StepContext
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
             ) -> None:
                 raise ValueError("boom from callback")
 
@@ -223,15 +223,15 @@ class TestMultipleCallbacks:
         assert len(log1.steps) == len(log2.steps) >= 1
 
 
-class TestStepContext:
+class TestPackSystemView:
     def test_positions_are_owned_copies(self):
         frames: list = []
 
         class Recorder:
             def on_step(
-                self, step: molpack.StepReport, ctx: molpack.StepContext
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
             ) -> None:
-                frames.append((step.loop_idx, ctx.positions))
+                frames.append((step.loop_idx, sys.positions))
 
         target = molpack.Target(_two_water_frame(), count=30).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
@@ -252,11 +252,11 @@ class TestStepContext:
 
         class Stasher:
             def on_step(
-                self, step: molpack.StepReport, ctx: molpack.StepContext
+                self, step: molpack.StepReport, sys: molpack.PackSystemView
             ) -> None:
                 if not stashed:
-                    assert ctx.natoms == 8
-                stashed.append(ctx)
+                    assert sys.natoms == 8
+                stashed.append(sys)
 
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])

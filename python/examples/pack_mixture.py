@@ -50,12 +50,12 @@ def main() -> None:
         )
     OUT.mkdir(parents=True, exist_ok=True)
     molrs.io.write_mrec_frame(str(OUT / "pack_mixture.mrec"), packed)
-    molrs.io.write_lammps_trajectory(
+    molrs.io.write_lammps_dump_trajectory(
         str(OUT / "pack_mixture.lammpstrj"),
         [packed],
         columns=["id", "element", "mol", "x", "y", "z"],
     )
-    if "bonds" in packed and packed["bonds"].nrows:
+    if "bonds" in packed and packed["bonds"].n_rows:
         molrs.io.write_lammps_dump_local(str(OUT / "pack_mixture.dump.local"), [packed])
 
 

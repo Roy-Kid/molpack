@@ -81,7 +81,7 @@ impl StageFactory for LatticeGrow {
                 });
             }
             // Backbone analyzability is part of validation: named rejection
-            // before any context is built.
+            // before any system is built.
             let frame = t.template.as_ref().expect("validate_template checked");
             let tree = crate::grow::tree_from_target(t)
                 .map_err(|source| PackError::Grow { target: i, source })?;

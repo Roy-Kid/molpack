@@ -305,10 +305,11 @@ fn sampled_c_n(prior: &TorsionPrior, n_beads: usize, bond: F, n_samples: usize, 
 //
 // Task 8 (spec §7, ac-005): `with_density(rho)` on the shared engine
 // settings resolves in stage ① to a CUBIC periodic box `[0, L]³` (all axes
-// periodic) with `L = cbrt(total_mass_amu / (N_A · rho) · 1e24)` Å (rho in
-// g/cm³), the total mass summing over ALL targets × their counts. Masses
-// default to element lookup; `Target::with_mass(amu)` overrides the per-copy
-// total (the only route for element-"X" targets). Named errors:
+// periodic) with `L³ = total_mass / (N_A · rho)` cm³, converted to Å³ by the
+// unit registry (masses in g/mol, rho in g/cm³), the total mass summing over
+// ALL targets × their counts. Masses default to element lookup;
+// `Target::with_mass(amu)` overrides the per-copy total (the only route for
+// element-"X" targets). Named errors:
 // `PackError::DensityConflictsWithBox` (density + explicit box/cell) and
 // `PackError::UnknownMass { target }` (density given, a target's mass
 // unresolvable, no override). Density is solver-agnostic: it belongs to the

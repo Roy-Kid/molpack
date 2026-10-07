@@ -50,7 +50,7 @@ const NOT_CARRIED: [&str; 9] = [
 /// # Errors
 /// [`PackError::TemplateColumns`] when two templates carry one column under
 /// different dtypes, so the copies cannot share one column, or when a
-/// template's relation block lacks a 1-D `UInt` endpoint column, so its
+/// template's relation block lacks a 1-D `Uint` endpoint column, so its
 /// copies could not be offset.
 pub(crate) fn assemble_frame(
     targets: &[Target],
@@ -94,7 +94,7 @@ fn topology_frame(
     let mut groups: Vec<(usize, usize)> = Vec::with_capacity(targets.len());
     for (target, &count) in targets.iter().zip(counts) {
         let one = replayed(target_template(target))?;
-        groups.push((one.get(ATOMS).and_then(Block::nrows).unwrap_or(0), count));
+        groups.push((one.get(ATOMS).and_then(Block::n_rows).unwrap_or(0), count));
         parts.push(one.replicate(count).map_err(column_error)?);
     }
     let mol_ids = mol_ids(groups);
@@ -104,8 +104,8 @@ fn topology_frame(
         .into_inner();
     let mut frame = molrs::core::Frame::new();
     for (name, mut block) in blocks {
-        let nrows = block.nrows().unwrap_or(0);
-        insert_front(&mut block, keys::ID, 0, (1..=nrows as Idx).collect())?;
+        let n_rows = block.n_rows().unwrap_or(0);
+        insert_front(&mut block, keys::ID, 0, (1..=n_rows as Idx).collect())?;
         if name == ATOMS {
             insert_front(&mut block, keys::MOL_ID, 1, mol_ids.clone())?;
             block
@@ -128,7 +128,7 @@ fn replayed(template: &molrs::core::Frame) -> Result<molrs::core::Frame, PackErr
     let carried: Vec<&str> = atoms.keys().filter(|k| !NOT_CARRIED.contains(k)).collect();
     let carried = if carried.is_empty() {
         let mut rows = Block::new();
-        rows.resize(atoms.nrows().unwrap_or(0))
+        rows.resize(atoms.n_rows().unwrap_or(0))
             .map_err(column_error)?;
         rows
     } else {
@@ -390,7 +390,7 @@ mod tests {
     fn col_i16(frame: &molrs::core::Frame, block: &str, key: &str) -> Vec<i16> {
         let column = frame.get(block).unwrap().get(key).unwrap();
         match column {
-            Column::Int16(h) => h.array().iter().copied().collect(),
+            Column::I16(h) => h.array().iter().copied().collect(),
             other => panic!("expected i16, got {}", other.dtype()),
         }
     }

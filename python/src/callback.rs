@@ -6,12 +6,12 @@
 //! ```python
 //! class MyHook:
 //!     def on_start(self, ntotat: int, ntotmol: int) -> None: ...
-//!     def on_step(self, step: StepReport, ctx: StepContext) -> bool | None: ...  # True → stop
+//!     def on_step(self, step: StepReport, sys: PackSystemView) -> bool | None: ...  # True → stop
 //!     def on_finish(self) -> None: ...
 //! ```
 //!
-//! `on_step` mirrors the Rust trait's `(step, sys)` pair: `ctx` is a borrow
-//! guard over the live packing context, valid only for the duration of the
+//! `on_step` mirrors the Rust trait's `(step, sys)` pair: `sys` is a borrow
+//! guard over the live packing system, valid only for the duration of the
 //! callback (accessing it afterwards raises `RuntimeError`). Its
 //! `positions` property materialises an owned `(ntotat, 3)` float64 NumPy
 //! array on demand — callbacks that never touch it pay nothing.
@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::errors::stash_err;
-use molpack::PackContext;
+use molpack::PackSystem;
 use molpack::{Callback, StepReport};
 use molrs::op::F;
 use numpy::IntoPyArray;
@@ -163,25 +163,25 @@ impl PyStepReport {
 // because `Callback::should_stop` is `&self` while writes happen via the
 // mutating `on_*` methods.
 
-// PyStepContext — borrow guard over the live `PackContext`, handed to
+// PyPackSystemView — borrow guard over the live `PackSystem`, handed to
 // `on_step` and invalidated the moment the callback returns (spec: FFI
 // stale-handle invalidation). Data properties copy on access, so a stashed
 // guard can never dangle — it only errors.
 
-#[pyclass(name = "StepContext", unsendable)]
-pub struct PyStepContext {
-    sys: std::cell::Cell<Option<*const PackContext>>,
+#[pyclass(name = "PackSystemView", unsendable)]
+pub struct PyPackSystemView {
+    sys: std::cell::Cell<Option<*const PackSystem>>,
 }
 
-impl PyStepContext {
+impl PyPackSystemView {
     fn expired() -> pyo3::PyErr {
         pyo3::exceptions::PyRuntimeError::new_err(
-            "StepContext expired: it is only valid inside the on_step callback \
-             it was passed to — copy what you need (e.g. ctx.positions) there",
+            "PackSystemView expired: it is only valid inside the on_step callback \
+             it was passed to — copy what you need (e.g. sys.positions) there",
         )
     }
 
-    fn live(&self) -> PyResult<&PackContext> {
+    fn live(&self) -> PyResult<&PackSystem> {
         match self.sys.get() {
             // SAFETY: the pointer is set right before the callback and
             // cleared right after it returns, on the same thread; while it
@@ -193,7 +193,7 @@ impl PyStepContext {
 }
 
 #[pymethods]
-impl PyStepContext {
+impl PyPackSystemView {
     /// Owned ``(ntotat, 3)`` float64 array of the live coordinates.
     /// Atoms the growth solver has not placed yet sit at their sentinel.
     #[getter]
@@ -210,10 +210,10 @@ impl PyStepContext {
     fn __repr__(&self) -> String {
         match self.sys.get() {
             Some(_) => format!(
-                "StepContext(natoms={})",
+                "PackSystemView(natoms={})",
                 self.live().map(|s| s.xcart.len()).unwrap_or(0)
             ),
-            None => "StepContext(expired)".to_owned(),
+            None => "PackSystemView(expired)".to_owned(),
         }
     }
 }
@@ -254,7 +254,7 @@ impl Callback for PythonCallback {
         });
     }
 
-    fn on_step(&mut self, step: &StepReport, sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, sys: &PackSystem) {
         let Some(m) = &self.on_step else { return };
         Python::attach(|py| {
             let py_step = match Py::new(py, PyStepReport::from_report(step)) {
@@ -266,8 +266,8 @@ impl Callback for PythonCallback {
             };
             let guard = match Py::new(
                 py,
-                PyStepContext {
-                    sys: std::cell::Cell::new(Some(sys as *const PackContext)),
+                PyPackSystemView {
+                    sys: std::cell::Cell::new(Some(sys as *const PackSystem)),
                 },
             ) {
                 Ok(v) => v,
@@ -291,7 +291,7 @@ impl Callback for PythonCallback {
         });
     }
 
-    fn on_finish(&mut self, _sys: &PackContext) {
+    fn on_finish(&mut self, _sys: &PackSystem) {
         let Some(m) = &self.on_finish else { return };
         Python::attach(|py| {
             if let Err(e) = m.bind(py).call1(()) {

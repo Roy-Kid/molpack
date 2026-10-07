@@ -9,7 +9,7 @@
 //! **grown** into place, one torsion at a time, inside the final box.
 //!
 //! Growth is therefore a *peer* of the GENCAN path, not a component of it:
-//! it consumes the same [`PackContext`](crate::PackContext) (same radii, same
+//! it consumes the same [`PackSystem`](crate::PackSystem) (same radii, same
 //! restraints, same cell), is judged by the same objective, and is selected
 //! by the [`CbmcGrow`](crate::CbmcGrow) entry. It never
 //! calls the GENCAN internals, and the GENCAN path never calls it — the

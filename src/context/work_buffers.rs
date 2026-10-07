@@ -38,7 +38,7 @@ pub struct WorkBuffers {
     pub flash_ind: Vec<usize>,
     /// Histogram bucket buffer reused by flashsort.
     pub flash_l: Vec<usize>,
-    /// Last x-vector whose expanded Cartesian geometry is still resident in `PackContext`.
+    /// Last x-vector whose expanded Cartesian geometry is still resident in `PackSystem`.
     pub cached_x: Vec<F>,
     /// Active-type mask associated with `cached_x`.
     pub cached_comptype: Vec<bool>,

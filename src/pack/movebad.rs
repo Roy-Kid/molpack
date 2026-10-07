@@ -2,7 +2,7 @@
 //! Port of `heuristics.f90` and `flashsort.f90`.
 
 use crate::Objective;
-use crate::context::PackContext;
+use crate::context::PackSystem;
 use crate::eval::EvalMode;
 use crate::pack::gencan::GencanWorkspace;
 use crate::pack::restmol::restmol;
@@ -21,7 +21,7 @@ pub struct MoveBadConfig<'a> {
 /// Port of `movebad` from `heuristics.f90`.
 pub fn movebad(
     x: &mut [F],
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     precision: F,
     cfg: &MoveBadConfig<'_>,
     rng: &mut impl Rng,

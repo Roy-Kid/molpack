@@ -14,7 +14,7 @@ use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
 use crate::AtomRestraint;
-use crate::context::PackContext;
+use crate::context::PackSystem;
 use crate::euler::eulerrmat;
 use crate::grow::config::{GrowConfig, crowding_cap};
 use crate::grow::field::{BlockKind, OverlapField, Probe};
@@ -101,7 +101,7 @@ pub(super) struct Trial {
     pub(super) penalty: F,
 }
 
-/// Per-atom restraint lookup, cloned out of the context once so the round
+/// Per-atom restraint lookup, cloned out of the system once so the round
 /// loop holds no borrow on `sys`. Restraints are **hard** during growth: a
 /// candidate violating any of its atom's restraints is rejected outright,
 /// exactly like a hard-core overlap — which is what makes `frest == 0` a
@@ -113,7 +113,7 @@ pub(super) struct RestraintTable {
 }
 
 impl RestraintTable {
-    pub(super) fn from_context(sys: &PackContext) -> Self {
+    pub(super) fn from_system(sys: &PackSystem) -> Self {
         Self {
             offsets: sys.iratom_offsets.clone(),
             data: sys.iratom_data.clone(),

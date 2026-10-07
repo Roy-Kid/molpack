@@ -12,7 +12,7 @@
 //! ```
 //!
 //! Every test in this file names a fixture built by hand through
-//! `PackContext::new`, in the same style as `pack_context.rs::geometry_cache_tests` and
+//! `PackSystem::new`, in the same style as `pack_system.rs::geometry_cache_tests` and
 //! `restraint::geometric::tests::gradient`, so nothing here depends on the `.inp` front end, on
 //! `initial`, or on a solver driver.
 
@@ -24,7 +24,7 @@ use super::{PackState, Placed, evaluate_unscaled};
 use crate::AtomRestraint;
 use crate::Objective;
 use crate::context::DEFAULT_SCALE2;
-use crate::context::{PackContext, RigidView};
+use crate::context::{PackSystem, RigidView};
 use crate::eval::EvalMode;
 use crate::restraint::geometric::InsideBoxRestraint;
 
@@ -83,7 +83,7 @@ impl Lcg {
 
 /// Six rigid dimers in a 20 Angstrom cubic cell, placed from [`SEED`].
 ///
-/// Returns the context and the flat placement vector `x` (`6 * NMOL` values,
+/// Returns the system and the flat placement vector `x` (`6 * NMOL` values,
 /// COM block then Euler block) that produced its `xcart`: the two are written
 /// through [`RigidView::write_xcart`], so the lab-frame coordinates and the
 /// placement vector describe the same geometry rather than merely coexisting.
@@ -91,45 +91,45 @@ impl Lcg {
 /// On return `radius == radius_ini` (the growth-path state) and
 /// `scale` / `scale2` hold their constructor defaults; the GENCAN-path state
 /// is this fixture plus [`scale_radius`].
-fn six_dimers() -> (PackContext, Vec<F>) {
-    let mut ctx = PackContext::new(NTOTAT, NMOL, 1);
-    ctx.ntype_with_fixed = 1;
-    ctx.nmols = vec![NMOL];
-    ctx.natoms = vec![NAT];
-    ctx.idfirst = vec![0];
-    ctx.comptype = vec![true];
+fn six_dimers() -> (PackSystem, Vec<F>) {
+    let mut sys = PackSystem::new(NTOTAT, NMOL, 1);
+    sys.ntype_with_fixed = 1;
+    sys.nmols = vec![NMOL];
+    sys.natoms = vec![NAT];
+    sys.idfirst = vec![0];
+    sys.comptype = vec![true];
 
     // One reference conformer per copy (`coor` shares `xcart`'s index space):
     // each dimer's two atoms sit on the x axis about their own centre.
-    ctx.coor = (0..NTOTAT)
+    sys.coor = (0..NTOTAT)
         .map(|icart| {
             let sign = if icart % NAT == 0 { -0.5 } else { 0.5 };
             [sign * BOND, 0.0, 0.0]
         })
         .collect();
 
-    ctx.radius = vec![RADIUS; NTOTAT];
-    ctx.radius_ini = vec![RADIUS; NTOTAT];
-    ctx.fscale = vec![1.0; NTOTAT];
-    for (icart, slot) in ctx.ibmol.iter_mut().enumerate() {
+    sys.radius = vec![RADIUS; NTOTAT];
+    sys.radius_ini = vec![RADIUS; NTOTAT];
+    sys.fscale = vec![1.0; NTOTAT];
+    for (icart, slot) in sys.ibmol.iter_mut().enumerate() {
         *slot = icart / NAT;
     }
-    ctx.ibtype.fill(0);
+    sys.ibtype.fill(0);
 
     let box_restraint: Arc<dyn AtomRestraint> =
         Arc::new(InsideBoxRestraint::new([0.0; 3], [BOX; 3]));
-    ctx.restraints = vec![box_restraint];
-    ctx.iratom_offsets = (0..=NTOTAT).collect();
-    ctx.iratom_data = vec![0; NTOTAT];
+    sys.restraints = vec![box_restraint];
+    sys.iratom_offsets = (0..=NTOTAT).collect();
+    sys.iratom_data = vec![0; NTOTAT];
 
-    ctx.sizemin = [0.0; 3];
-    ctx.sizemax = [BOX; 3];
+    sys.sizemin = [0.0; 3];
+    sys.sizemax = [BOX; 3];
 
-    ctx.simbox = molrs::core::SimBox::cube(BOX, molrs::op::F3::zeros(3), [false; 3])
+    sys.simbox = molrs::core::SimBox::cube(BOX, molrs::op::F3::zeros(3), [false; 3])
         .expect("cubic packing cell");
-    ctx.grid = molrs::core::CellGrid::with_dims([2; 3], [false; 3]);
-    ctx.resize_cell_arrays();
-    ctx.sync_atom_props();
+    sys.grid = molrs::core::CellGrid::with_dims([2; 3], [false; 3]);
+    sys.resize_cell_arrays();
+    sys.sync_atom_props();
 
     let mut rng = Lcg::new(SEED);
     let mut view = RigidView::fresh(NMOL);
@@ -149,23 +149,23 @@ fn six_dimers() -> (PackContext, Vec<F>) {
         ];
         view.set_euler(imol, euler);
     }
-    view.write_xcart(&mut ctx);
+    view.write_xcart(&mut sys);
 
     let x = view.as_slice().to_vec();
-    (ctx, x)
+    (sys, x)
 }
 
 /// Put the fixture into the GENCAN-path state: `radius = factor * radius_ini`,
 /// mirrored into `atom_props` through the setter.
-fn scale_radius(ctx: &mut PackContext, factor: F) {
-    let scaled: Vec<F> = ctx.radius_ini.iter().map(|r| r * factor).collect();
+fn scale_radius(sys: &mut PackSystem, factor: F) {
+    let scaled: Vec<F> = sys.radius_ini.iter().map(|r| r * factor).collect();
     for (icart, r) in scaled.into_iter().enumerate() {
-        ctx.set_radius(icart, r);
+        sys.set_radius(icart, r);
     }
 }
 
-fn radius_bits(ctx: &PackContext) -> Vec<u64> {
-    ctx.radius.iter().map(|r| r.to_bits()).collect()
+fn radius_bits(sys: &PackSystem) -> Vec<u64> {
+    sys.radius.iter().map(|r| r.to_bits()).collect()
 }
 
 fn bits(triple: (F, F, F)) -> (u64, u64, u64) {
@@ -188,18 +188,18 @@ fn bits(triple: (F, F, F)) -> (u64, u64, u64) {
 /// An oracle has to be a copy that stops moving; the copy is the point. If
 /// this body ever needs to change, the change is a behaviour change and must
 /// be argued for, not applied.
-fn legacy_unscaled(ctx: &mut PackContext, x: &[F]) -> (F, F, F) {
-    ctx.work.radiuswork.copy_from_slice(&ctx.radius);
+fn legacy_unscaled(sys: &mut PackSystem, x: &[F]) -> (F, F, F) {
+    sys.work.radiuswork.copy_from_slice(&sys.radius);
     // `i` is both the argument to the setter and the index into the source
     // array, so this is not a `needless_range_loop`.
-    for i in 0..ctx.ntotat {
-        ctx.set_radius(i, ctx.radius_ini[i]);
+    for i in 0..sys.ntotat {
+        sys.set_radius(i, sys.radius_ini[i]);
     }
-    let f_total = ctx.evaluate(x, EvalMode::FOnly, None).f_total;
-    let fdist = ctx.fdist;
-    let frest = ctx.frest;
-    for i in 0..ctx.ntotat {
-        ctx.set_radius(i, ctx.work.radiuswork[i]);
+    let f_total = sys.evaluate(x, EvalMode::FOnly, None).f_total;
+    let fdist = sys.fdist;
+    let frest = sys.frest;
+    for i in 0..sys.ntotat {
+        sys.set_radius(i, sys.work.radiuswork[i]);
     }
     (f_total, fdist, frest)
 }
@@ -208,27 +208,27 @@ fn legacy_unscaled(ctx: &mut PackContext, x: &[F]) -> (F, F, F) {
 
 #[test]
 fn new_wraps_the_same_fixedatom_and_comptype_storage() {
-    let (ctx, _) = six_dimers();
-    assert!(!ctx.fixedatom[3], "fixture starts with every atom free");
-    assert!(ctx.comptype[0], "fixture starts with its one type active");
+    let (sys, _) = six_dimers();
+    assert!(!sys.fixedatom[3], "fixture starts with every atom free");
+    assert!(sys.comptype[0], "fixture starts with its one type active");
 
-    let mut state = PackState::new(ctx, NMOL);
+    let mut state = PackState::new(sys, NMOL);
 
-    // `PackState` wraps rather than extracts: a write through `ctx_mut` is
-    // visible through `ctx`, because there is one storage, not a mirror.
-    state.ctx_mut().set_fixed_atom(3, true);
-    state.ctx_mut().comptype[0] = false;
+    // `PackState` wraps rather than extracts: a write through `sys_mut` is
+    // visible through `sys`, because there is one storage, not a mirror.
+    state.sys_mut().set_fixed_atom(3, true);
+    state.sys_mut().comptype[0] = false;
 
     assert!(
-        state.ctx().fixedatom[3],
+        state.sys().fixedatom[3],
         "fixedatom must be the wrapped context's own vector, not a copy"
     );
     assert!(
-        !state.ctx().comptype[0],
+        !state.sys().comptype[0],
         "comptype must be the wrapped context's own vector, not a copy"
     );
     assert_eq!(
-        state.ctx().fixedatom.len(),
+        state.sys().fixedatom.len(),
         NTOTAT,
         "wrapping must not resize the anchored-atom set"
     );
@@ -236,8 +236,8 @@ fn new_wraps_the_same_fixedatom_and_comptype_storage() {
 
 #[test]
 fn new_starts_with_placed_none_and_a_fresh_rigid_view() {
-    let (ctx, _) = six_dimers();
-    let state = PackState::new(ctx, NMOL);
+    let (sys, _) = six_dimers();
+    let state = PackState::new(sys, NMOL);
 
     assert_eq!(
         state.placed(),
@@ -264,8 +264,8 @@ fn new_starts_with_placed_none_and_a_fresh_rigid_view() {
 
 #[test]
 fn set_placed_moves_the_shape_marker_to_all() {
-    let (ctx, _) = six_dimers();
-    let mut state = PackState::new(ctx, NMOL);
+    let (sys, _) = six_dimers();
+    let mut state = PackState::new(sys, NMOL);
 
     state.set_placed(Placed::All);
 
@@ -276,23 +276,23 @@ fn set_placed_moves_the_shape_marker_to_all() {
 
 #[test]
 fn rigid_split_mut_hands_out_two_disjoint_mutable_borrows() {
-    let (ctx, _) = six_dimers();
-    let mut state = PackState::new(ctx, NMOL);
+    let (sys, _) = six_dimers();
+    let mut state = PackState::new(sys, NMOL);
 
     // Both `&mut` must be live at once — this is the whole point of the
     // accessor, and a signature that returns them sequentially would not
     // compile here.
     {
-        let (ctx, rigid) = state.rigid_split_mut();
-        ctx.scale = 0.25;
+        let (sys, rigid) = state.rigid_split_mut();
+        sys.scale = 0.25;
         rigid.set_com(1, [1.5, 2.5, 3.5]);
-        ctx.scale2 = 0.125;
+        sys.scale2 = 0.125;
         rigid.set_euler(1, [0.25, 0.5, 0.75]);
     }
 
-    let (ctx, rigid) = state.into_parts();
-    assert_eq!(ctx.scale.to_bits(), (0.25 as F).to_bits());
-    assert_eq!(ctx.scale2.to_bits(), (0.125 as F).to_bits());
+    let (sys, rigid) = state.into_parts();
+    assert_eq!(sys.scale.to_bits(), (0.25 as F).to_bits());
+    assert_eq!(sys.scale2.to_bits(), (0.125 as F).to_bits());
     assert_eq!(rigid.com(1), [1.5, 2.5, 3.5]);
     assert_eq!(rigid.euler(1), [0.25, 0.5, 0.75]);
 }
@@ -301,18 +301,18 @@ fn rigid_split_mut_hands_out_two_disjoint_mutable_borrows() {
 
 #[test]
 fn into_parts_returns_the_wrapped_context_and_view() {
-    let (ctx, _) = six_dimers();
-    let mut state = PackState::new(ctx, NMOL);
-    state.ctx_mut().frest = 4.25;
+    let (sys, _) = six_dimers();
+    let mut state = PackState::new(sys, NMOL);
+    state.sys_mut().frest = 4.25;
     state.rigid_split_mut().1.set_com(0, [7.0, 8.0, 9.0]);
 
-    let (ctx, rigid) = state.into_parts();
+    let (sys, rigid) = state.into_parts();
 
     assert_eq!(
-        ctx.ntotat, NTOTAT,
-        "into_parts hands back the context that was wrapped"
+        sys.ntotat, NTOTAT,
+        "into_parts hands back the system that was wrapped"
     );
-    assert_eq!(ctx.frest.to_bits(), (4.25 as F).to_bits());
+    assert_eq!(sys.frest.to_bits(), (4.25 as F).to_bits());
     assert_eq!(rigid.nmol(), NMOL);
     assert_eq!(rigid.com(0), [7.0, 8.0, 9.0]);
 }
@@ -321,21 +321,21 @@ fn into_parts_returns_the_wrapped_context_and_view() {
 
 #[test]
 fn invalidate_geometry_cache_forwards_to_the_context() {
-    let (mut ctx, x) = six_dimers();
+    let (mut sys, x) = six_dimers();
     // One evaluation populates the cached Cartesian expansion; the same probe
-    // `pack_context.rs::geometry_cache_tests` uses.
-    let _ = ctx.evaluate(&x, EvalMode::FOnly, None);
+    // `pack_system.rs::geometry_cache_tests` uses.
+    let _ = sys.evaluate(&x, EvalMode::FOnly, None);
     assert!(
-        ctx.work.cached_geometry.is_some(),
+        sys.work.cached_geometry.is_some(),
         "fixture must warm the cache, or the test below is vacuous"
     );
 
-    let mut state = PackState::new(ctx, NMOL);
+    let mut state = PackState::new(sys, NMOL);
     state.invalidate_geometry_cache();
 
     assert!(
-        state.ctx().work.cached_geometry.is_none(),
-        "PackState::invalidate_geometry_cache must reach PackContext's cache"
+        state.sys().work.cached_geometry.is_none(),
+        "PackState::invalidate_geometry_cache must reach PackSystem's cache"
     );
 }
 
@@ -343,34 +343,34 @@ fn invalidate_geometry_cache_forwards_to_the_context() {
 
 #[test]
 fn evaluate_unscaled_restores_scale_and_radius() {
-    let (mut ctx, x) = six_dimers();
-    scale_radius(&mut ctx, DISCALE);
+    let (mut sys, x) = six_dimers();
+    scale_radius(&mut sys, DISCALE);
     // An artificial state: neither field holds its default, so a helper that
     // only *sets* them (and never restores) is caught, and so is one that
     // never sets them at all.
-    ctx.scale = 0.7;
-    ctx.scale2 = 0.05;
+    sys.scale = 0.7;
+    sys.scale2 = 0.05;
 
-    let scale_before = ctx.scale.to_bits();
-    let scale2_before = ctx.scale2.to_bits();
-    let radius_before = radius_bits(&ctx);
+    let scale_before = sys.scale.to_bits();
+    let scale2_before = sys.scale2.to_bits();
+    let radius_before = radius_bits(&sys);
 
-    let got = evaluate_unscaled(&mut ctx, &x);
+    let got = evaluate_unscaled(&mut sys, &x);
 
     // (a) `scale` / `scale2` are restored as symmetrically as `radius`.
     assert_eq!(
-        ctx.scale.to_bits(),
+        sys.scale.to_bits(),
         scale_before,
         "evaluate_unscaled must give the caller's scale back"
     );
     assert_eq!(
-        ctx.scale2.to_bits(),
+        sys.scale2.to_bits(),
         scale2_before,
         "evaluate_unscaled must give the caller's scale2 back"
     );
     // (b) the radius swap does not leak.
     assert_eq!(
-        radius_bits(&ctx),
+        radius_bits(&sys),
         radius_before,
         "evaluate_unscaled must give the caller's radius back"
     );
@@ -457,8 +457,8 @@ fn evaluate_unscaled_matches_legacy_on_growth_fixture() {
 
 #[test]
 fn pack_state_evaluate_unscaled_forwards_to_the_free_function() {
-    let (ctx, x) = six_dimers();
-    let mut state = PackState::new(ctx, NMOL);
+    let (sys, x) = six_dimers();
+    let mut state = PackState::new(sys, NMOL);
     let via_state = state.evaluate_unscaled(&x);
 
     let (mut bare, _) = six_dimers();
@@ -475,7 +475,7 @@ fn pack_state_evaluate_unscaled_forwards_to_the_free_function() {
 
 #[test]
 fn evaluate_unscaled_on_empty_context_returns_zeros() {
-    let mut state = PackState::new(PackContext::new(0, 0, 0), 0);
+    let mut state = PackState::new(PackSystem::new(0, 0, 0), 0);
     assert_eq!(state.rigid().nmol(), 0);
 
     let (f_total, fdist, frest) = state.evaluate_unscaled(&[]);

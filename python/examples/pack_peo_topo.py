@@ -236,12 +236,12 @@ def main(argv: list[str] | None = None) -> None:
     stem = f"pack_peo_topo_{kind}"
     OUT.mkdir(parents=True, exist_ok=True)
     molrs.io.write_mrec_frame(str(OUT / f"{stem}.mrec"), packed)
-    molrs.io.write_lammps_trajectory(
+    molrs.io.write_lammps_dump_trajectory(
         str(OUT / f"{stem}.lammpstrj"),
         [packed],
         columns=["id", "element", "mol", "x", "y", "z"],
     )
-    if "bonds" in packed and packed["bonds"].nrows:
+    if "bonds" in packed and packed["bonds"].n_rows:
         molrs.io.write_lammps_dump_local(str(OUT / f"{stem}.dump.local"), [packed])
     print(f"  wall         : {time.perf_counter() - t0:.3f} s")
 

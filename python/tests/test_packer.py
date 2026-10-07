@@ -239,7 +239,7 @@ class TestGencanPackRun:
     def test_run_returns_frame(self):
         result = self._packer().with_seed(42).run([self._make_target()], max_loops=50)
 
-        assert result.frame["atoms"].nrows == 3
+        assert result.frame["atoms"].n_rows == 3
 
     def test_result_elements_match_positions(self):
         result = self._packer().with_seed(42).run([self._make_target()], max_loops=50)

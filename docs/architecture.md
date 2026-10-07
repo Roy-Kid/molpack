@@ -34,17 +34,17 @@ src/
 ├── restraint/          AtomRestraint trait; region.rs (RegionRestraint over molrs Region),
 │                       cell.rs (CellRestraint), collective/, crate-private geometric/ (.inp kernels)
 ├── callback.rs         Callback trait + LogLevel + 4 built-in callbacks
-├── objective.rs        Objective trait + its PackContext impl over the crate-private
+├── objective.rs        Objective trait + its PackSystem impl over the crate-private
 │                       compute_f / compute_g / compute_fg
 ├── eval.rs             EvalMode / EvalOutput
 ├── outcome.rs          StageOutcome
-├── context/            PackContext = single owner of mutable packing state
-│   ├── pack_context.rs
-│   ├── pack_state.rs   PackState — context + Placed + RigidView; evaluate_unscaled
+├── context/            PackSystem = single owner of mutable packing state
+│   ├── pack_system.rs
+│   ├── pack_state.rs   PackState — system + Placed + RigidView; evaluate_unscaled
 │   ├── rigid_view.rs   RigidView — the 6·ntotmol COM + Euler placement vector
 │   ├── grid.rs         install_resolved_cell / coverage_radmax (diameter)
 │   ├── geometry.rs     GeometryKey — evaluation-cache identity
-│   ├── build.rs        build_context — context + CSR restraint pool from Targets
+│   ├── build.rs        build_system — system + CSR restraint pool from Targets
 │   └── work_buffers.rs scratch arrays (xcart, gxcar, …)
 ├── pack/               rigid-body family (crate-private)
 │   ├── gencan/         GencanPack (gencan_pack.rs), GencanStage, pgencan / gencan / linesearch
@@ -88,7 +88,7 @@ src/
   state        │      initial,   is a peer
     │          │      movebad)   inside)
     ▼          ▼        │         │
-    └───────────► context/PackContext  (+ grid)
+    └───────────► context/PackSystem  (+ grid)
                             │
                             ▼
                        objective.rs   ← hot path
@@ -117,7 +117,7 @@ A **stage** is one interchangeable packing algorithm behind four methods:
 shape of the state the stage needs on the way in and promises on the way
 out, as a `Placed` marker — `Placed::None` (nothing placed yet) or
 `Placed::All` (every free molecule has a placement). `run` receives a
-`PackState`: the run's `PackContext`, plus that marker, plus the rigid
+`PackState`: the run's `PackSystem`, plus that marker, plus the rigid
 placement vector `RigidView` (three centre-of-mass and three Euler values
 per free molecule). `run` returns `Result<StageOutcome, PackError>`: a stage
 that cannot do its job fails with a named error, never by disguising failure
@@ -146,7 +146,7 @@ USER INPUTS                 ─→  Target / PackEngine builders
                             ─→  Pipeline::run()          the lifecycle body
                                 a. broadcast global → per-target restraints
                                 b. snapshot every Target
-                                c. build PackContext, wrap into PackState
+                                c. build PackSystem, wrap into PackState
                                      WorkBuffers (xcart, gxcar, scratch)
                                 d. flatten restraints → CSR pool
                                 e. per stage: Stage::run(state, targets, …)
@@ -167,14 +167,14 @@ OUTPUT                       ─→  State
 
 Three rules govern this flow:
 
-- **`PackContext` owns mutable state.** GENCAN, movebad, callbacks, and the
-  phase driver all take `&mut PackContext` (writers) or `&PackContext`
+- **`PackSystem` owns mutable state.** GENCAN, movebad, callbacks, and the
+  phase driver all take `&mut PackSystem` (writers) or `&PackSystem`
   (observers). No other module owns mutable state across iterations.
 - **`Arc<dyn Restraint>` for polymorphic storage.** Cheap clone (refcount
   bump) into the per-atom CSR pool. The hot path does one virtual call
   per restraint per atom.
 - **GENCAN is decoupled.** `gencan/pgencan` takes `&mut dyn Objective`,
-  not `&mut PackContext`. Synthetic objectives (Rosenbrock, Booth, Beale)
+  not `&mut PackSystem`. Synthetic objectives (Rosenbrock, Booth, Beale)
   exercise the optimizer in isolation.
 
 ### Coordinate layout
@@ -206,7 +206,7 @@ rigid-body stage.
 fn run(targets, max_loops):
     validate inputs (non-empty, valid PBC, atoms > 0)
     broadcast settings.global_restraints → each target's molecule_restraints
-    resolve packing space; build PackContext, wrap into PackState
+    resolve packing space; build PackSystem, wrap into PackState
     check the stage chain (empty list / bad order / a preset's non-default settings)
     callbacks.on_start
     for stage in stages:                  // one stage for a preset's own run
@@ -326,7 +326,7 @@ Each leaf step calls `sys.evaluate(x, mode, &mut g)` — the hot path.
 
 ## Hot path: objective evaluation
 
-`Objective::evaluate` on `PackContext` is invoked O(10³–10⁴) times per `run()`.
+`Objective::evaluate` on `PackSystem` is invoked O(10³–10⁴) times per `run()`.
 Performance lives here.
 
 ```text
@@ -432,11 +432,11 @@ atoms into their regions before pair conflicts matter.
 |---|---|
 | How is one restraint's penalty computed for one atom? | `restraint/*::f` / `*::fg` |
 | Where does `with_global_restraint` broadcast? | `pack_space.rs::broadcast_global_restraints` |
-| Where is the per-atom CSR pool built? | `context/build.rs::build_context` (CSR build loop) |
+| Where is the per-atom CSR pool built? | `context/build.rs::build_system` (CSR build loop) |
 | How are `x` ↔ Cartesian coords expanded? | `objective.rs::expand_molecules`, `euler.rs::eulerrmat` |
 | Where is the pair-overlap kernel? | `objective.rs::accumulate_pair_fg_parallel` |
 | What does the initial pre-fit do? | `pack/initial.rs::initial`, `pack/restmol.rs::restmol` |
 | How is precision-based termination tested? | `pack/gencan/search.rs::converged` (Packmol's `packmolprecision`) |
 | What does `movebad` do? | `pack/movebad.rs::movebad` |
 | How is torsion MC wired in? | `optimizer/torsion_mc.rs::TorsionMcOptimizer::minimize`, called from `optimizer/mod.rs::run_optimizer_bindings` |
-| Where does periodic boundary wrap apply? | `context/pack_context.rs::pbc_distance` |
+| Where does periodic boundary wrap apply? | `context/pack_system.rs::pbc_distance` |

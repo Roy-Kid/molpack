@@ -261,8 +261,8 @@ class StepReport:
     def precision(self) -> float: ...
     def __repr__(self) -> str: ...
 
-class StepContext:
-    """Callback-scoped guard over the live packing context.
+class PackSystemView:
+    """Callback-scoped guard over the live packing system (``on_step``'s ``sys``).
 
     Valid only inside the ``on_step`` call it was passed to; any access
     afterwards raises ``RuntimeError``. Properties copy on access.

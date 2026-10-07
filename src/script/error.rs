@@ -13,7 +13,7 @@ pub enum ScriptError {
     Parse { line: usize, message: String },
     /// An unrecognised keyword appeared where a known one was expected.
     /// Unlike a generic parse error, this carries the offending token and
-    /// the context block so error messages can suggest fixes.
+    /// the system block so error messages can suggest fixes.
     UnknownKeyword {
         line: usize,
         keyword: String,

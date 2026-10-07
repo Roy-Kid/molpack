@@ -1,6 +1,6 @@
 //! Identity of the packing geometry for the evaluation cache.
 //!
-//! The packing context builds a key and the work buffers store it. This
+//! The packing system builds a key and the work buffers store it. This
 //! module imports neither, so those two do not import each other for the key.
 
 use molrs::op::F;

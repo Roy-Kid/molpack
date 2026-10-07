@@ -245,18 +245,18 @@ lifecycle points:
 ```text
 pub trait Callback: Send {
     fn on_start        (&mut self, ntotat, ntotmol)       {}
-    fn on_initialized  (&mut self, sys: &PackContext)     {}
+    fn on_initialized  (&mut self, sys: &PackSystem)     {}
     fn on_step         (&mut self, step: &StepReport, sys);   // required
     fn on_phase_start  (&mut self, phase: &PhaseProgress)  {}
     fn on_phase_end    (&mut self, phase, report: &PhaseReport) {}
     fn on_stage_start  (&mut self, stage: &StageProgress)  {}
     fn on_stage_end    (&mut self, stage: &StageProgress, outcome: &StageOutcome, sys) {}
-    fn on_finish       (&mut self, sys: &PackContext)     {}
+    fn on_finish       (&mut self, sys: &PackSystem)     {}
     fn should_stop     (&self) -> bool                    { false }
 }
 ```
 
-Observer contract: `sys` is always `&PackContext`, never `&mut`.
+Observer contract: `sys` is always `&PackSystem`, never `&mut`.
 Callbacks cannot modify packer state — bind an in-loop optimizer if you need to.
 
 Built-ins: [`LammpsLogCallback`](crate::LammpsLogCallback),
@@ -284,7 +284,7 @@ chains stages itself brackets each stage with. `on_stage_end`'s
 [`StageOutcome`](crate::StageOutcome) deliberately carries no verdict, only
 `converged` and `degraded` (how many times the stage had to relax a
 constructive guarantee). The violation maxima are read off `sys`, the
-post-stage `PackContext` — the same place `on_finish` reads them — so the
+post-stage `PackSystem` — the same place `on_finish` reads them — so the
 shared objective stays the only ruler.
 
 [`Stage::run`](crate::Stage::run) itself is fallible: it returns
@@ -316,7 +316,7 @@ stage actually did. A stage whose [`Requires`](crate::Requires) needs
 callback is notified and before any stage runs.
 
 The run's verdict — `fdist`, `frest`, `converged` — is read off the shared
-[`PackContext`](crate::PackContext) after the *last* stage returns, never
+[`PackSystem`](crate::PackSystem) after the *last* stage returns, never
 assembled from what the individual stages self-reported: the same one-ruler
 rule the Stage explanation describes for a single algorithm, applied across a
 whole chain. `on_stage_start` / `on_stage_end` bracket each stage in turn, so a
@@ -405,7 +405,7 @@ the run's final verdict read a `Repeat` or a `Guarded` exactly as they read
 ## Objective
 
 The [`Objective`](crate::Objective) trait abstracts over
-what GENCAN sees. `PackContext` implements it; synthetic test
+what GENCAN sees. `PackSystem` implements it; synthetic test
 objectives (Rosenbrock / Booth / Beale) can implement it to exercise
 the optimizer in isolation.
 
@@ -422,7 +422,7 @@ pub trait Objective {
 ```
 
 GENCAN (`pgencan`, `gencan`, `tn_ls`, `spg`, `cg`) takes `&mut dyn
-Objective` rather than `&mut PackContext` — the optimizer is
+Objective` rather than `&mut PackSystem` — the optimizer is
 decoupled from the packing state.
 
 ## Target
@@ -491,18 +491,18 @@ let full  = GencanPack::new().run(&[Target::fixed_from(&grown.frame), solvent], 
 Both entries return the same [`State`](crate::State) —
 `frame`, `fdist`, `frest`, `converged`, `degraded`, `intra`.
 
-## PackContext
+## PackSystem
 
-[`PackContext`](crate::PackContext) is the single owner of mutable
+[`PackSystem`](crate::PackSystem) is the single owner of mutable
 packing state — coordinates, cell lists, restraint pool, rotation
 buffers, counters. All optimizer / movebad / callback code paths take
-`&mut PackContext` (for writers) or `&PackContext` (for observers).
+`&mut PackSystem` (for writers) or `&PackSystem` (for observers).
 
 Structure (`molpack/src/context/`):
 
 - `WorkBuffers` — scratch arrays (xcart, gxcar, radiuswork).
 
-Users rarely touch `PackContext` directly — it reaches them through
+Users rarely touch `PackSystem` directly — it reaches them through
 callbacks and the in-loop optimizer bridge. Power users implementing a
 custom `Objective` against synthetic test problems will interact with it.
 
@@ -513,7 +513,7 @@ engine.with_global_restraint(r)
     ≡  for t in targets { t.with_restraint(r.clone()) }
 ```
 
-There is no separate "global-restraint" storage path in `PackContext`.
+There is no separate "global-restraint" storage path in `PackSystem`.
 The broadcast happens inside `PackEngine::run()`; each target receives an
 `Arc::clone` of every global restraint (refcount bump, not a deep
 copy).

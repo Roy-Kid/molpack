@@ -188,7 +188,7 @@ impl Stage for LatticeStage {
         // ── The box and its cell grid ──────────────────────────────────────
         // See `install_resolved_cell` for why `radmax` reads `radius_ini`.
         if let Some((cell, discale)) = &self.cell {
-            let sys = state.ctx_mut();
+            let sys = state.sys_mut();
             crate::context::grid::install_resolved_cell(sys, cell, *discale);
         }
 

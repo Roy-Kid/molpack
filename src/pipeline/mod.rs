@@ -12,7 +12,7 @@ use crate::Invariant;
 use crate::PackError;
 use crate::Target;
 use crate::callback::{Callback, StageProgress};
-use crate::context::build::{ContextKnobs, build_context};
+use crate::context::build::{SystemKnobs, build_system};
 use crate::context::{PackState, Placed};
 use crate::pack_space::{ResolvedSpace, broadcast_global_restraints, resolve_pack_space};
 use crate::stage::{Budget, Stage};
@@ -55,7 +55,7 @@ pub use engine::{EngineSetup, PackEngine, StageFactory};
 ///    [`StageFactory::validate_targets`] — named, before anything is built.
 /// 2. **Resolve space and build state.** Global restraints are broadcast onto
 ///    every target, the density / box / cell declaration resolves into one
-///    packing space, and the [`PackContext`](crate::PackContext) is built and
+///    packing space, and the [`PackSystem`](crate::PackSystem) is built and
 ///    wrapped — with a zeroed rigid placement vector — into one
 ///    [`PackState`].
 /// 3. **Check the chain.** Every factory's stages are resolved, then three
@@ -120,14 +120,14 @@ pub use engine::{EngineSetup, PackEngine, StageFactory};
 /// # The cache boundary
 ///
 /// [`PackState::invalidate_geometry_cache`] is called before **every** stage.
-/// A pipeline reuses one context, so the previous stage's last evaluation
+/// A pipeline reuses one system, so the previous stage's last evaluation
 /// leaves the geometry cache *hot*, while the hand-written `with_restart`
-/// spelling starts from a fresh context and therefore a *cold* one. A hit
+/// spelling starts from a fresh system and therefore a *cold* one. A hit
 /// changes the summation path in `objective.rs` (it skips the cell reset and
 /// the molecule expansion, accumulating the constraint values from `xcart`
 /// instead), so `frest` would no longer agree bit for bit between the two
 /// spellings. Invalidating at each boundary starts both cold; before the
-/// first stage the context is new and the call is a no-op.
+/// first stage the system is new and the call is a no-op.
 ///
 /// # One verdict, one `Placements`
 ///
@@ -315,7 +315,7 @@ impl Pipeline {
     ) -> Result<(bool, usize), PackError> {
         let (tagged, position) = open_bracket(own_callbacks, stages, setup, space, budget);
         *callbacks = tagged;
-        state.ctx_mut().ntotmol = setup.ntotmol_free;
+        state.sys_mut().ntotmol = setup.ntotmol_free;
 
         let total = stages.len();
         let mut degraded = 0usize;
@@ -337,7 +337,7 @@ impl Pipeline {
             state.set_placed(stage.guarantees().placed);
 
             for h in callbacks.iter_mut() {
-                h.on_stage_end(&progress, &outcome, state.ctx());
+                h.on_stage_end(&progress, &outcome, state.sys());
             }
             degraded += outcome.degraded;
             last_converged = outcome.converged;
@@ -358,7 +358,7 @@ impl Pipeline {
     ) -> Result<State, PackError> {
         let (last_converged, degraded) = outcome;
         {
-            let ctx = state.ctx_mut();
+            let ctx = state.sys_mut();
             for itype in 0..setup.ntype_with_fixed {
                 ctx.comptype[itype] = true;
             }
@@ -422,7 +422,7 @@ impl PackEngine for Pipeline {
         // ── 1. Validate ───────────────────────────────────────────────────
         self.validate(targets)?;
 
-        // ── 2. Space, context, state ──────────────────────────────────────
+        // ── 2. Space, system, state ──────────────────────────────────────
         let broadcast = broadcast_global_restraints(targets, &self.settings.global_restraints);
         let targets: &[Target] = &broadcast;
         let space = resolve_pack_space(
@@ -432,12 +432,12 @@ impl PackEngine for Pipeline {
             targets,
         )?;
 
-        let knobs = ContextKnobs {
+        let knobs = SystemKnobs {
             tolerance: self.settings.tolerance(),
             short_tolerance: self.settings.short_tolerance,
             parallel_eval: self.settings.parallel_eval,
         };
-        let built = build_context(&knobs, targets)?;
+        let built = build_system(&knobs, targets)?;
         let mut state = PackState::new(built.sys, built.ntotmol_free);
 
         let setup = EngineSetup {

@@ -75,11 +75,12 @@ target.
 ## Callbacks
 
 Attach any object implementing some subset of `on_start(ntotat, ntotmol)`,
-`on_step(step) -> bool | None`, `on_finish()`:
+`on_step(step, sys) -> bool | None` (`sys` is a `PackSystemView`, valid
+only inside the call), `on_finish()`:
 
 ```python
 class MyCallback:
-    def on_step(self, step, ctx):
+    def on_step(self, step, sys):
         print(f"phase={step.phase} loop={step.loop_idx} fdist={step.fdist:.3f}")
         return None  # or True to request early stop
 
@@ -189,7 +190,7 @@ was attached to:
 class CountSteps:
     def __init__(self):
         self.count = 0
-    def on_step(self, step, ctx):
+    def on_step(self, step, sys):
         self.count += 1
 
 counter = CountSteps()
@@ -204,7 +205,7 @@ receives tells you which stage emitted that step:
 
 ```python
 class WatchStages:
-    def on_step(self, step, ctx):
+    def on_step(self, step, sys):
         s = step.stage
         print(f"stage {s.index + 1}/{s.total} ({s.name}) loop={step.loop_idx}")
         return None

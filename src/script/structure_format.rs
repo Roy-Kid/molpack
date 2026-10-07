@@ -163,7 +163,7 @@ impl StructureFormat {
             StructureFormat::Cube => io::read_cube(path).map_err(|e| e.to_string()),
             StructureFormat::AmberInpcrd => io::read_amber_inpcrd(path).map_err(|e| e.to_string()),
             StructureFormat::LammpsData => io::read_lammps_data(path).map_err(|e| e.to_string()),
-            StructureFormat::LammpsDump => io::read_lammps_trajectory(path)
+            StructureFormat::LammpsDump => io::read_lammps_dump_trajectory(path)
                 .map_err(|e| e.to_string())
                 .and_then(|frames| {
                     frames
@@ -194,7 +194,7 @@ impl StructureFormat {
                 io::write_lammps_data(path, frame).map_err(|e| e.to_string())
             }
             StructureFormat::LammpsDump => {
-                io::write_lammps_trajectory(path, std::slice::from_ref(frame), None)
+                io::write_lammps_dump_trajectory(path, std::slice::from_ref(frame), None)
                     .map_err(|e| e.to_string())
             }
             StructureFormat::Sdf | StructureFormat::AmberInpcrd => {

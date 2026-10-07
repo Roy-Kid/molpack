@@ -1,11 +1,11 @@
 //! [`PackState`]: the state one packing run carries between stages.
 //!
-//! The type **wraps** a [`PackContext`] instead of extracting fields out of
+//! The type **wraps** a [`PackSystem`] instead of extracting fields out of
 //! it. Not one field moves, so the shared objective's read set is unchanged,
-//! `ctx.xcart` stays the single lab-frame home of the coordinates, and
-//! `ctx.fixedatom` / `ctx.comptype` are read through the wrapper rather than
+//! `sys.xcart` stays the single lab-frame home of the coordinates, and
+//! `sys.fixedatom` / `sys.comptype` are read through the wrapper rather than
 //! mirrored — that mirror has drifted before, which is why
-//! `PackContext::debug_assert_atom_props_sync` exists at all. On top of the
+//! `PackSystem::debug_assert_atom_props_sync` exists at all. On top of the
 //! context the state adds the two things a chain of stages needs and the
 //! context has no home for: the placement shape marker [`Placed`] and the
 //! rigid placement slot [`RigidView`].
@@ -27,11 +27,11 @@
 //!
 //! # Why `Debug` is hand-written
 //!
-//! [`PackContext`] holds `Arc<dyn Restraint>` values, a cell grid and a
+//! [`PackSystem`] holds `Arc<dyn Restraint>` values, a cell grid and a
 //! frame, and does not implement `Debug`, so `#[derive(Debug)]` on a struct
-//! that owns one cannot compile. Rather than grow the context with a derive
+//! that owns one cannot compile. Rather than grow the system with a derive
 //! it does not otherwise need, this module writes the impl by hand: it prints
-//! `placed` and the view's molecule count and elides the context.
+//! `placed` and the view's molecule count and elides the system.
 
 use std::fmt;
 
@@ -39,7 +39,7 @@ use molrs::op::F;
 
 use crate::Objective;
 use crate::context::DEFAULT_SCALE2;
-use crate::context::{PackContext, RigidView};
+use crate::context::{PackSystem, RigidView};
 use crate::eval::EvalMode;
 
 /// The shape of the placements a [`PackState`] currently holds.
@@ -51,14 +51,14 @@ use crate::eval::EvalMode;
 pub enum Placed {
     /// Nothing has been placed yet — a freshly wrapped context.
     None,
-    /// Every free molecule the context lays out has a placement.
+    /// Every free molecule the system lays out has a placement.
     All,
 }
 
-/// A [`PackContext`] plus the two pieces of run state a stage chain needs.
+/// A [`PackSystem`] plus the two pieces of run state a stage chain needs.
 pub struct PackState {
     /// The wrapped context — the authority for geometry, radii and restraints.
-    ctx: PackContext,
+    sys: PackSystem,
     /// The shape marker; see [`Placed`].
     placed: Placed,
     /// The rigid degrees of freedom, always present (never an `Option`).
@@ -66,7 +66,7 @@ pub struct PackState {
 }
 
 impl fmt::Debug for PackState {
-    /// Prints the marker and the view's molecule count; the context is
+    /// Prints the marker and the view's molecule count; the system is
     /// elided because it does not implement `Debug` (see the module docs).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PackState")
@@ -77,24 +77,24 @@ impl fmt::Debug for PackState {
 }
 
 impl PackState {
-    /// Wrap `ctx` into a fresh run state for `nmol` free molecules: a zeroed
+    /// Wrap `sys` into a fresh run state for `nmol` free molecules: a zeroed
     /// [`RigidView`] in the slot and [`Placed::None`] as the marker.
-    pub fn new(ctx: PackContext, nmol: usize) -> Self {
+    pub fn new(sys: PackSystem, nmol: usize) -> Self {
         Self {
-            ctx,
+            sys,
             placed: Placed::None,
             rigid: RigidView::fresh(nmol),
         }
     }
 
-    /// The wrapped context.
-    pub fn ctx(&self) -> &PackContext {
-        &self.ctx
+    /// The wrapped packing system.
+    pub fn sys(&self) -> &PackSystem {
+        &self.sys
     }
 
-    /// The wrapped context, mutably.
-    pub fn ctx_mut(&mut self) -> &mut PackContext {
-        &mut self.ctx
+    /// The wrapped packing system, mutably.
+    pub fn sys_mut(&mut self) -> &mut PackSystem {
+        &mut self.sys
     }
 
     /// The current placement shape marker.
@@ -115,33 +115,33 @@ impl PackState {
     /// Context and view as two disjoint mutable borrows, for the many
     /// operations that write placements while reading or updating the
     /// context (`write_xcart`, `capture_from_xcart`, a stage's inner loop).
-    pub fn rigid_split_mut(&mut self) -> (&mut PackContext, &mut RigidView) {
-        (&mut self.ctx, &mut self.rigid)
+    pub fn rigid_split_mut(&mut self) -> (&mut PackSystem, &mut RigidView) {
+        (&mut self.sys, &mut self.rigid)
     }
 
     /// Give the two owned parts back, consuming the state.
-    pub fn into_parts(self) -> (PackContext, RigidView) {
-        (self.ctx, self.rigid)
+    pub fn into_parts(self) -> (PackSystem, RigidView) {
+        (self.sys, self.rigid)
     }
 
-    /// Drop the context's cached Cartesian expansion.
+    /// Drop the system's cached Cartesian expansion.
     ///
-    /// A forward to [`PackContext::invalidate_geometry_cache`], not a second
+    /// A forward to [`PackSystem::invalidate_geometry_cache`], not a second
     /// implementation: the cache and its invalidation semantics belong to the
     /// context. It sits here because the caller is a stage boundary, which
     /// holds the state and not the bare context.
     pub fn invalidate_geometry_cache(&mut self) {
-        self.ctx.invalidate_geometry_cache();
+        self.sys.invalidate_geometry_cache();
     }
 
     /// Evaluate the shared objective once at unscaled radii.
     ///
     /// A thin forward to the free `evaluate_unscaled` below (crate-private,
     /// so this is code font and not a link) — one body, two
-    /// spellings, so a caller holding a `&mut PackContext` and a caller
+    /// spellings, so a caller holding a `&mut PackSystem` and a caller
     /// holding a `&mut PackState` cannot disagree about the verdict.
     pub fn evaluate_unscaled(&mut self, x: &[F]) -> (F, F, F) {
-        evaluate_unscaled(&mut self.ctx, x)
+        evaluate_unscaled(&mut self.sys, x)
     }
 }
 
@@ -151,9 +151,9 @@ impl PackState {
 /// Returns `(f_total, fdist, frest)` from that evaluation — the triple the
 /// GENCAN main loop feeds to `flast` / `fimp` / callback `StepReport`, and the
 /// one both growth drivers turn into their `StageOutcome`. On return
-/// `ctx.fdist` / `ctx.frest` / `ctx.fdist_atom` / `ctx.frest_atom` still
+/// `sys.fdist` / `sys.frest` / `sys.fdist_atom` / `sys.frest_atom` still
 /// describe this unscaled evaluation — that radius-dependent inner state is
-/// what a caller asks for — while `ctx.radius`, `ctx.scale` and `ctx.scale2`
+/// what a caller asks for — while `sys.radius`, `sys.scale` and `sys.scale2`
 /// hold exactly the values the caller had on entry.
 ///
 /// # Order of operations
@@ -168,7 +168,7 @@ impl PackState {
 ///
 /// # Why both groups are restored
 ///
-/// `scale` and `scale2` are `pub` fields of [`PackContext`], which the crate
+/// `scale` and `scale2` are `pub` fields of [`PackSystem`], which the crate
 /// root re-exports, so a caller may legitimately hold values of its own in
 /// them. The contract above is that this function gives the caller's values
 /// back; restoring `radius` but not the scale pair would make that promise
@@ -179,7 +179,7 @@ impl PackState {
 ///
 /// The crate writes `scale` / `scale2` in exactly three places, and all three
 /// write the constructor defaults (`1.0` and `DEFAULT_SCALE2` == `0.01`, the
-/// struct literal at `src/context/pack_context.rs:370-371`):
+/// struct literal at `src/context/pack_system.rs:370-371`):
 ///
 /// * `src/initial.rs:338-339`, the port of Packmol `initial.f90:50-51`;
 /// * the final-verdict site of the continuum growth driver
@@ -217,25 +217,25 @@ impl PackState {
 /// pipeline layer may not import `gencan/`, and it is `pub(crate)` because
 /// this chain does not pay for a published symbol before its seam lands —
 /// so the old path leaves the public surface.
-pub(crate) fn evaluate_unscaled(ctx: &mut PackContext, x: &[F]) -> (F, F, F) {
-    let scale = ctx.scale;
-    let scale2 = ctx.scale2;
-    ctx.scale = 1.0;
-    ctx.scale2 = DEFAULT_SCALE2;
+pub(crate) fn evaluate_unscaled(sys: &mut PackSystem, x: &[F]) -> (F, F, F) {
+    let scale = sys.scale;
+    let scale2 = sys.scale2;
+    sys.scale = 1.0;
+    sys.scale2 = DEFAULT_SCALE2;
 
-    ctx.work.radiuswork.copy_from_slice(&ctx.radius);
-    for i in 0..ctx.ntotat {
-        ctx.set_radius(i, ctx.radius_ini[i]);
+    sys.work.radiuswork.copy_from_slice(&sys.radius);
+    for i in 0..sys.ntotat {
+        sys.set_radius(i, sys.radius_ini[i]);
     }
-    let f_total = ctx.evaluate(x, EvalMode::FOnly, None).f_total;
-    let fdist = ctx.fdist;
-    let frest = ctx.frest;
-    for i in 0..ctx.ntotat {
-        ctx.set_radius(i, ctx.work.radiuswork[i]);
+    let f_total = sys.evaluate(x, EvalMode::FOnly, None).f_total;
+    let fdist = sys.fdist;
+    let frest = sys.frest;
+    for i in 0..sys.ntotat {
+        sys.set_radius(i, sys.work.radiuswork[i]);
     }
 
-    ctx.scale = scale;
-    ctx.scale2 = scale2;
+    sys.scale = scale;
+    sys.scale2 = scale2;
     (f_total, fdist, frest)
 }
 

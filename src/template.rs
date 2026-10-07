@@ -78,7 +78,7 @@ mod rotatable_tests {
             let bonds = with_double
                 .get_mut("bonds")
                 .expect("chain frame has a bonds block");
-            let n = bonds.nrows().expect("bond rows");
+            let n = bonds.n_rows().expect("bond rows");
             let mut classes = vec![1u32; n];
             classes[2] = 2; // one stated double bond
             bonds

@@ -413,6 +413,17 @@ step.precision
 step.stage             # StageProgress — which packing algorithm emitted this step
 ```
 
+## `PackSystemView`
+
+The second argument of `Callback.on_step`: a guard over the live packing
+system, valid only inside that call (any access afterwards raises
+`RuntimeError`). Properties copy on access.
+
+```python
+sys.positions          # (natoms, 3) float64 array; unplaced atoms sit at their sentinel
+sys.natoms
+```
+
 ### `StageProgress`
 
 Read-only triple identifying the stage a step belongs to. Load-bearing
@@ -602,7 +613,7 @@ class Restraint(Protocol):
 ```python
 class Callback(Protocol):
     def on_start(self, ntotat: int, ntotmol: int) -> None: ...
-    def on_step(self, step: StepReport) -> bool | None: ...   # True → stop
+    def on_step(self, step: StepReport, sys: PackSystemView) -> bool | None: ...   # True → stop
     def on_finish(self) -> None: ...
 ```
 

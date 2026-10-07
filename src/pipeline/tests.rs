@@ -31,8 +31,8 @@ use crate::callback::{PhaseProgress, StageProgress};
 use crate::grow::TorsionPrior;
 use crate::test_fixtures::{chain_frame, inside_box};
 use crate::{
-    Budget, Callback, CbmcGrow, GencanPack, Guarantees, Invariant, Layers, OnViolation,
-    PackContext, PackEngine, PackError, PackSettings, PackState, Pipeline, Placed, Requires,
+    Budget, Callback, CbmcGrow, GencanPack, Guarantees, Invariant, Layers, OnViolation, PackEngine,
+    PackError, PackSettings, PackState, PackSystem, Pipeline, Placed, Requires,
     RestraintsSatisfied, Stage, StageFactory, StageOutcome, State, StepReport, Target, Until,
     Violation,
 };
@@ -198,7 +198,7 @@ impl Callback for Observer {
         self.tally.lock().expect("observer mutex").starts += 1;
     }
 
-    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, _sys: &PackSystem) {
         self.tally.lock().expect("observer mutex").steps.push((
             step.stage.index,
             step.stage.total,
@@ -214,7 +214,7 @@ impl Callback for Observer {
             .push((stage.index, stage.total, stage.name));
     }
 
-    fn on_stage_end(&mut self, stage: &StageProgress, _outcome: &StageOutcome, _sys: &PackContext) {
+    fn on_stage_end(&mut self, stage: &StageProgress, _outcome: &StageOutcome, _sys: &PackSystem) {
         self.tally.lock().expect("observer mutex").stage_ends.push((
             stage.index,
             stage.total,
@@ -222,7 +222,7 @@ impl Callback for Observer {
         ));
     }
 
-    fn on_finish(&mut self, _sys: &PackContext) {
+    fn on_finish(&mut self, _sys: &PackSystem) {
         self.tally.lock().expect("observer mutex").finishes += 1;
     }
 
@@ -740,7 +740,7 @@ struct StopOnFirstSignal {
 }
 
 impl Callback for StopOnFirstSignal {
-    fn on_step(&mut self, _step: &StepReport, _sys: &PackContext) {}
+    fn on_step(&mut self, _step: &StepReport, _sys: &PackSystem) {}
 
     fn on_phase_start(&mut self, _phase: &PhaseProgress) {
         self.signals.fetch_add(1, Ordering::Relaxed);

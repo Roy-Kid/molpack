@@ -36,8 +36,8 @@ from molpack import (
     CbmcGrow,
     GencanPack,
     LatticeGrow,
+    PackSystemView,
     Pipeline,
-    StepContext,
     StepReport,
     Target,
     TorsionPrior,
@@ -120,7 +120,7 @@ class _Counter:
     def on_start(self, ntotat: int, ntotmol: int) -> None:
         self.starts += 1
 
-    def on_step(self, step: StepReport, ctx: StepContext) -> None:
+    def on_step(self, step: StepReport, sys: PackSystemView) -> None:
         self.steps += 1
 
     def on_finish(self) -> None:
@@ -133,7 +133,7 @@ class _StageRecorder:
     def __init__(self) -> None:
         self.seen: list[tuple[int, int, str]] = []
 
-    def on_step(self, step: StepReport, ctx: StepContext) -> None:
+    def on_step(self, step: StepReport, sys: PackSystemView) -> None:
         self.seen.append((step.stage.index, step.stage.total, step.stage.name))
 
 

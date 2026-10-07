@@ -79,7 +79,7 @@ packer = GencanPack().with_tolerance(2.0).with_seed(42)
 result = packer.run([water], max_loops=200)
 frame = result.frame
 
-print(frame["atoms"].nrows)
+print(frame["atoms"].n_rows)
 ```
 
 `GencanPack` is the rigid-body entry — you choose the packing algorithm
@@ -122,7 +122,7 @@ result = (
     GencanPack().with_tolerance(2.0).with_seed(42).run([water], max_loops=200)
 )
 
-print(f"packed {result.frame['atoms'].nrows} atoms")
+print(f"packed {result.frame['atoms'].n_rows} atoms")
 ```
 
 ## Next steps

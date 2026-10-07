@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use crate::callback::{
     Callback, LammpsLogCallback, PhaseProgress, PhaseReport, StageProgress, StepReport,
 };
-use crate::context::PackContext;
+use crate::context::PackSystem;
 use crate::pack_space::ResolvedSpace;
 use crate::stage::{Budget, Stage, StageOutcome};
 
@@ -83,7 +83,7 @@ pub(super) fn open_bracket(
 
 /// Close the run's callback bracket: fire `on_finish` on the tagged set
 /// [`open_bracket`] produced.
-pub(super) fn close_bracket(callbacks: &mut [Box<dyn Callback>], sys: &PackContext) {
+pub(super) fn close_bracket(callbacks: &mut [Box<dyn Callback>], sys: &PackSystem) {
     for h in callbacks.iter_mut() {
         h.on_finish(sys);
     }
@@ -107,11 +107,11 @@ impl Callback for StageTagger {
         self.inner.on_start(ntotat, ntotmol);
     }
 
-    fn on_initialized(&mut self, sys: &PackContext) {
+    fn on_initialized(&mut self, sys: &PackSystem) {
         self.inner.on_initialized(sys);
     }
 
-    fn on_step(&mut self, step: &StepReport, sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, sys: &PackSystem) {
         let mut tagged: StepReport = step.clone();
         tagged.stage = *self.position.lock().expect("stage position mutex");
         self.inner.on_step(&tagged, sys);
@@ -121,7 +121,7 @@ impl Callback for StageTagger {
         self.inner.on_phase_start(phase);
     }
 
-    fn on_finish(&mut self, sys: &PackContext) {
+    fn on_finish(&mut self, sys: &PackSystem) {
         self.inner.on_finish(sys);
     }
 
@@ -137,7 +137,7 @@ impl Callback for StageTagger {
         self.inner.on_stage_start(stage);
     }
 
-    fn on_stage_end(&mut self, stage: &StageProgress, outcome: &StageOutcome, sys: &PackContext) {
+    fn on_stage_end(&mut self, stage: &StageProgress, outcome: &StageOutcome, sys: &PackSystem) {
         self.inner.on_stage_end(stage, outcome, sys);
     }
 }

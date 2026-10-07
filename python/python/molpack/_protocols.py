@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from .molpack import StepReport
+from .molpack import PackSystemView, StepReport
 
 
 @runtime_checkable
@@ -20,8 +20,8 @@ class Callback(Protocol):
     native extension. Returning ``True`` from :meth:`on_step` requests
     early termination.
 
-    ``ctx`` mirrors the Rust trait's ``sys`` argument: a
-    :class:`StepContext` borrow guard valid only inside the callback
+    ``sys`` mirrors the Rust trait's ``sys`` argument: a
+    :class:`PackSystemView` borrow guard valid only inside the callback
     (touching it later raises ``RuntimeError``). Its ``positions``
     property copies the live coordinates into an owned ``(ntotat, 3)``
     float64 NumPy array on access — callbacks that never touch it pay
@@ -37,7 +37,7 @@ class Callback(Protocol):
 
     def on_start(self, ntotat: int, ntotmol: int) -> None: ...
 
-    def on_step(self, step: StepReport, ctx) -> bool | None: ...
+    def on_step(self, step: StepReport, sys: PackSystemView) -> bool | None: ...
 
     def on_finish(self) -> None: ...
 

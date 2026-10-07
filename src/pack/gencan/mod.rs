@@ -164,7 +164,7 @@ mod tests {
     //!
     //! The `Objective` trait is the only contract `gencan` depends on, so we
     //! provide a hand-rolled `Quadratic` impl rather than poking at
-    //! `PackContext` internals. `fdist`/`frest` are reported as 0 so the
+    //! `PackSystem` internals. `fdist`/`frest` are reported as 0 so the
     //! Packmol-style early-exit check (`fdist < precision && frest < precision`)
     //! never fires when `precision = 0.0`; gencan then has to converge on its
     //! own gpsupn / maxit criterion.

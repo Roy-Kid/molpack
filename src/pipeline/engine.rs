@@ -29,7 +29,7 @@ use crate::{PackSettings, State};
 
 /// Everything the lifecycle resolved before handing control to the stages:
 /// the run's shared settings, the targets (post-broadcast), the space, and
-/// the context shape. Borrowed — valid only inside [`StageFactory::stages`].
+/// the system shape. Borrowed — valid only inside [`StageFactory::stages`].
 pub struct EngineSetup<'a> {
     /// The run's shared settings — the one ruler.
     ///
@@ -59,7 +59,7 @@ pub struct EngineSetup<'a> {
 /// runnable on its own.
 pub trait StageFactory {
     /// Reject targets this factory cannot handle — by name, never by
-    /// silently switching to another algorithm. Called before any context is
+    /// silently switching to another algorithm. Called before any system is
     /// built.
     fn validate_targets(&self, _targets: &[Target]) -> Result<(), PackError> {
         Ok(())
@@ -189,7 +189,7 @@ pub trait PackEngine: StageFactory + Sized {
             distance < tolerance,
             "short tolerance distance {distance} must be smaller than the tolerance {tolerance}"
         );
-        // Stored halved: the context wants the per-atom short radius.
+        // Stored halved: the system wants the per-atom short radius.
         self.settings_mut().short_tolerance = Some((distance / 2.0, scale));
         self
     }

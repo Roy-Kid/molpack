@@ -41,7 +41,7 @@ impl Default for LogSpec {
 }
 
 /// The knobs every entry shares — consumed by the lifecycle and the shared
-/// infrastructure (space resolution, context construction), never by one
+/// infrastructure (space resolution, system construction), never by one
 /// algorithm alone. Algorithm-specific knobs live on their entry.
 #[derive(Debug, Clone, Default)]
 pub struct PackSettings {

@@ -11,11 +11,11 @@
 //!
 //! COM block first, Euler block second, three values per molecule each, so
 //! the vector is `6 * nmol` long. A molecule's index into this vector is its
-//! index in the context layout (`idfirst` / `natoms` / `nmols`, type-major
+//! index in the system layout (`idfirst` / `natoms` / `nmols`, type-major
 //! then copy-major), which is also `xcart`'s and `coor`'s molecule order:
 //! one index space, no translation table.
 //!
-//! Two coordinate frames meet here, both stored on a [`PackContext`].
+//! Two coordinate frames meet here, both stored on a [`PackSystem`].
 //! `ctx.coor` holds each copy's *reference conformer* — its atoms' positions
 //! measured from that copy's own centre of mass, with no orientation applied,
 //! so it describes the molecule's shape and nothing else. `ctx.xcart` holds
@@ -36,7 +36,7 @@
 //!   writeback.
 //!
 //! [`RigidView::install_seed`] is the third and last place the view touches a
-//! [`PackContext`], and the only constructing one: it takes a placement
+//! [`PackSystem`], and the only constructing one: it takes a placement
 //! solution from a previous run as two bare slices, so this module never
 //! names the `entry` layer that produced them (dependencies run
 //! `entry → context`, never back).
@@ -61,7 +61,7 @@
 //! is a programming error and must be unrepresentable rather than quietly
 //! corrupting another molecule's placement.
 
-use crate::context::PackContext;
+use crate::context::PackSystem;
 use crate::euler::{compcart, eulerrmat};
 use molrs::op::F;
 use molrs::op::centroid;
@@ -157,7 +157,7 @@ impl RigidView {
     /// Expand the rigid DOF into lab-frame coordinates:
     /// `xcart = com + R(euler) · coor` for every atom of every copy.
     ///
-    /// Molecules are enumerated in the context's own layout order, and
+    /// Molecules are enumerated in the system's own layout order, and
     /// `coor` shares `xcart`'s index space, so each copy is rebuilt from its
     /// own reference conformer (copies diverge once an in-loop optimizer has
     /// relaxed them independently).
@@ -169,13 +169,13 @@ impl RigidView {
     ///
     /// # Panics
     ///
-    /// Panics when the context lays out more free molecules than the view
+    /// Panics when the system lays out more free molecules than the view
     /// holds (`sum(ctx.nmols[..ctx.ntype]) > nmol`): view and context must
     /// have been sized from the same run. Debug builds additionally assert
     /// that every atom rebuilt here is a free one — a fixed structure's
     /// coordinates are given, not placed, and must never be overwritten from
     /// `(com, euler)`.
-    pub fn write_xcart(&self, ctx: &mut PackContext) {
+    pub fn write_xcart(&self, ctx: &mut PackSystem) {
         let mut imol = 0usize;
         let mut icart = 0usize;
 
@@ -212,14 +212,14 @@ impl RigidView {
     /// past `coor.len()` (the fixed structures) are left untouched.
     ///
     /// The molecule count comes from `ctx.ntotmol`, the number of free
-    /// molecules the context was built for — the same count that sizes the
+    /// molecules the system was built for — the same count that sizes the
     /// run's placement vector.
     ///
     /// # Panics
     ///
     /// Panics when `x.len() != 6 * ctx.ntotmol`, or when `coor` is longer
-    /// than the context's coordinate array.
-    pub fn install_seed(x: &[F], coor: &[[F; 3]], ctx: &mut PackContext) -> Self {
+    /// than the system's coordinate array.
+    pub fn install_seed(x: &[F], coor: &[[F; 3]], ctx: &mut PackSystem) -> Self {
         let nmol = ctx.ntotmol;
         assert_eq!(
             x.len(),
@@ -254,10 +254,10 @@ impl RigidView {
     ///
     /// # Panics
     ///
-    /// Panics when the context lays out more free molecules than the view
+    /// Panics when the system lays out more free molecules than the view
     /// holds (`sum(ctx.nmols[..ctx.ntype]) > nmol`), the same sizing contract
     /// as [`RigidView::write_xcart`].
-    pub fn capture_from_xcart(&mut self, ctx: &mut PackContext) {
+    pub fn capture_from_xcart(&mut self, ctx: &mut PackSystem) {
         let mut imol = 0usize;
 
         for itype in 0..ctx.ntype {
@@ -291,7 +291,7 @@ mod tests {
     //! `RigidView` is the single home of the rigid degrees of freedom: the flat
     //! `6 * nmol` placement vector (COM block first, Euler block second, three
     //! values per molecule each) plus the three operations that cross between it
-    //! and a `PackContext` —
+    //! and a `PackSystem` —
     //!
     //! - `write_xcart` — `xcart = com + R(euler) · coor` (the outbound rebuild,
     //!   inherited verbatim from `initial::init_xcart_from_x`),
@@ -300,8 +300,8 @@ mod tests {
     //!   `(com, euler = 0)` plus a centered conformer in `ctx.coor` (the growth
     //!   writeback contract).
     //!
-    //! Fixtures build a `PackContext` directly (`PackContext::new` + the public
-    //! layout fields), the same way `pack_context.rs::geometry_cache_tests` does — no engine,
+    //! Fixtures build a `PackSystem` directly (`PackSystem::new` + the public
+    //! layout fields), the same way `pack_system.rs::geometry_cache_tests` does — no engine,
     //! no solver, no growth driver. Categories: basics, edge cases, immutability
     //! (a fresh view is all zeros; a clone is an independent snapshot). No
     //! physics is asserted here: the view is pure bookkeeping over a
@@ -309,7 +309,7 @@ mod tests {
 
     use crate::context::RigidView as ContextRigidView;
     use crate::euler::{compcart, eulerrmat};
-    use crate::{PackContext, RigidView};
+    use crate::{PackSystem, RigidView};
     use molrs::op::F;
 
     /// The crate-root re-export and the `context` path name one type, not two.
@@ -322,9 +322,9 @@ mod tests {
 
     /// Two three-atom copies of one type: `ntotat = 6`, `ntotmol = 2`, layout
     /// `idfirst = [0]`. `coor` holds one reference conformer **per copy**,
-    /// sharing `xcart`'s index space (the `PackContext` convention).
-    fn two_copies_of_three() -> PackContext {
-        let mut ctx = PackContext::new(6, 2, 1);
+    /// sharing `xcart`'s index space (the `PackSystem` convention).
+    fn two_copies_of_three() -> PackSystem {
+        let mut ctx = PackSystem::new(6, 2, 1);
         ctx.nmols = vec![2];
         ctx.natoms = vec![3];
         ctx.idfirst = vec![0];
@@ -516,7 +516,7 @@ mod tests {
     /// whatever `coor` held.
     #[test]
     fn rigid_view_install_seed_copies_conformer_and_placements() {
-        let mut ctx = PackContext::new(8, 2, 1);
+        let mut ctx = PackSystem::new(8, 2, 1);
         ctx.nmols = vec![2];
         ctx.natoms = vec![3];
         ctx.idfirst = vec![0];
@@ -634,7 +634,7 @@ mod tests {
         assert_eq!(view.nmol(), 0);
         assert!(view.as_slice().is_empty(), "fresh(0) has no slots");
 
-        let mut ctx = PackContext::new(0, 0, 0);
+        let mut ctx = PackSystem::new(0, 0, 0);
         ctx.nmols = Vec::new();
         ctx.natoms = Vec::new();
         ctx.idfirst = Vec::new();
@@ -681,7 +681,7 @@ mod tests {
     /// zero — no drift from the centroid division.
     #[test]
     fn rigid_view_capture_from_xcart_single_atom_copy() {
-        let mut ctx = PackContext::new(2, 2, 1);
+        let mut ctx = PackSystem::new(2, 2, 1);
         ctx.nmols = vec![2];
         ctx.natoms = vec![1];
         ctx.idfirst = vec![0];
@@ -699,14 +699,14 @@ mod tests {
         assert_eq!(view.euler(1), [0.0; 3]);
     }
 
-    /// With several types of different sizes, the view enumerates the context's
+    /// With several types of different sizes, the view enumerates the system's
     /// `(idfirst, natoms, nmols)` layout, so a molecule index in `x` is exactly
     /// the molecule's index in the `xcart` layout — type-major, copy-major.
     #[test]
     fn rigid_view_capture_from_xcart_multitype_layout() {
         // type 0: two copies of 2 atoms (icart 0..4); type 1: one copy of 3
         // atoms (icart 4..7).
-        let mut ctx = PackContext::new(7, 3, 2);
+        let mut ctx = PackSystem::new(7, 3, 2);
         ctx.nmols = vec![2, 1];
         ctx.natoms = vec![2, 3];
         ctx.idfirst = vec![0, 4];

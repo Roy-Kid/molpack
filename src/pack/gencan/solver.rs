@@ -159,7 +159,7 @@ impl Stage for GencanStage {
     ///    and the grid itself (synthesizing a fall-back box from `sidemax`
     ///    when nothing was declared), so installing one here would be a second
     ///    owner. The box is the entry's resolved cell when there is one, else
-    ///    the one the context already carries — which is how a GENCAN stage
+    ///    the one the system already carries — which is how a GENCAN stage
     ///    that follows another stage in a chain lands on the same box, and the
     ///    same `radmax`, as the hand-written `with_restart` spelling.
     /// 2. **The seed**, if this stage carries one, is injected verbatim
@@ -182,7 +182,7 @@ impl Stage for GencanStage {
     ) -> Result<StageOutcome, PackError> {
         // ① Box + cell grid, only for a run that continues from placements.
         if state.placed() == Placed::All || self.seed_placements.is_some() {
-            let sys = state.ctx_mut();
+            let sys = state.sys_mut();
             let simbox = self.cell.clone().unwrap_or_else(|| sys.simbox.clone());
             // One derivation of the grid's coverage scale, in
             // `initial::coverage_radmax`.
@@ -313,25 +313,25 @@ mod tests {
     use ndarray::Array1;
 
     use super::*;
-    use crate::context::build::{ContextKnobs, build_context};
+    use crate::context::build::{SystemKnobs, build_system};
 
     /// RED-1 (engine-entry-split): the rigid-body path must run behind the
-    /// `Stage` seam — same context plumbing as any other stage, verdict
+    /// `Stage` seam — same system plumbing as any other stage, verdict
     /// from the shared objective, no entry internals.
     #[test]
     fn gencan_solves_a_small_pack_on_the_seam() {
         let coords = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
         let targets = vec![Target::from_coords(&coords, &[1.0, 1.0], 6)];
 
-        let built = build_context(
-            &ContextKnobs {
+        let built = build_system(
+            &SystemKnobs {
                 tolerance: 2.0,
                 short_tolerance: None,
                 parallel_eval: false,
             },
             &targets,
         )
-        .expect("context builds");
+        .expect("system builds");
         let mut state = PackState::new(built.sys, built.ntotmol_free);
 
         let cell = SimBox::ortho(
@@ -362,9 +362,9 @@ mod tests {
         assert!(outcome.converged, "6 dimers in a 20 Å box must converge");
         assert_eq!(outcome.degraded, 0, "GENCAN never softens");
         assert!(
-            state.ctx().fdist <= 0.01,
+            state.sys().fdist <= 0.01,
             "verdict comes from the shared objective: fdist = {}",
-            state.ctx().fdist
+            state.sys().fdist
         );
     }
 
@@ -382,8 +382,8 @@ mod tests {
     /// borrow the bindings rather than take them, after which the second run
     /// calls the optimizer exactly as the first did.
     ///
-    /// **Why it lives in the crate.** `build_context` is `pub(crate)`, so an
-    /// integration test in `tests/` cannot build a context and run the same
+    /// **Why it lives in the crate.** `build_system` is `pub(crate)`, so an
+    /// integration test in `tests/` cannot build a system and run the same
     /// stage twice on it; `optimizer::torsion_mc`'s tests only reaches the entry, which
     /// runs a stage once. Named with `optimizer` so the acceptance filter
     /// `cargo test -p molcrafts-molpack --lib -- optimizer` selects it.
@@ -435,15 +435,15 @@ mod tests {
                 .with_restraint(InsideBoxRestraint::new([0.0; 3], [4.0; 3])),
         ];
 
-        let built = build_context(
-            &ContextKnobs {
+        let built = build_system(
+            &SystemKnobs {
                 tolerance: 2.0,
                 short_tolerance: None,
                 parallel_eval: false,
             },
             &targets,
         )
-        .expect("context builds");
+        .expect("system builds");
 
         let cell = SimBox::ortho(
             Array1::from_vec(vec![20.0, 20.0, 20.0]),

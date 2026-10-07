@@ -156,7 +156,7 @@ impl Stage for GrowStage {
         // ── The box and its cell grid ──────────────────────────────────────
         // See `install_resolved_cell` for why `radmax` reads `radius_ini`.
         if let Some((cell, discale)) = &self.cell {
-            let sys = state.ctx_mut();
+            let sys = state.sys_mut();
             crate::context::grid::install_resolved_cell(sys, cell, *discale);
         }
 
@@ -230,7 +230,7 @@ impl Stage for GrowStage {
                 .max()
                 .unwrap_or(0),
         );
-        let restraint_table = RestraintTable::from_context(sys);
+        let restraint_table = RestraintTable::from_system(sys);
         let mut aborted = false;
         let mut self_blocked = 0usize;
         let mut inter_chain = 0usize;

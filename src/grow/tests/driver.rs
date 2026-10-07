@@ -15,7 +15,7 @@ use super::*;
 
 use crate::AtomRestraint;
 use crate::callback::{Callback, StepReport};
-use crate::context::PackContext;
+use crate::context::PackSystem;
 
 /// A restraint that refuses every point, so every growth attempt is a dead end.
 #[derive(Debug)]
@@ -38,7 +38,7 @@ struct StopAfterOne {
 }
 
 impl Callback for StopAfterOne {
-    fn on_step(&mut self, _step: &StepReport, _sys: &PackContext) {
+    fn on_step(&mut self, _step: &StepReport, _sys: &PackSystem) {
         self.seen = true;
     }
     fn should_stop(&self) -> bool {

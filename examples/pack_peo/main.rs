@@ -26,12 +26,13 @@
 
 use molpack::grow::{GrowConfig, TorsionPrior};
 use molpack::{
-    Callback, CbmcGrow, GencanPack, LatticeGrow, PackContext, PackEngine, State, StepReport, Target,
+    Callback, CbmcGrow, GencanPack, LatticeGrow, PackEngine, PackSystem, State, StepReport, Target,
 };
 use molrs::core::Block;
 use molrs::core::Frame;
 use molrs::core::Mic;
-use molrs::core::constants::{ANGSTROM3_PER_CM3, AVOGADRO};
+use molrs::core::UnitFactor;
+use molrs::core::constants::AVOGADRO;
 use molrs::op::F;
 use molrs::op::centroid;
 use molrs::op::vec3::{add, cross, dot, norm, scale, sub};
@@ -70,7 +71,7 @@ impl LadderCallback {
 }
 
 impl Callback for LadderCallback {
-    fn on_step(&mut self, step: &StepReport, sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, sys: &PackSystem) {
         {
             let mut s = self.state.lock().expect("ladder");
             s.rounds = step.loop_idx;
@@ -138,7 +139,7 @@ fn is_placed(p: [F; 3]) -> bool {
     dot(p, p) > 1e-16
 }
 
-fn placed_snapshot(sys: &PackContext) -> PlacedSnap {
+fn placed_snapshot(sys: &PackSystem) -> PlacedSnap {
     let na = sys.natoms.first().copied().unwrap_or(0);
     let n_chains = sys.nmols.first().copied().unwrap_or(0);
     let base0 = sys.idfirst.first().copied().unwrap_or(0);
@@ -250,7 +251,7 @@ fn print_closest_scored(pos: &[[F; 3]], bonds: &[(usize, usize)], elem: &[String
     }
 }
 
-fn min_inter_placed(sys: &PackContext, placed: &[usize], l: F) -> (F, F) {
+fn min_inter_placed(sys: &PackSystem, placed: &[usize], l: F) -> (F, F) {
     if placed.len() < 2 {
         return (F::INFINITY, 0.0);
     }
@@ -670,7 +671,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(p) => molrs::io::read_pdb(p)?,
         None => synthesize_peo(dp),
     };
-    let na = frame.get("atoms").and_then(|a| a.nrows()).unwrap_or(0);
+    let na = frame.get("atoms").and_then(|a| a.n_rows()).unwrap_or(0);
     let bonds: Vec<(usize, usize)> = {
         let b = frame.get("bonds").expect("template bonds");
         let i = b
@@ -703,7 +704,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(0.0);
     let rg_ideal = (FLORY_R2_PER_M * m_chain / 6.0).sqrt();
     let total_g = n_chains as F * m_chain / AVOGADRO;
-    let l = (total_g / density * ANGSTROM3_PER_CM3).cbrt();
+    // cm³ → Å³ as the cube of the exact cm → Å factor (1e8), which rounds
+    // once to the correctly rounded 1e24; the registry's `cm^3` →
+    // `angstrom^3` is one ulp above it.
+    static CM_TO_ANGSTROM: UnitFactor = UnitFactor::new("cm", "angstrom");
+    let cm_to_angstrom = CM_TO_ANGSTROM.get();
+    let cm3_to_angstrom3 = cm_to_angstrom * cm_to_angstrom * cm_to_angstrom;
+    let l = (total_g / density * cm3_to_angstrom3).cbrt();
     let tmpl_elem: Vec<String> = frame
         .get("atoms")
         .and_then(|a| a.get("element"))

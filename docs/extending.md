@@ -308,7 +308,7 @@ objective evolution.
 ```no_run
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use molpack::{Callback, PackContext, StepReport};
+use molpack::{Callback, PackSystem, StepReport};
 use molrs::op::F;
 
 pub struct CsvCallback { writer: BufWriter<File> }
@@ -322,7 +322,7 @@ impl CsvCallback {
 }
 
 impl Callback for CsvCallback {
-    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, _sys: &PackSystem) {
         let _ = writeln!(
             self.writer,
             "{},{},{},{},{}",
@@ -340,7 +340,7 @@ Callback notes:
 
 - **`on_step` is the only required method.** Everything else has a
   default no-op.
-- **`sys` is `&PackContext`, never `&mut`.** Callbacks cannot mutate
+- **`sys` is `&PackSystem`, never `&mut`.** Callbacks cannot mutate
   packer state — bind an in-loop optimizer (next section) if you need to.
 - **Multiple callbacks run in registration order.** Register your CSV
   callback before `ProgressCallback` to get a row on every step,
@@ -589,7 +589,7 @@ stages always return `Ok`.
 
 `run` takes a `&mut PackState`, which carries three things:
 
-- a [`PackContext`](crate::PackContext) — the run's mutable geometry: per-atom
+- a [`PackSystem`](crate::PackSystem) — the run's mutable geometry: per-atom
   radii, the restraint pool, the cell list, and `xcart`, the **lab-frame**
   coordinates, meaning where each atom actually sits in the packing cell;
 - a [`RigidView`](crate::RigidView) — the **rigid placement vector**: for every
@@ -600,12 +600,12 @@ stages always return `Ok`.
   `Placed::All` (every free molecule has a placement).
 
 Take the first two apart with `state.rigid_split_mut()`, which hands back
-`(&mut PackContext, &mut RigidView)` as two disjoint borrows.
+`(&mut PackSystem, &mut RigidView)` as two disjoint borrows.
 
-Two coordinate frames meet inside the context. `ctx.coor` holds each copy's
+Two coordinate frames meet inside the system. `sys.coor` holds each copy's
 **reference conformer** — its atoms measured from that copy's own centre of
 mass with no orientation applied, so it describes the molecule's shape and
-nothing else. `ctx.xcart` holds the lab-frame positions. The two are related by
+nothing else. `sys.xcart` holds the lab-frame positions. The two are related by
 `xcart = com + R(euler) · coor`, where `R(euler)` is the rotation matrix built
 from the three Euler angles.
 
@@ -650,7 +650,7 @@ convergence criterion, and how
 many times it had to relax a constructive guarantee (growth's hard-core
 softening rungs; always `0` on the rigid-body path, which relaxes nothing). The
 run's verdict — the largest inter-molecular overlap `fdist` and the largest
-restraint violation `frest` — is read off the context *after* `run` returns, by
+restraint violation `frest` — is read off the system *after* `run` returns, by
 the shared objective. That is the one-ruler rule: no algorithm reports its own
 score.
 
@@ -690,7 +690,7 @@ impl Stage for ShakeStage {
         _callbacks: &mut [Box<dyn Callback>],
     ) -> Result<StageOutcome, PackError> {
         // `self.step` is read, never taken — re-entrancy contract.
-        let (_ctx, x) = state.rigid_split_mut();
+        let (_sys, x) = state.rigid_split_mut();
         for i in 0..x.nmol() {
             let com = x.com(i);
             x.set_com(
@@ -711,7 +711,7 @@ impl Stage for ShakeStage {
 ### Wiring it into a run
 
 A stage does not run itself. The lifecycle around it — validation, restraint
-broadcast, context construction, callback bracketing, the lab-frame rebuild,
+broadcast, system construction, callback bracketing, the lab-frame rebuild,
 frame assembly — lives in exactly one place: [`Pipeline`](crate::Pipeline)'s
 [`run`](crate::PackEngine::run), reached through the
 [`PackEngine`](crate::PackEngine) trait. An **entry** is a type that plugs into
@@ -862,7 +862,7 @@ that computed its own second measure of "is this satisfied" would be exactly
 the mistake the one-ruler rule exists to catch, so reuse the objective's
 numbers rather than re-deriving them; molpack's own
 [`RestraintsSatisfied`](crate::RestraintsSatisfied) does this by comparing
-`state.ctx().frest` against a tolerance. `layer` names which rung of the
+`state.sys().frest` against a tolerance. `layer` names which rung of the
 repair-cost ladder ([`Layers`](crate::Layers), documented where it is
 consumed) a violation sits on — from a wrong bond graph that nothing
 downstream can repair, to bond lengths and angles a downstream force-field

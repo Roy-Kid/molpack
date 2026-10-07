@@ -7,7 +7,7 @@ use molrs::op::F;
 
 use std::time::Instant;
 
-use crate::context::PackContext;
+use crate::context::PackSystem;
 use crate::outcome::StageOutcome;
 
 // ── Info structs ─────────────────────────────────────────────────────────────
@@ -139,17 +139,17 @@ pub trait Callback: Send {
 
     /// Called once after initialization completes, with valid `xcart` positions.
     /// Use this to write the initial conformation (e.g. `XyzTrajectoryCallback`).
-    fn on_initialized(&mut self, _sys: &PackContext) {}
+    fn on_initialized(&mut self, _sys: &PackSystem) {}
 
     /// Called after each outer optimization loop iteration.
-    fn on_step(&mut self, step: &StepReport, sys: &PackContext);
+    fn on_step(&mut self, step: &StepReport, sys: &PackSystem);
 
     /// Called at the start of each packing phase (per-type and all-types).
     /// Allows stateful callbacks to reset between phases.
     fn on_phase_start(&mut self, _phase: &PhaseProgress) {}
 
     /// Called once after the packing loop finishes (convergence or max loops).
-    fn on_finish(&mut self, _sys: &PackContext) {}
+    fn on_finish(&mut self, _sys: &PackSystem) {}
 
     /// Return `true` to request early termination of the packing loop.
     fn should_stop(&self) -> bool {
@@ -182,12 +182,7 @@ pub trait Callback: Send {
     /// exactly as [`on_finish`] does. Same shape, same authority.
     ///
     /// [`on_finish`]: Callback::on_finish
-    fn on_stage_end(
-        &mut self,
-        _stage: &StageProgress,
-        _outcome: &StageOutcome,
-        _sys: &PackContext,
-    ) {
+    fn on_stage_end(&mut self, _stage: &StageProgress, _outcome: &StageOutcome, _sys: &PackSystem) {
     }
 }
 
@@ -241,7 +236,7 @@ impl XyzTrajectoryCallback {
 
     /// The snapshot as a frame: the coordinates-only frame of `xcart`, one
     /// `atoms` row per entry, with the step in its meta.
-    fn snapshot(step: usize, sys: &PackContext) -> molrs::core::Frame {
+    fn snapshot(step: usize, sys: &PackSystem) -> molrs::core::Frame {
         let elements = (0..sys.xcart.len())
             .map(|i| {
                 sys.elements
@@ -258,7 +253,7 @@ impl XyzTrajectoryCallback {
         frame
     }
 
-    fn write_snapshot(&mut self, step: usize, sys: &PackContext) {
+    fn write_snapshot(&mut self, step: usize, sys: &PackSystem) {
         use molrs::io::writer::{FrameWriter, Writer};
 
         self.open();
@@ -278,7 +273,7 @@ impl XyzTrajectoryCallback {
 
 #[cfg(feature = "io")]
 impl Callback for XyzTrajectoryCallback {
-    fn on_step(&mut self, step: &StepReport, sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, sys: &PackSystem) {
         if step.loop_idx.is_multiple_of(self.every) {
             self.write_snapshot(step.loop_idx, sys);
         }
@@ -314,7 +309,7 @@ impl Callback for ProgressCallback {
         eprintln!("Packing {ntotmol} molecules ({ntotat} atoms)...");
     }
 
-    fn on_initialized(&mut self, sys: &PackContext) {
+    fn on_initialized(&mut self, sys: &PackSystem) {
         let elapsed = self.start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
         eprintln!(
             "  Initializing... done ({:.1}s)  overlap: {:.4e}  constraints: {:.4e}",
@@ -334,7 +329,7 @@ impl Callback for ProgressCallback {
         );
     }
 
-    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, _sys: &PackSystem) {
         let elapsed = self.start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
         eprintln!(
             "    Step [{}/{}]  overlap: {:.2e}  constraints: {:.2e}  improved {:.1}%  ({:.1}s)",
@@ -347,7 +342,7 @@ impl Callback for ProgressCallback {
         );
     }
 
-    fn on_finish(&mut self, sys: &PackContext) {
+    fn on_finish(&mut self, sys: &PackSystem) {
         let elapsed = self.start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
         if sys.fdist < 0.01 && sys.frest < 0.01 {
             eprintln!(
@@ -464,7 +459,7 @@ impl Callback for LammpsLogCallback {
         }
     }
 
-    fn on_initialized(&mut self, sys: &PackContext) {
+    fn on_initialized(&mut self, sys: &PackSystem) {
         if !self.level.is_enabled() {
             return;
         }
@@ -501,7 +496,7 @@ impl Callback for LammpsLogCallback {
         }
     }
 
-    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, _sys: &PackSystem) {
         if self.level < LogLevel::Progress || !step.loop_idx.is_multiple_of(self.every) {
             return;
         }
@@ -543,7 +538,7 @@ impl Callback for LammpsLogCallback {
         );
     }
 
-    fn on_finish(&mut self, sys: &PackContext) {
+    fn on_finish(&mut self, sys: &PackSystem) {
         if !self.level.is_enabled() {
             return;
         }
@@ -662,7 +657,7 @@ impl Default for EarlyStopCallback {
 }
 
 impl Callback for EarlyStopCallback {
-    fn on_initialized(&mut self, _sys: &PackContext) {
+    fn on_initialized(&mut self, _sys: &PackSystem) {
         self.reset();
     }
 
@@ -678,7 +673,7 @@ impl Callback for EarlyStopCallback {
         self.reset();
     }
 
-    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, _sys: &PackSystem) {
         self.observe(step.f, step.radscale);
     }
 

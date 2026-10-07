@@ -103,7 +103,7 @@ impl Layers {
 /// # One ruler
 ///
 /// An invariant reads the **shared objective's** verdict off the state — the
-/// numbers the context owns after a stage returns — never a second metric of
+/// numbers the system owns after a stage returns — never a second metric of
 /// its own. [`RestraintsSatisfied`] therefore compares `frest`, the largest
 /// restraint violation the objective computed, against its tolerance; it does
 /// not re-derive restraint residuals, because two rulers for one quantity is
@@ -182,12 +182,12 @@ impl Invariant for RestraintsSatisfied {
     /// to the atoms carrying a residual. See the module docs for why that
     /// list can be empty on a live run.
     fn check(&self, state: &PackState) -> Vec<Violation> {
-        let (frest, tolerance) = (state.ctx().frest, self.tolerance);
+        let (frest, tolerance) = (state.sys().frest, self.tolerance);
         if frest <= tolerance {
             return Vec::new();
         }
         let atoms = state
-            .ctx()
+            .sys()
             .frest_atom
             .iter()
             .enumerate()
@@ -216,8 +216,8 @@ mod tests {
     //! algorithm.
     //!
     //! **The fixture is a hand-built state, on purpose.** `RestraintsSatisfied`
-    //! reads two context fields — `frest` and `frest_atom` — and nothing else, so
-    //! a `PackState` wrapping `PackContext::new(ntotat, nmol, ntype)` with those
+    //! reads two system fields — `frest` and `frest_atom` — and nothing else, so
+    //! a `PackState` wrapping `PackSystem::new(ntotat, nmol, ntype)` with those
     //! two fields written directly is the whole of its input. Booting a packing
     //! run to produce them would make this file's answers depend on the GENCAN
     //! schedule, which owns none of the behaviour under test.
@@ -231,7 +231,7 @@ mod tests {
     //! cargo test -p molcrafts-molpack --lib
     //! ```
 
-    use crate::{Invariant, Layers, PackContext, PackState, RestraintsSatisfied};
+    use crate::{Invariant, Layers, PackState, PackSystem, RestraintsSatisfied};
     use molrs::op::F;
 
     // ── the ladder, in rung order ─────────────────────────────────────────────
@@ -250,10 +250,10 @@ mod tests {
 
     // ── the hand-built fixture ────────────────────────────────────────────────
 
-    /// A run state whose context reports `frest` as its largest restraint
+    /// A run state whose system reports `frest` as its largest restraint
     /// violation and `frest_atom[i]` for each `(i, value)` pair given.
     ///
-    /// `PackContext::new` sizes `frest_atom` to `ntotat` and zeroes it, so every
+    /// `PackSystem::new` sizes `frest_atom` to `ntotat` and zeroes it, so every
     /// index not named here is exactly `0.0` — the "this atom is not part of the
     /// violation" value `RestraintsSatisfied` filters on.
     fn state_with_restraint_residual(
@@ -262,8 +262,8 @@ mod tests {
         frest: F,
         per_atom: &[(usize, F)],
     ) -> PackState {
-        let mut state = PackState::new(PackContext::new(ntotat, nmol, 1), nmol);
-        let ctx = state.ctx_mut();
+        let mut state = PackState::new(PackSystem::new(ntotat, nmol, 1), nmol);
+        let ctx = state.sys_mut();
         ctx.frest = frest;
         for &(icart, value) in per_atom {
             ctx.frest_atom[icart] = value;

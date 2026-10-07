@@ -208,7 +208,7 @@ fn read_with_molrs<'py>(
         StructureFormat::LammpsData => "read_lammps_data",
         StructureFormat::LammpsDump => {
             // A dump is a trajectory: its first snapshot is the template.
-            let trajectory = io.getattr("read_lammps_trajectory")?.call1((path,))?;
+            let trajectory = io.getattr("read_lammps_dump_trajectory")?.call1((path,))?;
             return trajectory.call_method1("read_frame", (0,));
         }
     };

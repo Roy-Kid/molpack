@@ -437,7 +437,7 @@ follow policy (§ 6).
 interchangeable implementations of one seam; they share lifecycle and
 infrastructure, never each other's internals.
 
-**Intent.** Shared: lifecycle stages ①②⑤, `PackContext` / `PackState`
+**Intent.** Shared: lifecycle stages ①②⑤, `PackSystem` / `PackState`
 (live run), the shared objective, frozen public `State`. Not shared:
 drivers.
 

@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use molrs::core::Element;
 use molrs::core::SimBox;
-use molrs::core::constants::{ANGSTROM3_PER_CM3, AVOGADRO};
+use molrs::core::UnitFactor;
+use molrs::core::constants::AVOGADRO;
 use molrs::op::F;
 use ndarray::array;
 
@@ -18,6 +19,18 @@ use crate::AtomRestraint;
 use crate::PackError;
 use crate::Target;
 use crate::restraint::cell::{simbox_from_lengths_angles, simbox_from_matrix};
+
+/// cm → Å; a density-sized box's volume converts by its cube.
+static CM_TO_ANGSTROM: UnitFactor = UnitFactor::new("cm", "angstrom");
+
+/// cm³ → Å³ as the cube of the exact length factor 1e8: `(1e8 · 1e8) · 1e8`
+/// rounds once, to the correctly rounded 1e24. The registry's own
+/// `cm^3` → `angstrom^3` comes out one ulp above it, which would move the
+/// last bit of a density-sized box.
+fn cm3_to_angstrom3() -> F {
+    let f = CM_TO_ANGSTROM.get();
+    f * f * f
+}
 
 pub(crate) type PeriodicSpec = ([F; 3], [F; 3], [bool; 3]);
 
@@ -178,8 +191,10 @@ pub(crate) fn resolve_pack_space(
             };
             total_amu += per_copy * t.count.max(1) as F;
         }
-        // rho in g/cm³, the mass in g/mol: the volume in cm³, then in Å³.
-        let l = (total_amu / (rho * AVOGADRO) * ANGSTROM3_PER_CM3).cbrt();
+        // rho in g/cm³ and the masses in g/mol: Avogadro's number turns the
+        // molar mass into grams, so the quotient is the volume in cm³, which
+        // the unit registry converts to Å³.
+        let l = (total_amu / (rho * AVOGADRO) * cm3_to_angstrom3()).cbrt();
         Some(([0.0; 3], [l, l, l], [true; 3]))
     } else {
         None
@@ -488,5 +503,17 @@ mod broadcast_tests {
             2,
             "the global restraint is added to the target's own, never replacing it"
         );
+    }
+}
+
+#[cfg(test)]
+mod density_box_tests {
+    use super::cm3_to_angstrom3;
+
+    /// The cube of the exact cm → Å factor is the correctly rounded 10²⁴,
+    /// the factor a density-sized box has always used.
+    #[test]
+    fn cm3_to_angstrom3_is_the_correctly_rounded_power_of_ten() {
+        assert_eq!(cm3_to_angstrom3(), 1e24);
     }
 }

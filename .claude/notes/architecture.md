@@ -18,13 +18,13 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - `src/pipeline/combinators.rs` (304) — `Until`/`OnViolation` plus the `Repeat`/`Guarded` stages and their factories
 - `src/invariant.rs` (459) — repair-cost ladder `Layers` (L0–L5), `Invariant` trait, `Violation`, `RestraintsSatisfied`
 - `src/template.rs` (102) — private crate-root leaf: `coord_rows` (rows of `molrs::core::Frame::coords`, Å) + `rotatable_bonds` (the one rotatable-bond policy); bond graphs are `molrs::core::Topology` (not re-exported)
-- `src/context/pack_state.rs` (245) — live run object `PackState` (wraps `PackContext` + `Placed` + `RigidView`), `evaluate_unscaled`
+- `src/context/pack_state.rs` (245) — live run object `PackState` (wraps `PackSystem` + `Placed` + `RigidView`), `evaluate_unscaled`
 - `src/context/pack_state/tests.rs` (486) — in-crate unit tests for `PackState` + `evaluate_unscaled`
 - `src/context/rigid_view.rs` (773) — `RigidView` owns the rigid DOF (COM+Euler); `write_xcart` / `capture_from_xcart` / `install_seed`, bounds-checked accessors
-- `src/context/pack_context.rs` (1274) — `PackContext`, the run’s mutable numeric state (64 `pub` fields)
-- `src/context/build.rs` (387) — `pub(crate)` `build_context` + `ContextKnobs`
+- `src/context/pack_system.rs` (1274) — `PackSystem`, the run’s mutable numeric state (64 `pub` fields)
+- `src/context/build.rs` (387) — `pub(crate)` `build_system` + `SystemKnobs`
 - `src/context/mod.rs` (17) — context facade re-exports
-- `src/context/work_buffers.rs` (98) — `WorkBuffers` rayon scratch (no `ModelData` / `RuntimeState` views: deleted 2026-09-29, callers read `PackContext` / `PackState` directly)
+- `src/context/work_buffers.rs` (98) — `WorkBuffers` rayon scratch (no `ModelData` / `RuntimeState` views: deleted 2026-09-29, callers read `PackSystem` / `PackState` directly)
 - `src/settings.rs` (153) — shared settings only (`PackSettings`, `LogSpec`, `first_non_default_knob`); re-exports `State` + `IntraResidual`
 - `src/pack_space.rs` (489) — `pub(crate)` space resolution: `resolve_pack_space`/`ResolvedSpace`/`CellDecl`, restraint broadcast, plane-vs-PBC refusal
 - `src/state.rs` (428) — frozen public `State` + `IntraResidual` + `pub(crate)` `Placements` (holds a `RigidView`) + `positions_in_target_order`
@@ -53,14 +53,14 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - `src/euler.rs` (337) — Euler ↔ rotation matrix + derivatives (there is no separate validation module: the verdict is `State::fdist`/`frest`, and `RestraintsSatisfied` guards stages)
 - `src/error.rs` (207) — `PackError`, 17 variants
 - `src/optimizer/mod.rs` (373) + `torsion_mc.rs` (313) — in-loop optimizer seam (`OptimizeSelect`, `TorsionMcOptimizer`), always compiled
-- `src/random.rs` — molpack's own RNG streams (kept for bit parity, ruling 10); the former `numerics.rs` grab-bag was dissolved into its users (GENCAN floors in `pack/gencan/mod.rs`, `numeric_controls` in `search.rs`, `DEFAULT_SCALE2` in `context/pack_context.rs`)
+- `src/random.rs` — molpack's own RNG streams (kept for bit parity, ruling 10); the former `numerics.rs` grab-bag was dissolved into its users (GENCAN floors in `pack/gencan/mod.rs`, `numeric_controls` in `search.rs`, `DEFAULT_SCALE2` in `context/pack_system.rs`)
 - `src/test_fixtures.rs` (81) — `cfg(test)` fixtures shared by the in-module unit tests; `src/grow/tests/` — `mod.rs` (352) fixtures, `refusals.rs` (588), `field.rs` (334), `internal.rs` (189), `prior.rs` (115), `driver.rs` (60); `src/pipeline/tests.rs` (1094)
 - `src/bin/molpack/main.rs` (136) — `cli`-gated CLI front end
 - `docs/getting_started.md` (128), `docs/concepts.md` (558), `docs/architecture.md` (441), `docs/extending.md` (1021) — `include_str!`-mounted rustdoc chapters (`src/lib.rs:166-176`)
 - `python/src/lib.rs` (109) — `#[pymodule]`; ABI handshake then `add_class` / `add_function` / `register_errors`
 - `python/src/packing_methods.rs` (804) — `PyGencanPack`/`PyCbmcGrow`/`PyLatticeGrow`/`PyPipeline`, `IntoStageFactory`, `packing_method_pymethods!` + `stage_method_registry!`
 - `python/src/state.rs` (140) — `PyState` (`#[pyclass(name = "State")]`) + nested `PyIntraResidual`
-- `python/src/callback.rs` (306) — `PyStageProgress` / `PyStepReport` / `PyStepContext`
+- `python/src/callback.rs` (306) — `PyStageProgress` / `PyStepReport` / `PyPackSystemView`
 - `python/src/restraint.rs` (binds `restraint`), `target.rs`, `molrs_capsule.rs` ABI/capsule bridge (`check_abi` — the one version gate), `script.rs` (default loader: the `molrs.io` reader of the template's `StructureFormat`), `errors.rs` (typed exceptions + error mapping + callback error slot), `grow.rs`, `parallel.rs`
 - `python/python/molpack/__init__.py` — package `__all__` + `version` (wheel metadata); `_protocols.py` `Callback`/`Restraint` protocols; `molpack.pyi` stubs. No Python CLI (the `molpack` command is the Rust binary) and no metadata version check (the ABI handshake is the gate)
 
@@ -71,7 +71,7 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - **Stage seam** (`src/lib.rs:126,150`, Rust-only): `Stage` (`name`/`requires`/`guarantees`/`run`), `Requires`, `Guarantees`, `StageOutcome`, `Budget`, `PackState`, `Placed`
 - **Invariants / combinators** (`src/lib.rs:138,142`): `Invariant`, `Layers` (L0–L5), `Violation`, `RestraintsSatisfied`, `Until`, `OnViolation`
 - **Shared settings + space** (`src/lib.rs:128`): `PackSettings` (`tolerance`/`precision`/`discale`/`seed`/`first_non_default_knob`); `pack_space` is entirely `pub(crate)`
-- **Context** (`src/lib.rs:126`): `PackContext`, `RigidView` (`fresh`/`nmol`/`com`/`set_com`/`euler`/`set_euler`/`as_slice`/`as_mut_slice`/`write_xcart`/`capture_from_xcart`/`install_seed`)
+- **Context** (`src/lib.rs:126`): `PackSystem`, `RigidView` (`fresh`/`nmol`/`com`/`set_com`/`euler`/`set_euler`/`as_slice`/`as_mut_slice`/`write_xcart`/`capture_from_xcart`/`install_seed`)
 - **Callbacks** (`src/lib.rs:134-137`): `Callback` (+ `on_stage_start`/`on_stage_end`), `LammpsLogCallback`, `ProgressCallback`, `EarlyStopCallback`, `XyzTrajectoryCallback` (`io`), `StepReport`, `StageProgress`, `PhaseProgress`, `PhaseReport`
 - **Restraints** (`src/lib.rs`): `AtomRestraint`, `RegionRestraint` (over `molrs::core::Region`), `CellRestraint` (`AtomRestraint::declared_cell` → `Option<SimBox>`); the 14 Packmol-parity `*Restraint` structs are crate-private `.inp` kernels; collective `Restraint` + `GroupCtx` + six profile structs (`GaussianPlane`/`GaussianPoint`/`ExponentialPlane`/`ExponentialPoint`/`TabulatedPlane`/`TabulatedPoint`) and the `SelfSeparation` bound
 - **Targets** (`src/lib.rs:151`): `Target` (19 `with_*`, `from_coords`/`new`/`fixed_from(&State)`/`fixed_at`), `Angle`, `Axis`, `CenteringMode`, `Placement`; skip table via `with_special_bonds(molrs::core::BondDistanceWeights)`
@@ -80,7 +80,7 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - **Feature-gated**: `io` → `script::BuildResult`/`Script::build`, `XyzTrajectoryCallback`
 - **Namespaces**: `context` (layout constants, `AtomProps`, `WorkBuffers`, `GeometryKey`), `grow` (`GrowConfig`, `GrowError`, `LatticeConfig`, `TorsionPrior`, `AnglePrior`), `script`. Every other module is private; every public item has one path
 - **No `prelude`** — deleted in the 0.4.0 module refactor (it duplicated the root).
-- **Python module** (`python/src/lib.rs:65-107`): `Angle`, `Axis`, `CenteringMode`, `GaussianPlane`, `GaussianPoint`, `ExponentialPlane`, `ExponentialPoint`, `TabulatedPlane`, `TabulatedPoint`, `SelfSeparation`, `TorsionPrior`, `AnglePrior`, `Target`, `GencanPack`, `CbmcGrow`, `LatticeGrow`, `Pipeline`, `State` (`PyState`), `IntraResidual` (`PyIntraResidual`), `StepReport`, `StageProgress`, `StepContext`, `ScriptJob`; pyfunctions `load_script`, `rayon_enabled`, `num_threads`, `init_thread_pool`; error classes via `register_errors`. `python/python/molpack/__init__.py` `__all__` mirrors those 23 classes and four functions plus `Callback`/`Restraint` protocols, six error classes, `version`. `GencanPack.with_restart(state)` is the Python continuation; the pre-`State` result class and the old continuation method are gone.
+- **Python module** (`python/src/lib.rs:65-107`): `Angle`, `Axis`, `CenteringMode`, `GaussianPlane`, `GaussianPoint`, `ExponentialPlane`, `ExponentialPoint`, `TabulatedPlane`, `TabulatedPoint`, `SelfSeparation`, `TorsionPrior`, `AnglePrior`, `Target`, `GencanPack`, `CbmcGrow`, `LatticeGrow`, `Pipeline`, `State` (`PyState`), `IntraResidual` (`PyIntraResidual`), `StepReport`, `StageProgress`, `PackSystemView`, `ScriptJob`; pyfunctions `load_script`, `rayon_enabled`, `num_threads`, `init_thread_pool`; error classes via `register_errors`. `python/python/molpack/__init__.py` `__all__` mirrors those 23 classes and four functions plus `Callback`/`Restraint` protocols, six error classes, `version`. `GencanPack.with_restart(state)` is the Python continuation; the pre-`State` result class and the old continuation method are gone.
 
 ### Style summary
 
@@ -101,7 +101,7 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 - `src/pack/` (`gencan/`, `initial`, `movebad`, `restmol`) and `src/grow/` (`lattice/` a peer inside the family) — **algorithm families**. Each stage is a preset entry via `Pipeline::single`. A family does not call the other's driver. Cross-algorithm hand-off is caller-side (`Pipeline::with_stage` or `GencanPack::with_restart`). `pack` and `euler` are `pub(crate)`.
 - `src/invariant.rs` — **guard leaf**; depends on `context` only (`PackState`).
 - `src/template.rs` — **pure leaf**; `std` + molrs `Frame` only. Bond graphs are `molrs::core::Topology`.
-- `src/context/` (including `grid` and `geometry`), `src/objective.rs`, `src/eval.rs`, `src/restraint/` — **shared bottom layer**. `PackContext::evaluate` is implemented in `objective`. There is no `constraints` module. `GeometryKey` lives in `geometry.rs`.
+- `src/context/` (including `grid` and `geometry`), `src/objective.rs`, `src/eval.rs`, `src/restraint/` — **shared bottom layer**. `PackSystem::evaluate` is implemented in `objective`. There is no `constraints` module. `GeometryKey` lives in `geometry.rs`.
 - `src/error.rs` — wraps `grow::GrowError` (`src/grow/error.rs`). `validate_grow_cell` returns `GrowError`; entries map `PackError::Grow`.
 - `src/grow/error.rs`, `src/outcome.rs` — leaves. Lattice-only faults stay variants of `GrowError`.
 - `src/euler.rs`, `src/random.rs`, `src/template.rs` — leaf utilities (`euler` and `random` kept for Packmol bit parity, ruling 10); `src/assemble.rs`, `src/callback.rs` — cross-cutting.
@@ -111,7 +111,7 @@ _Generated 2026-09-04 by /mol:map; line counts, `src/lib.rs` line refs, prelude 
 
 **Known cycles / debts** — the 2026-10-01 split cleared `initial ↔ gencan ↔ movebad` as a cross-module cycle (the three now share `pack/`), `objective ↔ constraints` (no `Constraints` type), `target ↔ entry`, `callback ↔ stage`, `context ↔ frame` (`frame.rs` is gone), and `error → grow`. Inside `pack/`, placement calls the bad-move heuristic and both call `restmol`; the heuristic does not call placement. `phases` reads `STAGE_NAME` and does not import the stage type. `grow/internal` reads `GrowError` from `grow_error`, not from the `grow` facade. Open debts in `.claude/notes/notes.md`: **D-01** growth hard-core unreachable at melt density (partial local fix landed; rest owed to `grow-axes`), **D-04** the `uv … tox` spelling cannot resolve (molrs double pin). **D-02**, **D-03**, **D-05**, **D-07** are cleared. Grid coverage is `context::grid::coverage_radmax` (`2 * radius_ini`) for every stage.
 
-Files over the 800-line cap (`conventions.md`: 200–400 typical, 800 max; counts include in-module tests), as of the 2026-10-01 family split — `gencan/mod.rs`, `initial.rs`, and `saw.rs` were brought under the cap (`search.rs` / `linesearch.rs`, grid tests moved to `context/grid.rs`, walks in `saw/walk.rs`): `src/objective.rs`, `src/context/pack_context.rs`, `src/script/parser.rs`, `src/target.rs`, `src/pipeline/tests.rs`, `src/restraint/geometric/tests/gradient.rs`, `python/src/packing_methods.rs`. Those were not part of this split.
+Files over the 800-line cap (`conventions.md`: 200–400 typical, 800 max; counts include in-module tests), as of the 2026-10-01 family split — `gencan/mod.rs`, `initial.rs`, and `saw.rs` were brought under the cap (`search.rs` / `linesearch.rs`, grid tests moved to `context/grid.rs`, walks in `saw/walk.rs`): `src/objective.rs`, `src/context/pack_system.rs`, `src/script/parser.rs`, `src/target.rs`, `src/pipeline/tests.rs`, `src/restraint/geometric/tests/gradient.rs`, `python/src/packing_methods.rs`. Those were not part of this split.
 
 <!-- mol:map:managed end -->
 

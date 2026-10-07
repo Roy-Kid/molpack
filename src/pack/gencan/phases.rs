@@ -9,9 +9,9 @@ use molrs::op::F;
 use rand::rngs::SmallRng;
 
 use crate::Objective;
-use crate::context::PackContext;
+use crate::context::PackSystem;
 use crate::eval::EvalMode;
-// The unscaled verdict is a shared primitive owned by the context layer, not
+// The unscaled verdict is a shared primitive owned by the system layer, not
 // by this stage: growth evaluates the same way, and the pipeline layer must
 // not import `gencan/`.
 use super::small_floor;
@@ -63,7 +63,7 @@ pub fn run_iteration(
     disable_movebad: bool,
     movebad_cfg: &MoveBadConfig,
     gencan_params: &GencanParams,
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     xwork: &mut [F],
     swap: &mut SwapState,
     flast: &mut F,
@@ -219,7 +219,7 @@ pub fn run_phase(
     disable_movebad: bool,
     movebad_cfg: &MoveBadConfig,
     gencan_params: &GencanParams,
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     x: &mut [F],
     swap: &mut SwapState,
     optimizer_bindings: &mut [ResolvedBinding<'_>],

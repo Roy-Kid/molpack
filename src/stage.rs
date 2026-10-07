@@ -16,7 +16,7 @@ use molrs::op::F;
 ///
 /// [`PackEngine::run`](crate::PackEngine::run) is five stages; the middle
 /// two — initial state and the iteration driver — are *the algorithm*, and
-/// everything around them (target lowering, `PackContext` construction,
+/// everything around them (target lowering, `PackSystem` construction,
 /// frame assembly) is shared infrastructure. A [`Stage`] is one
 /// interchangeable implementation of that middle: it receives the run's
 /// [`PackState`], drives it towards a feasible configuration, and declares
@@ -56,11 +56,11 @@ use molrs::op::F;
 /// The two violation maxima the shared objective produces — the largest
 /// inter-molecular contact violation and the largest restraint violation,
 /// the pair [`State`](crate::State) reports — are **authoritative
-/// on the state after [`Stage::run`] returns**, where the context owns them
+/// on the state after [`Stage::run`] returns**, where the system owns them
 /// as its own fields. [`StageOutcome`] carries no verdict: a stage reports
 /// only what it alone knows (whether it hit its own convergence criterion,
 /// and how many times it had to relax a constructive guarantee). A callback
-/// that wants the numbers reads them off the context in
+/// that wants the numbers reads them off the system in
 /// [`Callback::on_stage_end`], which is handed the state precisely so that no
 /// stage can self-report a verdict the shared ruler would disagree with.
 ///
@@ -90,10 +90,10 @@ pub trait Stage: Send {
     /// `CellGrid`). `targets` are the targets this stage is responsible for
     /// — the same objects the caller handed to
     /// [`PackEngine::run`](crate::PackEngine::run), so chemistry has exactly
-    /// one source of truth. A stage takes the context and the rigid
+    /// one source of truth. A stage takes the system and the rigid
     /// placement vector apart with
     /// [`PackState::rigid_split_mut`], writes the per-copy conformers into
-    /// the context's `coor` and the placements into the
+    /// the system's `coor` and the placements into the
     /// [`RigidView`](crate::RigidView), and returns its outcome.
     ///
     /// Those two together are what the run's output is made of: once `run`
@@ -103,7 +103,7 @@ pub trait Stage: Send {
     /// directly (both growth drivers do) must therefore capture them back
     /// with
     /// [`RigidView::capture_from_xcart`](crate::RigidView::capture_from_xcart)
-    /// before returning; anything left only in the context's `xcart` is
+    /// before returning; anything left only in the system's `xcart` is
     /// overwritten.
     ///
     /// # Re-entrancy contract
@@ -218,8 +218,8 @@ mod tests {
     //! (`gencan::tests`, `grow::tests`), so this file boots no engine entry
     //! and names no production stage (acceptance ac-008).
     //!
-    //! Fixture: `PackState::new(PackContext::new(0, 0, 0), 0)` — the degenerate
-    //! context of `pack_context.rs::geometry_cache_tests` / `src/context/pack_state/tests.rs`,
+    //! Fixture: `PackState::new(PackSystem::new(0, 0, 0), 0)` — the degenerate
+    //! context of `pack_system.rs::geometry_cache_tests` / `src/context/pack_state/tests.rs`,
     //! which is all a stage that does no geometry can legitimately need. No RNG,
     //! no clock, no filesystem, no network.
     //!
@@ -231,7 +231,7 @@ mod tests {
 
     use crate::StageProgress;
     use crate::{
-        Budget, Callback, Guarantees, PackContext, PackError, PackState, Placed, Requires, Stage,
+        Budget, Callback, Guarantees, PackError, PackState, PackSystem, Placed, Requires, Stage,
         StageOutcome, StepReport, Target,
     };
 
@@ -310,12 +310,12 @@ mod tests {
     struct NoopCallback;
 
     impl Callback for NoopCallback {
-        fn on_step(&mut self, _step: &StepReport, _sys: &PackContext) {}
+        fn on_step(&mut self, _step: &StepReport, _sys: &PackSystem) {}
     }
 
-    /// The degenerate run state: an empty context and no free molecules.
+    /// The degenerate run state: an empty system and no free molecules.
     fn empty_state() -> PackState {
-        PackState::new(PackContext::new(0, 0, 0), 0)
+        PackState::new(PackSystem::new(0, 0, 0), 0)
     }
 
     /// The budget every fake here is run with; no fake reads it.
@@ -471,7 +471,7 @@ mod tests {
             name: "alpha",
         };
         let outcome = StageOutcome::new(false, 0);
-        let sys = PackContext::new(0, 0, 0);
+        let sys = PackSystem::new(0, 0, 0);
 
         callback.on_stage_start(&stage);
         callback.on_stage_end(&stage, &outcome, &sys);

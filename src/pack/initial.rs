@@ -18,7 +18,7 @@ use ndarray::array;
 use std::time::Instant;
 
 use crate::Objective;
-use crate::context::{NONE_IDX, PackContext, RigidView};
+use crate::context::{NONE_IDX, PackSystem, RigidView};
 use crate::eval::EvalMode;
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::pack::movebad::{MoveBadConfig, movebad};
@@ -43,7 +43,7 @@ pub struct SwapState {
 
 impl SwapState {
     /// action=0: save full x.
-    pub fn init(x: &[F], sys: &PackContext) -> Self {
+    pub fn init(x: &[F], sys: &PackSystem) -> Self {
         SwapState {
             xfull: x.to_vec(),
             ntotmol_full: sys.ntotmol,
@@ -54,7 +54,7 @@ impl SwapState {
     ///
     /// Returns the compact x vector (length = `nmols[itype]` * 6).
     /// Also updates `sys.ntotmol` and `sys.comptype`.
-    pub fn set_type(&self, itype: usize, sys: &mut PackContext) -> Vec<F> {
+    pub fn set_type(&self, itype: usize, sys: &mut PackSystem) -> Vec<F> {
         // Byte-offsets in xfull for this type's COM/euler variables
         // (Packmol swaptype.f90 action 1, with 0-based indexing)
         let ilubar_start: usize = sys.nmols[0..itype].iter().sum::<usize>() * 3;
@@ -75,7 +75,7 @@ impl SwapState {
     }
 
     /// action=2: save per-type results back into xfull.
-    pub fn save_type(&mut self, itype: usize, xtype: &[F], sys: &PackContext) {
+    pub fn save_type(&mut self, itype: usize, xtype: &[F], sys: &PackSystem) {
         let ilubar_start: usize = sys.nmols[0..itype].iter().sum::<usize>() * 3;
         let ilugan_start: usize = self.ntotmol_full * 3 + ilubar_start;
         let nm = sys.nmols[itype];
@@ -85,7 +85,7 @@ impl SwapState {
     }
 
     /// action=3: restore full x and ntotmol.
-    pub fn restore(&self, x: &mut [F], sys: &mut PackContext) {
+    pub fn restore(&self, x: &mut [F], sys: &mut PackSystem) {
         debug_assert_eq!(x.len(), self.xfull.len());
         x.copy_from_slice(&self.xfull);
         sys.ntotmol = self.ntotmol_full;
@@ -104,7 +104,7 @@ impl SwapState {
 /// is still identical, so copy 0 is representative. `dmax` only sizes the
 /// initial placement grid — it is not consulted after in-loop optimizers let
 /// the copies' conformations diverge.
-pub fn compute_dmax(sys: &mut PackContext) {
+pub fn compute_dmax(sys: &mut PackSystem) {
     sys.dmax = vec![0.0 as F; sys.ntype];
     for itype in 0..sys.ntype {
         let idfirst = sys.idfirst[itype];
@@ -142,7 +142,7 @@ fn init_loop_one_type(
     itype: usize,
     nloop0: usize,
     xtype: &mut [F],
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     precision: F,
     gencan_maxit: usize,
     movebad_cfg: &MoveBadConfig<'_>,
@@ -207,7 +207,7 @@ fn init_loop_one_type(
 #[allow(clippy::too_many_arguments)]
 pub fn initial(
     view: &mut RigidView,
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     precision: F,
     discale: F,
     sidemax: F,
@@ -302,7 +302,7 @@ pub fn initial(
 
     let free_atoms = sys.ntotat - sys.nfixedat;
     // Packmol's initial.f90 lines 140-165 re-flip fixedatom=true on the
-    // fixed-atom tail here, but by this point context construction has already
+    // fixed-atom tail here, but by this point system construction has already
     // done that and called `sync_atom_props` — writing the `Vec<bool>`
     // directly would desynchronize `atom_props` and trip the debug
     // invariant in `compute_f`. The assertion below confirms the state
@@ -589,7 +589,7 @@ pub fn initial(
     log::debug!("[{:.3}s] initial() complete", t0.elapsed().as_secs_f64());
 }
 
-fn random_angle_for_type(itype: usize, axis: usize, sys: &PackContext, rng: &mut impl Rng) -> F {
+fn random_angle_for_type(itype: usize, axis: usize, sys: &PackSystem, rng: &mut impl Rng) -> F {
     if sys.constrain_rot[itype][axis] {
         let center = sys.rot_bound[itype][axis][0];
         let half_width = sys.rot_bound[itype][axis][1].abs();

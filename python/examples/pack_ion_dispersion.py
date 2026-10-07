@@ -98,7 +98,7 @@ def write(name: str, result) -> None:
         )
     OUT.mkdir(parents=True, exist_ok=True)
     molrs.io.write_mrec_frame(str(OUT / f"{name}.mrec"), packed)
-    molrs.io.write_lammps_trajectory(
+    molrs.io.write_lammps_dump_trajectory(
         str(OUT / f"{name}.lammpstrj"),
         [packed],
         columns=["id", "element", "mol", "x", "y", "z"],

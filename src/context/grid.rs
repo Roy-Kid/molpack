@@ -9,15 +9,15 @@ use molrs::core::CellGrid;
 use molrs::core::SimBox;
 use molrs::op::F;
 
-use crate::context::{NONE_IDX, PackContext};
+use crate::context::{NONE_IDX, PackSystem};
 
-/// Install the resolved simulation box and cell grid on the context and bin
+/// Install the resolved simulation box and cell grid on the system and bin
 /// the fixed atoms.
 ///
 /// A solver that skips initial placement still needs a populated grid for
 /// the shared-objective evaluation.
 pub(crate) fn install_simbox_and_grid(
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     simbox: SimBox,
     radmax: F,
     discale: F,
@@ -58,7 +58,7 @@ pub(crate) fn install_simbox_and_grid(
     }
 }
 
-/// Derive `radmax` and the free-atom count from the context, then install
+/// Derive `radmax` and the free-atom count from the system, then install
 /// the resolved cell and its grid — the shared "box and its cell grid"
 /// prelude for every stage that hands `run` an already-resolved [`SimBox`]
 /// (growth, lattice growth, and a GENCAN stage that continues from existing
@@ -67,7 +67,7 @@ pub(crate) fn install_simbox_and_grid(
 /// The coverage scale is [`coverage_radmax`], the same derivation initial
 /// placement uses — there is one answer to "how wide must a cell be", and
 /// both entries into the grid read it from the same place.
-pub(crate) fn install_resolved_cell(sys: &mut PackContext, cell: &SimBox, discale: F) {
+pub(crate) fn install_resolved_cell(sys: &mut PackSystem, cell: &SimBox, discale: F) {
     let radmax = coverage_radmax(sys);
     let free_atoms = sys.ntotat - sys.nfixedat;
     install_simbox_and_grid(sys, cell.clone(), radmax, discale, free_atoms);
@@ -88,7 +88,7 @@ pub(crate) fn install_resolved_cell(sys: &mut PackContext, cell: &SimBox, discal
 /// - **`radius_ini`, not `radius`.** `radius` is GENCAN's transient working
 ///   copy, rescaled at every phase start, so reading it would size the grid
 ///   from whatever the previous stage happened to leave behind.
-pub(crate) fn coverage_radmax(sys: &PackContext) -> F {
+pub(crate) fn coverage_radmax(sys: &PackSystem) -> F {
     sys.radius_ini
         .iter()
         .copied()
@@ -109,7 +109,7 @@ mod tests {
     //! reports a clean structure that overlaps.
 
     use super::install_resolved_cell;
-    use crate::PackContext;
+    use crate::PackSystem;
     use crate::objective::compute_f;
     use molrs::core::SimBox;
     use molrs::op::F;
@@ -120,8 +120,8 @@ mod tests {
     /// Two single-atom molecules `dx` apart on the x axis in a 20 Å free box,
     /// with the working radius already scaled by `discale` (what a phase
     /// start leaves behind).
-    fn two_atoms(dx: F) -> (PackContext, Vec<F>) {
-        let mut sys = PackContext::new(2, 2, 1);
+    fn two_atoms(dx: F) -> (PackSystem, Vec<F>) {
+        let mut sys = PackSystem::new(2, 2, 1);
         sys.ntype_with_fixed = 1;
         sys.nmols = vec![2];
         sys.natoms = vec![1];
