@@ -1,4 +1,4 @@
-"""Tests for Python-defined packing callbacks (``with_callback`` on the entries)."""
+"""Tests for Python-defined packing callbacks (``with_callback`` on the engines)."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def _two_water_frame() -> molrs.core.Frame:
 
 
 def _packer() -> molpack.GencanPack:
-    return molpack.GencanPack().with_progress(False).with_inner_iterations(5)
+    return molpack.GencanPack().with_inner_iterations(5)
 
 
 @dataclass
@@ -247,7 +247,7 @@ class TestPackSystemView:
         if len(frames) >= 2:
             assert frames[0][1] is not frames[1][1]
 
-    def test_context_expires_after_callback(self):
+    def test_system_view_expires_after_callback(self):
         stashed: list = []
 
         class Stasher:
@@ -268,7 +268,7 @@ class TestPackSystemView:
             _ = stashed[0].positions
         assert "expired" in repr(stashed[0])
 
-    def test_callback_ignoring_context_still_works(self):
+    def test_callback_ignoring_the_system_view_still_works(self):
         log = CallLog()
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])

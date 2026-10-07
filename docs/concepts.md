@@ -53,7 +53,7 @@ collective restraint sees *every* copy of a species at once and returns a
 single penalty whose gradient is **coupled across the whole group**:
 
 ```text
-pub struct GroupCtx {
+pub struct GroupEvaluation {
     pub scale: F,             // linear-penalty annealing scale
     pub scale2: F,            // quadratic-penalty annealing scale
     pub natoms_per_copy: usize,
@@ -61,8 +61,8 @@ pub struct GroupCtx {
 }
 
 pub trait Restraint: Send + Sync + std::fmt::Debug {
-    fn f (&self, coords: &[[F; 3]], ctx: GroupCtx) -> F;
-    fn fg(&self, coords: &[[F; 3]], ctx: GroupCtx, grads: &mut [[F; 3]]) -> F;
+    fn f (&self, coords: &[[F; 3]], evaluation: GroupEvaluation) -> F;
+    fn fg(&self, coords: &[[F; 3]], evaluation: GroupEvaluation, grads: &mut [[F; 3]]) -> F;
     fn is_bound(&self) -> bool { false }
     fn is_parallel_safe(&self) -> bool { true }
     fn name(&self) -> &'static str { std::any::type_name::<Self>() }
@@ -74,7 +74,7 @@ in the packer's own order: **copy-major, atom-minor**.
 The gradient convention mirrors [`AtomRestraint`](#atomrestraint): `fg` accumulates INTO
 `grads[i]` with `+=`.
 
-`GroupCtx` carries what a group-level term cannot recover from a flat
+`GroupEvaluation` carries what a group-level term cannot recover from a flat
 coordinate slice: how many atoms make one copy (so `coords` can be cut into
 molecules) and the minimum-image convention (so a term that measures
 distances agrees with the pair loop across a periodic boundary). It is
@@ -149,7 +149,7 @@ number of copies, which at melt scale dominates everything else the objective
 does. `SelfSeparation` instead bins the centres into a `CellGrid` at least
 `d_min` wide and sweeps each cell against itself and its forward neighbours:
 the same partition-and-stencil the packer's own pair loop uses, one level up.
-That is why `GroupCtx` carries the cell. Measured against the double loop, the
+That is why `GroupEvaluation` carries the cell. Measured against the double loop, the
 added cost per evaluation falls from 11.8M to 2.6M instructions at 1k copies
 and from ~1.2G to 32M at 10k — linear in the number of copies rather than
 quadratic. Below 64 cells the stencil reaches the whole partition and cannot
@@ -274,7 +274,7 @@ writing one. Every `StepReport` names the stage that emitted it in `step.stage`,
 a [`StageProgress`](crate::StageProgress) with three fields: `index` (0-based
 position of the stage in the run), `total` (how many stages the run has), and
 `name` (the stage's own [`Stage::name`](crate::Stage::name), e.g. `"gencan"`).
-A run driven by one engine entry has one stage, so it reports `index = 0` and
+A run driven by one engine has one stage, so it reports `index = 0` and
 `total = 1`.
 
 `on_stage_start` and `on_stage_end` bracket a whole stage the way
@@ -446,17 +446,17 @@ A [`Target`](crate::Target) describes one molecule type:
   chaining primitive for staged packs.
 
 The packing algorithm is *not* a target property: you pick it by picking
-the engine entry ([`GencanPack`](crate::GencanPack) or
+the engine ([`GencanPack`](crate::GencanPack) or
 [`CbmcGrow`](crate::CbmcGrow)), and every target in that call is packed
-by it. An unsupported target/entry combination is a named error, never a
+by it. An unsupported target/engine combination is a named error, never a
 silent fall-back.
 
 Targets are snapshotted at `run()` entry — mutating a `Target` after
 passing it to an engine has no effect.
 
-## PackEngine and its entries
+## PackEngine and its engines
 
-[`PackEngine`](crate::PackEngine) is the shared lifecycle: one entry type
+[`PackEngine`](crate::PackEngine) is the shared lifecycle: one engine type
 per algorithm, all with the same builders and the same terminal verb.
 [`GencanPack`](crate::GencanPack) is rigid-body GENCAN descent;
 [`CbmcGrow`](crate::CbmcGrow) is configurational-bias chain growth.
@@ -481,14 +481,14 @@ default seed is Packmol's `1_234_567`).
 Every setter consumes and returns `self`, and so does `run` — an engine
 is one-shot by construction, which is what makes it impossible to lose
 its callback set on a second call. To stage two algorithms, run the first
-entry and feed its output to the second as a fixed matrix:
+engine and feed its output to the second as a fixed matrix:
 
 ```text
 let grown = CbmcGrow::new(prior).with_density(0.9).run(&[chain], 60)?;
 let full  = GencanPack::new().run(&[Target::fixed_from(&grown.frame), solvent], 200)?;
 ```
 
-Both entries return the same [`State`](crate::State) —
+Both engines return the same [`State`](crate::State) —
 `frame`, `fdist`, `frest`, `converged`, `degraded`, `intra`.
 
 ## PackSystem
@@ -498,7 +498,7 @@ packing state — coordinates, cell lists, restraint pool, rotation
 buffers, counters. All optimizer / movebad / callback code paths take
 `&mut PackSystem` (for writers) or `&PackSystem` (for observers).
 
-Structure (`molpack/src/context/`):
+Structure (`molpack/src/system/`):
 
 - `WorkBuffers` — scratch arrays (xcart, gxcar, radiuswork).
 

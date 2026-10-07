@@ -6,7 +6,7 @@
 //! * [`StageFactory`] — "given the resolved setup, what stages do you
 //!   contribute?" Everything a [`Pipeline`](super::Pipeline) needs from the
 //!   things it was handed: their target validation, their shared settings,
-//!   the callbacks they carry, and their stages. A preset entry implements it,
+//!   the callbacks they carry, and their stages. A preset engine implements it,
 //!   and so does `Pipeline` itself, which is what makes pipelines nest.
 //! * [`PackEngine`] — the runnable surface: the shared `with_*` builders and
 //!   [`run`](PackEngine::run). `run` is a **required** method with no

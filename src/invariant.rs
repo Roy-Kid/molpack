@@ -2,7 +2,7 @@
 
 use molrs::op::F;
 
-use crate::context::PackState;
+use crate::system::PackState;
 
 /// A set of rungs on the repair-cost ladder (see the module docs).
 ///
@@ -262,10 +262,10 @@ mod tests {
         per_atom: &[(usize, F)],
     ) -> PackState {
         let mut state = PackState::new(PackSystem::new(ntotat, nmol, 1), nmol);
-        let ctx = state.sys_mut();
-        ctx.frest = frest;
+        let sys = state.sys_mut();
+        sys.frest = frest;
         for &(icart, value) in per_atom {
-            ctx.frest_atom[icart] = value;
+            sys.frest_atom[icart] = value;
         }
         state
     }

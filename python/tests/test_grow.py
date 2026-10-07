@@ -1,7 +1,7 @@
-"""Chain-growth entry bindings (``CbmcGrow``, engine-entry-split).
+"""Chain-growth engine bindings (``CbmcGrow``).
 
 Covers the typed prior surface (``TorsionPrior`` / ``AnglePrior``), the
-growth knobs on the entry itself, the named-error contracts (an unsupported
+growth knobs on the engine itself, the named-error contracts (an unsupported
 combination is a ``ValueError``, never a silent fall-back), the
 ``with_density`` mutual exclusion, and end-to-end grow packs from a real
 bonded ``molrs`` frame.
@@ -54,11 +54,11 @@ def _chain_frame(n: int, bond: float = 1.53, bonds: bool = True) -> molrs.core.F
 
 
 def _grow() -> CbmcGrow:
-    return CbmcGrow(TorsionPrior.uniform()).with_progress(False)
+    return CbmcGrow(TorsionPrior.uniform())
 
 
 class TestTypedSurface:
-    """The typed prior objects and entry builders — never strings."""
+    """The typed prior objects and engine builders — never strings."""
 
     def test_torsion_prior_constructors(self):
         # All four constructors build, and the repr names the variant — the
@@ -96,14 +96,9 @@ class TestTypedSurface:
             .with_angle_prior(AnglePrior.template())
         )
         assert isinstance(chained, CbmcGrow)
-        # Builders return a NEW entry; the original stays buildable.
+        # Builders return a NEW engine; the original stays buildable.
         assert chained is not base
         assert repr(chained)
-
-    def test_grow_has_no_exclusion_depth_knob(self):
-        # Spec 05 unhooked the engine knob; the table lives on Target.
-        entry = CbmcGrow(TorsionPrior.uniform())
-        assert hasattr(entry, "with_exclusion_depth") is False
 
 
 class TestNamedErrors:
@@ -159,7 +154,7 @@ class TestNamedErrors:
 
 
 class TestGencanPath:
-    """The rigid-body entry through the same result type."""
+    """The rigid-body engine through the same result type."""
 
     def test_gencan_degraded_is_zero_and_deterministic(self):
         # A GENCAN pack reports degraded == 0, and the same seed reproduces
@@ -169,7 +164,6 @@ class TestGencanPath:
                 GencanPack()
                 .with_seed(42)
                 .with_tolerance(2.0)
-                .with_progress(False)
                 .with_periodic_box([0.0, 0.0, 0.0], [15.0, 15.0, 15.0])
                 .run([Target(_chain_frame(2, bonds=False), 3)], max_loops=50)
             )
@@ -182,7 +176,7 @@ class TestGencanPath:
 
 
 class TestLatticeGrow:
-    """Diamond-lattice growth entry (lattice-growth-phase spec)."""
+    """Diamond-lattice growth engine (lattice-growth-phase spec)."""
 
     def test_lattice_requires_torsion_prior(self):
         with pytest.raises(TypeError):

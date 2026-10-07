@@ -17,7 +17,7 @@ torsion at a time, inside the final box.
 not a preprocessor for it: growth consumes the same radii, tolerance,
 and restraints, is judged by the same `fdist` / `frest` objective, and
 returns the same `State`. You choose the algorithm by choosing the
-entry — `GencanPack` places rigid bodies, `CbmcGrow` grows chains — and
+engine — `GencanPack` places rigid bodies, `CbmcGrow` grows chains — and
 every target in that call is handled by it. molpack never infers the
 algorithm from the molecule and never silently falls back from one to
 the other.
@@ -51,7 +51,7 @@ print(result.converged, result.degraded)
 
 The torsion prior is `CbmcGrow`'s one mandatory constructor argument;
 the growth knobs (`with_trials`, `with_retract`, `with_relax`, …) are
-builders on the entry, alongside the shared ones (`with_density`,
+builders on the engine, alongside the shared ones (`with_density`,
 `with_seed`, `with_tolerance`, …).
 
 A target that cannot be grown — no bond graph, fewer than 3 atoms, a
@@ -282,7 +282,7 @@ geometry. Which atoms are hydrogens is per-target data: element symbol `H` by
 default, or `Target.with_hydrogens(indices)` for a model that names them
 differently (`[]` puts every atom of a coarse-grained chain on the lattice). The force field downstream sets bonded geometry in its first steps;
 it cannot as cheaply undo a chain threaded through a wall, which is what
-rebuilding from template internal coordinates used to cost. Residual contacts
+rebuilding from template internal coordinates costs. Residual contacts
 are reported honestly in `fdist` and belong to the seeded push-off.
 
 This repository's polymer-melt benchmark claim cap is ρ = 1.2 g/cm³; the

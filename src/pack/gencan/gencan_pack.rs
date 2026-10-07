@@ -1,4 +1,4 @@
-//! `GencanPack` — the rigid-body GENCAN packing entry.
+//! `GencanPack` — the rigid-body GENCAN packing engine.
 
 use molrs::op::F;
 
@@ -14,11 +14,11 @@ use crate::state::Placements;
 use crate::{PackSettings, State};
 
 /// Rigid-body packing via the GENCAN bound-constrained optimizer
-/// (Birgin & Martínez) — the Packmol algorithm as its own entry.
+/// (Birgin & Martínez) — the Packmol algorithm as its own engine.
 ///
 /// Shared knobs (`with_seed`, `with_tolerance`, boxes, callbacks, …) come
 /// from [`PackEngine`]; everything on this type is GENCAN-only and means
-/// nothing to a growth entry.
+/// nothing to a growth engine.
 pub struct GencanPack {
     settings: PackSettings,
     callbacks: Vec<Box<dyn Callback>>,
@@ -188,7 +188,7 @@ impl StageFactory for GencanPack {
 
     fn stages(&mut self, setup: &EngineSetup<'_>) -> Result<Vec<Box<dyn Stage>>, PackError> {
         // Shared knobs come from the run (`setup.settings`), algorithm knobs
-        // from this entry — one ruler, one owner each.
+        // from this engine — one ruler, one owner each.
         let s = setup.settings;
         let gencan = GencanSettings {
             inner_iterations: self.inner_iterations,
@@ -208,8 +208,8 @@ impl StageFactory for GencanPack {
             setup.ntype,
             setup.ntype_with_fixed,
         );
-        // Both handovers are the entry's one-shot move, not a per-run one:
-        // `run(self)` consumes the entry, so there is no second `stages()`
+        // Both handovers are the engine's one-shot move, not a per-run one:
+        // `run(self)` consumes the engine, so there is no second `stages()`
         // call to run bare, and the stage keeps what it is given for every
         // run it is asked to do.
         let stage = match self.seed_placements.take() {
@@ -239,7 +239,7 @@ mod tests {
     use super::*;
     use crate::Target;
 
-    /// The entry lifecycle is deterministic: same targets, same seed,
+    /// The engine lifecycle is deterministic: same targets, same seed,
     /// bit-identical positions and verdict.
     #[test]
     fn gencan_pack_is_deterministic() {
@@ -250,7 +250,7 @@ mod tests {
                 .with_tolerance(2.0)
                 .with_periodic_box([0.0; 3], [20.0; 3], [true; 3])
                 .run(&[Target::from_coords(&coords, &[1.0, 1.0], 6)], 50)
-                .expect("entry pack runs")
+                .expect("engine pack runs")
         };
         let (a, b) = (run(), run());
         assert!(a.converged);

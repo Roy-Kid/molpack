@@ -26,7 +26,7 @@ Format per entry:
 - **K2** `XYZHandler` 改为 `io` 门控，快照拼成 Frame（`element`/`x,y,z`/`mol_id`，meta `step`）交给 `molrs::io::data::xyz::write_xyz_frame`；文件格式变为 molrs 的 extended XYZ（`step=N Properties=species:S:1:pos:R:3:mol_id:I:1`）。
 - **K3** `assemble::topology_frame` 改为每个目标 `Frame::replicate` 后 `Frame::concat`，删掉手写的端点偏移与 `row_bases`。**K4** `molrs::core::constants::AVOGADRO`。**K5** 平面重复判断问 `HalfSpace::new(n, 0)?.repeats_along(s)`。
 - **K6** grow 内坐标用 `op::vec3::{angle, dihedral}` + `op::rigid::nerf`（逐位等同旧实现）；集体约束法向用 `op::vec3::normalize`（Python 绑定同一判据）；`TorsionMcOptimizer` 的 `recenter_free` 用 `op::superpose::centroid`，退化键判据用 `normalize`。**裁决 10 保留**：`.inp` 几何约束核（`restraint/geometric`，逐位复现 Packmol `comprest`/`gwalls`）、金刚石晶格行走（`grow/lattice/saw`）、独立 RNG 流（`random.rs`）、模板中心的求和顺序（`target::geometric_center`）——各自文档写明原因。
-- **K7** 删根上的 molrs 再导出（`F`、`Element`、`BondDistanceWeights`、`Optimizer`、`OptimizationReport`）与 `prelude`。**K8** 只剩三个公开命名空间：`context`（布局常量、`AtomProps`、`WorkBuffers`、`GeometryKey`）、`grow`（`GrowConfig`、`GrowError`、`LatticeConfig`、`TorsionPrior`、`AnglePrior`）、`script`；其余模块私有，根上一条路径（新增根导出 `StageProgress`、`EngineSetup`、`Restraint`、`GroupCtx` 与六个集体约束）。原模块文档中面向用户的内容移到 `Pipeline` / `Stage` / `Invariant` / `AtomRestraint` 的类型文档。
+- **K7** 删根上的 molrs 再导出（`F`、`Element`、`BondDistanceWeights`、`Optimizer`、`OptimizationReport`）与 `prelude`。**K8** 只剩三个公开命名空间：`context`（布局常量、`AtomProps`、`WorkBuffers`、`GeometryKey`）、`grow`（`GrowConfig`、`GrowError`、`LatticeConfig`、`TorsionPrior`、`AnglePrior`）、`script`；其余模块私有，根上一条路径（新增根导出 `StageProgress`、`EngineSetup`、`Restraint`、`GroupEvaluation` 与六个集体约束）。原模块文档中面向用户的内容移到 `Pipeline` / `Stage` / `Invariant` / `AtomRestraint` 的类型文档。
 - **K9** `compute_f/fg/g` 改 `pub(crate)`；删 `PackContext` 的固有 `evaluate`（唯一入口 `Objective::evaluate`）、`EvalMode::RestMol`、`grow::moves::uniform`。顺手删死代码：`GencanParams::{iprint, ncomp}`、`GencanResult::{fcnt, gcnt, cgcnt}`、`CgResult::{q, iter}`、`OverlapField.n_placed` 字段、`InternalTree.n_atoms` 字段（测试访问器改为推导并 `cfg(test)`）、`ATOM_PROPS_SIZE`（改 `const _: () = assert!(..)`）。
 - **K10** 唯一版本闸门是扩展导入时的 `molrs_capsule::check_abi`：删 `molpack/version.py`（`MOLRS_MINOR`、`check_molrs_version`）及其测试；`molpack.version` 由 `__init__.py` 读 wheel 元数据。唯一 CLI 是 Rust `molpack` 二进制（README 与 `docs/cli/` 呈现的就是它：`molpack mixture.inp` / stdin）；删 Python `molpack.cli`（typer 的 `molpack pack|info|version`，语法不同）、`[project.scripts]` 与 `typer` 依赖。
 - **K11** 解散 `numerics.rs`：`objective_small_floor` ≡ `residual_small_floor` 合为 `pack/gencan` 的 `small_floor`，其余 floor 也归 GENCAN，`numeric_controls` 归 `search.rs`，`DEFAULT_SCALE2` 归 `context/pack_context.rs`；`grow_error.rs` → `grow/error.rs`；Python `helpers.rs` → `errors.rs`（删 `NpF = f64`，用 `molrs::op::F`），`constraint.rs` → `restraint.rs`（`tests/test_constraint.py` → `test_restraint.py`）；删 `ff` 透传特性——唯一用户是一个测试，改为 molrs dev-dependency 带 `ff`；门禁命令 `--features cli,ff` → `--features cli`。
@@ -57,7 +57,7 @@ molpack 0.3.0 对 molrs **v0.15.0 发布标签**构建（不是 molrs dev）。�
 
 ## 2026-09-29 — 清理：删死代码、优化器接缝去门控、GenCanPack 默认早停
 
-- **删除**：`src/cases.rs`（`ExampleCase`、`build_targets`、`example_dir_from_manifest`、`render_inp_script`）；校验模块 `validation`（`validate_from_targets`、`ValidationReport`、`ViolationMetrics`、`MOLPACK_DEBUG_VALIDATION`）——裁决只读 `State::fdist`/`frest`，阶段守卫是 `RestraintsSatisfied`；`src/context/state.rs`（`RuntimeState`/`RuntimeStateMut`、`runtime()`/`runtime_mut()`）与 `src/context/model.rs`（`ModelData`、`model()`）——调用方直接读 `PackContext`/`PackState`；`template::frame_positions` 与 `FramePositionsError`——改为 `molrs::core::Frame::coords` + `template::coord_rows`；`NullHandler`、`Handler::on_inner_iter`、`StepReport.relaxer_acceptance`；`PackContext` 的 `RestraintRef` 别名（就是 `usize`）。单测共享夹具在 `src/testutil.rs`（`cfg(test)`）。
+- **删除**：`src/cases.rs`（`ExampleCase`、`build_targets`、`example_dir_from_manifest`、`render_inp_script`）；校验模块 `validation`（`validate_from_targets`、`ValidationReport`、`ViolationMetrics`、`MOLPACK_DEBUG_VALIDATION`）——裁决只读 `State::fdist`/`frest`，阶段守卫是 `RestraintsSatisfied`；`src/system/state.rs`（`RuntimeState`/`RuntimeStateMut`、`runtime()`/`runtime_mut()`）与 `src/system/model.rs`（`ModelData`、`model()`）——调用方直接读 `PackContext`/`PackState`；`template::frame_positions` 与 `FramePositionsError`——改为 `molrs::core::Frame::coords` + `template::coord_rows`；`NullHandler`、`Handler::on_inner_iter`、`StepReport.relaxer_acceptance`；`PackContext` 的 `RestraintRef` 别名（就是 `usize`）。单测共享夹具在 `src/testutil.rs`（`cfg(test)`）。
 - **优化器接缝去门控**：`src/optimizer/`、`GenCanPack::with_optimizer`、`OptimizeSelect`、`TorsionMcOptimizer` 始终编译；`ff = ["molrs/ff"]` 只是透传，molpack 自身不因它多编译任何东西。「relaxer」概念整体退场，文档页为 `docs/rust/handlers-optimizers.md`。
 - **默认早停**：`GenCanPack` 默认装 `EarlyStopHandler`（`src/handler.rs`，与 Packmol 对齐：radscale = 1 时 10 轮内 bestf 改善 < 10 % 即结束该阶段）；`with_early_stop(None)` 关闭、`with_early_stop(handler)` 替换；`GenCanPack::default_max_loops(ntype) = 200 * ntype`。
 
@@ -66,11 +66,11 @@ molpack 0.3.0 对 molrs **v0.15.0 发布标签**构建（不是 molrs dev）。�
 
 ## 2026-10-01 — pack 一族、grow 一族；D-07 清
 
-刚性放置（`initial` / `movebad` / `gencan`）在 `src/pack/`，对箱外 `pub(crate)`。生长仍是 `src/grow/`，晶格行走是它的同级子模块，不是 CBMC 驱动的孩子。`euler` 与可选的循环内优化器留在族外。网格安装在 `context::grid`（`CellGrid::for_cutoff_capped`），生长不再依赖 GENCAN 驱动。`GrowError` 在箱根叶子 `grow_error`（晶格变体留在同一个枚举上）。`EvalMode` / `EvalOutput` 在 `eval`；`PackContext::evaluate` 的实现在 `objective`；`Constraints` 删除。`StageOutcome` 在 `outcome`。`Target::fixed_from` 收 `&Frame`。阶段类型名是 `GenCanStage`（`NAME` 仍是 `"gencan"`）。箱根不再重导出 `LatticeConfig`。
+刚性放置（`initial` / `movebad` / `gencan`）在 `src/pack/`，对箱外 `pub(crate)`。生长仍是 `src/grow/`，晶格行走是它的同级子模块，不是 CBMC 驱动的孩子。`euler` 与可选的循环内优化器留在族外。网格安装在 `system::grid`（`CellGrid::for_cutoff_capped`），生长不再依赖 GENCAN 驱动。`GrowError` 在箱根叶子 `grow_error`（晶格变体留在同一个枚举上）。`EvalMode` / `EvalOutput` 在 `eval`；`PackContext::evaluate` 的实现在 `objective`；`Constraints` 删除。`StageOutcome` 在 `outcome`。`Target::fixed_from` 收 `&Frame`。阶段类型名是 `GenCanStage`（`NAME` 仍是 `"gencan"`）。箱根不再重导出 `LatticeConfig`。
 
 **D-07 清**：(1) 单点卷回已是 `SimBox::wrap_row`；(2) 网格封顶是 `CellGrid::for_cutoff_capped`；(3) `topology_for_growth` 映射 `TopologyError`（`MissingBondEndpoint` / `BondOutOfRange { row, atom, n }`），不再自扫键。`Block` 读列走 `Column::as_*`。
 **Why:** 审查要求一族一个模块，并且和本地 molrs 0.15 对齐。环（initial↔gencan↔movebad、objective↔constraints、handler↔stage、target↔entry、error↔grow）是违规，不是风格。
-**How to apply:** 新的刚性驱动放进 `pack/`；生长的拒绝只加在 `GrowError` 上；网格覆盖只读 `context::grid::coverage_radmax`（直径）。不要打开 molrs `builder`，也不要把 CBMC 和晶格并成一个泛型驱动。
+**How to apply:** 新的刚性驱动放进 `pack/`；生长的拒绝只加在 `GrowError` 上；网格覆盖只读 `system::grid::coverage_radmax`（直径）。不要打开 molrs `builder`，也不要把 CBMC 和晶格并成一个泛型驱动。
 
 ## 2026-09-29 — 对齐 molrs 0.15 定稿
 
@@ -104,7 +104,7 @@ molpack 以 `default-features = false` 依赖 molrs / molrs-ffi（molrs 的 defa
 
 - **`tests/`、`benches/`、`regressions/` 全部删除。** 行为测试只剩 `src/` 里的 `#[cfg(test)]` 模块，与拥有该行为的代码同住（law § 11）；测试体过大就开子模块（`src/grow/tests/{internal,field,prior,entry}.rs`、`src/pipeline/tests.rs`）。原 17 个集成文件 ~236 个 `#[test]` 收敛为 351 个 lib 单测 + 21 个 doc 测试，整层跑完 < 1 s。
 - **被删的是什么。** 端到端打包场景（`packer.rs`、`triclinic.rs`、`cli.rs`、`examples_batch.rs`、grow 的 27 个整链/统计用例）、逐位连续性对照（pipeline ≡ preset / `with_restart`）、所有硬编码 golden（`*_regression_*_golden`，Rust 与 Python 两侧）、criterion benches 与 `bench.yml`、`mt_scaling` 测量 harness。判据：断言的是「这次构建碰巧产出的数字」或「整条流水线跑通」，而不是某个模块自己拥有的性质。
-- **补的缺口。** 三处原来只被 e2e 覆盖的规则改成属主处的单测：`context::build`（short radius 必须更短，按 target/atom 命名）、`entry::setup`（global restraint 的广播等价律）、`pipeline`（`NoTargets`）。
+- **补的缺口。** 三处原来只被 e2e 覆盖的规则改成属主处的单测：`system::build`（short radius 必须更短，按 target/atom 命名）、`entry::setup`（global restraint 的广播等价律）、`pipeline`（`NoTargets`）。
 - **Python 侧同规矩。** 绑定层只测 marshalling / 错误映射 / 回调是否真的回到 Python；`test_integration.py`、`test_pack_peo_examples.py`、`test_pack_peo_topo.py`、`test_fixed_only.py` 删除，其余文件里重复 Rust 物理的用例删除（196 → 143）。
 
 **Why:** 操作者 2026-09-20 裁定：与 molrs 对齐（molrs 已无 tests/ benches/ examples/），且打包质量的度量系统要重新设计，旧的 e2e/回归/bench 既慢又是「守住当前数值」而非守住契约。

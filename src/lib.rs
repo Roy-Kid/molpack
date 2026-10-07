@@ -6,10 +6,8 @@
 //! (Martínez et al. 2009). Correctness is checked against Packmol's reference
 //! output for five canonical workloads.
 //!
-//! This crate was split out of the molrs workspace in 2026 and is now
-//! maintained independently. It depends on the unified `molcrafts-molrs` crate
-//! for shared data structures (always-on `core`) and, behind the `io` feature,
-//! its file I/O module.
+//! It depends on the `molcrafts-molrs` crate for shared data structures
+//! (always-on `core`) and, behind the `io` feature, its file I/O module.
 //!
 //! ## Documentation map
 //!
@@ -67,7 +65,7 @@
 //! ## Public surface at a glance
 //!
 //! Every public item has exactly one path. The crate root carries the
-//! vocabulary below; three namespaces carry the rest — [`context`] (the
+//! vocabulary below; three namespaces carry the rest — [`system`] (the
 //! per-atom layout a custom objective or callback reads off a
 //! [`PackSystem`]), [`grow`] (growth configuration and priors) and
 //! [`script`] (the `.inp` loader). molrs types (`Frame`, `SimBox`, regions,
@@ -76,7 +74,7 @@
 //!
 //! | Category | Items |
 //! |---|---|
-//! | Engine entries | [`PackEngine`], [`GencanPack`], [`CbmcGrow`], [`LatticeGrow`], [`LogLevel`] |
+//! | Engines | [`PackEngine`], [`GencanPack`], [`CbmcGrow`], [`LatticeGrow`], [`LogLevel`] |
 //! | Run lifecycle | [`Pipeline`], [`StageFactory`], [`EngineSetup`], [`State`], [`IntraResidual`] |
 //! | Stage combinators (Rust-only) | [`Until`], [`OnViolation`], [`Invariant`], [`Layers`], [`Violation`], [`RestraintsSatisfied`] |
 //! | Shared settings + space | [`PackSettings`] |
@@ -84,7 +82,7 @@
 //! | Run state | [`PackSystem`], [`RigidView`] |
 //! | Stage seam (Rust-only) | [`Stage`], [`Requires`], [`Guarantees`], [`StageOutcome`], [`Budget`], [`PackState`], [`Placed`] |
 //! | Per-atom restraints | [`AtomRestraint`], [`RegionRestraint`] (over [`molrs::core::Region`]), [`CellRestraint`] |
-//! | Group restraints | [`Restraint`], [`GroupCtx`], [`GaussianPlane`], [`GaussianPoint`], [`ExponentialPlane`], [`ExponentialPoint`], [`TabulatedPlane`], [`TabulatedPoint`], [`SelfSeparation`] |
+//! | Group restraints | [`Restraint`], [`GroupEvaluation`], [`GaussianPlane`], [`GaussianPoint`], [`ExponentialPlane`], [`ExponentialPoint`], [`TabulatedPlane`], [`TabulatedPoint`], [`SelfSeparation`] |
 //! | Callback trait + built-ins | [`Callback`], [`LammpsLogCallback`], [`ProgressCallback`], [`EarlyStopCallback`], `XyzTrajectoryCallback` (feature `io`), [`StepReport`], [`StageProgress`], [`PhaseProgress`], [`PhaseReport`] |
 //! | Objective | [`Objective`], [`EvalMode`], [`EvalOutput`] |
 //! | In-loop optimizer | [`OptimizeSelect`], [`OptimizeMode`], [`GencanPack::with_optimizer`], [`TorsionMcOptimizer`], over molrs's [`molrs::optimize::Optimizer`] trait |
@@ -97,7 +95,7 @@
 //! - `io` — pull in molrs's `io` module so `script::Script::build` reads the
 //!   template files through the molrs reader of each one's
 //!   [`script::StructureFormat`] (PDB, XYZ, SDF/MOL, LAMMPS, …) and hands back a
-//!   `script::BuildResult`, and so `XyzTrajectoryCallback` can write its trajectory
+//!   `script::ScriptJob`, and so `XyzTrajectoryCallback` can write its trajectory
 //!   through molrs's extended XYZ writer. PyO3 / WASM / embedding hosts that
 //!   bring their own loader leave this off and use [`script::Script::lower`]
 //!   with [`script::StructurePlan::apply`] instead.
@@ -111,7 +109,6 @@
 
 mod assemble;
 mod callback;
-pub mod context;
 mod error;
 mod euler;
 mod eval;
@@ -129,6 +126,7 @@ pub mod script;
 mod settings;
 mod stage;
 mod state;
+pub mod system;
 mod target;
 mod template;
 #[cfg(test)]
@@ -140,9 +138,6 @@ pub use callback::{
     Callback, EarlyStopCallback, LammpsLogCallback, LogLevel, PhaseProgress, PhaseReport,
     ProgressCallback, StageProgress, StepReport,
 };
-pub use context::pack_state::{PackState, Placed};
-pub use context::pack_system::PackSystem;
-pub use context::rigid_view::RigidView;
 pub use error::PackError;
 pub use eval::{EvalMode, EvalOutput};
 pub use grow::cbmc_grow::CbmcGrow;
@@ -154,11 +149,14 @@ pub use pack::GencanPack;
 pub use pipeline::{EngineSetup, OnViolation, PackEngine, Pipeline, StageFactory, Until};
 pub use restraint::{
     AtomRestraint, CellRestraint, ExponentialPlane, ExponentialPoint, GaussianPlane, GaussianPoint,
-    GroupCtx, RegionRestraint, Restraint, SelfSeparation, TabulatedPlane, TabulatedPoint,
+    GroupEvaluation, RegionRestraint, Restraint, SelfSeparation, TabulatedPlane, TabulatedPoint,
 };
 pub use settings::PackSettings;
 pub use stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 pub use state::{IntraResidual, State};
+pub use system::pack_state::{PackState, Placed};
+pub use system::pack_system::PackSystem;
+pub use system::rigid_view::RigidView;
 pub use target::{Angle, Axis, CenteringMode, Placement, Target};
 
 // ────────────────────────────────────────────────────────────────────────────

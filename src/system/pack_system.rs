@@ -1,4 +1,4 @@
-//! Packing runtime context — mirrors Packmol `compute_data` behavior.
+//! The packing system — mirrors Packmol `compute_data` behavior.
 
 use std::sync::Arc;
 
@@ -78,7 +78,7 @@ const _: () = assert!(
 /// validation scores penalties on the same scale.
 pub(crate) const DEFAULT_SCALE2: F = 0.01;
 
-/// Full runtime context for one packing execution.
+/// The full mutable state of one packing run.
 /// All arrays are 0-based; Fortran 1-based arrays are shifted by -1.
 pub struct PackSystem {
     // ---- Atom Cartesian coordinates (updated every function evaluation) ----
@@ -178,10 +178,10 @@ pub struct PackSystem {
     /// All restraints pool: `restraints[irest]`.
     pub restraints: Vec<Arc<dyn AtomRestraint>>,
     /// CSR offsets for per-atom restraint indices:
-    /// restraints of atom `icart` are in `iratom_data[iratom_offsets[icart]..iratom_offsets[icart+1]]`.
+    /// restraints of atom `icart` are in `iratom_indices[iratom_offsets[icart]..iratom_offsets[icart+1]]`.
     pub iratom_offsets: Vec<usize>,
     /// Flattened per-atom restraint indices.
-    pub iratom_data: Vec<usize>,
+    pub iratom_indices: Vec<usize>,
     /// Group-level restraints, paired with the (0-based) type they act on:
     /// `(itype, restraint)`. Evaluated once per group in the objective with the
     /// coordinates of all copies of `itype`; the coupled gradient is scattered
@@ -328,7 +328,7 @@ impl PackSystem {
             rot_bound: vec![[[0.0; 2]; 3]; ntype],
             restraints: Vec::new(),
             iratom_offsets: vec![0; ntotat + 1],
-            iratom_data: Vec::new(),
+            iratom_indices: Vec::new(),
             collective: Vec::new(),
             ibtype: vec![0; ntotat],
             ibmol: vec![0; ntotat],
@@ -931,7 +931,7 @@ mod atom_props_tests {
 mod neighbor_table_tests {
     use super::*;
 
-    fn ctx_with_grid(celldim: [u32; 3], pbc: [bool; 3]) -> PackSystem {
+    fn system_with_grid(celldim: [u32; 3], pbc: [bool; 3]) -> PackSystem {
         let mut sys = PackSystem::new(1, 1, 1);
         sys.simbox = SimBox::cube(10.0, array![0.0, 0.0, 0.0], pbc).expect("cell");
         sys.grid = CellGrid::with_dims(celldim, pbc);
@@ -944,7 +944,7 @@ mod neighbor_table_tests {
     /// total the fixed 13-offset table carried.
     #[test]
     fn periodic_grid_holds_thirteen_forward_neighbours_per_cell() {
-        let sys = ctx_with_grid([4, 4, 4], [true; 3]);
+        let sys = system_with_grid([4, 4, 4], [true; 3]);
         let n = sys.grid.n_cells();
         assert_eq!(sys.neighbor_cells.len(), 13 * n);
     }
@@ -956,7 +956,7 @@ mod neighbor_table_tests {
     /// divides up.
     #[test]
     fn forward_counts_are_uneven_while_the_total_is_not() {
-        let sys = ctx_with_grid([4, 4, 4], [true; 3]);
+        let sys = system_with_grid([4, 4, 4], [true; 3]);
         let counts: Vec<usize> = (0..sys.grid.n_cells())
             .map(|i| sys.neighbors(i).len())
             .collect();
@@ -970,8 +970,8 @@ mod neighbor_table_tests {
     /// the way an unconditional wrap would leave it.
     #[test]
     fn a_non_periodic_axis_drops_its_wrap_neighbours() {
-        let periodic = ctx_with_grid([4, 4, 4], [true; 3]);
-        let confined = ctx_with_grid([4, 4, 4], [true, true, false]);
+        let periodic = system_with_grid([4, 4, 4], [true; 3]);
+        let confined = system_with_grid([4, 4, 4], [true, true, false]);
         assert!(
             confined.neighbor_cells.len() < periodic.neighbor_cells.len(),
             "confining an axis must remove neighbour entries, got {} vs {}",
@@ -984,7 +984,7 @@ mod neighbor_table_tests {
     /// fixed `{0, +1}` offset set.
     #[test]
     fn two_cells_on_an_axis_are_paired_once() {
-        let sys = ctx_with_grid([2, 1, 1], [true; 3]);
+        let sys = system_with_grid([2, 1, 1], [true; 3]);
         assert_eq!(sys.neighbors(0), &[1]);
         assert_eq!(sys.neighbors(1), &[] as &[u32]);
     }
@@ -1041,7 +1041,7 @@ mod geometry_cache_tests {
 
         sys.restraints = vec![Arc::new(inside_box([0.0, 0.0, 0.0], [5.0, 5.0, 5.0]))];
         sys.iratom_offsets = vec![0, 1, 2, 3];
-        sys.iratom_data = vec![0, 0, 0];
+        sys.iratom_indices = vec![0, 0, 0];
 
         setup_cells(&mut sys, 1, 10.0);
 
@@ -1225,7 +1225,7 @@ mod geometry_cache_tests {
         let fdist_move_a = sys.fdist_atom.clone();
         let frest_move_a = sys.frest_atom.clone();
 
-        // Fresh context, same sequence, cache forced off each call.
+        // Fresh system, same sequence, cache forced off each call.
         let (mut sys2, _) = mixed_system();
         force_cache_miss(&mut sys2);
         let _ = compute_f(&x, &mut sys2);

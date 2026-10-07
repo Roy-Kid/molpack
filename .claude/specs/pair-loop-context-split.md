@@ -114,7 +114,7 @@ follow if it earns its own measurement.
 
 ## Files
 
-- `molpack/src/context/pack_context.rs` — `PairInputs` / `PairOutputs`, field
+- `molpack/src/system/pack_context.rs` — `PairInputs` / `PairOutputs`, field
   moves, accessors for the ~40 call sites that touch `xcart` / `gxcar` today
 - `molpack/src/objective.rs` — kernel signatures; then `walk_chain`
 - `molpack/src/{initial,movebad,packer}.rs` — call sites that read or write the

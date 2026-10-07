@@ -8,7 +8,7 @@ criteria:
       PackContext 上不再存在 xcart / atom_props / short_radius /
       short_radius_scale / latomnext / any_short_radius / any_fixed_atoms 字段；
       它们全部位于 PairInputs，经 `sys.inputs` 访问。
-      `grep -n "pub xcart\|pub atom_props\|pub latomnext" src/context/pack_context.rs`
+      `grep -n "pub xcart\|pub atom_props\|pub latomnext" src/system/pack_context.rs`
       的命中只出现在 PairInputs 的定义里。
     status: pending
   - id: ac-002

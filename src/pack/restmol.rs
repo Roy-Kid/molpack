@@ -7,9 +7,9 @@
 use molrs::op::F;
 
 use crate::Objective;
-use crate::context::PackSystem;
 use crate::eval::EvalMode;
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
+use crate::system::PackSystem;
 
 /// Scoped state override for `restmol`; restores the system on drop.
 struct RestmolScope<'a> {

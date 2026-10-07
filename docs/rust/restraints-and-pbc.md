@@ -2,7 +2,7 @@
 
 Restraints are soft penalties that guide atoms into allowed regions. They can
 be attached to a target, to a subset of atoms on each target copy, or globally
-on the engine entry. Geometry is a molrs [`Region`](https://docs.rs/molcrafts-molrs)
+on the engine. Geometry is a molrs [`Region`](https://docs.rs/molcrafts-molrs)
 — `Sphere`, `Cuboid`, `Parallelepiped`, `HalfSpace`, `Cylinder`, `Ellipsoid`,
 `Polyhedron`, `SphereUnion`, and their `AndRegion` / `OrRegion` / `NotRegion`
 compositions — and molpack's one geometric restraint, `RegionRestraint`, says
@@ -46,7 +46,7 @@ subtract 1 from each atom index.
 
 ## Global restraints
 
-Attach a restraint to every target through the engine entry:
+Attach a restraint to every target through the engine:
 
 ```rust
 use std::sync::Arc;
@@ -65,7 +65,7 @@ packing.
 
 ## Periodic boxes
 
-Periodic boundary conditions are declared on the engine entry; a region only
+Periodic boundary conditions are declared on the engine; a region only
 confines:
 
 ```rust

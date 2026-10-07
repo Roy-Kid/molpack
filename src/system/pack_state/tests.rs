@@ -4,7 +4,7 @@
 //! They live inside the crate because both types are `pub(crate)` for the
 //! duration of the `stage-pipeline` chain and are therefore invisible to an
 //! integration test in `tests/` (a separate crate). The module is mounted from
-//! `src/context/pack_state.rs` with `#[cfg(test)] mod tests;` and is collected
+//! `src/system/pack_state.rs` with `#[cfg(test)] mod tests;` and is collected
 //! by the ordinary `--lib` gate:
 //!
 //! ```text
@@ -23,10 +23,10 @@ use molrs::op::F;
 use super::{PackState, Placed, evaluate_unscaled};
 use crate::AtomRestraint;
 use crate::Objective;
-use crate::context::DEFAULT_SCALE2;
-use crate::context::{PackSystem, RigidView};
 use crate::eval::EvalMode;
 use crate::restraint::geometric::InsideBoxRestraint;
+use crate::system::DEFAULT_SCALE2;
+use crate::system::{PackSystem, RigidView};
 
 // ── the shared fixture ─────────────────────────────────────────────────────
 
@@ -120,7 +120,7 @@ fn six_dimers() -> (PackSystem, Vec<F>) {
         Arc::new(InsideBoxRestraint::new([0.0; 3], [BOX; 3]));
     sys.restraints = vec![box_restraint];
     sys.iratom_offsets = (0..=NTOTAT).collect();
-    sys.iratom_data = vec![0; NTOTAT];
+    sys.iratom_indices = vec![0; NTOTAT];
 
     sys.sizemin = [0.0; 3];
     sys.sizemax = [BOX; 3];
@@ -217,11 +217,11 @@ fn new_wraps_the_same_fixedatom_and_comptype_storage() {
 
     assert!(
         state.sys().fixedatom[3],
-        "fixedatom must be the wrapped context's own vector, not a copy"
+        "fixedatom must be the wrapped system's own vector, not a copy"
     );
     assert!(
         !state.sys().comptype[0],
-        "comptype must be the wrapped context's own vector, not a copy"
+        "comptype must be the wrapped system's own vector, not a copy"
     );
     assert_eq!(
         state.sys().fixedatom.len(),
@@ -467,7 +467,7 @@ fn pack_state_evaluate_unscaled_forwards_to_the_free_function() {
     );
 }
 
-// ── edge: the degenerate context ───────────────────────────────────────────
+// ── edge: the degenerate system ───────────────────────────────────────────
 
 #[test]
 fn evaluate_unscaled_on_empty_context_returns_zeros() {

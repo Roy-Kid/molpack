@@ -8,18 +8,18 @@ use molrs::op::F;
 use rand::rngs::SmallRng;
 
 use crate::Objective;
-use crate::context::PackSystem;
 use crate::eval::EvalMode;
+use crate::system::PackSystem;
 // The unscaled verdict is a shared primitive owned by the system layer, not
 // by this stage: growth evaluates the same way, and the pipeline layer must
 // not import `gencan/`.
 use super::small_floor;
 use crate::callback::{Callback, PhaseProgress, PhaseReport, StageProgress, StepReport};
-use crate::context::pack_state::evaluate_unscaled;
 use crate::optimizer::{ResolvedBinding, run_optimizer_bindings};
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::pack::initial::SwapState;
 use crate::pack::movebad::{MoveBadConfig, movebad};
+use crate::system::pack_state::evaluate_unscaled;
 
 /// Outcome of one main-loop iteration inside a packing phase.
 ///

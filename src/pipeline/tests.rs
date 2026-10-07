@@ -3,7 +3,7 @@
 //! [`Pipeline`](crate::Pipeline) is the ONE place a molpack run's five
 //! phases live — validate, build state, check the stage chain, run each
 //! stage, assemble — so the lifecycle's own contract is owned here (law
-//! § 11), not spread across the preset entries. What each preset declares
+//! § 11), not spread across the preset engines. What each preset declares
 //! stays with that preset; what the seam itself promises stays in
 //! [`crate::stage`]'s tests.
 //!
@@ -178,9 +178,9 @@ struct Tally {
     steps: Vec<(usize, usize, &'static str)>,
 }
 
-type Shared = Arc<Mutex<Tally>>;
+type TallyHandle = Arc<Mutex<Tally>>;
 
-fn shared() -> Shared {
+fn new_tally() -> TallyHandle {
     Arc::new(Mutex::new(Tally::default()))
 }
 
@@ -189,7 +189,7 @@ fn shared() -> Shared {
 /// events have arrived (the `EarlyStopCallback` shape of
 /// `grow::tests::Recorder`).
 struct Observer {
-    tally: Shared,
+    tally: TallyHandle,
     stop_after: usize,
 }
 
@@ -232,7 +232,7 @@ impl Callback for Observer {
 }
 
 /// An observer that never asks for a stop.
-fn observer(tally: &Shared) -> Box<dyn Callback> {
+fn observer(tally: &TallyHandle) -> Box<dyn Callback> {
     Box::new(Observer {
         tally: Arc::clone(tally),
         stop_after: usize::MAX,
@@ -309,7 +309,7 @@ impl StageFactory for NeedsPlacedFactory {
 /// the silent failure this whole design exists to prevent.
 #[test]
 fn pipeline_adopts_preset_callbacks() {
-    let one = shared();
+    let one = new_tally();
     let piped = boxfree_settings(
         Pipeline::new().with_stage(GencanPack::new().with_callback(observer(&one))),
     )
@@ -333,7 +333,7 @@ fn pipeline_adopts_preset_callbacks() {
 
     // Two stages: an adopted callback observes the WHOLE run, so both stage
     // indices show up on the events it recorded.
-    let both = shared();
+    let both = new_tally();
     dense_settings(
         Pipeline::new()
             .with_stage(GencanPack::new().with_callback(observer(&both)))
@@ -361,7 +361,7 @@ fn pipeline_adopts_preset_callbacks() {
 /// and before any stage runs (ac-003).
 #[test]
 fn pipeline_stage_order_error_fires_before_any_callback() {
-    let tally = shared();
+    let tally = new_tally();
     let err = boxfree_settings(
         Pipeline::new()
             .with_callback(observer(&tally))
@@ -515,8 +515,8 @@ fn pipeline_two_stages_sum_degraded_and_count_hooks() {
         .run(&targets, CHAIN_LOOPS)
         .expect("the seeded GENCAN stage runs standalone");
 
-    let carried = shared();
-    let attached = shared();
+    let carried = new_tally();
+    let attached = new_tally();
     let piped = chain_settings(
         Pipeline::new()
             .with_callback(observer(&attached))
@@ -954,7 +954,7 @@ fn guarded_rerun_max_two_reruns_twice_then_unconverged() {
 /// that (ac-006).
 #[test]
 fn combinators_keep_stage_index_monotone() {
-    let flat = shared();
+    let flat = new_tally();
     dense_settings(
         Pipeline::new()
             .with_callback(observer(&flat))
@@ -993,7 +993,7 @@ fn combinators_keep_stage_index_monotone() {
     // Nested: Guarded(Repeat([gencan])). The invariant list is empty on
     // purpose — this test is about stage identity, and the guard's own
     // verdict is pinned by the two tests above.
-    let nested = shared();
+    let nested = new_tally();
     let inner = Pipeline::new().with_repeat(body(GencanPack::new()), Until::Passes(2));
     dense_settings(
         Pipeline::new()
@@ -1021,7 +1021,7 @@ fn combinators_keep_stage_index_monotone() {
 /// `with_stage` refuses them — a combinator is not a hole in either rule.
 #[test]
 fn repeat_adopts_body_callbacks_and_refuses_settings() {
-    let tally = shared();
+    let tally = new_tally();
     boxfree_settings(Pipeline::new().with_repeat(
         body(GencanPack::new().with_callback(observer(&tally))),
         Until::Passes(2),

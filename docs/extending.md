@@ -351,7 +351,7 @@ Callback notes:
 - **Every step names its stage.** `step.stage` is a `StageProgress` — `index`,
   `total`, `name` — identifying the packing algorithm that emitted the step
   (stages are the subject of the `Stage` section below). A run driven by one
-  engine entry has one stage, so it reports `index = 0` and `total = 1`. The
+  engine has one stage, so it reports `index = 0` and `total = 1`. The
   `on_stage_start` / `on_stage_end` hooks bracket a whole stage the way
   `on_phase_start` / `on_phase_end` bracket one GENCAN phase; both are
   no-op defaults, and a single-stage run calls neither.
@@ -637,10 +637,10 @@ A stage may be run **more than once** on an evolving state. The rule that falls
 out of that is short: the second `run` must have every capability the first
 had. The only thing a call may consume is scratch it created itself.
 
-The contract is not decorative. The rigid-body stage used to move its bound
-in-loop optimizers out of `self` on the first call; from the second call on it
-kept running, just *degraded* — with no error and no name for what it had lost.
-Borrow your configuration, do not take it.
+The contract is not decorative. A stage that moves its bound in-loop
+optimizers out of `self` on the first call keeps running from the second call
+on, just *degraded* — with no error and no name for what it lost. Borrow your
+configuration, do not take it.
 
 ### `StageOutcome` carries no verdict
 
@@ -714,12 +714,12 @@ A stage does not run itself. The lifecycle around it — validation, restraint
 broadcast, system construction, callback bracketing, the lab-frame rebuild,
 frame assembly — lives in exactly one place: [`Pipeline`](crate::Pipeline)'s
 [`run`](crate::PackEngine::run), reached through the
-[`PackEngine`](crate::PackEngine) trait. An **entry** is a type that plugs into
+[`PackEngine`](crate::PackEngine) trait. An **engine** is a type that plugs into
 that lifecycle by implementing [`StageFactory`](crate::StageFactory); its
-`stages` method is the one thing an entry must supply: the stage(s) it drives,
+`stages` method is the one thing an engine must supply: the stage(s) it drives,
 built from the run's resolved [`EngineSetup`](crate::EngineSetup).
 `PackEngine` then adds the shared `with_*` builders plus a one-line `run` that
-hands the entry to the lifecycle as its sole stage source
+hands the engine to the lifecycle as its sole stage source
 (`Pipeline::single(self).run(targets, max_loops)`) — the same code path a
 hand-composed pipeline runs, not a second implementation to keep in step.
 
@@ -774,7 +774,7 @@ impl PackEngine for ShakePack {
         &mut self.callbacks
     }
 
-    /// One line: hand the entry to the crate's one lifecycle body as its
+    /// One line: hand the engine to the crate's one lifecycle body as its
     /// sole stage source — every preset writes exactly this.
     fn run(
         self,
@@ -786,11 +786,11 @@ impl PackEngine for ShakePack {
 }
 ```
 
-`ShakePack` now has every shared builder (`with_seed`, `with_tolerance`,
+`ShakePack` has every shared builder (`with_seed`, `with_tolerance`,
 `with_callback`, `with_global_restraint`, …) and the terminal
 `run(&targets, max_loops)`, exactly like `GencanPack`, because all of them are
 provided methods on `PackEngine`. `EngineSetup` (the resolved targets, cell and
-context shape) is the one thing `stages` reads to build its stage(s) from —
+system shape) is the one thing `stages` reads to build its stage(s) from —
 there is no separate hook for pre-loading a placement vector before a stage
 runs. Instead, each stage's own `run` does that as its own prelude: the
 shipped GENCAN stage installs its grid, and — only if it inherited a seed via
@@ -799,8 +799,8 @@ skip `initial()` and continue from what is already there.
 
 ### Composing stages
 
-A single-entry `run` is `Pipeline::single(self)` under the hood, so the same
-lifecycle also runs a hand-built sequence of stages directly, with no entry
+A single-engine `run` is `Pipeline::single(self)` under the hood, so the same
+lifecycle also runs a hand-built sequence of stages directly, with no engine
 type of your own. [`Pipeline::new`](crate::Pipeline::new) builds an
 empty pipeline; [`with_stage`](crate::Pipeline::with_stage) appends
 one factory at a time — a chain grower feeding a rigid-body packer, for
@@ -1010,7 +1010,7 @@ Rules:
   during per-type pre-compaction, you will see no effect there.
 - **`radscale` is phase-dependent.** Don't hard-code atomic radii —
   always go through `sys.radius[i]`. The crate-internal `evaluate_unscaled`
-  (`src/context/pack_state.rs`) temporarily swaps `radius` with `radius_ini`
+  (`src/system/pack_state.rs`) temporarily swaps `radius` with `radius_ini`
   so the numbers it reports are unscaled.
 - **PBC boxes must be valid.** Zero-length axis returns
   `PackError::InvalidPbcBox`.

@@ -14,9 +14,9 @@ use std::sync::{Arc, Mutex};
 use crate::callback::{
     Callback, LammpsLogCallback, PhaseProgress, PhaseReport, StageProgress, StepReport,
 };
-use crate::context::PackSystem;
 use crate::pack_space::ResolvedSpace;
 use crate::stage::{Budget, Stage, StageOutcome};
+use crate::system::PackSystem;
 
 use super::EngineSetup;
 

@@ -3,7 +3,7 @@
 //! This leaf names growth's refusals. It imports neither [`PackError`](crate::PackError)
 //! nor a stage, so the crate error can wrap it and the stages can return it
 //! without a cycle. Lattice-only variants live here for the same reason:
-//! one `GrowError` is what every growth entry maps, and the lattice stage is
+//! one `GrowError` is what every growth engine maps, and the lattice stage is
 //! their only constructor.
 
 use std::fmt;
@@ -59,7 +59,7 @@ pub enum GrowError {
     /// The declared cell is not orthorhombic; the v1 overlap field only
     /// supports orthorhombic boxes (`triclinic-cell-downshift` lifts this).
     TriclinicCell,
-    /// `fixed_at` combined with a growth entry — a fixed placement is by
+    /// `fixed_at` combined with a growth engine — a fixed placement is by
     /// definition not grown.
     FixedTarget,
     /// The template's bond graph contains a cycle. Growth decomposes the

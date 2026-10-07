@@ -14,9 +14,9 @@ use molrs::op::F;
 use molrs::optimize::{Optimizer, set_free_mask};
 
 use crate::Objective;
-use crate::context::PackSystem;
 use crate::euler::eulerrmat;
 use crate::eval::EvalMode;
+use crate::system::PackSystem;
 use crate::target::centered_coords;
 
 mod torsion_mc;

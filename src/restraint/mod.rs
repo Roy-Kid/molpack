@@ -48,7 +48,7 @@ use molrs::op::F;
 /// - `name` — human-readable identifier (default: `std::any::type_name::<Self>()`)
 /// - `declared_cell` — opt-in: a restraint confining atoms to a primitive
 ///   cell also states what that cell is. Periodicity itself is declared on
-///   the engine entry (`with_periodic_box` / `with_cell`), never inferred
+///   the engine (`with_periodic_box` / `with_cell`), never inferred
 ///   from a restraint's shape.
 ///
 /// `Debug` is required on concrete impls so `Target` and the engines remain
@@ -137,6 +137,6 @@ pub use cell::CellRestraint;
 pub use region::RegionRestraint;
 
 pub use collective::{
-    ExponentialPlane, ExponentialPoint, GaussianPlane, GaussianPoint, GroupCtx, Restraint,
+    ExponentialPlane, ExponentialPoint, GaussianPlane, GaussianPoint, GroupEvaluation, Restraint,
     SelfSeparation, TabulatedPlane, TabulatedPoint,
 };

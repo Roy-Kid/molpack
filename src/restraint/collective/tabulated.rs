@@ -13,7 +13,7 @@ use molrs::op::F;
 use molrs::op::vec3::normalize;
 
 use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg};
-use super::{GroupCtx, Restraint};
+use super::{GroupEvaluation, Restraint};
 
 /// Precomputed inverse-CDF (quantile) sampler for a tabulated target density.
 #[derive(Debug, Clone)]
@@ -114,13 +114,13 @@ impl TabulatedPlane {
 }
 
 impl Restraint for TabulatedPlane {
-    fn f(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>) -> F {
+    fn f(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>) -> F {
         plane_match_f(coords, &self.normal, self.offset, self.strength, |p| {
             self.quant.quantile(p)
         })
     }
 
-    fn fg(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
+    fn fg(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>, grads: &mut [[F; 3]]) -> F {
         plane_match_fg(
             coords,
             &self.normal,
@@ -166,13 +166,13 @@ impl TabulatedPoint {
 }
 
 impl Restraint for TabulatedPoint {
-    fn f(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>) -> F {
+    fn f(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>) -> F {
         point_match_f(coords, &self.center, self.strength, |p| {
             self.quant.quantile(p)
         })
     }
 
-    fn fg(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
+    fn fg(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>, grads: &mut [[F; 3]]) -> F {
         point_match_fg(
             coords,
             &self.center,
@@ -189,7 +189,7 @@ impl Restraint for TabulatedPoint {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_fixtures::{assert_fd_grad, ctx_free, free_box, rng_uniform};
+    use super::super::test_fixtures::{assert_fd_grad, free_box, free_evaluation, rng_uniform};
     use super::*;
 
     /// A fine grid sampling a Gaussian density; the tabulated quantile should
@@ -271,6 +271,6 @@ mod tests {
         let coords: Vec<[F; 3]> = (0..n)
             .map(|k| [0.0, 0.0, q.quantile((k as F + 0.5) / n as F)])
             .collect();
-        assert!(r.f(&coords, ctx_free(&free_box(1_000.0), 1)) < 1e-6);
+        assert!(r.f(&coords, free_evaluation(&free_box(1_000.0), 1)) < 1e-6);
     }
 }

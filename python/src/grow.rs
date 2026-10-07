@@ -1,5 +1,5 @@
 //! Typed bindings for the growth statistics inputs: `TorsionPrior` and
-//! `AnglePrior`. The growth knobs themselves live on the `CbmcGrow` entry.
+//! `AnglePrior`. The growth knobs themselves live on the `CbmcGrow` engine.
 
 use molpack::grow::{AnglePrior, TorsionPrior};
 use pyo3::prelude::*;

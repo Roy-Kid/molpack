@@ -1,6 +1,6 @@
 //! Python wrapper for the pack result.
 //!
-//! [`PyState`] is returned by every engine entry's ``run()``
+//! [`PyState`] is returned by every engine's ``run()``
 //! (`GencanPack`, `CbmcGrow`): the packed ``molrs.core.Frame`` plus structured
 //! diagnostics (`converged` / `fdist` / `frest` / `degraded` / `intra`).
 

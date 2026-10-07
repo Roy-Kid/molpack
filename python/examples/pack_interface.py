@@ -49,8 +49,12 @@ def main() -> None:
         )
     )
 
-    show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
-    packer = molpack.GencanPack().with_progress(show_progress)
+    log_level = (
+        "progress"
+        if os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
+        else "quiet"
+    )
+    packer = molpack.GencanPack().with_log_level(log_level)
 
     result = packer.run([water, chloroform, t3], max_loops=400)
 

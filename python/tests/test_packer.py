@@ -211,7 +211,7 @@ class TestGencanPack:
         p5 = p1.with_init_passes(40)
         p6 = p1.with_init_box_half_size(200.0)
         p7 = p1.with_perturb(0.1, random=True, enabled=False)
-        p8 = p1.with_progress(False)
+        p8 = p1.with_log_level("quiet")
         p9 = p1.with_seed(42)
         p10 = p1.with_parallel_eval(True)
         p11 = p1.with_avoid_overlap(False)
@@ -226,7 +226,7 @@ class TestGencanPackRun:
         )
 
     def _packer(self) -> molpack.GencanPack:
-        return molpack.GencanPack().with_tolerance(2.0).with_progress(False)
+        return molpack.GencanPack().with_tolerance(2.0)
 
     def test_minimal_packing(self):
         result = self._packer().with_seed(42).run([self._make_target()], max_loops=50)
@@ -283,7 +283,7 @@ class TestGencanPackRun:
         assert result.positions.shape[0] == 8
 
     def test_no_targets_raises_typed_error(self):
-        packer = molpack.GencanPack().with_progress(False)
+        packer = molpack.GencanPack()
         with pytest.raises(molpack.NoTargetsError):
             packer.run([], max_loops=10)
 

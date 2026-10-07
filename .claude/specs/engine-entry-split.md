@@ -97,7 +97,7 @@ pyclass 与 Rust 同名 1:1,单一终态动词;共享旋钮绑定一次(trait �
 |---|---|---|
 | `src/entry.rs` | `PackEngine` + `PackSettings` + `State` | ≤300 |
 | `src/pack_space.rs` | density/pbc/cell 解析(原 packer.rs:533-650)+ restraint 广播 | ≤300 |
-| `src/context/build.rs` | `build_context`(原 836-1047) | ≤250 |
+| `src/system/build.rs` | `build_context`(原 836-1047) | ≤250 |
 | `src/gencan/solver.rs` | `GencanSolver: Solver`(原 run_gencan_stages) | — |
 | `src/gencan/phases.rs` | run_phase / run_iteration / evaluate_unscaled(原 1512-1869) | — |
 | `src/gencan/gencan_pack.rs`、`src/grow/cbmc_grow.rs`、`src/grow/lattice/lattice_grow.rs` | 三个入口 | 各≤300 |

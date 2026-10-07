@@ -1,16 +1,16 @@
-//! Stage ② of the entry lifecycle: lower targets into a fully built
+//! Stage ② of the engine lifecycle: lower targets into a fully built
 //! [`PackSystem`] (counts, per-copy conformers, radii, restraints, fixed
 //! placements, AoS sync, frame constants).
 //!
-//! Every entry shares this one system construction; it is callable more
-//! than once — chained entries build one system per stage.
+//! Every engine shares this one system construction; it is callable more
+//! than once — chained engines build one system per stage.
 
 use molrs::core::Element;
 use molrs::op::F;
 
 use crate::PackError;
-use crate::context::PackSystem;
 use crate::euler::{compcart, eulerfixed};
+use crate::system::PackSystem;
 use crate::target::{CenteringMode, Target};
 
 /// The three shared knobs system construction actually consumes.
@@ -81,7 +81,7 @@ impl AtomPropsTemplate {
         Ok(())
     }
 
-    /// Write atom `iatom` of the template onto context slot `icart`.
+    /// Write atom `iatom` of the template onto system slot `icart`.
     fn stamp(&self, sys: &mut PackSystem, icart: usize, iatom: usize) {
         sys.radius[icart] = self.radii[iatom];
         sys.radius_ini[icart] = self.radii[iatom];
@@ -109,7 +109,7 @@ fn reference_coords(target: &Target) -> &[[F; 3]] {
 /// Stage ② of `pack_with_report`: lower targets into a fully built
 /// [`PackSystem`] (counts, per-copy conformers, radii, restraints,
 /// fixed placements, AoS sync, frame constants). Callable more than once
-/// — the mixed-method composition builds one context for growth and one
+/// — the mixed-method composition builds one system for growth and one
 /// for the rigid stage (spec Design §6).
 pub(crate) fn build_system(
     knobs: &SystemKnobs,
@@ -269,11 +269,11 @@ pub(crate) fn build_system(
         let next = sys.iratom_offsets.last().copied().unwrap_or(0) + atom_restraints.len();
         sys.iratom_offsets.push(next);
     }
-    sys.iratom_data.clear();
-    sys.iratom_data
+    sys.iratom_indices.clear();
+    sys.iratom_indices
         .reserve(sys.iratom_offsets.last().copied().unwrap_or(0));
     for atom_restraints in iratom_lists {
-        sys.iratom_data.extend(atom_restraints);
+        sys.iratom_indices.extend(atom_restraints);
     }
 
     // Group-level (collective) restraints: one entry per (free type, restraint).

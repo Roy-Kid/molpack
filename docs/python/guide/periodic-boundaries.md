@@ -6,7 +6,7 @@ you attach. Use periodic boundaries (PBC) when packing for MD input.
 
 ## Enabling PBC
 
-The periodic box is declared on the engine entry (Packmol's `pbc`
+The periodic box is declared on the engine (Packmol's `pbc`
 keyword). `with_periodic_box` is a shared builder, so it reads the same on
 `GencanPack`, `CbmcGrow` and `LatticeGrow`:
 
@@ -57,14 +57,14 @@ except InvalidPbcBoxError as e:
     ...
 ```
 
-The periodic box is declared in exactly one place — on the entry — so there
+The periodic box is declared in exactly one place — on the engine — so there
 is no second declaration to conflict with it. Typed errors inherit from
 `molpack.PackError` (which itself is a `RuntimeError` subclass), so a blanket
 `except PackError` catches any packing failure.
 
 ## Choosing a box
 
-A common pattern: one periodic cell on the entry, and the same cuboid on
+A common pattern: one periodic cell on the engine, and the same cuboid on
 every target that must stay inside it:
 
 ```python

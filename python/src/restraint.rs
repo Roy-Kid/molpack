@@ -16,8 +16,8 @@ use crate::errors::stash_err;
 use crate::molrs_capsule::region_from_py;
 use molpack::RegionRestraint;
 use molpack::{
-    AtomRestraint, ExponentialPlane, ExponentialPoint, GaussianPlane, GaussianPoint, GroupCtx,
-    Restraint, SelfSeparation, TabulatedPlane, TabulatedPoint,
+    AtomRestraint, ExponentialPlane, ExponentialPoint, GaussianPlane, GaussianPoint,
+    GroupEvaluation, Restraint, SelfSeparation, TabulatedPlane, TabulatedPoint,
 };
 use molrs::op::F;
 use pyo3::exceptions::{PyTypeError, PyValueError};
@@ -29,15 +29,15 @@ use pyo3::prelude::*;
 // only requires a new arm in `extract_restraint`.
 
 #[derive(Clone)]
-pub(crate) struct SharedAtomRestraint(pub Arc<dyn AtomRestraint>);
+pub(crate) struct ArcAtomRestraint(pub Arc<dyn AtomRestraint>);
 
-impl std::fmt::Debug for SharedAtomRestraint {
+impl std::fmt::Debug for ArcAtomRestraint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SharedAtomRestraint({})", self.0.name())
+        write!(f, "ArcAtomRestraint({})", self.0.name())
     }
 }
 
-impl AtomRestraint for SharedAtomRestraint {
+impl AtomRestraint for ArcAtomRestraint {
     #[inline]
     fn f(&self, x: &[F; 3], scale: F, scale2: F) -> F {
         self.0.f(x, scale, scale2)
@@ -73,9 +73,7 @@ fn is_region(obj: &Bound<'_, pyo3::types::PyAny>) -> PyResult<bool> {
     obj.hasattr("_ffi_regionref_capsule")
 }
 
-pub(crate) fn extract_restraint(
-    obj: &Bound<'_, pyo3::types::PyAny>,
-) -> PyResult<SharedAtomRestraint> {
+pub(crate) fn extract_restraint(obj: &Bound<'_, pyo3::types::PyAny>) -> PyResult<ArcAtomRestraint> {
     if let Some(region) = try_region(obj)? {
         return Ok(region);
     }
@@ -84,7 +82,7 @@ pub(crate) fn extract_restraint(
     // methods. Bound methods are resolved once here so the hot path
     // skips per-call attribute lookups.
     if let (Ok(f_method), Ok(fg_method)) = (obj.getattr("f"), obj.getattr("fg")) {
-        return Ok(SharedAtomRestraint(Arc::new(PyCallableAtomRestraint {
+        return Ok(ArcAtomRestraint(Arc::new(PyCallableAtomRestraint {
             f_method: f_method.unbind(),
             fg_method: fg_method.unbind(),
         })));
@@ -107,12 +105,12 @@ pub(crate) fn extract_restraint(
 /// from another molrs minor line is an error here, never a fall-through.
 pub(crate) fn try_region(
     obj: &Bound<'_, pyo3::types::PyAny>,
-) -> PyResult<Option<SharedAtomRestraint>> {
+) -> PyResult<Option<ArcAtomRestraint>> {
     if !is_region(obj)? {
         return Ok(None);
     }
     let region = region_from_py(obj)?;
-    Ok(Some(SharedAtomRestraint(Arc::new(RegionRestraint(region)))))
+    Ok(Some(ArcAtomRestraint(Arc::new(RegionRestraint(region)))))
 }
 
 // PyCallableAtomRestraint — bridge from the Rust `AtomRestraint` trait to a
@@ -211,22 +209,22 @@ impl AtomRestraint for PyCallableAtomRestraint {
 // implements `Restraint` and can feed
 // `Target::with_collective_restraint(impl Restraint)`.
 #[derive(Clone)]
-pub(crate) struct SharedRestraint(pub Arc<dyn Restraint>);
+pub(crate) struct ArcRestraint(pub Arc<dyn Restraint>);
 
-impl std::fmt::Debug for SharedRestraint {
+impl std::fmt::Debug for ArcRestraint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SharedRestraint({})", self.0.name())
+        write!(f, "ArcRestraint({})", self.0.name())
     }
 }
 
-impl Restraint for SharedRestraint {
+impl Restraint for ArcRestraint {
     #[inline]
-    fn f(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>) -> F {
-        self.0.f(coords, ctx)
+    fn f(&self, coords: &[[F; 3]], evaluation: GroupEvaluation<'_>) -> F {
+        self.0.f(coords, evaluation)
     }
     #[inline]
-    fn fg(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
-        self.0.fg(coords, ctx, grads)
+    fn fg(&self, coords: &[[F; 3]], evaluation: GroupEvaluation<'_>, grads: &mut [[F; 3]]) -> F {
+        self.0.fg(coords, evaluation, grads)
     }
     #[inline]
     fn is_bound(&self) -> bool {
@@ -244,33 +242,33 @@ impl Restraint for SharedRestraint {
 
 pub(crate) fn extract_collective_restraint(
     obj: &Bound<'_, pyo3::types::PyAny>,
-) -> PyResult<SharedRestraint> {
+) -> PyResult<ArcRestraint> {
     if let Ok(c) = obj.extract::<PyGaussianPlane>() {
-        return Ok(SharedRestraint(Arc::new(c.inner)));
+        return Ok(ArcRestraint(Arc::new(c.inner)));
     }
     if let Ok(c) = obj.extract::<PyGaussianPoint>() {
-        return Ok(SharedRestraint(Arc::new(c.inner)));
+        return Ok(ArcRestraint(Arc::new(c.inner)));
     }
     if let Ok(c) = obj.extract::<PyExponentialPlane>() {
-        return Ok(SharedRestraint(Arc::new(c.inner)));
+        return Ok(ArcRestraint(Arc::new(c.inner)));
     }
     if let Ok(c) = obj.extract::<PyExponentialPoint>() {
-        return Ok(SharedRestraint(Arc::new(c.inner)));
+        return Ok(ArcRestraint(Arc::new(c.inner)));
     }
     if let Ok(c) = obj.extract::<PyTabulatedPlane>() {
-        return Ok(SharedRestraint(Arc::new(c.inner)));
+        return Ok(ArcRestraint(Arc::new(c.inner)));
     }
     if let Ok(c) = obj.extract::<PyTabulatedPoint>() {
-        return Ok(SharedRestraint(Arc::new(c.inner)));
+        return Ok(ArcRestraint(Arc::new(c.inner)));
     }
     if let Ok(c) = obj.extract::<PySelfSeparation>() {
-        return Ok(SharedRestraint(Arc::new(c.inner)));
+        return Ok(ArcRestraint(Arc::new(c.inner)));
     }
 
     // Duck-typed Python collective restraint: callable `f`/`fg` taking the
     // whole group. Bound methods resolved once, like the per-atom path.
     if let (Ok(f_method), Ok(fg_method)) = (obj.getattr("f"), obj.getattr("fg")) {
-        return Ok(SharedRestraint(Arc::new(PyCallableRestraint {
+        return Ok(ArcRestraint(Arc::new(PyCallableRestraint {
             f_method: f_method.unbind(),
             fg_method: fg_method.unbind(),
         })));
@@ -306,10 +304,14 @@ impl std::fmt::Debug for PyCallableRestraint {
 }
 
 impl Restraint for PyCallableRestraint {
-    fn f(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>) -> F {
+    fn f(&self, coords: &[[F; 3]], evaluation: GroupEvaluation<'_>) -> F {
         Python::attach(|py| {
             let pts: Vec<(F, F, F)> = coords.iter().map(|p| (p[0], p[1], p[2])).collect();
-            match self.f_method.bind(py).call1((pts, ctx.scale, ctx.scale2)) {
+            match self
+                .f_method
+                .bind(py)
+                .call1((pts, evaluation.scale, evaluation.scale2))
+            {
                 Ok(res) => res.extract::<F>().unwrap_or_else(|e| {
                     stash_err(e);
                     0.0
@@ -322,10 +324,14 @@ impl Restraint for PyCallableRestraint {
         })
     }
 
-    fn fg(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
+    fn fg(&self, coords: &[[F; 3]], evaluation: GroupEvaluation<'_>, grads: &mut [[F; 3]]) -> F {
         Python::attach(|py| {
             let pts: Vec<(F, F, F)> = coords.iter().map(|p| (p[0], p[1], p[2])).collect();
-            match self.fg_method.bind(py).call1((pts, ctx.scale, ctx.scale2)) {
+            match self
+                .fg_method
+                .bind(py)
+                .call1((pts, evaluation.scale, evaluation.scale2))
+            {
                 Ok(res) => match res.extract::<(F, Vec<[F; 3]>)>() {
                     Ok((v, g)) => {
                         if g.len() == grads.len() {

@@ -93,7 +93,7 @@ pub fn pack_error_to_pyerr(e: molpack::PackError) -> PyErr {
 /// Sink for Python exceptions raised inside Rust-invoked callbacks
 /// (`PyCallableRestraint::fg`, `PythonCallback::on_*`). The Rust trait
 /// signatures can't surface `PyErr` in-band, so callbacks stash the
-/// first error here and set their stop-flag; the entry's `run()` drains
+/// first error here and set their stop-flag; the engine's `run()` drains
 /// the slot at return time and re-raises.
 ///
 /// `PyErr` is `!Send` alone (needs GIL to drop), but `Mutex<Option<PyErr>>`

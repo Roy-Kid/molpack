@@ -30,7 +30,7 @@ class Callback(Protocol):
 
     ``step.stage`` says which stage of the run the callback came from
     (``index`` / ``total`` / ``name``); a single-stage run reports
-    ``index == 0`` and ``total == 1``. A callback attached to an entry that
+    ``index == 0`` and ``total == 1``. A callback attached to an engine that
     is then handed to a ``Pipeline`` as a stage is *adopted* by the
     pipeline — it observes the whole run, not only that stage.
     """

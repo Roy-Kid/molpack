@@ -9,7 +9,7 @@
 //! ``structure``'s template is read on the Python side, defaulting to the
 //! ``molrs.io`` reader of its [`StructureFormat`] (the script's ``filetype``,
 //! else the file name: ``molrs.io.read_pdb``, ``read_xyz``, …) but pluggable
-//! via the ``read_frame`` argument. This keeps the PyO3 wheel free of
+//! via the ``loader`` argument. This keeps the PyO3 wheel free of
 //! ``molrs-io`` and lets users plug in their own loader (mdtraj, ASE, …) as
 //! long as it returns a ``molrs.core.Frame``.
 
@@ -30,8 +30,8 @@ use crate::target::{PyTarget, target_from_frame};
 /// tuple-unpacking (``packer, targets, output, nloop = load_script(...)``).
 #[pyclass(name = "ScriptJob", module = "molpack", sequence)]
 pub struct PyScriptJob {
-    /// `GencanPack` pre-configured with ``tolerance`` / ``seed`` /
-    /// periodic box from the script.
+    /// `GencanPack` pre-configured with the script's ``tolerance``,
+    /// ``seed``, ``pbc`` box or ``cell``, and ``avoid_overlap``.
     #[pyo3(get)]
     pub packer: Py<PyGencanPack>,
     /// Targets ready to be packed.
@@ -41,7 +41,7 @@ pub struct PyScriptJob {
     /// script's parent directory).
     #[pyo3(get)]
     pub output: PathBuf,
-    /// Outer-loop iteration cap (``nloop`` keyword; default 400).
+    /// Outer-loop iteration cap (``nloop`` keyword; default ``200 * ntype``).
     #[pyo3(get)]
     pub nloop: usize,
 }
@@ -83,7 +83,7 @@ impl PyScriptJob {
 ///     Path to a ``.inp`` script. Relative file paths inside the script
 ///     (structures, output) are resolved against the script's parent
 ///     directory.
-/// read_frame : callable, optional
+/// loader : callable, optional
 ///     Callable ``(path: str, filetype: str | None) -> Frame`` used to
 ///     load each ``structure`` template. The returned object only needs
 ///     a ``frame["atoms"]`` block exposing ``x`` / ``y`` / ``z`` and an
@@ -98,11 +98,11 @@ impl PyScriptJob {
 ///     Bundle of ``(packer, targets, output, nloop)`` — supports both
 ///     attribute access and tuple unpacking.
 #[pyfunction]
-#[pyo3(signature = (path, *, read_frame = None))]
+#[pyo3(signature = (path, *, loader = None))]
 pub fn load_script(
     py: Python<'_>,
     path: PathBuf,
-    read_frame: Option<Py<PyAny>>,
+    loader: Option<Py<PyAny>>,
 ) -> PyResult<PyScriptJob> {
     let src = std::fs::read_to_string(&path)
         .map_err(|e| PyOSError::new_err(format!("reading {}: {e}", path.display())))?;
@@ -118,7 +118,7 @@ pub fn load_script(
 
     let plan: ScriptPlan = script_ast.lower(&base_dir).map_err(script_error_to_pyerr)?;
 
-    let loader = match read_frame {
+    let loader = match loader {
         Some(callable) => TemplateLoader::Callable(callable),
         None => TemplateLoader::Molrs(import_molrs_io(py)?),
     };
@@ -129,11 +129,7 @@ pub fn load_script(
         .map(|sp| build_target(py, sp, plan.filetype.as_deref(), &loader))
         .collect::<PyResult<_>>()?;
 
-    let packer = PyGencanPack::from_script(
-        Some(script_ast.tolerance),
-        script_ast.seed,
-        script_ast.pbc.map(|pbc| (pbc.min, pbc.max)),
-    );
+    let packer = PyGencanPack::from_script(&script_ast);
 
     Ok(PyScriptJob {
         packer: Py::new(py, packer)?,
@@ -182,7 +178,7 @@ fn build_target<'py>(
 fn import_molrs_io(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     py.import("molrs.io").map_err(|e| {
         PyImportError::new_err(format!(
-            "loading template files needs `molcrafts-molrs` (or pass read_frame=...): {e}"
+            "loading template files needs `molcrafts-molrs` (or pass loader=...): {e}"
         ))
     })
 }

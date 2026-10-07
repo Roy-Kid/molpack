@@ -382,11 +382,10 @@ impl AtomRestraint for OutsideSphereRestraint {
 
 /// Packmol kind 9 — quadratic penalty forcing atom outside ellipsoid.
 ///
-/// Both `f` and `fg` apply the `scale2` factor — `f` previously omitted
-/// it (a transcription artefact of the original Fortran-port comment),
-/// which left `f` and `fg` 100× out of phase at the default
-/// `scale2 = 0.01` and made the optimizer's gradient look 100× flatter
-/// than the function value reported. The `scale2` factor here matches
+/// Both `f` and `fg` apply the `scale2` factor; omitting it from either
+/// leaves `f` and `fg` 100× out of phase at the default `scale2 = 0.01`
+/// and makes the optimizer's gradient look 100× flatter than the function
+/// value reported. The `scale2` factor here matches
 /// the documented "quadratic penalty group" convention (kinds 4 / 5 /
 /// 8 / 9 / 12 / 13) and the sister kind-5 [`InsideEllipsoidRestraint`].
 #[derive(Debug, Clone, Copy)]

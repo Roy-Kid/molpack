@@ -5,7 +5,7 @@ A Rust packing job has three parts:
 1. Build one `Target` per molecule species.
 2. Attach at least one spatial restraint to each mobile target, or use an
    engine-level global restraint.
-3. Pick an engine entry and call `run(&targets, max_loops)` on it —
+3. Pick an engine and call `run(&targets, max_loops)` on it —
    `GencanPack` for rigid-body packing, `CbmcGrow` for chain growth.
 
 ## One molecule type in a box
@@ -63,7 +63,7 @@ size and packing difficulty.
 
 ## One engine, one run
 
-`run` takes the entry **by value**, so an engine is consumed by the run it
+`run` takes the engine **by value**, so an engine is consumed by the run it
 performs. Build a fresh `GencanPack` (or `CbmcGrow`) for each pack; a second
 `run` on the same value does not compile. This is what makes it impossible to
 lose an engine's callback set on a repeat call.

@@ -72,9 +72,9 @@ would silently mis-pack, so the parser rejects them rather than guessing.
 **Script parser strictness**
 
 - Unknown top-level keywords are rejected via
-  `ScriptError::UnknownKeyword`. A silently dropped `pbc` previously
-  triggered a 42 GB cell-grid allocation — strict parsing prevents
-  that class of failure.
+  `ScriptError::UnknownKeyword`. A silently dropped `pbc` leaves the cell
+  grid sized by the ±`sidemax` initial placement, a 42 GB allocation on a
+  measured workload; strict parsing guards against that class of failure.
 
 **Determinism**
 

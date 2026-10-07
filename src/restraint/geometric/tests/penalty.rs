@@ -291,7 +291,7 @@ fn gradient_accumulates() {
     assert!((g[2] - 100.0).abs() < TOL);
 }
 
-// ── Phase B.6 acceptance: user-plugin type equality + scope equivalence ────
+// ── User-plugin type equality + scope equivalence ──────────────────────────
 
 /// User-defined `AtomRestraint` — identical in shape to the 14 built-ins.
 /// Demonstrates direction-3: no ceremony to plug in your own geometry.

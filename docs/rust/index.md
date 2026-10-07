@@ -22,9 +22,9 @@ let frame = result.frame;
 
 The shared builders (`with_seed`, `with_tolerance`, callbacks, boxes, …) and
 the terminal `run` come from the `PackEngine` trait, so it has to be in scope.
-`GencanPack` is the rigid-body entry; `CbmcGrow` is the chain-growth one.
+`GencanPack` is the rigid-body engine; `CbmcGrow` is the chain-growth one.
 
-Each entry is a **single-stage preset**: calling `.run(...)` on `GencanPack`
+Each engine is a **single-stage preset**: calling `.run(...)` on `GencanPack`
 or `CbmcGrow` drives exactly one packing algorithm end to end (internally,
 `Pipeline::single(self).run(...)`). When a pack needs more than one algorithm
 in sequence — grow a chain, then push it apart with rigid-body descent —

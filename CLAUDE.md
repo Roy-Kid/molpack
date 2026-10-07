@@ -32,7 +32,7 @@ mol_project:
 
 molpack builds initial molecular configurations: a faithful Rust port of
 Packmol (rigid-body GENCAN packing, `.inp`-compatible CLI) plus growth
-entries for dense polymer melts, exposed as the `molcrafts-molpack` crate,
+engines for dense polymer melts, exposed as the `molcrafts-molpack` crate,
 the `molpack` binary, and a PyO3 wheel. It serves MD practitioners who
 need a geometry-only starting structure; energy belongs to their force
 field downstream. Rust 1.91 / edition 2024, Python ≥ 3.12 via maturin,
@@ -40,7 +40,7 @@ sibling `../molrs` path dependency.
 
 ## Where things live
 
-- Source code: `src/` (library — lifecycle in `src/pipeline/`, the packing-algorithm seam in `src/stage.rs`, template reading (coordinates + rotatable-bond policy) in `src/template.rs`, run state in `src/context/pack_state.rs` + `src/context/rigid_view.rs`, post-stage checks in `src/invariant.rs`, restraints in `src/restraint/` — the molrs-region lift `region.rs` + `cell.rs`, `collective/`, and the crate-private `.inp` parity kernels in `geometric/`; regions themselves are `molrs::core`: molpack has no region type, no geometric restraint class and no file entry for one; CLI in `src/bin/molpack/`), `python/src/` (PyO3 wheel), `python/python/molpack/` (package)
+- Source code: `src/` (library — lifecycle in `src/pipeline/`, the packing-algorithm seam in `src/stage.rs`, template reading (coordinates + rotatable-bond policy) in `src/template.rs`, run state in `src/system/pack_state.rs` + `src/system/rigid_view.rs`, post-stage checks in `src/invariant.rs`, restraints in `src/restraint/` — the molrs-region lift `region.rs` + `cell.rs`, `collective/`, and the crate-private `.inp` parity kernels in `geometric/`; regions themselves are `molrs::core`: molpack has no region type, no geometric restraint class and no file entry for one; CLI in `src/bin/molpack/`), `python/src/` (PyO3 wheel), `python/python/molpack/` (package)
 - Tests: unit tests only, in-module (`#[cfg(test)]`), next to the code that owns the behaviour — there is no `tests/` directory, no `benches/`, no `regressions/`; Python binding tests in `python/tests/`; runnable scenes in `examples/` + `python/examples/`
 - Public documentation: `docs/` (Zensical site: Rust guide + `docs/python/`)
 - Passive project knowledge: `.claude/notes/` — `law.md` (rulebook), `conventions.md` (features, style, gates, layout, molrs sibling + ABI), `architecture.md` (blueprint via `/mol:map`), `notes.md` (decisions)

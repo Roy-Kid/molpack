@@ -34,7 +34,7 @@ BOX_HI = [40.0, 40.0, 40.0]
 
 
 def _packer() -> molpack.GencanPack:
-    return molpack.GencanPack().with_progress(False)
+    return molpack.GencanPack()
 
 
 class InsideSpherePy:

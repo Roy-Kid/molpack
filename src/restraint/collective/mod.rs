@@ -42,9 +42,9 @@
 //! The two families measure different things and compose: both may be attached
 //! to the same species at once.
 //!
-//! # Evaluation context
+//! # Group evaluation
 //!
-//! `f` / `fg` receive a [`GroupCtx`] alongside the coordinates. It carries what a
+//! `f` / `fg` receive a [`GroupEvaluation`] alongside the coordinates. It carries what a
 //! group-level term cannot recover from a flat coordinate slice: the packer's
 //! two annealing scales, **how many atoms make one copy** (so `coords` can be
 //! cut into molecules), and the **minimum-image convention** in force (so a term
@@ -60,7 +60,7 @@ use molrs::core::{Mic, SimBox};
 use molrs::op::F;
 
 // ============================================================================
-// Evaluation context
+// Group evaluation
 // ============================================================================
 
 /// What the packer knows at evaluation time and a group-level term cannot
@@ -71,7 +71,7 @@ use molrs::op::F;
 /// resolved after the targets are lowered, so a restraint that cached a box at
 /// construction time could cache the wrong one.
 #[derive(Debug, Clone, Copy)]
-pub struct GroupCtx<'a> {
+pub struct GroupEvaluation<'a> {
     /// Linear-penalty annealing scale (Packmol's two-scale contract).
     pub scale: F,
     /// Quadratic-penalty annealing scale.
@@ -110,11 +110,11 @@ pub trait Restraint: Send + Sync + std::fmt::Debug {
     /// Penalty value for the group's current configuration.
     ///
     /// `coords[i]` is the Cartesian position of the `i`-th atom in the group.
-    fn f(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>) -> F;
+    fn f(&self, coords: &[[F; 3]], evaluation: GroupEvaluation<'_>) -> F;
 
     /// Fused value + gradient. Accumulates `∂L/∂coords[i]` INTO `grads[i]`
     /// with `+=`; returns the same value `f` would. `grads.len() == coords.len()`.
-    fn fg(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F;
+    fn fg(&self, coords: &[[F; 3]], evaluation: GroupEvaluation<'_>, grads: &mut [[F; 3]]) -> F;
 
     /// Does this restraint express a **bound** — a condition that is either met
     /// or not — rather than a target it only ever approaches?
@@ -162,7 +162,7 @@ pub use tabulated::{TabulatedPlane, TabulatedPoint};
 /// and a finite-difference gradient check.
 #[cfg(test)]
 pub(super) mod test_fixtures {
-    use super::{GroupCtx, Restraint};
+    use super::{GroupEvaluation, Restraint};
     use molrs::core::{Mic, SimBox};
     use molrs::op::F;
 
@@ -184,8 +184,8 @@ pub(super) mod test_fixtures {
     }
 
     /// Unit scales, free boundaries, `natoms_per_copy` atoms per copy.
-    pub(crate) fn ctx_free(cell: &SimBox, natoms_per_copy: usize) -> GroupCtx<'_> {
-        GroupCtx {
+    pub(crate) fn free_evaluation(cell: &SimBox, natoms_per_copy: usize) -> GroupEvaluation<'_> {
+        GroupEvaluation {
             scale: 1.0,
             scale2: 1.0,
             natoms_per_copy,
@@ -199,13 +199,17 @@ pub(super) mod test_fixtures {
     /// rank swap (where the sorted-CDF objective is non-smooth).
     pub(crate) fn assert_fd_grad(r: &dyn Restraint, coords: &[[F; 3]]) {
         let cell = free_box(1_000.0);
-        assert_fd_grad_in(r, coords, ctx_free(&cell, 1));
+        assert_fd_grad_in(r, coords, free_evaluation(&cell, 1));
     }
 
-    /// [`assert_fd_grad`] under a caller-supplied context.
-    pub(crate) fn assert_fd_grad_in(r: &dyn Restraint, coords: &[[F; 3]], ctx: GroupCtx<'_>) {
+    /// [`assert_fd_grad`] under a caller-supplied evaluation.
+    pub(crate) fn assert_fd_grad_in(
+        r: &dyn Restraint,
+        coords: &[[F; 3]],
+        evaluation: GroupEvaluation<'_>,
+    ) {
         let mut analytic = vec![[0.0 as F; 3]; coords.len()];
-        r.fg(coords, ctx, &mut analytic);
+        r.fg(coords, evaluation, &mut analytic);
         let eps = 1e-6;
         for i in 0..coords.len() {
             for k in 0..3 {
@@ -213,7 +217,7 @@ pub(super) mod test_fixtures {
                 let mut minus = coords.to_vec();
                 plus[i][k] += eps;
                 minus[i][k] -= eps;
-                let fd = (r.f(&plus, ctx) - r.f(&minus, ctx)) / (2.0 * eps);
+                let fd = (r.f(&plus, evaluation) - r.f(&minus, evaluation)) / (2.0 * eps);
                 assert!(
                     (fd - analytic[i][k]).abs() < 1e-4,
                     "{} atom {i} axis {k}: fd={fd}, analytic={}",

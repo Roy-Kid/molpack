@@ -1,6 +1,6 @@
 """The Python mirror of the multi-stage ``Pipeline`` (stage-pipeline-07-bindings).
 
-``Pipeline`` is the composition surface: the entries (``GencanPack`` /
+``Pipeline`` is the composition surface: the engines (``GencanPack`` /
 ``CbmcGrow`` / ``LatticeGrow``) stay single-stage presets, and chaining them
 is one object with the *same* shared knobs. What this file owns, and nothing
 else can:
@@ -11,8 +11,8 @@ else can:
    *adopted* by the pipeline and still fires (`ac-004`); a preset carrying a
    non-default *shared* knob into a pipeline is refused by name, knob included
    (`ac-004`); an empty pipeline is a named ``ValueError``, not a no-op; an
-   object that is not a registered entry is a ``TypeError`` that *lists* the
-   entries (`ac-002`'s user-visible face).
+   object that is not a registered engine is a ``TypeError`` that *lists* the
+   engines (`ac-002`'s user-visible face).
 3. **Callbacks can see which stage they are in.** ``StepReport.stage`` carries the
    ``index`` / ``total`` / ``name`` triple, in a pipeline and in a bare preset
    run alike (`ac-003`).
@@ -43,7 +43,7 @@ from molpack import (
     TorsionPrior,
 )
 
-#: The entries a `Pipeline` accepts as a stage. The binding builds its
+#: The engines a `Pipeline` accepts as a stage. The binding builds its
 #: `TypeError` text from ONE registry; this tuple is the same list spelled
 #: from the classes themselves, so it cannot drift into a stale literal.
 ENTRY_NAMES = (GencanPack.__name__, CbmcGrow.__name__, LatticeGrow.__name__)
@@ -230,7 +230,7 @@ def test_pipeline_empty_is_value_error() -> None:
     This is the composition error Python *can* reach. The sibling
     ``PackError::StageOrder`` ("stage X requires placements but nothing before
     it placed the molecules") is unreachable from Python by construction: the
-    only stages Python can build are the three registered entries, and every
+    only stages Python can build are the three registered engines, and every
     one of them places molecules itself (``Requires::nothing``). Building a
     stage that *requires* prior placements is a Rust-level extension point
     (`Stage` stays Rust-only, spec §Design), so `StageOrder` is owned by
@@ -242,9 +242,9 @@ def test_pipeline_empty_is_value_error() -> None:
 
 
 def test_pipeline_rejects_unknown_stage_with_registry_message() -> None:
-    """A non-entry object is a ``TypeError`` that lists the entries.
+    """A non-engine object is a ``TypeError`` that lists the engines.
 
-    The list comes from the binding's one stage registry, so a fourth entry
+    The list comes from the binding's one stage registry, so a fourth engine
     shows up here without anyone editing an error string.
     """
     # Deliberate misuse: the stub's `Stage` union is closed on purpose, so
@@ -259,6 +259,6 @@ def test_pipeline_rejects_unknown_stage_with_registry_message() -> None:
         message = str(excinfo.value)
         for name in ENTRY_NAMES:
             assert name in message, (
-                f"the refusal must list the supported entries; {name!r} missing "
+                f"the refusal must list the supported engines; {name!r} missing "
                 f"from: {message}"
             )

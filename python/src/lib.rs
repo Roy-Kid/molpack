@@ -5,15 +5,15 @@
 //! | Python class     | Rust wrapper         | Purpose                            |
 //! |------------------|----------------------|------------------------------------|
 //! | `Target`         | [`PyTarget`]         | Molecule specification for packing |
-//! | `GencanPack`     | [`PyGencanPack`]     | Rigid-body GENCAN packing entry    |
-//! | `CbmcGrow`       | [`PyCbmcGrow`]       | Chain-growth entry                 |
-//! | `LatticeGrow`    | [`PyLatticeGrow`]    | Lattice-growth entry               |
-//! | `Pipeline`       | [`PyPipeline`]       | Entries composed as stages         |
-//! | `State`     | [`PyState`]     | Frame + diagnostics from `run()`   |
+//! | `GencanPack`     | [`PyGencanPack`]     | Rigid-body GENCAN packing engine   |
+//! | `CbmcGrow`       | [`PyCbmcGrow`]       | Chain-growth engine                |
+//! | `LatticeGrow`    | [`PyLatticeGrow`]    | Lattice-growth engine              |
+//! | `Pipeline`       | [`PyPipeline`]       | Engines composed as stages         |
+//! | `State`          | [`PyState`]          | Frame + diagnostics from `run()`   |
 //! | `IntraResidual`  | [`PyIntraResidual`]  | Nested scored/exempted intra mins  |
-//! | `StepReport`       | [`PyStepReport`]       | Read-only snapshot for callbacks    |
-//! | `StageProgress`      | [`PyStageProgress`]      | Which stage a callback came from   |
-//! | `PackSystemView`    | [`PyPackSystemView`]    | Callback-scoped live-system guard |
+//! | `StepReport`     | [`PyStepReport`]     | Read-only snapshot for callbacks   |
+//! | `StageProgress`  | [`PyStageProgress`]  | Which stage a callback came from   |
+//! | `PackSystemView` | [`PyPackSystemView`] | Callback-scoped live-system guard  |
 //!
 //! Geometric restraints are molrs region objects (`molrs.core.Sphere`, `Cuboid`,
 //! `Parallelepiped`, `HalfSpace`, `Cylinder`, `Ellipsoid`, `Polyhedron`,
@@ -24,7 +24,7 @@
 //! `fg(x, scale, scale2)` methods to `Target.with_restraint` — no dedicated
 //! class needed.
 //!
-//! Custom Python progress callbacks are registered via the entries'
+//! Custom Python progress callbacks are registered via the engines'
 //! `with_callback(obj)`; see the [`callback`] module for the method contract.
 
 use pyo3::prelude::*;

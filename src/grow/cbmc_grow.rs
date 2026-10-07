@@ -1,4 +1,4 @@
-//! `CbmcGrow` — the continuum configurational-bias chain-growth entry.
+//! `CbmcGrow` — the continuum configurational-bias chain-growth engine.
 
 use crate::Callback;
 use crate::PackError;
@@ -13,7 +13,7 @@ use crate::{PackSettings, State};
 use molrs::op::F;
 
 /// Configurational-bias chain growth (CBMC-style constructive packing) as
-/// its own entry.
+/// its own engine.
 ///
 /// The torsion prior is mandatory — it decides the grown chains' statistics
 /// (spec Domain basis §5.1) — so it is the one constructor argument.
@@ -27,9 +27,9 @@ use molrs::op::F;
 /// cap force-completes the unfinished chains instead of spinning forever, which
 /// grows `degraded` and leaves `converged == false`.
 ///
-/// The entry reports its outcome honestly: on non-convergence `degraded`
+/// The engine reports its outcome honestly: on non-convergence `degraded`
 /// and `converged` say so and nothing else runs — no hidden second
-/// algorithm (engine-entry-split 门槛 2). For the rigid push-off, chain
+/// algorithm . For the rigid push-off, chain
 /// explicitly: feed the same free targets to
 /// [`GencanPack::with_restart`](crate::GencanPack::with_restart) with this
 /// run's result (placement-seeding spec).
@@ -44,7 +44,7 @@ impl CbmcGrow {
         Self::from_config(GrowConfig::new(torsion_prior))
     }
 
-    /// Build the entry around an existing [`GrowConfig`].
+    /// Build the engine around an existing [`GrowConfig`].
     pub fn from_config(config: GrowConfig) -> Self {
         Self {
             settings: PackSettings::default(),
@@ -90,9 +90,6 @@ impl CbmcGrow {
     /// `rung_due` consumes this cadence; `force_due` consumes
     /// `2 × soften_after` consecutive streak at the floor; `retract_depth`
     /// reads the streak and the separate retract knob, never this counter.
-    /// The Python wheel and `docs/python/api-reference.md` still describe this
-    /// knob as consecutive; that page is left stale on purpose until
-    /// special-bonds-06.
     pub fn with_soften_after(mut self, attempts: usize) -> Self {
         self.config = self.config.with_soften_after(attempts);
         self

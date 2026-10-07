@@ -1,8 +1,8 @@
-//! `LatticeGrow` — the diamond-lattice chain-growth entry.
+//! `LatticeGrow` — the diamond-lattice chain-growth engine.
 //!
 //! Split out of `lattice/mod.rs` so the lattice module has the same shape as
 //! its two peers (`gencan/gencan_pack.rs`, `grow/cbmc_grow.rs`): the algorithm in one
-//! file, the entry that selects it in another.
+//! file, the engine that selects it in another.
 
 use crate::Callback;
 use crate::PackError;
@@ -17,7 +17,7 @@ use super::LatticeStage;
 use super::config::LatticeConfig;
 use super::decorate::analyze_backbone;
 
-/// Diamond-lattice growth as its own entry (lattice-growth-phase spec).
+/// Diamond-lattice growth as its own engine (lattice-growth-phase spec).
 ///
 /// A tetrahedral heavy-atom tree of degree ≤ 4 is grown as a diamond-lattice
 /// self-avoiding walk; a linear chain is the `d = 2` degeneracy of that
@@ -26,7 +26,7 @@ use super::decorate::analyze_backbone;
 /// [`GrowError::RingTemplate`].
 ///
 /// The torsion prior is mandatory — it decides the walk's trans/gauche±
-/// weights — so it is the one constructor argument. The entry reports its
+/// weights — so it is the one constructor argument. The engine reports its
 /// outcome honestly: decoration drift and hydrogen crowding leave real
 /// contacts at melt density, `fdist` says so, and the remedy is the
 /// explicit seeded push-off chain
@@ -48,7 +48,7 @@ impl LatticeGrow {
         Self::from_config(LatticeConfig::new(torsion_prior))
     }
 
-    /// Build the entry around an existing [`LatticeConfig`].
+    /// Build the engine around an existing [`LatticeConfig`].
     pub fn from_config(config: LatticeConfig) -> Self {
         Self {
             settings: PackSettings::default(),

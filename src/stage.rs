@@ -2,13 +2,13 @@
 
 use crate::Callback;
 use crate::PackError;
-use crate::context::{PackState, Placed};
+use crate::system::{PackState, Placed};
 
 use crate::Target;
 pub use crate::outcome::StageOutcome;
 use molrs::op::F;
 
-/// One packing algorithm, selected by picking its engine entry
+/// One packing algorithm, selected by picking its engine
 /// ([`GencanPack`](crate::GencanPack), [`CbmcGrow`](crate::CbmcGrow),
 /// [`LatticeGrow`](crate::LatticeGrow)).
 ///
@@ -29,7 +29,7 @@ use molrs::op::F;
 ///
 /// **Rust-only:** this module ([`Stage`], [`Requires`], [`Guarantees`],
 /// [`StageOutcome`], [`Budget`]) is deliberately not mirrored in the Python
-/// wheel — Python picks the algorithm by picking the entry (`GencanPack` /
+/// wheel — Python picks the algorithm by picking the engine (`GencanPack` /
 /// `CbmcGrow` / `LatticeGrow`), and implementing a custom stage is a
 /// Rust-level extension point.
 ///
@@ -67,7 +67,7 @@ use molrs::op::F;
 /// # What this seam deliberately does not have
 ///
 /// * **No `validate` hook.** Not one implementor in this crate would
-///   override it: the rigid-body path validates its targets from its entry,
+///   override it: the rigid-body path validates its targets from its engine,
 ///   and both growth paths validate their cell from theirs. A pre-flight
 ///   hook nobody implements is a step a caller can forget plus a concept
 ///   nobody pays for. The seam is exactly four methods.
@@ -215,11 +215,11 @@ mod tests {
     //! [`Stage::run`](crate::Stage::run) — none of which needs a real algorithm,
     //! and all of which a real algorithm would only obscure. What each concrete
     //! implementor declares belongs to that implementor's owner
-    //! (`gencan::tests`, `grow::tests`), so this file boots no engine entry
+    //! (`gencan::tests`, `grow::tests`), so this file boots no engine
     //! and names no production stage (acceptance ac-008).
     //!
     //! Fixture: `PackState::new(PackSystem::new(0, 0, 0), 0)` — the degenerate
-    //! context of `pack_system.rs::geometry_cache_tests` / `src/context/pack_state/tests.rs`,
+    //! system of `pack_system.rs::geometry_cache_tests` / `src/system/pack_state/tests.rs`,
     //! which is all a stage that does no geometry can legitimately need. No RNG,
     //! no clock, no filesystem, no network.
     //!

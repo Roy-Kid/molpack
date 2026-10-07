@@ -3,7 +3,7 @@
 //!
 //! The packer hands a collective restraint one flat, **copy-major** coordinate
 //! slice per species, so copy `c` owns `coords[c·m .. (c+1)·m]` for
-//! `m = GroupCtx::natoms_per_copy`. That is the only fact this module needs; it
+//! `m = GroupEvaluation::natoms_per_copy`. That is the only fact this module needs; it
 //! is what lets a term reason about *molecules* instead of atoms.
 //!
 //! A copy's atoms are always contiguous in space, so the centroid needs no

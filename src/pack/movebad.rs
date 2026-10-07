@@ -2,11 +2,11 @@
 //! Port of `heuristics.f90` and `flashsort.f90`.
 
 use crate::Objective;
-use crate::context::PackSystem;
 use crate::eval::EvalMode;
 use crate::pack::gencan::GencanWorkspace;
 use crate::pack::restmol::restmol;
 use crate::random::uniform01;
+use crate::system::PackSystem;
 use molrs::op::F;
 use rand::Rng;
 

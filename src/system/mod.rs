@@ -1,4 +1,4 @@
-//! Context layer for packmol-aligned packing runtime.
+//! The packing system: one run's mutable state and its per-atom layout.
 //!
 //! The run's types — [`PackSystem`], [`PackState`], [`Placed`],
 //! [`RigidView`] — are published at the crate root; this

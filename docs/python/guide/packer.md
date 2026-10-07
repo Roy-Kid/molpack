@@ -1,9 +1,9 @@
 # Packer
 
 `GencanPack` drives the GENCAN-based three-phase optimizer. It is one of
-two engine entries — the other, `CbmcGrow`, grows chains instead of
+two engines — the other, `CbmcGrow`, grows chains instead of
 placing rigid bodies; see [Chain growth](growth.md). You pick the
-algorithm by picking the entry, and both share the builder names below.
+algorithm by picking the engine, and both share the builder names below.
 All tuning is through `with_*` builder methods — the `GencanPack`
 constructor takes no arguments.
 
@@ -33,15 +33,13 @@ packer = (
     .with_perturb(0.05, False, True)  # stall heuristic: fraction, random pick, on/off
     .with_seed(42)                  # deterministic RNG
     .with_parallel_eval(False)      # rayon-backed pair-kernel eval (opt-in)
-    .with_progress(True)            # LAMMPS-style screen output
+    .with_log_level("progress")     # LAMMPS-style screen output
 )
 ```
 
-Runs are silent by default; `.with_progress(True)` turns the screen log
-on and `.with_progress(False)` turns it back off. Finer control:
-`.with_log_level("quiet" | "summary" | "progress" | "verbose")` (an
-explicit level wins over `with_progress`) and `.with_log_frequency(n)`
-to print every *n*-th loop.
+Runs are silent by default (`"quiet"`); `.with_log_level(level)` picks
+`"quiet"`, `"summary"`, `"progress"` (LAMMPS-style thermo lines) or
+`"verbose"`, and `.with_log_frequency(n)` prints every *n*-th loop.
 
 A few more builders cover specific needs:
 
@@ -55,8 +53,8 @@ packer = (
 ```
 
 `with_tolerance`, `with_precision`, `with_seed`, `with_periodic_box`,
-`with_density`, `with_parallel_eval`, `with_progress`, `with_callback`,
-and `with_global_restraint` are the shared entry builders — they exist
+`with_density`, `with_parallel_eval`, `with_log_level`, `with_callback`,
+and `with_global_restraint` are the shared engine builders — they exist
 on `CbmcGrow` too. The rest are GENCAN-only.
 
 ## Global restraints
@@ -92,7 +90,7 @@ the `Callback` Protocol in `molpack`.
 
 ## Periodic boundaries
 
-PBC is declared on the entry via `.with_periodic_box(min, max)`; a region
+PBC is declared on the engine via `.with_periodic_box(min, max)`; a region
 only confines. See
 [Periodic boundaries](periodic-boundaries.md).
 
@@ -108,7 +106,7 @@ result = packer.run(targets, max_loops=200)
 Raises one of the typed `PackError` subclasses on failure
 (`NoTargetsError`, `InvalidPbcBoxError`, …).
 
-`run()` is the entry's only terminal verb and it consumes the entry —
+`run()` is the engine's only terminal verb and it consumes the engine —
 one engine, one run. Calling `run()` twice on the same object raises
 `RuntimeError`; build a fresh `GencanPack` for the next pack.
 
@@ -216,7 +214,7 @@ Pipeline([CbmcGrow(prior), GencanPack()]).with_callback(WatchStages()).run(targe
 `step.stage.index` is 0-based and increases monotonically over the run,
 `step.stage.total` is the number of stages the pipeline holds, and
 `step.stage.name` is the stage's own name — `"gencan"`, `"growth"`, or
-`"lattice"`. A single-entry run (`GencanPack().run(...)` directly, with no
+`"lattice"`. A single-engine run (`GencanPack().run(...)` directly, with no
 `Pipeline`) reports the same triple, with `index = 0` and `total = 1`.
 
 ### Composition errors
@@ -229,7 +227,7 @@ Pipeline([CbmcGrow(prior), GencanPack()]).with_callback(WatchStages()).run(targe
   raises `ValueError` naming the stage and the setting.
 - An object that is not one of `GencanPack`, `CbmcGrow`, or `LatticeGrow`
   passed to `Pipeline([...])` or `.with_stage(x)` raises `TypeError`, listing
-  the three supported entries.
+  the three supported engines.
 
 ## Reproducibility
 

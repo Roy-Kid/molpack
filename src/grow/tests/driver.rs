@@ -15,7 +15,7 @@ use super::*;
 
 use crate::AtomRestraint;
 use crate::callback::{Callback, StepReport};
-use crate::context::PackSystem;
+use crate::system::PackSystem;
 
 /// A restraint that refuses every point, so every growth attempt is a dead end.
 #[derive(Debug)]
@@ -30,8 +30,8 @@ impl AtomRestraint for RefuseEverywhere {
     }
 }
 
-/// Stops the driver after the first round, before a second chain could
-/// spend a rung that the old global ladder had queued.
+/// Stops the driver after the first round, before a second round could
+/// spend another rung.
 #[derive(Default)]
 struct StopAfterOne {
     seen: bool,
@@ -93,8 +93,7 @@ fn an_unsatisfiable_hard_core_terminates_and_says_so() {
 }
 
 /// Two chains that both earn a rung in the same round each shrink their own
-/// core. The old ladder took one global rung per round, so the second chain
-/// waited and `degraded` counted one shrink.
+/// core, and `degraded` counts both shrinks.
 #[test]
 fn a_rung_shrinks_only_the_chain_that_earned_it() {
     let cfg = GrowConfig::new(TorsionPrior::Uniform)

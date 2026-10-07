@@ -82,11 +82,11 @@ frame = result.frame
 print(frame["atoms"].n_rows)
 ```
 
-`GencanPack` is the rigid-body entry — you choose the packing algorithm
-by choosing the entry, and `CbmcGrow` is the chain-growth one. Both have
+`GencanPack` is the rigid-body engine — you choose the packing algorithm
+by choosing the engine, and `CbmcGrow` is the chain-growth one. Both have
 the same builders and the same terminal verb, `run()`, which returns a
 `State` with `.frame`, `.converged`, `.fdist`, `.frest`,
-`.positions`, `.degraded`, and `.intra`. An entry runs once: build a
+`.positions`, `.degraded`, and `.intra`. An engine runs once: build a
 new one for each pack.
 
 ## 5. Save

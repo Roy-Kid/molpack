@@ -32,7 +32,7 @@ def _ion_frame() -> molrs.core.Frame:
 
 
 def _packer() -> molpack.GencanPack:
-    return molpack.GencanPack().with_progress(False)
+    return molpack.GencanPack()
 
 
 class MeanTether:
@@ -257,9 +257,9 @@ class TestSelfSeparation:
         assert result.frest > 0.0
 
     def test_duck_typed_restraints_still_receive_scale_arguments(self):
-        # The Rust seam grew a context argument; the Python contract must not
-        # have. A duck-typed collective restraint still gets (coords, scale,
-        # scale2) and must compose with a native one on the same species.
+        # The Rust seam passes a `GroupEvaluation`; the Python contract is
+        # (coords, scale, scale2). A duck-typed collective restraint gets
+        # exactly that and composes with a native one on the same species.
         target = (
             molpack.Target(_ion_frame(), count=20)
             .with_name("NA")

@@ -113,7 +113,11 @@ def pack_mix(
         _target(linear, n_linear, "lin-PEO"),
         _target(star, n_star, "star-PEO"),
     ]
-    progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "0") != "0"
+    log_level = (
+        "progress"
+        if os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "0") != "0"
+        else "quiet"
+    )
     prior = molpack.TorsionPrior.three_state_from_c_inf(PEO_C_INF, TET)
     print(
         "  lattice      : LatticeGrow occupancy-guard @ 2.0 Å → "
@@ -124,7 +128,7 @@ def pack_mix(
         .with_seed(seed)
         .with_tolerance(2.0)
         .with_density(density)
-        .with_progress(progress)
+        .with_log_level(log_level)
         .run(targets, max_loops=max(40, (n_linear + n_star) * 8))
     )
     print(
@@ -137,7 +141,7 @@ def pack_mix(
         .with_restart(grown)
         .with_seed(seed)
         .with_tolerance(2.0)
-        .with_progress(progress)
+        .with_log_level(log_level)
         .run(targets, max_loops=80)
     )
     print(f"  push-off     : converged={pushed.converged}  fdist={pushed.fdist:.4e}")

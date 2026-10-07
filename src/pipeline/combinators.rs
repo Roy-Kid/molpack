@@ -26,8 +26,8 @@ use crate::Invariant;
 use crate::PackError;
 use crate::PackSettings;
 use crate::Target;
-use crate::context::{PackState, Placed};
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
+use crate::system::{PackState, Placed};
 
 use super::engine::{EngineSetup, StageFactory};
 

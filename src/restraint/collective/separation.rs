@@ -13,7 +13,7 @@ use molrs::core::{Mic, SimBox};
 use molrs::op::F;
 
 use super::com;
-use super::{GroupCtx, Restraint};
+use super::{GroupEvaluation, Restraint};
 
 /// Keep every pair of copies of one species at least `d_min` apart, measured
 /// **centre to centre**.
@@ -34,7 +34,7 @@ use super::{GroupCtx, Restraint};
 /// `d_min`. The gradient is continuous at contact, where the penalty and its
 /// slope both vanish.
 ///
-/// Distances use the minimum-image convention from [`GroupCtx`], so copies on
+/// Distances use the minimum-image convention from [`GroupEvaluation`], so copies on
 /// opposite sides of a periodic boundary are pushed apart exactly as neighbours
 /// in the interior are.
 ///
@@ -113,8 +113,12 @@ impl SelfSeparation {
     /// per-copy centres instead of atoms, at `d_min` instead of contact
     /// distance.
     #[inline]
-    fn for_each_close_pair<V>(&self, sites: &[[F; 3]], ctx: &GroupCtx<'_>, mut visit: V)
-    where
+    fn for_each_close_pair<V>(
+        &self,
+        sites: &[[F; 3]],
+        evaluation: &GroupEvaluation<'_>,
+        mut visit: V,
+    ) where
         V: FnMut(usize, usize, [F; 3], F),
     {
         let n = sites.len();
@@ -123,7 +127,7 @@ impl SelfSeparation {
         }
         let d2 = self.d_min * self.d_min;
 
-        let grid = partition(ctx.cell, self.d_min, n);
+        let grid = partition(evaluation.cell, self.d_min, n);
         let ncells = grid.n_cells();
 
         // A partition only pays when it excludes something. The 3x3x3 stencil
@@ -136,7 +140,7 @@ impl SelfSeparation {
         if ncells < GRID_MIN_CELLS {
             for a in 0..n {
                 for b in a + 1..n {
-                    if let Some((delta, dd)) = closer_than(sites, &ctx.mic, a, b, d2) {
+                    if let Some((delta, dd)) = closer_than(sites, &evaluation.mic, a, b, d2) {
                         visit(a, b, delta, dd);
                     }
                 }
@@ -148,7 +152,7 @@ impl SelfSeparation {
         // `order` the site ids grouped by cell.
         let cell_of: Vec<u32> = sites
             .iter()
-            .map(|s| grid.cell_of(ctx.cell, *s) as u32)
+            .map(|s| grid.cell_of(evaluation.cell, *s) as u32)
             .collect();
         let mut starts = vec![0u32; ncells + 1];
         for &c in &cell_of {
@@ -174,7 +178,7 @@ impl SelfSeparation {
             for a in lo..hi {
                 for b in a + 1..hi {
                     let (i, j) = (order[a] as usize, order[b] as usize);
-                    if let Some((delta, dd)) = closer_than(sites, &ctx.mic, i, j, d2) {
+                    if let Some((delta, dd)) = closer_than(sites, &evaluation.mic, i, j, d2) {
                         visit(i, j, delta, dd);
                     }
                 }
@@ -187,7 +191,7 @@ impl SelfSeparation {
                 for a in lo..hi {
                     for b in nlo..nhi {
                         let (i, j) = (order[a] as usize, order[b] as usize);
-                        if let Some((delta, dd)) = closer_than(sites, &ctx.mic, i, j, d2) {
+                        if let Some((delta, dd)) = closer_than(sites, &evaluation.mic, i, j, d2) {
                             visit(i, j, delta, dd);
                         }
                     }
@@ -198,22 +202,22 @@ impl SelfSeparation {
 }
 
 impl Restraint for SelfSeparation {
-    fn f(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>) -> F {
-        let sites = com::centroids(coords, ctx.natoms_per_copy);
+    fn f(&self, coords: &[[F; 3]], evaluation: GroupEvaluation<'_>) -> F {
+        let sites = com::centroids(coords, evaluation.natoms_per_copy);
         let mut sum = 0.0;
-        self.for_each_close_pair(&sites, &ctx, |_, _, _, dd| {
+        self.for_each_close_pair(&sites, &evaluation, |_, _, _, dd| {
             let shortfall = self.d_min - dd.sqrt();
             sum += shortfall * shortfall;
         });
         self.strength * sum
     }
 
-    fn fg(&self, coords: &[[F; 3]], ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
-        let sites = com::centroids(coords, ctx.natoms_per_copy);
+    fn fg(&self, coords: &[[F; 3]], evaluation: GroupEvaluation<'_>, grads: &mut [[F; 3]]) -> F {
+        let sites = com::centroids(coords, evaluation.natoms_per_copy);
         let mut dsites = vec![[0.0 as F; 3]; sites.len()];
         let mut sum = 0.0;
 
-        self.for_each_close_pair(&sites, &ctx, |c, other, delta, dd| {
+        self.for_each_close_pair(&sites, &evaluation, |c, other, delta, dd| {
             let dist = dd.sqrt();
             let shortfall = self.d_min - dist;
             sum += shortfall * shortfall;
@@ -230,7 +234,7 @@ impl Restraint for SelfSeparation {
             }
         });
 
-        com::scatter(&dsites, ctx.natoms_per_copy, grads);
+        com::scatter(&dsites, evaluation.natoms_per_copy, grads);
         self.strength * sum
     }
 
@@ -250,8 +254,8 @@ impl Restraint for SelfSeparation {
 ///
 /// A free function rather than a closure over the visitor: nesting the two made
 /// the visitor call opaque to the inliner and cost ~37 instructions on every
-/// pair examined — enough to make the direct sweep 2.4x slower than the loop it
-/// replaced (measured at 200 copies).
+/// pair examined — enough to make the direct sweep 2.4x slower than a plain
+/// double loop (measured at 200 copies).
 #[inline(always)]
 fn closer_than(sites: &[[F; 3]], mic: &Mic, a: usize, b: usize, d2: F) -> Option<([F; 3], F)> {
     let delta = mic.apply([
@@ -296,12 +300,12 @@ mod tests {
         SimBox::cube(side, molrs::op::F3::zeros(3), [periodic; 3]).expect("test box")
     }
 
-    /// A context whose minimum image and partition come from the *same* box —
+    /// An evaluation whose minimum image and partition come from the *same* box —
     /// the pairing the objective always supplies. Handing a periodic `Mic` a
     /// non-periodic partition would make the grid miss exactly the pairs the
     /// `Mic` was added to catch.
-    fn ctx<'a>(cell: &'a SimBox, natoms_per_copy: usize) -> GroupCtx<'a> {
-        GroupCtx {
+    fn evaluation<'a>(cell: &'a SimBox, natoms_per_copy: usize) -> GroupEvaluation<'a> {
+        GroupEvaluation {
             scale: 1.0,
             scale2: 1.0,
             natoms_per_copy,
@@ -312,7 +316,7 @@ mod tests {
 
     /// The `O(N²)` definition of the penalty, kept as the reference the
     /// partitioned sweep is checked against.
-    fn brute_force(r: &SelfSeparation, coords: &[[F; 3]], c: GroupCtx<'_>) -> F {
+    fn brute_force(r: &SelfSeparation, coords: &[[F; 3]], c: GroupEvaluation<'_>) -> F {
         let sites = com::centroids(coords, c.natoms_per_copy);
         let d2 = r.d_min * r.d_min;
         let mut sum = 0.0;
@@ -355,8 +359,8 @@ mod tests {
                 let r = SelfSeparation::new(d_min, 1.0);
                 let cell = cube(side, false);
                 let sites = random_sites(n, side, 0x1234 + n as u64);
-                let got = r.f(&sites, ctx(&cell, 1));
-                let want = brute_force(&r, &sites, ctx(&cell, 1));
+                let got = r.f(&sites, evaluation(&cell, 1));
+                let want = brute_force(&r, &sites, evaluation(&cell, 1));
                 assert!(
                     (got - want).abs() < 1e-9 * want.max(1.0),
                     "n={n} d_min={d_min}: partitioned {got} != brute force {want}"
@@ -373,8 +377,8 @@ mod tests {
                 let r = SelfSeparation::new(d_min, 1.0);
                 let cell = cube(side, true);
                 let sites = random_sites(n, side, 0xbeef + n as u64);
-                let got = r.f(&sites, ctx(&cell, 1));
-                let want = brute_force(&r, &sites, ctx(&cell, 1));
+                let got = r.f(&sites, evaluation(&cell, 1));
+                let want = brute_force(&r, &sites, evaluation(&cell, 1));
                 assert!(
                     (got - want).abs() < 1e-9 * want.max(1.0),
                     "n={n} d_min={d_min}: partitioned {got} != brute force {want}"
@@ -390,8 +394,8 @@ mod tests {
         let cell = cube(side, true);
         // 40 copies of a 3-atom molecule.
         let coords = random_sites(120, side, 0xc0ffee);
-        let got = r.f(&coords, ctx(&cell, 3));
-        let want = brute_force(&r, &coords, ctx(&cell, 3));
+        let got = r.f(&coords, evaluation(&cell, 3));
+        let want = brute_force(&r, &coords, evaluation(&cell, 3));
         assert!((got - want).abs() < 1e-9 * want.max(1.0), "{got} != {want}");
     }
 
@@ -408,8 +412,8 @@ mod tests {
             [55.0, 5.0, 5.0],
             [57.0, 5.0, 5.0],
         ];
-        let got = r.f(&sites, ctx(&cell, 1));
-        let want = brute_force(&r, &sites, ctx(&cell, 1));
+        let got = r.f(&sites, evaluation(&cell, 1));
+        let want = brute_force(&r, &sites, evaluation(&cell, 1));
         assert!(want > 0.0, "the fixture must actually violate the bound");
         assert!((got - want).abs() < 1e-9 * want, "{got} != {want}");
     }
@@ -423,8 +427,8 @@ mod tests {
         let r = SelfSeparation::new(2.0, 1.0);
         assert!(partition(&cell, 2.0, 10).n_cells() <= 10);
         let sites = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [900.0, 0.0, 0.0]];
-        let got = r.f(&sites, ctx(&cell, 1));
-        let want = brute_force(&r, &sites, ctx(&cell, 1));
+        let got = r.f(&sites, evaluation(&cell, 1));
+        let want = brute_force(&r, &sites, evaluation(&cell, 1));
         assert!((got - want).abs() < 1e-12, "{got} != {want}");
     }
 
@@ -435,7 +439,7 @@ mod tests {
         let cell = cube(100.0, false);
         let r = SelfSeparation::new(5.0, 1.0);
         let coords = [[0.0, 0.0, 0.0], [6.0, 0.0, 0.0], [12.0, 0.0, 0.0]];
-        assert_eq!(r.f(&coords, ctx(&cell, 1)), 0.0);
+        assert_eq!(r.f(&coords, evaluation(&cell, 1)), 0.0);
     }
 
     #[test]
@@ -444,17 +448,17 @@ mod tests {
         let r = SelfSeparation::new(5.0, 1.0);
         let loose = [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0]];
         let tight = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
-        let loose_e = r.f(&loose, ctx(&cell, 1));
+        let loose_e = r.f(&loose, evaluation(&cell, 1));
         assert!(loose_e > 0.0);
-        assert!(r.f(&tight, ctx(&cell, 1)) > loose_e);
+        assert!(r.f(&tight, evaluation(&cell, 1)) > loose_e);
     }
 
     #[test]
     fn strength_scales_the_value_linearly() {
         let cell = cube(100.0, false);
         let coords = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
-        let one = SelfSeparation::new(5.0, 1.0).f(&coords, ctx(&cell, 1));
-        let three = SelfSeparation::new(5.0, 3.0).f(&coords, ctx(&cell, 1));
+        let one = SelfSeparation::new(5.0, 1.0).f(&coords, evaluation(&cell, 1));
+        let three = SelfSeparation::new(5.0, 3.0).f(&coords, evaluation(&cell, 1));
         assert!((three - 3.0 * one).abs() < 1e-12);
     }
 
@@ -470,7 +474,7 @@ mod tests {
             [9.0, 0.0, 0.0],
             [11.0, 0.0, 0.0],
         ];
-        assert_eq!(r.f(&coords, ctx(&cell, 2)), 0.0);
+        assert_eq!(r.f(&coords, evaluation(&cell, 2)), 0.0);
     }
 
     #[test]
@@ -480,9 +484,9 @@ mod tests {
         let coords = [[1.0, 0.0, 0.0], [19.0, 0.0, 0.0]];
         let free = cube(20.0, false);
         let pbc = cube(20.0, true);
-        assert_eq!(r.f(&coords, ctx(&free, 1)), 0.0, "free: 18 apart");
+        assert_eq!(r.f(&coords, evaluation(&free, 1)), 0.0, "free: 18 apart");
         assert!(
-            r.f(&coords, ctx(&pbc, 1)) > 0.0,
+            r.f(&coords, evaluation(&pbc, 1)) > 0.0,
             "periodic: 2 apart, must be penalised"
         );
     }
@@ -494,7 +498,7 @@ mod tests {
         let cell = cube(100.0, false);
         let r = SelfSeparation::new(6.0, 1.3);
         let coords = random_sites(8, 10.0, 0x5eed_1234);
-        assert_fd_grad_in(&r, &coords, ctx(&cell, 1));
+        assert_fd_grad_in(&r, &coords, evaluation(&cell, 1));
     }
 
     #[test]
@@ -503,7 +507,7 @@ mod tests {
         let cell = cube(100.0, false);
         let r = SelfSeparation::new(7.0, 1.0);
         let coords = random_sites(15, 12.0, 0xabcd_0001);
-        assert_fd_grad_in(&r, &coords, ctx(&cell, 3));
+        assert_fd_grad_in(&r, &coords, evaluation(&cell, 3));
     }
 
     #[test]
@@ -519,7 +523,7 @@ mod tests {
             [18.0, 15.0, 5.0],
             [2.5, 15.3, 5.4],
         ];
-        assert_fd_grad_in(&r, &coords, ctx(&cell, 1));
+        assert_fd_grad_in(&r, &coords, evaluation(&cell, 1));
     }
 
     #[test]
@@ -528,7 +532,7 @@ mod tests {
         let r = SelfSeparation::new(2.0, 1.0);
         let coords = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]];
         let mut grads = [[0.0 as F; 3]; 2];
-        assert_eq!(r.fg(&coords, ctx(&cell, 1), &mut grads), 0.0);
+        assert_eq!(r.fg(&coords, evaluation(&cell, 1), &mut grads), 0.0);
         assert_eq!(grads, [[0.0; 3]; 2]);
     }
 
@@ -539,7 +543,7 @@ mod tests {
         let r = SelfSeparation::new(5.0, 1.0);
         let coords = [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
         let mut grads = [[0.0 as F; 3]; 2];
-        r.fg(&coords, ctx(&cell, 1), &mut grads);
+        r.fg(&coords, evaluation(&cell, 1), &mut grads);
         assert!(grads[0][0] > 0.0, "-grad moves copy 0 toward -x");
         assert!(grads[1][0] < 0.0, "-grad moves copy 1 toward +x");
     }
@@ -550,7 +554,7 @@ mod tests {
         let r = SelfSeparation::new(5.0, 1.0);
         let coords = [[0.0, 0.0, 0.0], [1.0, 2.0, 0.5]];
         let mut grads = [[0.0 as F; 3]; 2];
-        r.fg(&coords, ctx(&cell, 1), &mut grads);
+        r.fg(&coords, evaluation(&cell, 1), &mut grads);
         let [ga, gb] = grads;
         for (a, b) in ga.iter().zip(gb.iter()) {
             assert!((a + b).abs() < 1e-12);
@@ -568,8 +572,8 @@ mod tests {
             [2.0, 1.0, 1.0],
         ];
         let mut grads = [[0.0 as F; 3]; 4];
-        let fused = r.fg(&coords, ctx(&cell, 1), &mut grads);
-        assert!((fused - r.f(&coords, ctx(&cell, 1))).abs() < 1e-12);
+        let fused = r.fg(&coords, evaluation(&cell, 1), &mut grads);
+        assert!((fused - r.f(&coords, evaluation(&cell, 1))).abs() < 1e-12);
     }
 
     // ── contract ──────────────────────────────────────────────────────────

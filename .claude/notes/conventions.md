@@ -15,7 +15,7 @@ harness-layout rows.
 | Feature | Pulls in |
 |---|---|
 | `default` | nothing |
-| `io` | `molrs/io` (`molrs::io::{read_frame, write_frame}` for `Script::build` and the CLI) |
+| `io` | `molrs/io` (the per-format `molrs::io::read_<fmt>` / `write_<fmt>` doors behind `StructureFormat::read` / `write`, for `Script::build` and the CLI) |
 | `cli` | `clap` + `io` (the `molpack` binary) |
 | `rayon` | `rayon` + `molrs/rayon` (parallel evaluation) |
 
@@ -35,7 +35,7 @@ frame (the PyO3 `target_from_frame` helper) and lowers scripts with
 - Files: 200–400 lines typical, 800 max — split when a module grows beyond one concern
 - New public types implement `Debug` and (where appropriate) `Clone`
 - `cargo fmt` and `cargo clippy -- -D warnings` are mandatory before commit
-- Leaf config files (`grow/config.rs` and siblings) import only sibling leaves and molrs types — never `target` / `entry` / `context`
+- Leaf config files (`grow/config.rs` and siblings) import only sibling leaves and molrs types — never `target` / `pipeline` / `system`
 
 ## Tests and gates
 
@@ -44,7 +44,7 @@ frame (the PyO3 `target_from_frame` helper) and lowers scripts with
   next to the code that owns the behaviour (law § 11); a test body that is too
   large for its file gets a child `tests.rs` / `tests/` module
   (`src/grow/tests/`, `src/pipeline/tests.rs`,
-  `src/context/pack_state/tests.rs`, `src/restraint/geometric/tests/`); fixtures
+  `src/system/pack_state/tests.rs`, `src/restraint/geometric/tests/`); fixtures
   shared across modules live in `src/test_fixtures.rs` (`cfg(test)`). There
   is **no** `tests/` directory, **no** `benches/` and **no** `regressions/` —
   they were deleted on 2026-09-20 with the end-to-end packing suites, the
@@ -57,9 +57,9 @@ frame (the PyO3 `target_from_frame` helper) and lowers scripts with
   `Stage` seam, on fake stages only — what a concrete stage declares stays with
   that stage), `src/pipeline/tests.rs` (the multi-stage lifecycle body),
   `src/invariant.rs` (`Layers` / `Invariant` / `RestraintsSatisfied`),
-  `src/grow/tests/{internal,field,prior,entry}.rs`, `src/target.rs` +
+  `src/grow/tests/{driver,field,internal,prior,refusals}.rs`, `src/target.rs` +
   `src/script/build.rs` (the four per-atom properties, API side and `.inp`
-  side), `src/context/build.rs` (what context construction refuses).
+  side), `src/system/build.rs` (what context construction refuses).
 - `cargo test -p molcrafts-molpack --lib --features cli,rayon` — the gate,
   must always be green (`mol_project.build.test`); seconds, not minutes. A
   single test: append `-- <name filter>` (`build.test_single`).
@@ -91,8 +91,7 @@ Template geometry is read with `molrs::core::Frame::coords` (Å); the crate-root
 rotatable-bond policy. Bond graphs are `molrs::core::Topology`; molpack does not re-export that type.
 
 Skills and agents come from the `mol` plugin (`molcrafts-harness`); the repo
-carries no project-local `.claude/skills/` or `.claude/agents/` (the former
-`mpk-*` set was removed on 2026-09-02).
+carries no project-local `.claude/skills/` or `.claude/agents/`.
 
 ## Sibling layout assumed
 

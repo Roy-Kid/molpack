@@ -65,7 +65,7 @@ Every `StepReport` also says which packing algorithm emitted it. A **stage** is
 one algorithm behind molpack's packing seam (the `Stage` trait), and
 `step.stage` is a `StageProgress` carrying `index` (0-based position of the stage
 in the run), `total` (how many stages the run has), and `name` (the stage's own
-name, `"gencan"` for the rigid-body path). One engine entry drives one stage,
+name, `"gencan"` for the rigid-body path). One engine drives one stage,
 so a plain `GencanPack` or `CbmcGrow` run reports `index = 0`, `total = 1`.
 
 Two further callbacks bracket a whole stage, the way `on_phase_start` /
@@ -93,7 +93,7 @@ impl Callback for WatchStages {
 }
 ```
 
-Both have default no-op bodies, and a run driven by a single engine entry calls
+Both have default no-op bodies, and a run driven by a single engine calls
 neither; they are the seam a caller that chains stages itself brackets each
 stage with. Note where the numbers come from:
 `StageOutcome` reports only what the stage alone knows (`converged`,

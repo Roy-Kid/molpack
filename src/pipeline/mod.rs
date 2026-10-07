@@ -12,11 +12,11 @@ use crate::Invariant;
 use crate::PackError;
 use crate::Target;
 use crate::callback::{Callback, StageProgress};
-use crate::context::build::{SystemKnobs, build_system};
-use crate::context::{PackState, Placed};
 use crate::pack_space::{ResolvedSpace, broadcast_global_restraints, resolve_pack_space};
 use crate::stage::{Budget, Stage};
 use crate::state::{Placements, positions_in_target_order};
+use crate::system::build::{SystemKnobs, build_system};
+use crate::system::{PackState, Placed};
 use crate::{IntraResidual, PackSettings, State};
 use bracket::{close_bracket, open_bracket};
 use combinators::{GuardedFactory, RepeatFactory};
@@ -44,7 +44,7 @@ pub use engine::{EngineSetup, PackEngine, StageFactory};
 ///
 /// [`Pipeline`] holds the shared settings, the run's callbacks and a sequence
 /// of [`StageFactory`]s, and its [`PackEngine::run`] **is** the lifecycle —
-/// the only one in the crate. Each preset entry is one line
+/// the only one in the crate. Each preset engine is one line
 /// (`Pipeline::single(self).run(targets, max_loops)`), so a preset run and a
 /// one-stage pipeline are the same code, not two implementations to keep in
 /// step.
@@ -125,7 +125,7 @@ pub use engine::{EngineSetup, PackEngine, StageFactory};
 /// spelling starts from a fresh system and therefore a *cold* one. A hit
 /// changes the summation path in `objective.rs` (it skips the cell reset and
 /// the molecule expansion, accumulating the constraint values from `xcart`
-/// instead), so `frest` would no longer agree bit for bit between the two
+/// instead), so `frest` would not agree bit for bit between the two
 /// spellings. Invalidating at each boundary starts both cold; before the
 /// first stage the system is new and the call is a no-op.
 ///
@@ -358,11 +358,11 @@ impl Pipeline {
     ) -> Result<State, PackError> {
         let (last_converged, degraded) = outcome;
         {
-            let ctx = state.sys_mut();
+            let sys = state.sys_mut();
             for itype in 0..setup.ntype_with_fixed {
-                ctx.comptype[itype] = true;
+                sys.comptype[itype] = true;
             }
-            ctx.ntotmol = setup.ntotmol_free;
+            sys.ntotmol = setup.ntotmol_free;
         }
         let (mut sys, view) = state.into_parts();
         view.write_xcart(&mut sys);
@@ -372,7 +372,7 @@ impl Pipeline {
         let (fdist, frest) = (sys.fdist, sys.frest);
         let converged = last_converged && fdist < precision && frest < precision;
 
-        // The placement solution, verbatim, for cross-entry seeding: the frame
+        // The placement solution, verbatim, for cross-engine seeding: the frame
         // below is derived VIEW data — re-deriving (coor, rigid) from it would
         // recompute COMs and break bitwise continuity. Every stage leaves this
         // slot valid, so there is no branch on which one wrote it.

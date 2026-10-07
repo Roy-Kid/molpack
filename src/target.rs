@@ -511,7 +511,7 @@ impl Target {
     /// One fixed obstacle target holding a previous pack's entire output,
     /// coordinates kept verbatim (`CenteringMode::Off` + identity placement).
     ///
-    /// The named chaining primitive of engine-entry-split: grow first, then
+    /// The named chaining primitive between engines: grow first, then
     /// pack the next stage around the grown matrix held fixed —
     /// `GencanPack::new().run(&[Target::fixed_from(&grown.frame), solvent], …)`.
     pub fn fixed_from(frame: &molrs::core::Frame) -> Self {
@@ -784,9 +784,8 @@ mod tests {
 
     #[test]
     fn with_atom_restraint() {
-        // Indices are now 0-based (matching Rust convention) — no internal
-        // conversion happens. Caller subtracts 1 when porting from Packmol
-        // `.inp` files.
+        // Indices are 0-based (Rust convention) — no internal conversion
+        // happens. Caller subtracts 1 when porting from Packmol `.inp` files.
         let t = Target::from_coords(&water_positions(), &water_radii(), 5)
             .with_atom_restraint(&[0, 1], inside_sphere([0.0, 0.0, 0.0], 5.0));
         assert_eq!(t.atom_restraints.len(), 1);

@@ -38,7 +38,7 @@ src/
 │                       compute_f / compute_g / compute_fg
 ├── eval.rs             EvalMode / EvalOutput
 ├── outcome.rs          StageOutcome
-├── context/            PackSystem = single owner of mutable packing state
+├── system/             PackSystem = single owner of mutable packing state
 │   ├── pack_system.rs
 │   ├── pack_state.rs   PackState — system + Placed + RigidView; evaluate_unscaled
 │   ├── rigid_view.rs   RigidView — the 6·ntotmol COM + Euler placement vector
@@ -55,11 +55,11 @@ src/
 ├── invariant.rs        Layers (L0–L5 repair-cost ladder) + Invariant trait +
 │                       Violation + RestraintsSatisfied — consumed by combinators.rs::Guarded
 ├── grow/               chain-growth path, peer of the GENCAN path
-│   ├── cbmc_grow.rs    CbmcGrow — the chain-growth engine entry (honest verdicts)
+│   ├── cbmc_grow.rs    CbmcGrow — the chain-growth engine (honest verdicts)
 │   ├── lattice/        LatticeStage — diamond-lattice SAW for melt density
-│   │                   (lattice_grow.rs LatticeGrow entry, saw.rs walk,
+│   │                   (lattice_grow.rs LatticeGrow engine, saw.rs walk,
 │   │                   decorate.rs backbone on sites, config.rs leaf)
-│   ├── config.rs       GrowConfig (leaf — no target/entry imports)
+│   ├── config.rs       GrowConfig (leaf — no target/engine imports)
 │   ├── prior.rs        TorsionPrior / AnglePrior + C∞ calibration
 │   ├── internal.rs     template bond graph → internal-coordinate tree
 │   ├── field.rs        OverlapField — cell-listed hard-core / soft-shell probe
@@ -88,7 +88,7 @@ src/
   state        │      initial,   is a peer
     │          │      movebad)   inside)
     ▼          ▼        │         │
-    └───────────► context/PackSystem  (+ grid)
+    └───────────► system/PackSystem   (+ grid)
                             │
                             ▼
                        objective.rs   ← hot path
@@ -224,7 +224,7 @@ fn run(targets, max_loops):
 Every preset's `PackEngine::run` is one line —
 `Pipeline::single(self).run(targets, max_loops)` — so `GencanPack::run()`,
 `CbmcGrow::run()` and `LatticeGrow::run()` all resolve to the loop above. It
-lives once, in `src/pipeline/mod.rs`, never duplicated per entry.
+lives once, in `src/pipeline/mod.rs`, never duplicated per engine.
 
 ### Outer: `GencanStage::run()` (one stage)
 
@@ -345,7 +345,7 @@ evaluate(x, mode, g) dispatches by mode:
 
 2. accumulate_constraint_value_and_gradient (per atom icart):
        range := iratom_offsets[icart] .. iratom_offsets[icart + 1]
-       for &irest in iratom_data[range]:
+       for &irest in iratom_indices[range]:
            f += sys.restraints[irest].fg(xcart[icart], scale, scale2,
                                           &mut grad_xcart[icart])
        // Linear penalties consume `scale`; quadratic consume `scale2`.
@@ -432,11 +432,11 @@ atoms into their regions before pair conflicts matter.
 |---|---|
 | How is one restraint's penalty computed for one atom? | `restraint/*::f` / `*::fg` |
 | Where does `with_global_restraint` broadcast? | `pack_space.rs::broadcast_global_restraints` |
-| Where is the per-atom CSR pool built? | `context/build.rs::build_system` (CSR build loop) |
+| Where is the per-atom CSR pool built? | `system/build.rs::build_system` (CSR build loop) |
 | How are `x` ↔ Cartesian coords expanded? | `objective.rs::expand_molecules`, `euler.rs::eulerrmat` |
 | Where is the pair-overlap kernel? | `objective.rs::accumulate_pair_fg_parallel` |
 | What does the initial pre-fit do? | `pack/initial.rs::initial`, `pack/restmol.rs::restmol` |
 | How is precision-based termination tested? | `pack/gencan/search.rs::converged` (Packmol's `packmolprecision`) |
 | What does `movebad` do? | `pack/movebad.rs::movebad` |
 | How is torsion MC wired in? | `optimizer/torsion_mc.rs::TorsionMcOptimizer::minimize`, called from `optimizer/mod.rs::run_optimizer_bindings` |
-| Where does periodic boundary wrap apply? | `context/pack_system.rs::pbc_distance` |
+| Where does periodic boundary wrap apply? | `system/pack_system.rs::pbc_distance` |

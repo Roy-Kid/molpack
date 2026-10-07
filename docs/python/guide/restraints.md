@@ -48,7 +48,7 @@ test is the **atom centre**, not the van der Waals ball and not the molecule
 COM. A region reaches this wheel as a `molrs.RegionRef` capsule — no data is
 marshalled, and both wheels must share one molrs minor line.
 
-How each packing entry uses a region is **not** inferred from the shape:
+How each packing engine uses a region is **not** inferred from the shape:
 
 - `GencanPack` — soft quadratic wall on atom centres (`frest`).
 - `CbmcGrow` — hard reject on `propose`; `force_place` may leave atoms
@@ -93,7 +93,7 @@ threads the channels the solvent left.
 
 ## Periodic boxes
 
-The periodic box is the entry's declaration, `with_periodic_box(min, max)`;
+The periodic box is the engine's declaration, `with_periodic_box(min, max)`;
 a region only confines. See
 [Periodic boundaries](periodic-boundaries.md) for the full semantics and
 validation rules.
@@ -179,7 +179,7 @@ lipid = (
 ## Global restraints
 
 To apply one restraint to every target in a pack, attach it on the
-engine entry:
+engine:
 
 ```python
 packer = (

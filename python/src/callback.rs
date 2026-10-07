@@ -1,6 +1,6 @@
 //! Python-defined [`Callback`] hooks.
 //!
-//! A Python object attached via an entry's ``with_callback`` may
+//! A Python object attached via an engine's ``with_callback`` may
 //! implement any subset of three optional methods:
 //!
 //! ```python
@@ -19,7 +19,7 @@
 //! Missing methods are silently skipped (matching the Rust trait's default
 //! no-op impls). Exceptions raised inside any method are stashed in
 //! [`errors::PACK_ERR`][crate::errors] and trigger early termination;
-//! the entry's `run()` re-raises after the loop exits.
+//! the engine's `run()` re-raises after the loop exits.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

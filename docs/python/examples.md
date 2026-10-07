@@ -150,7 +150,7 @@ frame = molrs.core.Frame({
 water = Target(frame, count=100).with_name("water").with_restraint(
     molrs.core.Cuboid([0, 0, 0], [30, 30, 30])
 )
-packer = GencanPack().with_tolerance(2.0).with_progress(False).with_seed(42)
+packer = GencanPack().with_tolerance(2.0).with_seed(42)
 result = packer.run([water], max_loops=200)
 print(f"converged={result.converged}  natoms={result.natoms}")
 ```

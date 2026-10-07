@@ -11,7 +11,7 @@
 //! Growth is therefore a *peer* of the GENCAN path, not a component of it:
 //! it consumes the same [`PackSystem`](crate::PackSystem) (same radii, same
 //! restraints, same cell), is judged by the same objective, and is selected
-//! by the [`CbmcGrow`](crate::CbmcGrow) entry. It never
+//! by the [`CbmcGrow`](crate::CbmcGrow) engine. It never
 //! calls the GENCAN internals, and the GENCAN path never calls it — the
 //! [`Stage`](crate::Stage) seam is the only shared contract.
 //!
@@ -56,7 +56,7 @@ mod prior;
 #[cfg(test)]
 mod tests;
 
-// The entries (`CbmcGrow`, `LatticeGrow`) are published at the crate root;
+// The engines (`CbmcGrow`, `LatticeGrow`) are published at the crate root;
 // this module publishes their configuration vocabulary. Leaves are private:
 // one path per item.
 pub use config::GrowConfig;

@@ -406,7 +406,7 @@ pub(crate) fn decorate_chain(
         // their references; every backbone atom the step placed — the hooked
         // one, a branch sibling, an alignment atom — is its route point. The
         // torsion above still decides where the pendants sit, so it is chosen
-        // the same way — it just no longer has to carry the backbone.
+        // the same way — it just does not carry the backbone.
         for s in tree.step_sites(k) {
             if let Some(j) = bb.index_of[s.atom] {
                 coords[s.atom] = wb[j];

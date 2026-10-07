@@ -76,9 +76,9 @@ let target = Target::from_coords(&positions, &radii, 100)
     .with_name("water")
     .with_restraint(RegionRestraint(Arc::new(Cuboid::new(array![0.0, 0.0, 0.0], array![40.0, 40.0, 40.0]))));
 
-// You pick the algorithm by picking the entry: `GencanPack` for rigid-body
+// You pick the algorithm by picking the engine: `GencanPack` for rigid-body
 // packing, `CbmcGrow` for chain growth. Both share the `PackEngine` builders
-// and the single terminal verb `run`, which consumes the entry — one engine,
+// and the single terminal verb `run`, which consumes the engine — one engine,
 // one run. Every tuning knob has a Packmol-matching default, so
 // `GencanPack::new().run(...)` is a complete call; `200` is the outer-loop
 // budget.

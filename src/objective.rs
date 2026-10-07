@@ -1,10 +1,10 @@
 //! Objective function and gradient computation.
 //! Exact port of `computef.f90`, `computeg.f90`, `fparc.f90`, `gparc.f90`.
 
-use crate::GroupCtx;
-use crate::context::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackSystem};
+use crate::GroupEvaluation;
 use crate::euler::{compcart, eulerrmat, eulerrmat_derivatives};
 use crate::eval::{EvalMode, EvalOutput};
+use crate::system::{ATOM_FLAG_FIXED, ATOM_FLAG_SHORT, NONE_IDX, PackSystem};
 use molrs::core::Mic;
 use molrs::op::F;
 #[cfg(feature = "rayon")]
@@ -65,16 +65,16 @@ fn pbc_wrap_delta(dx: F, dy: F, dz: F, pbc: &PbcConstants) -> (F, F, F) {
 /// inside `fparc` / `gparc` / `fgparc` (and the rayon variants `fparc_stats`
 /// and `fgparc_into`).
 ///
-/// Before this type, each of those four kernels had the same 15-line
-/// prologue: read `atom_props[icart]`, derive `fixed_i`, `use_short_i`,
-/// `shrad_i`, `shscl_i`, and cache `any_fixed_atoms` / `any_short_radius`
-/// as `has_fixed` / `has_short`. Drift between the four copies would
-/// silently change kernel behaviour — centralising it here means one
-/// edit site. The struct is `#[inline(always)]`-constructed so the call
-/// compiles to the same loads the inlined prologue produced.
+/// It is the one home of the kernels' shared prologue: read
+/// `atom_props[icart]`, derive `fixed_i`, `use_short_i`, `shrad_i`,
+/// `shscl_i`, and cache `any_fixed_atoms` / `any_short_radius` as
+/// `has_fixed` / `has_short`. Four copies of that prologue could drift and
+/// silently change kernel behaviour; one struct is one edit site. It is
+/// `#[inline(always)]`-constructed so the call compiles to the same loads an
+/// inlined prologue would.
 #[derive(Clone, Copy)]
 struct AtomHotState {
-    props: crate::context::AtomProps,
+    props: crate::system::AtomProps,
     /// Cached `sys.any_short_radius` — guards the cold short-radius fetch.
     has_short: bool,
     /// Atom `i` itself is fixed — used only together with the `j`-fixed
@@ -509,7 +509,7 @@ fn expand_molecules(x: &[F], sys: &mut PackSystem, mode: ExpandMode) -> F {
                 // Value (F / FG): the same `.f` call order as the serial loop.
                 if matches!(mode, ExpandMode::F | ExpandMode::FG) {
                     let mut fplus = 0.0;
-                    for &irest in &sys_ro.iratom_data[start..end] {
+                    for &irest in &sys_ro.iratom_indices[start..end] {
                         fplus += sys_ro.restraints[irest].f(&pos, scale, scale2);
                     }
                     f_local += fplus;
@@ -527,7 +527,7 @@ fn expand_molecules(x: &[F], sys: &mut PackSystem, mode: ExpandMode) -> F {
                 if matches!(mode, ExpandMode::G | ExpandMode::FG) {
                     // SAFETY: disjoint slot, as above.
                     let gc = unsafe { slots.gxcar_at(icart) };
-                    for &irest in &sys_ro.iratom_data[start..end] {
+                    for &irest in &sys_ro.iratom_indices[start..end] {
                         let _ = sys_ro.restraints[irest].fg(&pos, scale, scale2, gc);
                     }
                 }
@@ -627,7 +627,7 @@ fn accumulate_constraint_value(icart: usize, pos: &[F; 3], sys: &mut PackSystem)
     let mut fplus = 0.0;
     let start = sys.iratom_offsets[icart];
     let end = sys.iratom_offsets[icart + 1];
-    for &irest in &sys.iratom_data[start..end] {
+    for &irest in &sys.iratom_indices[start..end] {
         fplus += sys.restraints[irest].f(pos, sys.scale, sys.scale2);
     }
     if fplus > sys.frest {
@@ -646,7 +646,7 @@ fn accumulate_constraint_gradient(icart: usize, pos: &[F; 3], sys: &mut PackSyst
     let scale = sys.scale;
     let scale2 = sys.scale2;
     let gc = &mut sys.work.gxcar[icart];
-    for &irest in &sys.iratom_data[start..end] {
+    for &irest in &sys.iratom_indices[start..end] {
         // fg returns the penalty value too; discard it — only gradient accumulation matters here
         let _ = sys.restraints[irest].fg(pos, scale, scale2, gc);
     }
@@ -764,14 +764,14 @@ fn accumulate_collective_f(sys: &PackSystem) -> (F, F) {
         if len == 0 {
             continue;
         }
-        let ctx = GroupCtx {
+        let evaluation = GroupEvaluation {
             scale,
             scale2,
             natoms_per_copy: sys.natoms[itype],
             cell: &sys.simbox,
             mic,
         };
-        let v = r.f(&sys.xcart[start..start + len], ctx);
+        let v = r.f(&sys.xcart[start..start + len], evaluation);
         total += v;
         if r.is_bound() {
             bound_max = bound_max.max(v);
@@ -815,8 +815,8 @@ fn accumulate_collective_fg(sys: &mut PackSystem) -> (F, F) {
     // Split borrow: coordinates are read in place and the coupled gradient is
     // accumulated straight into the scatter buffer. The restraint contract is
     // `+=` into `grads`, which is exactly what `gxcar` wants, so neither the
-    // coordinates nor the gradients need a staging copy — they used to cost
-    // two allocations plus two passes per evaluation per group, ~200 us for a
+    // coordinates nor the gradients need a staging copy — one would cost two
+    // allocations plus two passes per evaluation per group, ~200 us for a
     // 30k-atom species, on a path GENCAN calls thousands of times.
     let PackSystem {
         xcart,
@@ -830,7 +830,7 @@ fn accumulate_collective_fg(sys: &mut PackSystem) -> (F, F) {
         if len == 0 {
             continue;
         }
-        let ctx = GroupCtx {
+        let evaluation = GroupEvaluation {
             scale,
             scale2,
             natoms_per_copy,
@@ -839,7 +839,7 @@ fn accumulate_collective_fg(sys: &mut PackSystem) -> (F, F) {
         };
         let v = r.fg(
             &xcart[start..start + len],
-            ctx,
+            evaluation,
             &mut work.gxcar[start..start + len],
         );
         total += v;
@@ -1029,14 +1029,14 @@ fn accumulate_pair_fg(sys: &mut PackSystem) -> F {
 }
 
 /// Base pointer into the per-worker scratch gradient buffer
-/// ([`crate::context::WorkBuffers::grad_partials`]). `*mut [F; 3]` is not
+/// ([`crate::system::WorkBuffers::grad_partials`]). `*mut [F; 3]` is not
 /// `Send`/`Sync`; this wrapper asserts each worker only ever dereferences its
 /// own `[t*ntotat .. (t+1)*ntotat)` region, which is disjoint across the
 /// concurrently-running tasks (keyed by the unique rayon pool thread index).
 #[cfg(feature = "rayon")]
 #[derive(Clone, Copy)]
 struct PartialPtr {
-    base: *mut [F; 3],
+    start: *mut [F; 3],
     ntotat: usize,
 }
 // SAFETY: see type doc — regions are keyed by the unique pool thread index, so
@@ -1051,7 +1051,7 @@ impl PartialPtr {
     /// `t` must be the calling worker's unique pool index and `i < ntotat`.
     #[inline(always)]
     unsafe fn slot<'a>(self, t: usize, i: usize) -> &'a mut [F; 3] {
-        unsafe { &mut *self.base.add(t * self.ntotat + i) }
+        unsafe { &mut *self.start.add(t * self.ntotat + i) }
     }
 }
 
@@ -1062,7 +1062,7 @@ impl PartialPtr {
 /// atom-centric full-stencil pass incurs.
 ///
 /// Race freedom *without* that redundancy comes from per-worker scratch buffers
-/// ([`crate::context::WorkBuffers::grad_partials`]): worker `t` accumulates
+/// ([`crate::system::WorkBuffers::grad_partials`]): worker `t` accumulates
 /// every `gi += d` / `gj -= d` half-stencil write into its own private region
 /// `[t*ntotat .. (t+1)*ntotat)`, so no two concurrently-running tasks touch the
 /// same slot even though a half-stencil writes into neighbor cells. After the
@@ -1095,7 +1095,7 @@ fn accumulate_pair_fg_parallel(sys: &mut PackSystem) -> (F, F) {
     let pbc = pbc_constants(sys);
     let sys_ro: &PackSystem = sys;
     let pptr = PartialPtr {
-        base: partials.as_mut_ptr(),
+        start: partials.as_mut_ptr(),
         ntotat,
     };
 
@@ -1438,15 +1438,12 @@ fn update_cached_geometry(x: &[F], sys: &mut PackSystem) {
         .update_cached_geometry(x, &sys.comptype, sys.init1, sys.geometry_key());
 }
 
-// ── Phase A.5 — Objective trait ────────────────────────────────────────────
+// ── Objective trait ─────────────────────────────────────────────────────────
 //
-// `Objective` is the abstraction the packer's GENCAN loop will talk to. At
-// this checkpoint the trait is defined and implemented for `PackSystem` but
-// no call site has been rewired yet (`pgencan` still takes `&mut PackSystem`
-// directly). Phase A.6 swaps `pgencan`'s signature to `&mut dyn Objective`.
-//
-// The trait is intentionally shaped to match what the GENCAN loop reads and
-// writes today — no speculative extra methods.
+// `Objective` is what the GENCAN loop (`pack::gencan`: `gencan`, the line
+// search and the CG step) talks to, as `&mut dyn Objective`; `PackSystem`
+// implements it. The trait is shaped to match what that loop reads and
+// writes — no speculative extra methods.
 
 /// Abstracts the packer's objective function so the optimizer can talk to
 /// any `(f, g)` oracle, not just `PackSystem`.
@@ -1704,7 +1701,7 @@ mod parallel_equivalence_tests {
             }
         }
         sys.iratom_offsets = vec![0; ntotat + 1];
-        sys.iratom_data.clear();
+        sys.iratom_indices.clear();
 
         let pad: F = 3.0;
         let side = box_side + 2.0 * pad;
@@ -1858,7 +1855,7 @@ mod self_image_tests {
             sys.ibmol[icart] = 0;
         }
         sys.iratom_offsets = vec![0; na + 1];
-        sys.iratom_data.clear();
+        sys.iratom_indices.clear();
         let origin = molrs::op::F3::zeros(3);
         sys.simbox = molrs::core::SimBox::cube(side, origin, [pbc; 3]).expect("cell");
         sys.grid = molrs::core::CellGrid::for_cutoff(&sys.simbox, 2.0);

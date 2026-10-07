@@ -1,6 +1,6 @@
-//! What the growth entries refuse by name, and what they declare to the
+//! What the growth engines refuse by name, and what they declare to the
 //! stage chain. No successful growth is asserted here — that is the
-//! driver's behaviour, not the entry's.
+//! driver's behaviour, not the engine's.
 
 use super::*;
 
@@ -332,10 +332,10 @@ fn density_needs_mass() {
     );
 }
 
-// ── Section: engine-entry-split — the growth entry ─────────────────────────
+// ── Section: the growth engine ─────────────────────────────────────────────
 
-/// A ring template is refused by name, never silently grown open (the old
-/// tree decomposition dropped ring-closing bonds without a word).
+/// A ring template is refused by name, never silently grown open: a tree
+/// decomposition would drop the ring-closing bonds without a word.
 #[test]
 fn ring_template_is_refused() {
     let coords = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0], [0.75, 1.3, 0.0]];

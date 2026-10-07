@@ -23,8 +23,8 @@ name = "molpack"
 # Path deps are for local development; `version` fields are used by
 # `cargo publish` to resolve against the crates.io registry.
 #
-# Library-required. The merged `molcrafts-molrs` crate exposes its former member
-# crates as feature-gated modules: `core` is always on, while `io` is opt-in via
+# Library-required. The `molcrafts-molrs` crate exposes its parts as
+# feature-gated modules: `core` is always on, while `io` is opt-in via
 # the molpack feature below. molrs's own default is just `rayon`; it is
 # switched off here so parallelism stays molpack's own opt-in (the `rayon`
 # feature below) and wasm / Pyodide builds work.

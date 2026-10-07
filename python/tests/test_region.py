@@ -69,7 +69,6 @@ class TestRegionPacking:
             .with_seed(3)
             .with_tolerance(2.0)
             .with_precision(1e-4)
-            .with_progress(False)
             .run([target], max_loops=200)
         )
         # Every atom centre stays inside the sphere (a soft wall: allow the
@@ -86,7 +85,6 @@ class TestRegionPacking:
             .with_seed(5)
             .with_tolerance(2.0)
             .with_precision(1e-4)
-            .with_progress(False)
             .run([target], max_loops=200)
         )
         d = np.linalg.norm(state.positions - beads[0], axis=1)

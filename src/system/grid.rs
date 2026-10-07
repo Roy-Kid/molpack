@@ -9,7 +9,7 @@ use molrs::core::CellGrid;
 use molrs::core::SimBox;
 use molrs::op::F;
 
-use crate::context::{NONE_IDX, PackSystem};
+use crate::system::{NONE_IDX, PackSystem};
 
 /// Install the resolved simulation box and cell grid on the system and bin
 /// the fixed atoms.
@@ -66,7 +66,7 @@ pub(crate) fn install_simbox_and_grid(
 ///
 /// The coverage scale is [`coverage_radmax`], the same derivation initial
 /// placement uses — there is one answer to "how wide must a cell be", and
-/// both entries into the grid read it from the same place.
+/// both engines into the grid read it from the same place.
 pub(crate) fn install_resolved_cell(sys: &mut PackSystem, cell: &SimBox, discale: F) {
     let radmax = coverage_radmax(sys);
     let free_atoms = sys.ntotat - sys.nfixedat;

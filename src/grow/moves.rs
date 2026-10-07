@@ -14,13 +14,13 @@ use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
 use crate::AtomRestraint;
-use crate::context::PackSystem;
 use crate::euler::eulerrmat;
 use crate::grow::config::{GrowConfig, crowding_cap};
 use crate::grow::field::{BlockKind, OverlapField, Probe};
 use crate::grow::internal::InternalTree;
 use crate::grow::prior::{AnglePrior, TorsionPrior};
 use crate::random::uniform01;
+use crate::system::PackSystem;
 
 pub(super) const TWO_PI: F = std::f64::consts::TAU as F;
 
@@ -43,7 +43,7 @@ pub(super) struct Chain {
     /// Global molecule index (type-major, copy-major — the `x` order).
     pub(super) mol: usize,
     /// First `icart` of this copy.
-    pub(super) base: usize,
+    pub(super) first_icart: usize,
     /// 0 = seed pending; `1 + k` = tree step `k` pending; done at
     /// `1 + n_steps`.
     pub(super) stage: usize,
@@ -108,7 +108,7 @@ pub(super) struct Trial {
 /// constructive guarantee rather than a convergence hope (spec Design §3).
 pub(super) struct RestraintTable {
     pub(super) offsets: Vec<usize>,
-    pub(super) data: Vec<usize>,
+    pub(super) indices: Vec<usize>,
     pub(super) restraints: Vec<Arc<dyn AtomRestraint>>,
 }
 
@@ -116,7 +116,7 @@ impl RestraintTable {
     pub(super) fn from_system(sys: &PackSystem) -> Self {
         Self {
             offsets: sys.iratom_offsets.clone(),
-            data: sys.iratom_data.clone(),
+            indices: sys.iratom_indices.clone(),
             restraints: sys.restraints.clone(),
         }
     }
@@ -124,9 +124,9 @@ impl RestraintTable {
     /// `true` when any restraint on atom `icart` is violated at `p`.
     /// Scales mirror the shared objective's final-evaluation settings.
     pub(super) fn violated(&self, icart: usize, p: &[F; 3]) -> bool {
-        self.data[self.offsets[icart]..self.offsets[icart + 1]]
+        self.indices[self.offsets[icart]..self.offsets[icart + 1]]
             .iter()
-            .any(|&r| self.restraints[r].f(p, 1.0, crate::context::DEFAULT_SCALE2) > 0.0)
+            .any(|&r| self.restraints[r].f(p, 1.0, crate::system::DEFAULT_SCALE2) > 0.0)
     }
 }
 
@@ -340,7 +340,7 @@ pub(super) fn score_atoms(
     let mut placed = Vec::new();
     let mut penalty = 0.0;
     for a in atoms {
-        let slot = chain.base + a;
+        let slot = chain.first_icart + a;
         if restraints.violated(slot, &scratch[a]) {
             return Err(DeadEnd::Restraint);
         }
@@ -449,11 +449,11 @@ pub(super) fn retract(chain: &mut Chain, sp: &Species, field: &mut OverlapField,
         chain.stage -= 1;
         if chain.stage == 0 {
             for a in sp.tree.seed_atoms() {
-                field.remove(chain.base + a);
+                field.remove(chain.first_icart + a);
             }
         } else {
             for a in sp.tree.step_atoms(chain.stage - 1) {
-                field.remove(chain.base + a);
+                field.remove(chain.first_icart + a);
             }
         }
     }
@@ -508,7 +508,7 @@ pub(super) fn force_place(
                 sp.tree
                     .seed_atoms()
                     .iter()
-                    .map(|&a| (chain.base + a, a, scratch[a]))
+                    .map(|&a| (chain.first_icart + a, a, scratch[a]))
                     .collect(),
                 None,
             )
@@ -525,7 +525,7 @@ pub(super) fn force_place(
             (
                 sp.tree
                     .step_atoms(k)
-                    .map(|a| (chain.base + a, a, scratch[a]))
+                    .map(|a| (chain.first_icart + a, a, scratch[a]))
                     .collect(),
                 var,
             )
@@ -579,7 +579,7 @@ pub(super) fn relax(
     let old_vars = chain.vars.clone();
     for k in first..n_steps {
         for a in sp.tree.step_atoms(k) {
-            field.remove(chain.base + a);
+            field.remove(chain.first_icart + a);
         }
     }
 
@@ -588,7 +588,7 @@ pub(super) fn relax(
     let mut old_ok = true;
     'old: for k in first..n_steps {
         for a in sp.tree.step_atoms(k) {
-            let slot = chain.base + a;
+            let slot = chain.first_icart + a;
             match field.probe(
                 slot,
                 old_coords[a],
@@ -609,7 +609,7 @@ pub(super) fn relax(
     // Remove whatever the scoring pass re-inserted.
     for k in first..n_steps {
         for a in sp.tree.step_atoms(k) {
-            field.remove(chain.base + a);
+            field.remove(chain.first_icart + a);
         }
     }
     if !old_ok {
@@ -648,12 +648,12 @@ pub(super) fn relax(
             let mut ok = true;
             let mut atoms = Vec::new();
             for a in sp.tree.step_atoms(k) {
-                if restraints.violated(chain.base + a, &scratch[a]) {
+                if restraints.violated(chain.first_icart + a, &scratch[a]) {
                     ok = false;
                     break;
                 }
                 match field.probe(
-                    chain.base + a,
+                    chain.first_icart + a,
                     scratch[a],
                     sp.tree.exclusions(a),
                     hard_scale,
@@ -676,7 +676,7 @@ pub(super) fn relax(
             Some((u, atoms, var)) => {
                 for &(a, p) in &atoms {
                     chain.coords[a] = p;
-                    field.insert(chain.base + a, p);
+                    field.insert(chain.first_icart + a, p);
                 }
                 if let (Some(phi), Some(v)) = (var, sp.tree.step_var(k)) {
                     chain.vars[v] = phi;
@@ -694,7 +694,7 @@ pub(super) fn relax(
         // Restore the old tail verbatim.
         for k in first..n_steps {
             for a in sp.tree.step_atoms(k) {
-                let slot = chain.base + a;
+                let slot = chain.first_icart + a;
                 if field.is_placed(slot) {
                     field.remove(slot);
                 }
@@ -704,7 +704,7 @@ pub(super) fn relax(
         chain.vars = old_vars;
         for k in first..n_steps {
             for a in sp.tree.step_atoms(k) {
-                field.insert(chain.base + a, chain.coords[a]);
+                field.insert(chain.first_icart + a, chain.coords[a]);
             }
         }
     }

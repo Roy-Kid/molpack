@@ -16,9 +16,9 @@
 //! one index space, no translation table.
 //!
 //! Two coordinate frames meet here, both stored on a [`PackSystem`].
-//! `ctx.coor` holds each copy's *reference conformer* — its atoms' positions
+//! `sys.coor` holds each copy's *reference conformer* — its atoms' positions
 //! measured from that copy's own centre of mass, with no orientation applied,
-//! so it describes the molecule's shape and nothing else. `ctx.xcart` holds
+//! so it describes the molecule's shape and nothing else. `sys.xcart` holds
 //! *lab-frame* coordinates: where those atoms actually sit in the packing
 //! cell. The three Euler angles are the three-parameter description of the
 //! rotation matrix `R` that carries the first frame into the second (the
@@ -38,8 +38,8 @@
 //! [`RigidView::install_seed`] is the third and last place the view touches a
 //! [`PackSystem`], and the only constructing one: it takes a placement
 //! solution from a previous run as two bare slices, so this module never
-//! names the `entry` layer that produced them (dependencies run
-//! `entry → context`, never back).
+//! names the `state` / `pipeline` layer that produced them (dependencies
+//! run `pipeline → system`, never back).
 //!
 //! # What this view deliberately does not carry
 //!
@@ -61,8 +61,8 @@
 //! is a programming error and must be unrepresentable rather than quietly
 //! corrupting another molecule's placement.
 
-use crate::context::PackSystem;
 use crate::euler::{compcart, eulerrmat};
+use crate::system::PackSystem;
 use molrs::op::F;
 use molrs::op::centroid;
 use molrs::op::vec3::sub;
@@ -170,29 +170,29 @@ impl RigidView {
     /// # Panics
     ///
     /// Panics when the system lays out more free molecules than the view
-    /// holds (`sum(ctx.nmols[..ctx.ntype]) > nmol`): view and context must
+    /// holds (`sum(sys.nmols[..sys.ntype]) > nmol`): view and system must
     /// have been sized from the same run. Debug builds additionally assert
     /// that every atom rebuilt here is a free one — a fixed structure's
     /// coordinates are given, not placed, and must never be overwritten from
     /// `(com, euler)`.
-    pub fn write_xcart(&self, ctx: &mut PackSystem) {
+    pub fn write_xcart(&self, sys: &mut PackSystem) {
         let mut imol = 0usize;
         let mut icart = 0usize;
 
-        for itype in 0..ctx.ntype {
-            for _ in 0..ctx.nmols[itype] {
+        for itype in 0..sys.ntype {
+            for _ in 0..sys.nmols[itype] {
                 let xcm = self.com(imol);
                 let [beta, gama, teta] = self.euler(imol);
                 let (v1, v2, v3) = eulerrmat(beta, gama, teta);
 
-                for _ in 0..ctx.natoms[itype] {
-                    let pos = compcart(&xcm, &ctx.coor[icart], &v1, &v2, &v3);
-                    ctx.xcart[icart] = pos;
+                for _ in 0..sys.natoms[itype] {
+                    let pos = compcart(&xcm, &sys.coor[icart], &v1, &v2, &v3);
+                    sys.xcart[icart] = pos;
                     // Packmol's initial.f90 sets fixedatom=false on every
                     // free atom here, but in Rust that bit is already false
                     // from construction and `sync_atom_props` has been
                     // called — writing it again would desync `atom_props`.
-                    debug_assert!(!ctx.fixedatom[icart]);
+                    debug_assert!(!sys.fixedatom[icart]);
                     icart += 1;
                 }
 
@@ -202,31 +202,31 @@ impl RigidView {
     }
 
     /// Build a view from a previous run's placement solution and install that
-    /// run's conformers into `ctx`.
+    /// run's conformers into `sys`.
     ///
     /// The solution arrives as plain data — the flat placement vector and the
     /// per-copy reference conformers — so this layer never depends on the
-    /// snapshot type the entry layer hands out; the caller unpacks it. Both
+    /// snapshot type the engine layer hands out; the caller unpacks it. Both
     /// halves are copied verbatim (bitwise), which is what makes chaining one
     /// run into the next reproduce the first run's geometry exactly. Atoms
     /// past `coor.len()` (the fixed structures) are left untouched.
     ///
-    /// The molecule count comes from `ctx.ntotmol`, the number of free
+    /// The molecule count comes from `sys.ntotmol`, the number of free
     /// molecules the system was built for — the same count that sizes the
     /// run's placement vector.
     ///
     /// # Panics
     ///
-    /// Panics when `x.len() != 6 * ctx.ntotmol`, or when `coor` is longer
+    /// Panics when `x.len() != 6 * sys.ntotmol`, or when `coor` is longer
     /// than the system's coordinate array.
-    pub fn install_seed(x: &[F], coor: &[[F; 3]], ctx: &mut PackSystem) -> Self {
-        let nmol = ctx.ntotmol;
+    pub fn install_seed(x: &[F], coor: &[[F; 3]], sys: &mut PackSystem) -> Self {
+        let nmol = sys.ntotmol;
         assert_eq!(
             x.len(),
             6 * nmol,
             "placement vector holds 6 variables per molecule (3 COM + 3 Euler)"
         );
-        ctx.coor[..coor.len()].copy_from_slice(coor);
+        sys.coor[..coor.len()].copy_from_slice(coor);
         Self {
             x: x.to_vec(),
             nmol,
@@ -255,25 +255,25 @@ impl RigidView {
     /// # Panics
     ///
     /// Panics when the system lays out more free molecules than the view
-    /// holds (`sum(ctx.nmols[..ctx.ntype]) > nmol`), the same sizing contract
+    /// holds (`sum(sys.nmols[..sys.ntype]) > nmol`), the same sizing contract
     /// as [`RigidView::write_xcart`].
-    pub fn capture_from_xcart(&mut self, ctx: &mut PackSystem) {
+    pub fn capture_from_xcart(&mut self, sys: &mut PackSystem) {
         let mut imol = 0usize;
 
-        for itype in 0..ctx.ntype {
-            let na = ctx.natoms[itype];
+        for itype in 0..sys.ntype {
+            let na = sys.natoms[itype];
             let unit_weights = vec![1.0; na];
-            for icopy in 0..ctx.nmols[itype] {
-                let base = ctx.idfirst[itype] + icopy * na;
+            for icopy in 0..sys.nmols[itype] {
+                let base = sys.idfirst[itype] + icopy * na;
                 let atoms = base..base + na;
 
                 // At unit weights the sum runs in atom order and is divided
                 // by `na` once: bit for bit the plain mean.
-                let com = centroid(&ctx.xcart[atoms.clone()], &unit_weights)
+                let com = centroid(&sys.xcart[atoms.clone()], &unit_weights)
                     .expect("a molecule type has atoms");
 
                 for i in atoms {
-                    ctx.coor[i] = sub(ctx.xcart[i], com);
+                    sys.coor[i] = sub(sys.xcart[i], com);
                 }
 
                 self.set_com(imol, com);
@@ -286,7 +286,7 @@ impl RigidView {
 
 #[cfg(test)]
 mod tests {
-    //! Contract tests for `src/context/rigid_view.rs`.
+    //! Contract tests for `src/system/rigid_view.rs`.
     //!
     //! `RigidView` is the single home of the rigid degrees of freedom: the flat
     //! `6 * nmol` placement vector (COM block first, Euler block second, three
@@ -297,7 +297,7 @@ mod tests {
     //!   inherited verbatim from `initial::init_xcart_from_x`),
     //! - `install_seed` — inject a seed placement + conformer as plain data,
     //! - `capture_from_xcart` — read lab-frame coordinates back into
-    //!   `(com, euler = 0)` plus a centered conformer in `ctx.coor` (the growth
+    //!   `(com, euler = 0)` plus a centered conformer in `sys.coor` (the growth
     //!   writeback contract).
     //!
     //! Fixtures build a `PackSystem` directly (`PackSystem::new` + the public
@@ -307,14 +307,14 @@ mod tests {
     //! physics is asserted here: the view is pure bookkeeping over a
     //! coordinate layout.
 
-    use crate::context::RigidView as ContextRigidView;
     use crate::euler::{compcart, eulerrmat};
+    use crate::system::RigidView as SystemRigidView;
     use crate::{PackSystem, RigidView};
     use molrs::op::F;
 
-    /// The crate-root re-export and the `context` path name one type, not two.
+    /// The crate-root re-export and the `system` path name one type, not two.
     /// Compile-time only.
-    fn _both_paths_are_one_type(v: RigidView) -> ContextRigidView {
+    fn _both_paths_are_one_type(v: RigidView) -> SystemRigidView {
         v
     }
 
@@ -324,12 +324,12 @@ mod tests {
     /// `idfirst = [0]`. `coor` holds one reference conformer **per copy**,
     /// sharing `xcart`'s index space (the `PackSystem` convention).
     fn two_copies_of_three() -> PackSystem {
-        let mut ctx = PackSystem::new(6, 2, 1);
-        ctx.nmols = vec![2];
-        ctx.natoms = vec![3];
-        ctx.idfirst = vec![0];
-        ctx.coor = vec![[0.0; 3]; 6];
-        ctx
+        let mut sys = PackSystem::new(6, 2, 1);
+        sys.nmols = vec![2];
+        sys.natoms = vec![3];
+        sys.idfirst = vec![0];
+        sys.coor = vec![[0.0; 3]; 6];
+        sys
     }
 
     /// The regression conformer: two copies whose reference blocks are already
@@ -442,8 +442,8 @@ mod tests {
     /// the same arithmetic in the same order, so equality is exact.
     #[test]
     fn rigid_view_write_xcart_composes_com_and_rotation() {
-        let mut ctx = two_copies_of_three();
-        ctx.coor = CENTERED_COOR.to_vec();
+        let mut sys = two_copies_of_three();
+        sys.coor = CENTERED_COOR.to_vec();
 
         let mut view = RigidView::fresh(2);
         let coms = [[10.0, -3.0, 2.5], [-4.0, 7.25, 0.5]];
@@ -453,14 +453,14 @@ mod tests {
             view.set_euler(i, eulers[i]);
         }
 
-        view.write_xcart(&mut ctx);
+        view.write_xcart(&mut sys);
 
         for imol in 0..2 {
             let (v1, v2, v3) = eulerrmat(eulers[imol][0], eulers[imol][1], eulers[imol][2]);
             for a in 0..3 {
                 let icart = 3 * imol + a;
                 let want = compcart(&coms[imol], &CENTERED_COOR[icart], &v1, &v2, &v3);
-                for (k, (got, want)) in ctx.xcart[icart].iter().zip(&want).enumerate() {
+                for (k, (got, want)) in sys.xcart[icart].iter().zip(&want).enumerate() {
                     assert_eq!(
                         got, want,
                         "atom {icart} component {k}: xcart must be com + R(euler)·coor"
@@ -476,14 +476,14 @@ mod tests {
     /// outbound rebuild must then reproduce the captured coordinates.
     #[test]
     fn rigid_view_write_xcart_identity_rotation_is_translation() {
-        let mut ctx = two_copies_of_three();
-        ctx.coor = CENTERED_COOR.to_vec();
+        let mut sys = two_copies_of_three();
+        sys.coor = CENTERED_COOR.to_vec();
 
         let mut view = RigidView::fresh(2);
         view.set_com(0, [1.0, 2.0, 4.0]);
         view.set_com(1, [-8.0, 0.5, 16.0]);
 
-        view.write_xcart(&mut ctx);
+        view.write_xcart(&mut sys);
 
         for imol in 0..2 {
             let com = view.com(imol);
@@ -494,7 +494,7 @@ mod tests {
                     com[1] + CENTERED_COOR[icart][1],
                     com[2] + CENTERED_COOR[icart][2],
                 ];
-                for (k, (got, want)) in ctx.xcart[icart].iter().zip(&want).enumerate() {
+                for (k, (got, want)) in sys.xcart[icart].iter().zip(&want).enumerate() {
                     assert_eq!(
                         got, want,
                         "atom {icart} component {k}: euler = 0 must be a pure translation"
@@ -507,18 +507,18 @@ mod tests {
     // ── Category: basics — install_seed (plain-data injection) ─────────────────
 
     /// `install_seed` is the constructing form: the seed arrives as two bare
-    /// slices (never as an `entry`-layer type), the conformer is copied into the
+    /// slices (never as an `engine`-layer type), the conformer is copied into the
     /// leading `coor` block bitwise, and the returned view carries the seed
     /// placements verbatim. Atoms past the seed's length (fixed targets) keep
     /// whatever `coor` held.
     #[test]
     fn rigid_view_install_seed_copies_conformer_and_placements() {
-        let mut ctx = PackSystem::new(8, 2, 1);
-        ctx.nmols = vec![2];
-        ctx.natoms = vec![3];
-        ctx.idfirst = vec![0];
+        let mut sys = PackSystem::new(8, 2, 1);
+        sys.nmols = vec![2];
+        sys.natoms = vec![3];
+        sys.idfirst = vec![0];
         // Six free-atom slots plus two trailing slots that must not be touched.
-        ctx.coor = vec![[9.0, 9.0, 9.0]; 8];
+        sys.coor = vec![[9.0, 9.0, 9.0]; 8];
 
         let seed_coor: [[F; 3]; 6] = CENTERED_COOR;
         let seed_x: [F; 12] = [
@@ -528,7 +528,7 @@ mod tests {
             -0.4, 0.5, -0.6, // euler of molecule 1
         ];
 
-        let view = RigidView::install_seed(&seed_x, &seed_coor, &mut ctx);
+        let view = RigidView::install_seed(&seed_x, &seed_coor, &mut sys);
 
         assert_eq!(view.nmol(), 2, "the seed covers both free copies");
         assert_eq!(
@@ -537,7 +537,7 @@ mod tests {
             "the seed placements are injected verbatim (zero-conversion chaining)"
         );
         for (i, want) in seed_coor.iter().enumerate() {
-            for (k, (got, want)) in ctx.coor[i].iter().zip(want).enumerate() {
+            for (k, (got, want)) in sys.coor[i].iter().zip(want).enumerate() {
                 assert_eq!(
                     got.to_bits(),
                     want.to_bits(),
@@ -547,7 +547,7 @@ mod tests {
         }
         for i in 6..8 {
             assert_eq!(
-                ctx.coor[i],
+                sys.coor[i],
                 [9.0, 9.0, 9.0],
                 "coor[{i}] is past the seed and must be left alone"
             );
@@ -560,7 +560,7 @@ mod tests {
     // ── Category: basics — capture_from_xcart (the growth writeback) ───────────
 
     /// The writeback contract, lifted from the growth drivers: per copy the COM
-    /// is the centroid of that copy's lab-frame atoms, `ctx.coor` receives the
+    /// is the centroid of that copy's lab-frame atoms, `sys.coor` receives the
     /// centered conformer (`xcart − com`), and the Euler angles are zeroed —
     /// growth produces no rigid rotation, the whole shape lives in `coor`.
     ///
@@ -568,7 +568,7 @@ mod tests {
     /// also pins the summation order (accumulate in atom order, divide once).
     #[test]
     fn rigid_view_capture_from_xcart_centers_each_copy() {
-        let mut ctx = two_copies_of_three();
+        let mut sys = two_copies_of_three();
         let xcart: [[F; 3]; 6] = [
             [0.1, 0.2, 0.3],
             [1.3, -0.7, 2.9],
@@ -577,16 +577,16 @@ mod tests {
             [8.3, 0.9, -1.05],
             [9.15, 2.35, -3.4],
         ];
-        ctx.xcart = xcart.to_vec();
+        sys.xcart = xcart.to_vec();
         // Pre-fill `coor` with a sentinel so the writeback is visible.
-        ctx.coor = vec![[42.0; 3]; 6];
+        sys.coor = vec![[42.0; 3]; 6];
 
         let mut view = RigidView::fresh(2);
         // A stale rotation must be cleared, not preserved.
         view.set_euler(0, [1.0, 2.0, 3.0]);
         view.set_euler(1, [-1.0, -2.0, -3.0]);
 
-        view.capture_from_xcart(&mut ctx);
+        view.capture_from_xcart(&mut sys);
 
         for imol in 0..2 {
             let block = &xcart[3 * imol..3 * imol + 3];
@@ -607,7 +607,7 @@ mod tests {
                 let icart = 3 * imol + a;
                 for k in 0..3 {
                     assert_eq!(
-                        ctx.coor[icart][k],
+                        sys.coor[icart][k],
                         xcart[icart][k] - com[k],
                         "coor[{icart}] component {k} must be the centered conformer"
                     );
@@ -615,7 +615,7 @@ mod tests {
             }
         }
         assert_eq!(
-            ctx.xcart,
+            sys.xcart,
             xcart.to_vec(),
             "capture reads xcart; it must not rewrite it"
         );
@@ -624,23 +624,23 @@ mod tests {
     // ── Category: edge cases ───────────────────────────────────────────────────
 
     /// `fresh(0)`: an empty view is legal (a run with no free molecules), it has
-    /// no slots, and both context crossings are no-ops.
+    /// no slots, and both system crossings are no-ops.
     #[test]
     fn rigid_view_fresh_zero_molecules() {
         let mut view = RigidView::fresh(0);
         assert_eq!(view.nmol(), 0);
         assert!(view.as_slice().is_empty(), "fresh(0) has no slots");
 
-        let mut ctx = PackSystem::new(0, 0, 0);
-        ctx.nmols = Vec::new();
-        ctx.natoms = Vec::new();
-        ctx.idfirst = Vec::new();
-        ctx.coor = Vec::new();
+        let mut sys = PackSystem::new(0, 0, 0);
+        sys.nmols = Vec::new();
+        sys.natoms = Vec::new();
+        sys.idfirst = Vec::new();
+        sys.coor = Vec::new();
 
-        view.write_xcart(&mut ctx);
-        assert!(ctx.xcart.is_empty(), "nothing to expand");
-        view.capture_from_xcart(&mut ctx);
-        assert!(ctx.coor.is_empty(), "nothing to capture");
+        view.write_xcart(&mut sys);
+        assert!(sys.xcart.is_empty(), "nothing to expand");
+        view.capture_from_xcart(&mut sys);
+        assert!(sys.coor.is_empty(), "nothing to capture");
         assert_eq!(view.nmol(), 0);
     }
 
@@ -677,20 +677,20 @@ mod tests {
     /// zero — no drift from the centroid division.
     #[test]
     fn rigid_view_capture_from_xcart_single_atom_copy() {
-        let mut ctx = PackSystem::new(2, 2, 1);
-        ctx.nmols = vec![2];
-        ctx.natoms = vec![1];
-        ctx.idfirst = vec![0];
-        ctx.coor = vec![[7.0; 3]; 2];
-        ctx.xcart = vec![[1.25, -3.5, 0.125], [-9.0, 0.0, 4.75]];
+        let mut sys = PackSystem::new(2, 2, 1);
+        sys.nmols = vec![2];
+        sys.natoms = vec![1];
+        sys.idfirst = vec![0];
+        sys.coor = vec![[7.0; 3]; 2];
+        sys.xcart = vec![[1.25, -3.5, 0.125], [-9.0, 0.0, 4.75]];
 
         let mut view = RigidView::fresh(2);
-        view.capture_from_xcart(&mut ctx);
+        view.capture_from_xcart(&mut sys);
 
         assert_eq!(view.com(0), [1.25, -3.5, 0.125]);
         assert_eq!(view.com(1), [-9.0, 0.0, 4.75]);
-        assert_eq!(ctx.coor[0], [0.0; 3], "a single atom sits on its own COM");
-        assert_eq!(ctx.coor[1], [0.0; 3]);
+        assert_eq!(sys.coor[0], [0.0; 3], "a single atom sits on its own COM");
+        assert_eq!(sys.coor[1], [0.0; 3]);
         assert_eq!(view.euler(0), [0.0; 3]);
         assert_eq!(view.euler(1), [0.0; 3]);
     }
@@ -702,12 +702,12 @@ mod tests {
     fn rigid_view_capture_from_xcart_multitype_layout() {
         // type 0: two copies of 2 atoms (icart 0..4); type 1: one copy of 3
         // atoms (icart 4..7).
-        let mut ctx = PackSystem::new(7, 3, 2);
-        ctx.nmols = vec![2, 1];
-        ctx.natoms = vec![2, 3];
-        ctx.idfirst = vec![0, 4];
-        ctx.coor = vec![[0.0; 3]; 7];
-        ctx.xcart = vec![
+        let mut sys = PackSystem::new(7, 3, 2);
+        sys.nmols = vec![2, 1];
+        sys.natoms = vec![2, 3];
+        sys.idfirst = vec![0, 4];
+        sys.coor = vec![[0.0; 3]; 7];
+        sys.xcart = vec![
             [0.0, 0.0, 0.0],
             [2.0, 0.0, 0.0], // molecule 0 → centroid [1, 0, 0]
             [0.0, 10.0, 0.0],
@@ -718,15 +718,15 @@ mod tests {
         ];
 
         let mut view = RigidView::fresh(3);
-        view.capture_from_xcart(&mut ctx);
+        view.capture_from_xcart(&mut sys);
 
         assert_eq!(view.com(0), [1.0, 0.0, 0.0], "molecule 0 = type 0, copy 0");
         assert_eq!(view.com(1), [0.0, 12.0, 0.0], "molecule 1 = type 0, copy 1");
         assert_eq!(view.com(2), [1.0, 1.0, 30.0], "molecule 2 = type 1, copy 0");
         // The centered conformer lands in each copy's OWN `coor` block.
-        assert_eq!(ctx.coor[2], [0.0, -2.0, 0.0], "copy 1's first atom");
-        assert_eq!(ctx.coor[3], [0.0, 2.0, 0.0], "copy 1's second atom");
-        assert_eq!(ctx.coor[4], [-1.0, -1.0, 0.0], "type 1's first atom");
+        assert_eq!(sys.coor[2], [0.0, -2.0, 0.0], "copy 1's first atom");
+        assert_eq!(sys.coor[3], [0.0, 2.0, 0.0], "copy 1's second atom");
+        assert_eq!(sys.coor[4], [-1.0, -1.0, 0.0], "type 1's first atom");
         for i in 0..3 {
             assert_eq!(view.euler(i), [0.0; 3], "molecule {i} euler");
         }

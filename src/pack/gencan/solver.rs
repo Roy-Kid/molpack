@@ -12,7 +12,6 @@ use rand::rngs::SmallRng;
 use crate::Callback;
 use crate::PackError;
 use crate::Target;
-use crate::context::{PackState, Placed, RigidView};
 use crate::optimizer::{OptimizerBinding, ResolvedBinding, resolve_bindings};
 use crate::pack::gencan::phases::{PhaseOutcome, run_phase};
 use crate::pack::gencan::{GencanParams, GencanWorkspace};
@@ -20,9 +19,10 @@ use crate::pack::initial::{SwapState, initial};
 use crate::pack::movebad::MoveBadConfig;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 use crate::state::Placements;
+use crate::system::{PackState, Placed, RigidView};
 
-/// GENCAN-only knobs (engine-entry-split: these live on `GencanPack`, never
-/// on the shared settings — they mean nothing to a growth entry).
+/// GENCAN-only knobs. They live on `GencanPack`, never on the shared
+/// settings — they mean nothing to a growth engine.
 #[derive(Debug, Clone)]
 pub struct GencanSettings {
     /// GENCAN inner iterations (`maxit`).
@@ -41,8 +41,8 @@ pub struct GencanSettings {
     pub avoid_overlap: bool,
     /// Initial radius up-scaling (`discale`).
     pub discale: F,
-    /// RNG seed; the solver owns its stream (bit-parity with the packer's
-    /// former single `SmallRng`, which reached the GENCAN stage undrawn).
+    /// RNG seed; the solver owns its stream, which reaches the GENCAN stage
+    /// undrawn (bit parity with Packmol's single random stream).
     pub seed: u64,
 }
 
@@ -64,8 +64,8 @@ impl Default for GencanSettings {
 
 /// The rigid-body GENCAN packing algorithm as a [`Stage`].
 ///
-/// Construction captures everything the former `run_gencan_stages` read
-/// beyond the seam signature: the GENCAN knobs, the per-type move quota,
+/// Construction captures everything the GENCAN phases read beyond the seam
+/// signature: the GENCAN knobs, the per-type move quota,
 /// the resolved cell, and the phase-shape counts. Whether the stage starts
 /// from scratch or continues from placements it was handed is **not** stored
 /// here — it is read off the state on entry (see [`run`](Stage::run)), which
@@ -158,7 +158,7 @@ impl Stage for GencanStage {
     ///    it so in step 2). Starting from nothing, `initial()` owns the box
     ///    and the grid itself (synthesizing a fall-back box from `sidemax`
     ///    when nothing was declared), so installing one here would be a second
-    ///    owner. The box is the entry's resolved cell when there is one, else
+    ///    owner. The box is the engine's resolved cell when there is one, else
     ///    the one the system already carries — which is how a GENCAN stage
     ///    that follows another stage in a chain lands on the same box, and the
     ///    same `radmax`, as the hand-written `with_restart` spelling.
@@ -186,7 +186,7 @@ impl Stage for GencanStage {
             let simbox = self.cell.clone().unwrap_or_else(|| sys.simbox.clone());
             // One derivation of the grid's coverage scale, in
             // `initial::coverage_radmax`.
-            crate::context::grid::install_resolved_cell(sys, &simbox, self.settings.discale);
+            crate::system::grid::install_resolved_cell(sys, &simbox, self.settings.discale);
         }
         // ② The seed's conformers and placements, verbatim.
         if let Some(seed) = &self.seed_placements {
@@ -313,11 +313,11 @@ mod tests {
     use ndarray::Array1;
 
     use super::*;
-    use crate::context::build::{SystemKnobs, build_system};
+    use crate::system::build::{SystemKnobs, build_system};
 
-    /// RED-1 (engine-entry-split): the rigid-body path must run behind the
-    /// `Stage` seam — same system plumbing as any other stage, verdict
-    /// from the shared objective, no entry internals.
+    /// The rigid-body path runs behind the `Stage` seam — same system
+    /// plumbing as any other stage, verdict from the shared objective, no
+    /// engine internals.
     #[test]
     fn gencan_solves_a_small_pack_on_the_seam() {
         let coords = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
@@ -368,23 +368,18 @@ mod tests {
         );
     }
 
-    /// ac-005 (stage-pipeline-04-stage): a stage may be run more than once on
-    /// an evolving state, and the second run must have the same capabilities
-    /// as the first — it may consume the scratch it builds per run, never its
-    /// own configuration.
+    /// A stage may be run more than once on an evolving state, and the second
+    /// run must have the same capabilities as the first — it may consume the
+    /// scratch it builds per run, never its own configuration.
     ///
-    /// **RED for the right reason.** Before this spec, `solve` resolved its
-    /// bindings with `resolve_bindings(std::mem::take(&mut self.optimizers),
-    /// ..)` (`src/gencan/solver.rs:176`), which *moves* the bindings off the
-    /// stage. From the second run on, `self.optimizers` is empty, the
-    /// optimizer block is silently a no-op, and the counter below stops
-    /// advancing — a degraded result with no name (law § 10). The fix is to
-    /// borrow the bindings rather than take them, after which the second run
-    /// calls the optimizer exactly as the first did.
+    /// `solve` borrows its optimizer bindings. Taking them
+    /// (`std::mem::take(&mut self.optimizers)`) would leave the second run
+    /// with an empty list: the optimizer block silently a no-op and the
+    /// counter below stalled — a degraded result with no name (law § 10).
     ///
     /// **Why it lives in the crate.** `build_system` is `pub(crate)`, so an
     /// integration test in `tests/` cannot build a system and run the same
-    /// stage twice on it; `optimizer::torsion_mc`'s tests only reaches the entry, which
+    /// stage twice on it; `optimizer::torsion_mc`'s tests only reach the engine, which
     /// runs a stage once. Named with `optimizer` so the acceptance filter
     /// `cargo test -p molcrafts-molpack --lib -- optimizer` selects it.
     ///

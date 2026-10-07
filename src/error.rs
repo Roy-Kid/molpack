@@ -35,7 +35,7 @@ pub enum PackError {
         axis: usize,
         restraint: &'static str,
     },
-    /// A target was handed to a growth entry (`CbmcGrow`) but cannot be
+    /// A target was handed to a growth engine (`CbmcGrow`) but cannot be
     /// grown. Growth consumes the template's bond graph; molpack neither
     /// guesses missing chemistry nor silently falls back to rigid-body
     /// packing.
@@ -63,7 +63,7 @@ pub enum PackError {
         /// The precondition that was not met, rendered (e.g. `"placed: all"`).
         needs: &'static str,
     },
-    /// A preset entry carrying a non-default *shared* setting was handed to
+    /// A preset engine carrying a non-default *shared* setting was handed to
     /// `Pipeline::with_stage`. The shared settings are one ruler for the whole
     /// run; two stages each holding one would leave the shared objective with
     /// no single ruler, and picking a winner silently is the debt this error

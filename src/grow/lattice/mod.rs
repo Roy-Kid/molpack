@@ -42,12 +42,12 @@ use crate::AtomRestraint;
 use crate::PackError;
 use crate::Target;
 use crate::callback::{Callback, PhaseProgress, StageProgress, StepReport};
-use crate::context::pack_state::evaluate_unscaled;
-use crate::context::{PackState, Placed};
 use crate::grow::GrowError;
 use crate::grow::internal::InternalTree;
 use crate::grow::prior::TorsionPrior;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
+use crate::system::pack_state::evaluate_unscaled;
+use crate::system::{PackState, Placed};
 
 use decorate::{Backbone, analyze_backbone, decorate_chain};
 use saw::{DiamondLattice, RisWeights, SawField, forced_zigzag, grow_walk};
@@ -68,7 +68,7 @@ fn blocked_sites(lat: &DiamondLattice, restraints: &[Arc<dyn AtomRestraint>]) ->
             let x = lat.to_continuum(p);
             restraints
                 .iter()
-                .any(|r| r.f(&x, 1.0, crate::context::DEFAULT_SCALE2) > 0.0)
+                .any(|r| r.f(&x, 1.0, crate::system::DEFAULT_SCALE2) > 0.0)
         })
         .collect()
 }
@@ -84,7 +84,7 @@ pub struct LatticeStage {
     /// The box this stage tiles, and the radius up-scaling its cell grid is
     /// sized from. `None` only for a stage built directly from templates and
     /// never handed a cell — it then tiles whatever box the state already
-    /// carries; the entry always supplies one.
+    /// carries; the engine always supplies one.
     cell: Option<(SimBox, F)>,
 }
 
@@ -189,7 +189,7 @@ impl Stage for LatticeStage {
         // See `install_resolved_cell` for why `radmax` reads `radius_ini`.
         if let Some((cell, discale)) = &self.cell {
             let sys = state.sys_mut();
-            crate::context::grid::install_resolved_cell(sys, cell, *discale);
+            crate::system::grid::install_resolved_cell(sys, cell, *discale);
         }
 
         let (sys, x) = state.rigid_split_mut();
@@ -241,7 +241,7 @@ impl Stage for LatticeStage {
             }
             field.set_blocked(mask);
             for imol in 0..sys.nmols[itype] {
-                let base = sys.idfirst[itype] + imol * na;
+                let first_icart = sys.idfirst[itype] + imol * na;
                 // Escape ladder: guarded walk → unguarded walk (site
                 // self-avoidance only) → forced zigzag. Every escape below
                 // the guard is a relaxation of the constructive guarantee
@@ -297,9 +297,9 @@ impl Stage for LatticeStage {
                 let mut coords = vec![[0.0 as F; 3]; na];
                 decorate_chain(&sp.tree, &sp.backbone, &lat, &walk.sites, &mut coords);
                 for (a, p) in coords.iter().enumerate() {
-                    sys.xcart[base + a] = *p;
+                    sys.xcart[first_icart + a] = *p;
                 }
-                done.push(base);
+                done.push(first_icart);
                 mol += 1;
 
                 // Callback visibility: one StepReport per finished chain.
@@ -345,8 +345,8 @@ impl Stage for LatticeStage {
                 let na = sys.natoms[itype];
                 field.set_blocked(blocked_sites(&lat, &targets[itype].molecule_restraints));
                 for imol in 0..sys.nmols[itype] {
-                    let base = sys.idfirst[itype] + imol * na;
-                    if done.contains(&base) {
+                    let first_icart = sys.idfirst[itype] + imol * na;
+                    if done.contains(&first_icart) {
                         continue;
                     }
                     let walk = forced_zigzag(
@@ -365,9 +365,9 @@ impl Stage for LatticeStage {
                     let mut coords = vec![[0.0 as F; 3]; na];
                     decorate_chain(&sp.tree, &sp.backbone, &lat, &walk.sites, &mut coords);
                     for (a, p) in coords.iter().enumerate() {
-                        sys.xcart[base + a] = *p;
+                        sys.xcart[first_icart + a] = *p;
                     }
-                    done.push(base);
+                    done.push(first_icart);
                     m += 1;
                 }
             }
@@ -380,8 +380,8 @@ impl Stage for LatticeStage {
         x.capture_from_xcart(sys);
 
         // Final verdict from the shared objective, never self-reported: the
-        // same unscaled primitive the continuum driver calls, which also owns
-        // the `scale` / `scale2` handling this site used to spell out.
+        // same unscaled primitive the continuum driver calls, which owns the
+        // `scale` / `scale2` handling.
         let (_, fdist, frest) = evaluate_unscaled(sys, x.as_slice());
         let converged = !aborted && degraded == 0 && fdist == 0.0 && frest < budget.precision;
         Ok(StageOutcome::new(converged, degraded))

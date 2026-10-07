@@ -47,8 +47,6 @@ use molrs::op::F;
 use crate::PackError;
 use crate::Target;
 use crate::callback::{Callback, PhaseProgress, StageProgress, StepReport};
-use crate::context::pack_state::evaluate_unscaled;
-use crate::context::{PackState, Placed};
 use crate::grow::GrowError;
 use crate::grow::config::GrowConfig;
 use crate::grow::field::{BlockKind, OverlapField};
@@ -58,6 +56,8 @@ use crate::grow::moves::{
 };
 use crate::random::uniform01;
 use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
+use crate::system::pack_state::evaluate_unscaled;
+use crate::system::{PackState, Placed};
 
 /// The chain-growth stage. Built from the Grow targets before the first
 /// [`run`](Stage::run); the targets handed to `run` must be the same objects.
@@ -66,14 +66,14 @@ use crate::stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 /// across runs, as the seam's re-entrancy contract requires.
 ///
 /// **Rust-only:** not mirrored in the Python wheel — Python reaches growth
-/// through the `CbmcGrow` entry, which constructs this stage itself.
+/// through the `CbmcGrow` engine, which constructs this stage itself.
 pub struct GrowStage {
     seed: u64,
     species: Vec<Species>,
     /// The box this stage grows into, and the radius up-scaling its cell
     /// grid is sized from. `None` only for a stage built directly from
     /// templates and never handed a cell — it then grows in whatever box the
-    /// state already carries; the entry always supplies one.
+    /// state already carries; the engine always supplies one.
     cell: Option<(SimBox, F)>,
 }
 
@@ -157,7 +157,7 @@ impl Stage for GrowStage {
         // See `install_resolved_cell` for why `radmax` reads `radius_ini`.
         if let Some((cell, discale)) = &self.cell {
             let sys = state.sys_mut();
-            crate::context::grid::install_resolved_cell(sys, cell, *discale);
+            crate::system::grid::install_resolved_cell(sys, cell, *discale);
         }
 
         let (sys, x) = state.rigid_split_mut();
@@ -180,15 +180,15 @@ impl Stage for GrowStage {
             let na = sys.natoms[itype];
             let n_steps = self.species[itype].tree.n_steps();
             for imol in 0..sys.nmols[itype] {
-                let base = sys.idfirst[itype] + imol * na;
+                let first_icart = sys.idfirst[itype] + imol * na;
                 for a in 0..na {
-                    mol_of[base + a] = mol as u32;
-                    atom_of[base + a] = a as u32;
+                    mol_of[first_icart + a] = mol as u32;
+                    atom_of[first_icart + a] = a as u32;
                 }
                 chains.push(Chain {
                     itype,
                     mol,
-                    base,
+                    first_icart,
                     stage: 0,
                     coords: vec![[0.0; 3]; na],
                     vars: vec![0.0; self.species[itype].tree.n_vars()],
@@ -254,7 +254,7 @@ impl Stage for GrowStage {
             // serial scheduling advances only the first pending chain, so
             // each chain completes into a finished matrix before the next
             // starts.
-            // One config per run (the entry is the method), so the first
+            // One config per run (the engine is the method), so the first
             // species speaks for all.
             let serial = self.species.first().is_some_and(|s| s.cfg.serial);
             let mut order: Vec<usize> = if serial {
@@ -415,7 +415,7 @@ impl Stage for GrowStage {
             // guarantees, and `loop_idx` is the 1-based round number.
             for chain in &chains {
                 for (a, p) in chain.coords.iter().enumerate() {
-                    sys.xcart[chain.base + a] = *p;
+                    sys.xcart[chain.first_icart + a] = *p;
                 }
             }
             let step = StepReport {
@@ -437,8 +437,8 @@ impl Stage for GrowStage {
                 frest: 0.0,
                 f: 0.0,
                 improvement_pct: 0.0,
-                // Softest core this round. One chain's rung no longer moves
-                // the others, so the live report is the minimum.
+                // Softest core this round. Each chain climbs its own rung,
+                // so the live report is the minimum.
                 radscale: chains.iter().map(|c| c.hard_scale).fold(1.0, F::min),
                 precision: budget.precision,
             };
@@ -483,7 +483,7 @@ impl Stage for GrowStage {
                 // placed here would live only in `Chain.coords`. Same shape
                 // as the lattice driver's abort path (`grow/lattice/mod.rs`).
                 for (a, p) in chain.coords.iter().enumerate() {
-                    sys.xcart[chain.base + a] = *p;
+                    sys.xcart[chain.first_icart + a] = *p;
                 }
             }
         }
@@ -497,8 +497,8 @@ impl Stage for GrowStage {
 
         // ── Final verdict from the shared objective, never self-reported ──
         // One unscaled evaluation, the crate's single primitive for it: it
-        // sets the unscaled `scale` / `scale2` pair this site used to write
-        // inline and gives the caller's values back afterwards.
+        // sets the unscaled `scale` / `scale2` pair and gives the caller's
+        // values back afterwards.
         let (_, fdist, frest) = evaluate_unscaled(sys, x.as_slice());
         let converged = !aborted && degraded == 0 && fdist == 0.0 && frest < budget.precision;
         Ok(StageOutcome::new(converged, degraded))
@@ -521,8 +521,8 @@ fn max_rounds(max_loops: usize, max_n_steps: usize) -> u64 {
 /// Retract depth from the consecutive dead-end streak.
 ///
 /// `base.saturating_mul(1 << (streak / 4).min(12))`. Reads `deadend_streak`
-/// only — never `deadends_total`. Feeding the cumulative clock would restore
-/// the exponential whole-chain retract of debt D-01.
+/// only — never `deadends_total`. Feeding the cumulative clock would retract
+/// whole chains exponentially (debt D-01).
 fn retract_depth(base: usize, streak: usize) -> usize {
     base.saturating_mul(1 << (streak / 4).min(12))
 }
@@ -602,8 +602,8 @@ mod tests {
 
     #[test]
     fn missed_rung_still_due() {
-        // The old `is_multiple_of` gate skipped a missed take (3 % 2 != 0)
-        // until the next multiple. A watermark stays due once crossed.
+        // A watermark stays due once crossed: a take that misses the
+        // multiple (3 % 2 != 0) still fires instead of waiting for the next.
         assert!(rung_due(3, 0, 2));
         assert!(rung_due(2, 0, 2));
         assert!(!rung_due(3, 1, 2));

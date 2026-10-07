@@ -1,6 +1,7 @@
 """Type stubs for the molpack native extension (compiled from Rust via PyO3)."""
 
 import os
+import pathlib
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol, Self
 
@@ -280,7 +281,7 @@ class PackSystemView:
 # See ``molpack.Callback`` (``_protocols.py``) for the documented contract.
 
 # ---------------------------------------------------------------------------
-# Engine entries & State
+# Engines & State
 # ---------------------------------------------------------------------------
 
 class IntraResidual:
@@ -350,7 +351,7 @@ class ScriptJob:
     @property
     def targets(self) -> list[Target]: ...
     @property
-    def output(self) -> str: ...
+    def output(self) -> pathlib.Path: ...
     @property
     def nloop(self) -> int: ...
     def __len__(self) -> int: ...
@@ -360,7 +361,7 @@ class ScriptJob:
 def load_script(
     path: str | os.PathLike[str],
     *,
-    read_frame: Callable[..., Any] | None = None,
+    loader: Callable[..., Any] | None = None,
 ) -> ScriptJob:
     """Parse a molpack ``.inp`` script and lower it to a ready-to-run
     packer and target list.
@@ -403,7 +404,7 @@ class EmptyMoleculeError(PackError): ...
 class InvalidPbcBoxError(PackError): ...
 
 class GencanPack:
-    """Rigid-body GENCAN packing entry (engine-entry-split). One engine, one run."""
+    """Rigid-body GENCAN packing engine. One engine, one run."""
 
     def __init__(self) -> None: ...
     def with_restart(self, result: State) -> Self:
@@ -417,10 +418,9 @@ class GencanPack:
     def with_seed(self, seed: int) -> Self: ...
     def with_periodic_box(self, min: Sequence[float], max: Sequence[float]) -> Self: ...
     def with_density(self, rho: float) -> Self: ...
-    def with_progress(self, on: bool = True) -> Self: ...
     def with_log_level(self, level: str) -> Self:
-        """``"quiet"`` / ``"summary"`` / ``"progress"`` / ``"verbose"``;
-        an explicit level wins over :meth:`with_progress`."""
+        """Screen log: ``"quiet"`` (the default) / ``"summary"`` /
+        ``"progress"`` (LAMMPS-style thermo lines) / ``"verbose"``."""
         ...
     def with_log_frequency(self, n: int) -> Self: ...
     def with_parallel_eval(self, enabled: bool) -> Self: ...
@@ -450,7 +450,7 @@ class GencanPack:
         """``max_loops`` defaults to Packmol's ``nloop``: ``200 * len(targets)``."""
 
 class CbmcGrow:
-    """Configurational-bias chain-growth entry. The torsion prior is
+    """Configurational-bias chain-growth engine. The torsion prior is
     mandatory; no hidden push-off — chain
     ``GencanPack().with_restart(result)`` explicitly."""
 
@@ -460,10 +460,9 @@ class CbmcGrow:
     def with_seed(self, seed: int) -> Self: ...
     def with_periodic_box(self, min: Sequence[float], max: Sequence[float]) -> Self: ...
     def with_density(self, rho: float) -> Self: ...
-    def with_progress(self, on: bool = True) -> Self: ...
     def with_log_level(self, level: str) -> Self:
-        """``"quiet"`` / ``"summary"`` / ``"progress"`` / ``"verbose"``;
-        an explicit level wins over :meth:`with_progress`."""
+        """Screen log: ``"quiet"`` (the default) / ``"summary"`` /
+        ``"progress"`` (LAMMPS-style thermo lines) / ``"verbose"``."""
         ...
     def with_log_frequency(self, n: int) -> Self: ...
     def with_parallel_eval(self, enabled: bool) -> Self: ...
@@ -482,7 +481,7 @@ class CbmcGrow:
     def run(self, targets: Sequence[Target], max_loops: int) -> State: ...
 
 class LatticeGrow:
-    """Diamond-lattice growth entry: melt-density chain generation as an
+    """Diamond-lattice growth engine: melt-density chain generation as an
     on-lattice SAW (RIS-weighted, self-avoiding), decorated back to the
     template's exact bonded geometry. Residual contacts are reported
     honestly — chain ``GencanPack().with_restart(result)`` for the push-off.
@@ -494,7 +493,6 @@ class LatticeGrow:
     def with_seed(self, seed: int) -> Self: ...
     def with_periodic_box(self, min: Sequence[float], max: Sequence[float]) -> Self: ...
     def with_density(self, rho: float) -> Self: ...
-    def with_progress(self, on: bool = True) -> Self: ...
     def with_log_level(self, level: str) -> Self: ...
     def with_log_frequency(self, n: int) -> Self: ...
     def with_parallel_eval(self, enabled: bool) -> Self: ...
@@ -504,7 +502,7 @@ class LatticeGrow:
     def run(self, targets: Sequence[Target], max_loops: int) -> State: ...
 
 Stage = GencanPack | CbmcGrow | LatticeGrow
-"""The entry objects a :class:`Pipeline` accepts as a stage — this stub's
+"""The engine objects a :class:`Pipeline` accepts as a stage — this stub's
 mirror of the extension's single ``stage_method_registry!`` table."""
 
 class Pipeline:
@@ -515,7 +513,7 @@ class Pipeline:
     stage's own callbacks travel with it and are *adopted*: they observe the
     whole run. A stage carrying a non-default shared knob is refused by
     name (``ValueError``) at :meth:`run`, never silently stripped, and an
-    object that is not an entry raises ``TypeError`` where it is handed
+    object that is not an engine raises ``TypeError`` where it is handed
     over.
     """
 
@@ -526,10 +524,9 @@ class Pipeline:
     def with_seed(self, seed: int) -> Self: ...
     def with_periodic_box(self, min: Sequence[float], max: Sequence[float]) -> Self: ...
     def with_density(self, rho: float) -> Self: ...
-    def with_progress(self, on: bool = True) -> Self: ...
     def with_log_level(self, level: str) -> Self:
-        """``"quiet"`` / ``"summary"`` / ``"progress"`` / ``"verbose"``;
-        an explicit level wins over :meth:`with_progress`."""
+        """Screen log: ``"quiet"`` (the default) / ``"summary"`` /
+        ``"progress"`` (LAMMPS-style thermo lines) / ``"verbose"``."""
         ...
     def with_log_frequency(self, n: int) -> Self: ...
     def with_parallel_eval(self, enabled: bool) -> Self: ...

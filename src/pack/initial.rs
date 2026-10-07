@@ -18,12 +18,12 @@ use ndarray::array;
 use std::time::Instant;
 
 use crate::Objective;
-use crate::context::{NONE_IDX, PackSystem, RigidView};
 use crate::eval::EvalMode;
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::pack::movebad::{MoveBadConfig, movebad};
 use crate::pack::restmol::restmol;
 use crate::random::uniform01;
+use crate::system::{NONE_IDX, PackSystem, RigidView};
 
 use rand::Rng;
 
@@ -231,7 +231,7 @@ pub fn initial(
 
     // Packmol initial.f90 line 50-51
     sys.scale = 1.0;
-    sys.scale2 = crate::context::DEFAULT_SCALE2;
+    sys.scale2 = crate::system::DEFAULT_SCALE2;
 
     // ── 1. compute dmax ──────────────────────────────────────────────────────
     log::debug!("[{:.3}s] computing dmax", t0.elapsed().as_secs_f64());
@@ -358,7 +358,7 @@ pub fn initial(
     view.write_xcart(sys);
     let x = view.as_mut_slice();
 
-    let radmax = crate::context::grid::coverage_radmax(sys);
+    let radmax = crate::system::grid::coverage_radmax(sys);
 
     let mut smin = [1.0e20 as F; 3];
     let mut smax = [-1.0e20 as F; 3];
@@ -446,7 +446,7 @@ pub fn initial(
         )
         .expect("fallback cell must have positive extent on every axis"),
     };
-    crate::context::grid::install_simbox_and_grid(sys, simbox, radmax, discale, free_atoms);
+    crate::system::grid::install_simbox_and_grid(sys, simbox, radmax, discale, free_atoms);
 
     // ── 7. Random initial point using cm_min/cm_max ───────────────────────────
     // Packmol initial.f90 lines 362-427
@@ -502,8 +502,8 @@ pub fn initial(
                         // Reject a seed that lands in, or next to, a cell
                         // holding fixed atoms. The stencil drops out-of-range
                         // offsets on non-periodic axes instead of wrapping to
-                        // the opposite face, so this no longer inspects cells
-                        // on the far side of a confined direction.
+                        // the opposite face, so cells on the far side of a
+                        // confined direction are never inspected.
                         let icell = sys.grid.cell_of(&sys.simbox, pos);
                         let mut stencil = [0usize; 27];
                         let n = sys.grid.stencil_all(icell, &mut stencil);

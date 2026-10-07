@@ -116,7 +116,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
 | `src/refine/ladder.rs` | 半径调度，走 `PackContext::set_radius` | ≤ 150 |
 | `src/objective/cartesian.rs`（前置拆分产物） | `bin_xcart_into_cells`、`accumulate_cartesian_fg` | ≤ 200 |
 
-- **依赖方向**：`refine/*` → `stage` / `context::pack_state` / `molrs::core::Topology` / `objective::cartesian` /
+- **依赖方向**：`refine/*` → `stage` / `system::pack_state` / `molrs::core::Topology` / `objective::cartesian` /
   `gencan::{spg, cg}` / `restraint`。允许 `refine → gencan::{spg, cg}`：原则 2 与
   `chain-growth-solver.acceptance.md:30` 点名禁止的是 `pgencan / run_phase / run_iteration`
   这些刚体驱动，不是线搜索原语；本 spec 的验收 grep 把同一条禁令扩到 `src/refine/`，并

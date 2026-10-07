@@ -6,13 +6,13 @@ use molrs::core::SimBox;
 use molrs::op::F;
 
 use crate::Target;
-use crate::context::RigidView;
+use crate::system::RigidView;
 
 /// The solver-native placement solution for the FREE copies, captured
 /// verbatim at the end of a run: the run's [`RigidView`] (the packed
 /// COM + Euler placement vector), the per-copy centered reference conformers
 /// in xcart order, a per-copy atom-count fingerprint for validation, and the
-/// simbox the run installed. A later entry continues on this state with
+/// simbox the run installed. A later engine continues on this state with
 /// zero conversion — reconstructing from the assembled frame would recompute
 /// COMs and lose bitwise continuity ((p − com) + com ≠ p).
 #[derive(Debug, Clone)]
@@ -129,7 +129,7 @@ impl IntraResidual {
 /// by private `Pipeline::assemble`, which is the freeze point, and the
 /// caller then holds this `State`. There is no `type` alias either way.
 ///
-/// Cross-entry continuation (`GencanPack::with_restart`) reads the hidden
+/// Cross-engine continuation (`GencanPack::with_restart`) reads the hidden
 /// `Placements` snapshot, not the public [`Self::frame`] — reconstructing
 /// COM from the assembled frame would lose bitwise continuity.
 ///
@@ -142,7 +142,7 @@ pub struct State {
     /// 1-based, unsigned), `x` / `y` / `z` (Å) and each template's carried
     /// columns, plus the templates' relation blocks and the resolved cell.
     pub frame: molrs::core::Frame,
-    /// The verbatim placement solution, for cross-entry seeding
+    /// The verbatim placement solution, for cross-engine seeding
     /// (`GencanPack::with_restart`).
     pub(crate) placements: Placements,
     /// Maximum inter-molecular distance violation at termination.
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn state_natoms_reads_frame() {
         use super::{Placements, State};
-        use crate::context::RigidView;
+        use crate::system::RigidView;
 
         let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
         let state = State {

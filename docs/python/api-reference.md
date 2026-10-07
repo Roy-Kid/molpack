@@ -6,7 +6,7 @@ Import surface:
 from molpack import (
     # Core
     Target, State, IntraResidual, StepReport,
-    # Engine entries — one per packing algorithm
+    # Engines — one per packing algorithm
     GencanPack, CbmcGrow, LatticeGrow,
     # Multi-stage composition
     Pipeline,
@@ -127,7 +127,7 @@ Target(frame, count: int)
   output as one fixed obstacle, coordinates kept verbatim. The chaining
   primitive for staged packs: grow with `CbmcGrow`, then pack the next
   species around the frozen matrix with `GencanPack`. See
-  [Engine entries](#engine-entries).
+  [Engines](#engines).
 
 **Properties**
 
@@ -142,17 +142,17 @@ Target(frame, count: int)
 
 ---
 
-## Engine entries
+## Engines
 
-One entry class per packing algorithm; you pick the algorithm by picking
-the entry. All three are immutable builders — every `with_*` returns a new
+One engine class per packing algorithm; you pick the algorithm by picking
+the engine. All three are immutable builders — every `with_*` returns a new
 instance — and all three expose the same terminal verb:
 
 ```python
 .run(targets: list[Target], max_loops: int) -> State
 ```
 
-`run()` consumes the entry (one engine, one run): a second call on the
+`run()` consumes the engine (one engine, one run): a second call on the
 same object raises `RuntimeError`. Raises a typed `PackError` subclass on
 packing failure.
 
@@ -164,7 +164,7 @@ Available on `GencanPack` **and** `CbmcGrow`:
 - `.with_precision(p: float)` — convergence threshold (default 0.01).
 - `.with_seed(seed: int)` — deterministic RNG (default Packmol's 1234567).
 - `.with_periodic_box(min: [x,y,z], max: [x,y,z])` — declare a
-  fully-periodic box directly on the entry (Packmol `pbc`); see
+  fully-periodic box directly on the engine (Packmol `pbc`); see
   [Periodic boundaries](guide/periodic-boundaries.md).
 - `.with_density(rho: float)` — size the box from a target mass density
   (g/cm³) instead of declaring it: `run()` resolves a cubic, fully
@@ -173,8 +173,8 @@ Available on `GencanPack` **and** `CbmcGrow`:
   raises `ValueError`. Mutually exclusive with `.with_periodic_box`.
 - `.with_parallel_eval(enabled: bool)` — rayon-backed pair eval. Raises
   `RuntimeError` if the wheel lacks the `rayon` feature (fail-fast).
-- `.with_progress(on: bool = True)` — LAMMPS-style screen output
-  (off by default).
+- `.with_log_level(level: str)` — screen log: `"quiet"` (the default),
+  `"summary"`, `"progress"` (LAMMPS-style thermo lines) or `"verbose"`.
 - `.with_callback(callback)` — attach a custom `Callback` (stackable).
 - `.with_global_restraint(r)` — broadcast to every target (stackable).
 
@@ -283,7 +283,7 @@ Pipeline(stages: Sequence[GencanPack | CbmcGrow | LatticeGrow] | None = None)
 - The shared builders — same as [`GencanPack`](#shared-builders):
   `.with_tolerance`, `.with_precision`, `.with_seed`,
   `.with_periodic_box`, `.with_density`, `.with_parallel_eval`,
-  `.with_progress`, `.with_callback`, `.with_global_restraint`. Set these on
+  `.with_log_level`, `.with_callback`, `.with_global_restraint`. Set these on
   the `Pipeline`, never on a stage object that goes into one — a stage
   carrying a non-default shared setting raises `ValueError` naming the
   stage and the setting.
@@ -299,12 +299,12 @@ pipeline's callback set and fire for every stage in the run, not only the
 one they were attached to. Raises `ValueError` for an empty pipeline, a
 stage-ordering error, or a stage carrying a non-default shared setting
 (each naming the offending stage); raises `TypeError`, listing the three
-supported entries, for any object passed to `Pipeline([...])` or
+supported engines, for any object passed to `Pipeline([...])` or
 `.with_stage(x)` that is not a `GencanPack`, `CbmcGrow`, or `LatticeGrow`.
 
-### Chaining two entries
+### Chaining two engines
 
-An entry's own `run()` never mixes algorithms, and there is no hidden
+An engine's own `run()` never mixes algorithms, and there is no hidden
 fallback between them. Outside `Pipeline` (above), stage it in user code
 instead, in one of two shapes:
 
@@ -426,7 +426,7 @@ sys.natoms
 
 Read-only triple identifying the stage a step belongs to. Load-bearing
 inside a multi-stage [`Pipeline`](#pipeline); present, with `index = 0` and
-`total = 1`, on every single-entry run too.
+`total = 1`, on every single-engine run too.
 
 - `.index : int` — 0-based position of this stage in the run; monotonic
   across a multi-stage `Pipeline`.
@@ -439,7 +439,7 @@ inside a multi-stage [`Pipeline`](#pipeline); present, with `index = 0` and
 ## Restraints
 
 All restraint classes are immutable. Two families, both attached with
-`target.with_restraint(r)` (or the entry's `with_global_restraint(r)`):
+`target.with_restraint(r)` (or the engine's `with_global_restraint(r)`):
 **molrs regions** lifted to a per-atom penalty (below) and **collective**
 distribution-matching restraints ([next section](#collective-distribution-matching-restraints)).
 
@@ -551,12 +551,12 @@ ions = (
 
 ## Script loader
 
-### `load_script(path, *, read_frame=None) -> ScriptJob`
+### `load_script(path, *, loader=None) -> ScriptJob`
 
 Parse and lower a Packmol-compatible `.inp` script. Template files are
 read on the Python side (defaulting to the `molrs.io` reader of the format the
 script's `filetype` or the file name names: `read_pdb`, `read_xyz`, …), so the
-wheel stays free of `molrs-io`. Pass `read_frame`
+wheel stays free of `molrs-io`. Pass `loader`
 — a callable `(path, filetype) -> molrs.core.Frame` — to plug in another
 loader (mdtraj, ASE, …).
 
@@ -571,11 +571,11 @@ packer, targets, output, nloop = load_script("mix.inp")   # same object
 ```
 
 - `.packer : GencanPack` — pre-configured with the script's `tolerance`,
-  `seed`, and any `pbc` box. `.inp` scripts always lower to the
-  rigid-body entry.
+  `seed`, `pbc` box or `cell`, and `avoid_overlap`. `.inp` scripts always lower to the
+  rigid-body engine.
 - `.targets : list[Target]`
 - `.output : pathlib.Path` — resolved output path.
-- `.nloop : int` — outer-loop cap (`nloop` keyword; default 400).
+- `.nloop : int` — outer-loop cap (`nloop` keyword; default `200 * ntype`).
 
 ---
 

@@ -113,8 +113,12 @@ def _prior() -> molpack.TorsionPrior:
     return molpack.TorsionPrior.three_state_from_c_inf(PEO_C_INF, TET)
 
 
-def _progress() -> bool:
-    return os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "0") != "0"
+def _log_level() -> str:
+    return (
+        "progress"
+        if os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "0") != "0"
+        else "quiet"
+    )
 
 
 def _report_graph(polymer: Atomistic) -> tuple[int, int]:
@@ -143,7 +147,7 @@ def lattice_then_push(
         .with_seed(seed)
         .with_tolerance(2.0)
         .with_density(density)
-        .with_progress(_progress())
+        .with_log_level(_log_level())
         .run(targets, max_loops=max_grow)
     )
     print(
@@ -156,7 +160,7 @@ def lattice_then_push(
         .with_restart(grown)
         .with_seed(seed)
         .with_tolerance(2.0)
-        .with_progress(_progress())
+        .with_log_level(_log_level())
         .run(targets, max_loops=max_push)
     )
     print(f"  push-off     : converged={pushed.converged}  fdist={pushed.fdist:.4e}")
@@ -188,7 +192,7 @@ def pack_ring(dp: int, n_mol: int, density: float, seed: int) -> molpack.State:
     try:
         molpack.CbmcGrow(prior).with_seed(seed).with_tolerance(2.0).with_density(
             density
-        ).with_progress(False).run([target], max_loops=4)
+        ).run([target], max_loops=4)
         raise RuntimeError("CbmcGrow accepted a ring — RingTemplate should have fired")
     except ValueError as err:
         if "ring" not in str(err).lower():
@@ -199,7 +203,7 @@ def pack_ring(dp: int, n_mol: int, density: float, seed: int) -> molpack.State:
         .with_seed(seed)
         .with_tolerance(2.0)
         .with_density(density)
-        .with_progress(_progress())
+        .with_log_level(_log_level())
         .run([target], max_loops=max(40, n_mol * 8))
     )
     print(

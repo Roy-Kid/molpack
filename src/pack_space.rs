@@ -1,9 +1,9 @@
 //! Shared pack-space setup: density / periodic-box / cell resolution and
 //! global-restraint broadcast.
 //!
-//! Every entry needs the same answers before any algorithm runs: what box
+//! Every engine needs the same answers before any algorithm runs: what box
 //! does the system live in, and which restraints apply to every target.
-//! The entry lifecycle owns this machinery once — it is never re-declared
+//! The engine lifecycle owns this machinery once — it is never re-declared
 //! per algorithm.
 
 use std::sync::Arc;
@@ -109,9 +109,8 @@ pub(crate) fn reject_restraints_across_periodic_axes(
 
 /// Absolute tolerance (Å) under which two declared lattices are the same cell,
 /// per [`SimBox::approx_eq`]: every matrix and origin entry within it, identical
-/// PBC flags, and the same `is_cell_defined`. The last one is stricter than the
-/// hand-rolled check it replaced, on purpose: a no-cell box never agrees with
-/// a real lattice.
+/// PBC flags, and the same `is_cell_defined`. The last one is deliberate: a
+/// no-cell box never agrees with a real lattice.
 const CELL_AGREE_TOL: F = 1e-9;
 
 /// Scan every restraint on every target for an `AtomRestraint::declared_cell`.
@@ -266,7 +265,7 @@ pub(crate) fn broadcast_global_restraints<'a>(
 
 #[cfg(test)]
 mod periodic_declaration_tests {
-    //! Periodicity is declared on the engine entry and nowhere else. What a
+    //! Periodicity is declared on the engine and nowhere else. What a
     //! restraint still answers for is whether it survives the wrap, and
     //! [`reject_restraints_across_periodic_axes`] refuses the ones that do
     //! not — for the `.inp` plane kernels here, and for a lifted molrs region
@@ -343,9 +342,9 @@ mod periodic_declaration_tests {
 #[cfg(test)]
 mod region_under_wrap_tests {
     //! The same rule, reached through the public spelling: a molrs region
-    //! lifted by `RegionRestraint`. This is what used to go unchecked — a
-    //! half-space handed in as a region was accepted whatever the cell did,
-    //! and its "inside" then depended on where the origin sat.
+    //! lifted by `RegionRestraint`. Unchecked, a half-space handed in as a
+    //! region would be accepted whatever the cell did, and its "inside" would
+    //! then depend on where the origin sat.
 
     use std::sync::Arc;
 

@@ -30,19 +30,19 @@ target profile* plus orientation.
 > `SelfSeparation`* below):
 >
 > - **The collective seam now carries a context.** `Restraint::f`/`fg` take a
->   `GroupCtx { scale, scale2, natoms_per_copy, mic }` instead of the two bare
+>   `GroupEvaluation { scale, scale2, natoms_per_copy, mic }` instead of the two bare
 >   scales. Task 2's wavevector enumeration needs the cell and Task 1's
 >   reduction needs the per-copy width; both now arrive at evaluation time
 >   rather than being cached at construction — which matters, because the cell
 >   is resolved *after* the targets are lowered, so a restraint that stored a
->   box at construction could store the wrong one. The `Mic` on `GroupCtx` is
+>   box at construction could store the wrong one. The `Mic` on `GroupEvaluation` is
 >   the pair loop's own; a reciprocal lattice for `StructureFactor` should be
->   added to `GroupCtx` the same way rather than re-derived.
+>   added to `GroupEvaluation` the same way rather than re-derived.
 > - **The forward/backward COM math exists**, in
 >   `src/restraint/collective/com.rs` (`centroids` / `scatter`, geometric
 >   weights, unit-tested). Task 1's `SiteReduction` should **wrap** it, not
 >   restate it — `ComWeights::Mass` is the part still to build.
-> - **`GroupCtx` carries the cell**, not just the minimum image, precisely so a
+> - **`GroupEvaluation` carries the cell**, not just the minimum image, precisely so a
 >   group-level term can *partition* space. `SelfSeparation` bins its centres
 >   into a `molrs` `CellGrid` at `d_min` and sweeps the forward stencil, the
 >   same primitive the pair loop uses. `StructureFactor` needs the same box for

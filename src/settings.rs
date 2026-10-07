@@ -3,7 +3,7 @@
 //! The knobs the shared infrastructure reads (contact tolerance, precision,
 //! seed, the box or cell declaration, global restraints, screen logging via
 //! [`LogSpec`]). One ruler per run: algorithm-specific knobs live on their
-//! own entry type, never here. Two siblings complete what every run needs
+//! own engine type, never here. Two siblings complete what every run needs
 //! and no algorithm owns: [`pack_space`](crate::pack_space) resolves a
 //! density / periodic box / cell declaration into the one space the run
 //! packs into and broadcasts global restraints onto every target, and
@@ -11,7 +11,7 @@
 //! placement solution it carries, which is what makes one run continuable
 //! from another.
 //!
-//! What is deliberately *not* here: the entries themselves — [`GencanPack`](crate::GencanPack)
+//! What is deliberately *not* here: the engines themselves — [`GencanPack`](crate::GencanPack)
 //! lives with the rigid-body family, [`CbmcGrow`](crate::CbmcGrow) and
 //! [`LatticeGrow`](crate::LatticeGrow) with
 //! growth — and the lifecycle that drives them, which
@@ -40,9 +40,9 @@ impl Default for LogSpec {
     }
 }
 
-/// The knobs every entry shares — consumed by the lifecycle and the shared
+/// The knobs every engine shares — consumed by the lifecycle and the shared
 /// infrastructure (space resolution, system construction), never by one
-/// algorithm alone. Algorithm-specific knobs live on their entry.
+/// algorithm alone. Algorithm-specific knobs live on their engine.
 #[derive(Debug, Clone, Default)]
 pub struct PackSettings {
     pub(crate) tolerance: Option<F>,

@@ -4,10 +4,10 @@
 //! it. Not one field moves, so the shared objective's read set is unchanged,
 //! `sys.xcart` stays the single lab-frame home of the coordinates, and
 //! `sys.fixedatom` / `sys.comptype` are read through the wrapper rather than
-//! mirrored — that mirror has drifted before, which is why
+//! mirrored — a mirror can drift, which is why
 //! `PackSystem::debug_assert_atom_props_sync` exists at all. On top of the
-//! context the state adds the two things a chain of stages needs and the
-//! context has no home for: the placement shape marker [`Placed`] and the
+//! system the state adds the two things a chain of stages needs and the
+//! system has no home for: the placement shape marker [`Placed`] and the
 //! rigid placement slot [`RigidView`].
 //!
 //! # What the state deliberately does not carry
@@ -38,9 +38,9 @@ use std::fmt;
 use molrs::op::F;
 
 use crate::Objective;
-use crate::context::DEFAULT_SCALE2;
-use crate::context::{PackSystem, RigidView};
 use crate::eval::EvalMode;
+use crate::system::DEFAULT_SCALE2;
+use crate::system::{PackSystem, RigidView};
 
 /// The shape of the placements a [`PackState`] currently holds.
 ///
@@ -49,7 +49,7 @@ use crate::eval::EvalMode;
 /// running the next one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placed {
-    /// Nothing has been placed yet — a freshly wrapped context.
+    /// Nothing has been placed yet — a freshly wrapped system.
     None,
     /// Every free molecule the system lays out has a placement.
     All,
@@ -57,7 +57,7 @@ pub enum Placed {
 
 /// A [`PackSystem`] plus the two pieces of run state a stage chain needs.
 pub struct PackState {
-    /// The wrapped context — the authority for geometry, radii and restraints.
+    /// The wrapped system — the authority for geometry, radii and restraints.
     sys: PackSystem,
     /// The shape marker; see [`Placed`].
     placed: Placed,
@@ -112,9 +112,9 @@ impl PackState {
         &self.rigid
     }
 
-    /// Context and view as two disjoint mutable borrows, for the many
+    /// System and view as two disjoint mutable borrows, for the many
     /// operations that write placements while reading or updating the
-    /// context (`write_xcart`, `capture_from_xcart`, a stage's inner loop).
+    /// system (`write_xcart`, `capture_from_xcart`, a stage's inner loop).
     pub fn rigid_split_mut(&mut self) -> (&mut PackSystem, &mut RigidView) {
         (&mut self.sys, &mut self.rigid)
     }
@@ -128,8 +128,8 @@ impl PackState {
     ///
     /// A forward to [`PackSystem::invalidate_geometry_cache`], not a second
     /// implementation: the cache and its invalidation semantics belong to the
-    /// context. It sits here because the caller is a stage boundary, which
-    /// holds the state and not the bare context.
+    /// system. It sits here because the caller is a stage boundary, which
+    /// holds the state and not the bare system.
     pub fn invalidate_geometry_cache(&mut self) {
         self.sys.invalidate_geometry_cache();
     }
@@ -175,24 +175,14 @@ impl PackState {
 /// true of only half the fields written here. Symmetry costs two stack slots
 /// and removes an asymmetry from the contract.
 ///
-/// # Why the merge is bitwise inert at today's callers
+/// # Why the save/restore is bitwise inert
 ///
-/// The crate writes `scale` / `scale2` in exactly three places, and all three
-/// write the constructor defaults (`1.0` and `DEFAULT_SCALE2` == `0.01`, the
-/// struct literal at `src/context/pack_system.rs:370-371`):
-///
-/// * `src/initial.rs:338-339`, the port of Packmol `initial.f90:50-51`;
-/// * the final-verdict site of the continuum growth driver
-///   (`src/grow/driver.rs`), now absorbed into this function;
-/// * the same site in the lattice growth driver
-///   (`src/grow/lattice/mod.rs`), likewise absorbed.
-///
-/// Setting the pair here therefore writes what those callers already held,
-/// and restoring it writes those same values back: the save/restore pair is
-/// inert at every call site that exists today, which is what lets the two
-/// growth idioms collapse into this one without moving a bit.
-/// (`src/objective.rs:414,622` bind `scale2` into a local; they read it, they
-/// do not write it.)
+/// Outside this function the crate writes `scale` / `scale2` in one place,
+/// `pack::initial` (the port of Packmol `initial.f90:50-51`), and it writes
+/// the `PackSystem::new` defaults (`1.0` and `DEFAULT_SCALE2` == `0.01`).
+/// Setting the pair here therefore writes what every caller already holds,
+/// and restoring it writes those same values back. The objective kernels
+/// bind `scale2` into a local; they read it, they do not write it.
 ///
 /// The radius swap is inert on those paths too: `radius` is scaled only by
 /// the GENCAN schedule (`src/pack/gencan/phases.rs`) and by `movebad`, which
@@ -203,7 +193,7 @@ impl PackState {
 /// # What the swap moves, and what it does not
 ///
 /// `fdist` accumulates the pairwise violation computed **unconditionally**
-/// from `radius_ini` (`src/objective.rs:292-300`, outside the `overlap`
+/// from `radius_ini` (the pair kernel's `rsum_ini`, outside the `overlap`
 /// branch), and `frest` comes from the restraint terms, which read `scale` /
 /// `scale2` but no radius. The radius swap therefore moves `f_total` alone —
 /// which is why the regression golden can pin this triple and be pinning it

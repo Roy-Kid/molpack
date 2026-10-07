@@ -1,4 +1,4 @@
-"""Engine entries (engine-entry-split): GencanPack / CbmcGrow 1:1 bindings."""
+"""Engines : GencanPack / CbmcGrow 1:1 bindings."""
 
 from __future__ import annotations
 
@@ -139,7 +139,7 @@ class TestCbmcGrowSurface:
 
 class TestEngineErrorPaths:
     def test_empty_targets_list_raises(self):
-        packer = molpack.GencanPack().with_progress(False).with_seed(1)
+        packer = molpack.GencanPack().with_seed(1)
         with pytest.raises(molpack.NoTargetsError):
             packer.run([], max_loops=10)
 
@@ -159,7 +159,6 @@ class TestEngineErrorPaths:
         target = molpack.Target(frame, 1)
         packer = (
             molpack.GencanPack()
-            .with_progress(False)
             .with_seed(1)
             .with_periodic_box((0.0, 0.0, 0.0), (0.0, 10.0, 10.0))
         )

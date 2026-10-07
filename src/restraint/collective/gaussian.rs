@@ -9,7 +9,7 @@ use molrs::op::vec3::normalize;
 
 use super::engine::probit;
 use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg};
-use super::{GroupCtx, Restraint};
+use super::{GroupEvaluation, Restraint};
 
 /// Gaussian target quantile `q(p) = μ + σ·Φ⁻¹(p)`.
 #[inline]
@@ -25,7 +25,7 @@ fn gaussian_quantile(p: F, mu: F, sigma: F) -> F {
 /// Gaussian distribution `𝒩(μ, σ²)` — i.e. pack the copies into a **slab** of
 /// centre `μ` and width `σ` along the plane normal.
 ///
-/// `strength` (`λ`) scales the squared-Wasserstein penalty; the [`GroupCtx`] is
+/// `strength` (`λ`) scales the squared-Wasserstein penalty; the [`GroupEvaluation`] is
 /// accepted for trait symmetry but unused (the target is fixed, not annealed
 /// with the radius schedule).
 #[derive(Debug, Clone)]
@@ -63,7 +63,7 @@ impl GaussianPlane {
 }
 
 impl Restraint for GaussianPlane {
-    fn f(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>) -> F {
+    fn f(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>) -> F {
         plane_match_f(
             coords,
             &self.normal,
@@ -73,7 +73,7 @@ impl Restraint for GaussianPlane {
         )
     }
 
-    fn fg(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
+    fn fg(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>, grads: &mut [[F; 3]]) -> F {
         plane_match_fg(
             coords,
             &self.normal,
@@ -133,11 +133,11 @@ impl GaussianPoint {
 }
 
 impl Restraint for GaussianPoint {
-    fn f(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>) -> F {
+    fn f(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>) -> F {
         point_match_f(coords, &self.center, self.strength, self.quantile())
     }
 
-    fn fg(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
+    fn fg(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>, grads: &mut [[F; 3]]) -> F {
         point_match_fg(coords, &self.center, self.strength, self.quantile(), grads)
     }
 
@@ -148,7 +148,7 @@ impl Restraint for GaussianPoint {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_fixtures::{assert_fd_grad, ctx_free, free_box, rng_uniform};
+    use super::super::test_fixtures::{assert_fd_grad, free_box, free_evaluation, rng_uniform};
 
     #[test]
     fn a_distribution_target_is_not_a_bound() {
@@ -201,7 +201,7 @@ mod tests {
         let coords: Vec<[F; 3]> = (0..n)
             .map(|k| [0.0, 0.0, 20.0 + 5.0 * probit((k as F + 0.5) / n as F)])
             .collect();
-        assert!(r.f(&coords, ctx_free(&free_box(1_000.0), 1)) < 1e-6);
+        assert!(r.f(&coords, free_evaluation(&free_box(1_000.0), 1)) < 1e-6);
     }
 
     #[test]
@@ -213,8 +213,8 @@ mod tests {
             .collect();
         let clump: Vec<[F; 3]> = (0..n).map(|_| [30.0, 0.0, 0.0]).collect();
         assert!(
-            r.f(&on_shell, ctx_free(&free_box(1_000.0), 1))
-                < r.f(&clump, ctx_free(&free_box(1_000.0), 1))
+            r.f(&on_shell, free_evaluation(&free_box(1_000.0), 1))
+                < r.f(&clump, free_evaluation(&free_box(1_000.0), 1))
         );
     }
 }

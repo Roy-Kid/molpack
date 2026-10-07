@@ -51,7 +51,7 @@ def ion_statistics(pos: np.ndarray) -> dict[str, float]:
     }
 
 
-def pack(*, separate: bool, show_progress: bool) -> tuple[np.ndarray, object]:
+def pack(*, separate: bool, log_level: str) -> tuple[np.ndarray, object]:
     """Pack water + ions once. ``separate`` toggles the one line under test."""
     water_frame = molrs.io.read_pdb(str(DATA / "water.pdb"))
     ion_frame = molrs.io.read_pdb(str(DATA / "sodium.pdb"))
@@ -66,7 +66,7 @@ def pack(*, separate: bool, show_progress: bool) -> tuple[np.ndarray, object]:
     if separate:
         ions = ions.with_restraint(molpack.SelfSeparation(D_MIN))
 
-    packer = molpack.GencanPack().with_progress(show_progress).with_seed(SEED)
+    packer = molpack.GencanPack().with_log_level(log_level).with_seed(SEED)
     result = packer.run([water, ions], max_loops=200)
 
     # Targets are packed in the order given, so the ions are the trailing
@@ -106,17 +106,21 @@ def write(name: str, result) -> None:
 
 
 def main() -> None:
-    show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
+    log_level = (
+        "progress"
+        if os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
+        else "quiet"
+    )
     print(
         f"{N_ION} ions + {N_WATER} water in a "
         f"{BOX_HI[0]:.0f} A box, asking for {D_MIN:.0f} A between ions"
     )
 
-    free_pos, free_result = pack(separate=False, show_progress=show_progress)
+    free_pos, free_result = pack(separate=False, log_level=log_level)
     report("without SelfSeparation (the control)", free_pos, free_result)
     write("pack_ion_dispersion_free", free_result)
 
-    kept_pos, kept_result = pack(separate=True, show_progress=show_progress)
+    kept_pos, kept_result = pack(separate=True, log_level=log_level)
     report(f"with SelfSeparation({D_MIN})", kept_pos, kept_result)
     write("pack_ion_dispersion_separated", kept_result)
 

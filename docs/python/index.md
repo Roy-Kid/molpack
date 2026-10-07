@@ -51,7 +51,7 @@ print(f"packed {result.frame['atoms'].n_rows} atoms")
   </a>
   <a href="guide/growth/">
     <strong>Chain growth</strong>
-    <em>Dense polymer melts via the CbmcGrow entry.</em>
+    <em>Dense polymer melts via the CbmcGrow engine.</em>
   </a>
   <a href="guide/periodic-boundaries/">
     <strong>Periodic boundaries</strong>

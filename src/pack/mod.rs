@@ -3,7 +3,7 @@
 //!
 //! One family, peer of [`crate::grow`]. Placement calls the bad-move
 //! heuristic, and both call [`restmol`]; the heuristic does not call
-//! placement. Shared grid installation lives in [`crate::context::grid`],
+//! placement. Shared grid installation lives in [`crate::system::grid`],
 //! so growth does not depend on this family.
 //! Euler rotations and the optional in-loop optimizer stay outside: both
 //! serve more than this driver.

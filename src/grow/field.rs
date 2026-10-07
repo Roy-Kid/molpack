@@ -5,7 +5,7 @@
 //!
 //! Two radii per pair. Inside the **hard core**
 //! (`(radius_i + radius_j) * hard_scale`, radii in Å, `hard_scale`
-//! dimensionless with `1.0` = the same contact distance the GENCAN entry
+//! dimensionless with `1.0` = the same contact distance the GENCAN engine
 //! enforces) a placement is refused outright, so a completed structure
 //! satisfies molpack's own overlap criterion by construction rather than by
 //! convergence. Between the scaled hard core and the **soft shell** (an extra
@@ -105,7 +105,7 @@ impl OverlapField {
             ndarray::array![origin[0], origin[1], origin[2]],
             pbc,
         )
-        .expect("the growth box is validated by the entry before a field is built");
+        .expect("the growth box is validated by the engine before a field is built");
         let mic = bx.mic();
         let grid = CellGrid::for_cutoff(&bx, cutoff);
         let ncells = grid.n_cells();

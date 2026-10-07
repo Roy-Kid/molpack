@@ -89,7 +89,7 @@ packed = result.frame
 | `frest` | Restraint violations |
 | `frame` | Topology-complete packed `molrs.core.Frame` |
 
-`GencanPack` is the rigid-body entry; `CbmcGrow` grows chains instead. Each
+`GencanPack` is the rigid-body engine; `CbmcGrow` grows chains instead. Each
 engine runs once — `run()` consumes it, so build a new one per pack. If you
 only want the frame, take `result.frame`.
 
