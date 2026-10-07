@@ -11,8 +11,8 @@
 //! | `Pipeline`       | [`PyPipeline`]       | Entries composed as stages         |
 //! | `State`     | [`PyState`]     | Frame + diagnostics from `run()`   |
 //! | `IntraResidual`  | [`PyIntraResidual`]  | Nested scored/exempted intra mins  |
-//! | `StepInfo`       | [`PyStepInfo`]       | Read-only snapshot for callbacks    |
-//! | `StageInfo`      | [`PyStageInfo`]      | Which stage a callback came from   |
+//! | `StepReport`       | [`PyStepReport`]       | Read-only snapshot for callbacks    |
+//! | `StageProgress`      | [`PyStageProgress`]      | Which stage a callback came from   |
 //! | `StepContext`    | [`PyStepContext`]    | Callback-scoped live-context guard |
 //!
 //! Geometric restraints are molrs region objects (`molrs.core.Sphere`, `Cuboid`,
@@ -29,7 +29,7 @@
 
 use pyo3::prelude::*;
 
-mod interop;
+mod molrs_capsule;
 
 mod errors;
 use errors::register_errors;
@@ -41,7 +41,7 @@ use restraint::{
 };
 
 mod callback;
-use callback::{PyStageInfo, PyStepContext, PyStepInfo};
+use callback::{PyStageProgress, PyStepContext, PyStepReport};
 
 mod grow;
 
@@ -65,7 +65,7 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // with the installed molcrafts-molrs wheel, so both must embed the same
     // molrs minor line (minor-line = ABI version). A mismatch must be a clear
     // ImportError here, not a capsule ValueError (or worse) mid-run.
-    interop::check_abi(m.py())?;
+    molrs_capsule::check_abi(m.py())?;
 
     m.add_class::<PyAngle>()?;
     m.add_class::<PyAxis>()?;
@@ -89,8 +89,8 @@ fn molpack(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPipeline>()?;
     m.add_class::<PyState>()?;
     m.add_class::<PyIntraResidual>()?;
-    m.add_class::<PyStepInfo>()?;
-    m.add_class::<PyStageInfo>()?;
+    m.add_class::<PyStepReport>()?;
+    m.add_class::<PyStageProgress>()?;
     m.add_class::<PyStepContext>()?;
 
     m.add_class::<PyScriptJob>()?;

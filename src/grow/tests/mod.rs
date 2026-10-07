@@ -283,7 +283,7 @@ fn sampled_c_n(prior: &TorsionPrior, n_beads: usize, bond: F, n_samples: usize, 
 // hard-core violation. `frest == 0.0` thereby becomes a CONSTRUCTIVE
 // guarantee, exactly like `fdist == 0.0` — strict zero, not `< precision`.
 //
-// Task 7 contract (spec Design §4g): one `StepInfo` per growth round with
+// Task 7 contract (spec Design §4g): one `StepReport` per growth round with
 // `loop_idx` = round number (1-based, strictly increasing), `radscale` =
 // current hard-core scale (1.0 while undegraded), and fdist/frest = 0.0
 // while the hard-rejection regime holds. `Callback::should_stop() == true`
@@ -348,4 +348,4 @@ fn cube_tris(lo: [F; 3], hi: [F; 3]) -> Vec<[[F; 3]; 3]> {
     ]
 }
 
-// ── Section: the stage identity carried on StepInfo ───────────────────────
+// ── Section: the stage identity carried on StepReport ───────────────────────

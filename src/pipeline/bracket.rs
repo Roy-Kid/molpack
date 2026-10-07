@@ -11,7 +11,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::callback::{Callback, LammpsLogCallback, PhaseInfo, PhaseReport, StageInfo, StepInfo};
+use crate::callback::{
+    Callback, LammpsLogCallback, PhaseProgress, PhaseReport, StageProgress, StepReport,
+};
 use crate::context::PackContext;
 use crate::pack_space::ResolvedSpace;
 use crate::stage::{Budget, Stage, StageOutcome};
@@ -20,7 +22,7 @@ use super::EngineSetup;
 
 /// The slot the pipeline writes its current stage identity into, shared with
 /// every wrapped callback.
-pub(super) type StagePosition = Arc<Mutex<StageInfo>>;
+pub(super) type StagePosition = Arc<Mutex<StageProgress>>;
 
 /// Wrap each callback so its `on_step` events carry the run's stage position.
 ///
@@ -67,7 +69,7 @@ pub(super) fn open_bracket(
             space.cell.clone(),
         )));
     }
-    let position = Arc::new(Mutex::new(StageInfo {
+    let position = Arc::new(Mutex::new(StageProgress {
         index: 0,
         total: stages.len(),
         name: stages[0].name(),
@@ -87,7 +89,7 @@ pub(super) fn close_bracket(callbacks: &mut [Box<dyn Callback>], sys: &PackConte
     }
 }
 
-/// Stamps the pipeline's current stage position onto every `StepInfo` a
+/// Stamps the pipeline's current stage position onto every `StepReport` a
 /// stage emits.
 ///
 /// A stage reports `index: 0, total: 1` — true standalone, and all it can
@@ -109,14 +111,14 @@ impl Callback for StageTagger {
         self.inner.on_initialized(sys);
     }
 
-    fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
-        let mut tagged: StepInfo = info.clone();
+    fn on_step(&mut self, step: &StepReport, sys: &PackContext) {
+        let mut tagged: StepReport = step.clone();
         tagged.stage = *self.position.lock().expect("stage position mutex");
         self.inner.on_step(&tagged, sys);
     }
 
-    fn on_phase_start(&mut self, info: &PhaseInfo) {
-        self.inner.on_phase_start(info);
+    fn on_phase_start(&mut self, phase: &PhaseProgress) {
+        self.inner.on_phase_start(phase);
     }
 
     fn on_finish(&mut self, sys: &PackContext) {
@@ -127,15 +129,15 @@ impl Callback for StageTagger {
         self.inner.should_stop()
     }
 
-    fn on_phase_end(&mut self, info: &PhaseInfo, report: &PhaseReport) {
-        self.inner.on_phase_end(info, report);
+    fn on_phase_end(&mut self, phase: &PhaseProgress, report: &PhaseReport) {
+        self.inner.on_phase_end(phase, report);
     }
 
-    fn on_stage_start(&mut self, info: &StageInfo) {
-        self.inner.on_stage_start(info);
+    fn on_stage_start(&mut self, stage: &StageProgress) {
+        self.inner.on_stage_start(stage);
     }
 
-    fn on_stage_end(&mut self, info: &StageInfo, outcome: &StageOutcome, sys: &PackContext) {
-        self.inner.on_stage_end(info, outcome, sys);
+    fn on_stage_end(&mut self, stage: &StageProgress, outcome: &StageOutcome, sys: &PackContext) {
+        self.inner.on_stage_end(stage, outcome, sys);
     }
 }

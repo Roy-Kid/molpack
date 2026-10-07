@@ -142,7 +142,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
   （独立复算，不走 `fdist`——`fdist` 按 Packmol 语义只计分子间对，本 spec 不改这把尺）。
 - **裁决**：末级在 scale = 1.0 上由共享 objective 评估 `fdist / frest`；本阶段不自报。
 - **确定性**：同 seed 逐位一致；退火扰动走 `stream(seed, atom, rung, 0, SALT_ANNEAL)`。
-- **单调性不作保证**：级间 fdist 可能上升（半径变大）；记录每级 fdist 到 `StepInfo`
+- **单调性不作保证**：级间 fdist 可能上升（半径变大）；记录每级 fdist 到 `StepReport`
   （`loop_idx` = 级号，`radscale` = 当前 scale）。
 
 ## Test plan
@@ -175,7 +175,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
 - `docs/python/guide/growth.md`「Reading softened」与「Melt density」两节改写：push-off
   的推荐做法是 `DgRefine`，`GencanPack::with_restart` 保留为刚性构象体系的工具；
   新节「Refining with distance geometry」（阶梯、刚度、手性数据、残余的含义）。
-- `docs/python/api-reference.md`、`docs/rust/callbacks-optimizers.md`（`StepInfo` 在精修阶段
+- `docs/python/api-reference.md`、`docs/rust/callbacks-optimizers.md`（`StepReport` 在精修阶段
   的字段语义）。
 - `src/refine/mod.rs` 模块文档：与 Crippen–Havel / ETKDG 的关系、与 Auhl push-off 的关系、
   "无力场"边界（刚度是相对 overlap 项的无量纲几何参数）。

@@ -308,7 +308,7 @@ objective evolution.
 ```no_run
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use molpack::{Callback, PackContext, StepInfo};
+use molpack::{Callback, PackContext, StepReport};
 use molrs::op::F;
 
 pub struct CsvCallback { writer: BufWriter<File> }
@@ -322,15 +322,15 @@ impl CsvCallback {
 }
 
 impl Callback for CsvCallback {
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
         let _ = writeln!(
             self.writer,
             "{},{},{},{},{}",
-            info.phase.phase,
-            info.loop_idx,
-            info.fdist,
-            info.frest,
-            info.improvement_pct,
+            step.phase.phase,
+            step.loop_idx,
+            step.fdist,
+            step.frest,
+            step.improvement_pct,
         );
     }
 }
@@ -348,7 +348,7 @@ Callback notes:
 - **`should_stop` is polled every iteration.** Return `true` to break
   the outer loop early. Useful for time budgets or custom convergence
   criteria.
-- **Every step names its stage.** `info.stage` is a `StageInfo` — `index`,
+- **Every step names its stage.** `step.stage` is a `StageProgress` — `index`,
   `total`, `name` — identifying the packing algorithm that emitted the step
   (stages are the subject of the `Stage` section below). A run driven by one
   engine entry has one stage, so it reports `index = 0` and `total = 1`. The
@@ -951,8 +951,8 @@ let result = Pipeline::new()
 
 Stage notes:
 
-- **Pick your own name.** `name()` is what every `StepInfo` a callback sees
-  carries in `info.stage.name`; keep it short and lowercase — the three
+- **Pick your own name.** `name()` is what every `StepReport` a callback sees
+  carries in `step.stage.name`; keep it short and lowercase — the three
   built-ins report `"gencan"`, `"growth"` and `"lattice"`.
 - **`targets` is the one source of chemistry.** They are the same objects the
   caller passed to `run`, so a stage never needs a second copy of the molecule

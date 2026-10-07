@@ -41,7 +41,7 @@ use rand::rngs::SmallRng;
 use crate::AtomRestraint;
 use crate::PackError;
 use crate::Target;
-use crate::callback::{Callback, PhaseInfo, StageInfo, StepInfo};
+use crate::callback::{Callback, PhaseProgress, StageProgress, StepReport};
 use crate::context::pack_state::evaluate_unscaled;
 use crate::context::{PackState, Placed};
 use crate::grow::GrowError;
@@ -90,7 +90,7 @@ pub struct LatticeStage {
 
 impl LatticeStage {
     /// The name this stage reports, in one place: [`Stage::name`] returns it
-    /// and `StepInfo.stage.name` is filled from it, so the two cannot drift
+    /// and `StepReport.stage.name` is filled from it, so the two cannot drift
     /// apart.
     pub(crate) const NAME: &'static str = "lattice";
 
@@ -302,18 +302,18 @@ impl Stage for LatticeStage {
                 done.push(base);
                 mol += 1;
 
-                // Callback visibility: one StepInfo per finished chain.
-                let info = StepInfo {
+                // Callback visibility: one StepReport per finished chain.
+                let step = StepReport {
                     // One stage per run until the pipeline lands; the name
                     // comes from the stage type so the two cannot drift.
-                    stage: StageInfo {
+                    stage: StageProgress {
                         index: 0,
                         total: 1,
                         name: Self::NAME,
                     },
                     loop_idx: mol,
                     max_loops: budget.max_loops,
-                    phase: PhaseInfo {
+                    phase: PhaseProgress {
                         phase: 0,
                         total_phases: 1,
                         molecule_type: None,
@@ -326,7 +326,7 @@ impl Stage for LatticeStage {
                     precision: budget.precision,
                 };
                 for h in callbacks.iter_mut() {
-                    h.on_step(&info, sys);
+                    h.on_step(&step, sys);
                 }
                 if callbacks.iter().any(|h| h.should_stop()) {
                     aborted = true;

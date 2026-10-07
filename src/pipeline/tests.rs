@@ -16,7 +16,7 @@
 //!    with no targets, are named errors rather than no-op runs.
 //! 2. **One verdict, one bracket.** `on_start` / `on_finish` bracket the
 //!    whole run, `on_stage_start` / `on_stage_end` bracket each stage,
-//!    `StepInfo.stage` is monotone with `total` = the stage count, and
+//!    `StepReport.stage` is monotone with `total` = the stage count, and
 //!    `degraded` sums across stages.
 //! 3. **A combinator is a stage.** `Repeat` runs its body `n` times;
 //!    `Guarded` reruns the same stage or fails by name and never switches
@@ -27,13 +27,13 @@
 //! filesystem, no network, no third-party oracle.
 
 use crate::EngineSetup;
-use crate::callback::{PhaseInfo, StageInfo};
+use crate::callback::{PhaseProgress, StageProgress};
 use crate::grow::TorsionPrior;
 use crate::test_fixtures::{chain_frame, inside_box};
 use crate::{
     Budget, Callback, CbmcGrow, GencanPack, Guarantees, Invariant, Layers, OnViolation,
     PackContext, PackEngine, PackError, PackSettings, PackState, Pipeline, Placed, Requires,
-    RestraintsSatisfied, Stage, StageFactory, StageOutcome, State, StepInfo, Target, Until,
+    RestraintsSatisfied, Stage, StageFactory, StageOutcome, State, StepReport, Target, Until,
     Violation,
 };
 use molrs::op::F;
@@ -174,7 +174,7 @@ struct Tally {
     stage_starts: Vec<(usize, usize, &'static str)>,
     /// `(index, total, name)` of every `on_stage_end`.
     stage_ends: Vec<(usize, usize, &'static str)>,
-    /// `StepInfo.stage` of every `on_step`.
+    /// `StepReport.stage` of every `on_step`.
     steps: Vec<(usize, usize, &'static str)>,
 }
 
@@ -198,28 +198,28 @@ impl Callback for Observer {
         self.tally.lock().expect("observer mutex").starts += 1;
     }
 
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
         self.tally.lock().expect("observer mutex").steps.push((
-            info.stage.index,
-            info.stage.total,
-            info.stage.name,
+            step.stage.index,
+            step.stage.total,
+            step.stage.name,
         ));
     }
 
-    fn on_stage_start(&mut self, info: &StageInfo) {
+    fn on_stage_start(&mut self, stage: &StageProgress) {
         self.tally
             .lock()
             .expect("observer mutex")
             .stage_starts
-            .push((info.index, info.total, info.name));
+            .push((stage.index, stage.total, stage.name));
     }
 
-    fn on_stage_end(&mut self, info: &StageInfo, _outcome: &StageOutcome, _sys: &PackContext) {
-        self.tally
-            .lock()
-            .expect("observer mutex")
-            .stage_ends
-            .push((info.index, info.total, info.name));
+    fn on_stage_end(&mut self, stage: &StageProgress, _outcome: &StageOutcome, _sys: &PackContext) {
+        self.tally.lock().expect("observer mutex").stage_ends.push((
+            stage.index,
+            stage.total,
+            stage.name,
+        ));
     }
 
     fn on_finish(&mut self, _sys: &PackContext) {
@@ -564,19 +564,19 @@ fn pipeline_two_stages_sum_degraded_and_count_hooks() {
         assert_eq!(
             names,
             vec!["growth", "gencan"],
-            "{label}: each StageInfo carries the stage's own name()"
+            "{label}: each StageProgress carries the stage's own name()"
         );
         for &(index, total, _) in t.stage_starts.iter().chain(t.stage_ends.iter()) {
             assert_eq!(
                 total, 2,
-                "{label}: StageInfo.total is the number of stages in the run"
+                "{label}: StageProgress.total is the number of stages in the run"
             );
             assert!(index < total, "{label}: stage index {index} out of range");
         }
         for &(index, total, _) in t.steps.iter() {
             assert_eq!(
                 total, 2,
-                "{label}: every StepInfo reports the pipeline's stage count"
+                "{label}: every StepReport reports the pipeline's stage count"
             );
             assert!(index < total);
         }
@@ -584,7 +584,7 @@ fn pipeline_two_stages_sum_degraded_and_count_hooks() {
             let (prev, cur) = (pair[0].0, pair[1].0);
             assert!(
                 cur >= prev,
-                "{label}: StepInfo.stage.index went {prev} → {cur} — the \
+                "{label}: StepReport.stage.index went {prev} → {cur} — the \
                  stage index is monotone along a linear pipeline"
             );
         }
@@ -639,7 +639,7 @@ impl Stage for CountingStage {
         self.runs.fetch_add(1, Ordering::Relaxed);
         if self.signal {
             for h in callbacks.iter_mut() {
-                h.on_phase_start(&PhaseInfo {
+                h.on_phase_start(&PhaseProgress {
                     phase: 0,
                     total_phases: 1,
                     molecule_type: None,
@@ -740,9 +740,9 @@ struct StopOnFirstSignal {
 }
 
 impl Callback for StopOnFirstSignal {
-    fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {}
+    fn on_step(&mut self, _step: &StepReport, _sys: &PackContext) {}
 
-    fn on_phase_start(&mut self, _info: &PhaseInfo) {
+    fn on_phase_start(&mut self, _phase: &PhaseProgress) {
         self.signals.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -949,7 +949,7 @@ fn guarded_rerun_max_two_reruns_twice_then_unconverged() {
 }
 
 /// A combinator is ONE stage to the run around it: the inner passes never
-/// move `StepInfo.stage.index` or `total`, and the names a callback sees are
+/// move `StepReport.stage.index` or `total`, and the names a callback sees are
 /// the top-level ones. Nesting a combinator inside another does not change
 /// that (ac-006).
 #[test]
@@ -984,7 +984,7 @@ fn combinators_keep_stage_index_monotone() {
             let (prev, cur) = (pair[0].0, pair[1].0);
             assert!(
                 cur >= prev,
-                "StepInfo.stage.index went {prev} → {cur} — a repeated body \
+                "StepReport.stage.index went {prev} → {cur} — a repeated body \
                  must not walk the index backwards"
             );
         }

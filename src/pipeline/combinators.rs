@@ -4,7 +4,7 @@
 //! branch for either — chain check, callback bracket and verdict read them as
 //! they read `GencanPack` — and each stays *one* stage to the run around it:
 //! `name()` is `"repeat"` or `"guarded"`, inner passes never touch the index
-//! and total the pipeline stamps on `StepInfo.stage`, and the inner stages
+//! and total the pipeline stamps on `StepReport.stage`, and the inner stages
 //! get no `on_stage_start` / `on_stage_end` of their own.
 //!
 //! What a combinator owes its body is the rest of `mod.rs`'s per-stage

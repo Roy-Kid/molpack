@@ -24,7 +24,7 @@ molpack = { path = "..", package = "molcrafts-molpack", version = "0.4.0" }
 molrs = { path = "../../molrs/molrs", package = "molcrafts-molrs", version = "0.16", default-features = false }
 # Stable FFI handle layer. molpack resolves molrs Python objects (`Frame`,
 # regions) to `molrs_ffi::{FrameRef, RegionRef}` capsules (zero-copy) instead
-# of dict marshalling — see `src/interop.rs`. Minor-line pinned (minor-line =
+# of dict marshalling — see `src/molrs_capsule.rs`. Minor-line pinned (minor-line =
 # ABI version): the handle types and the `molrs::core::Frame` they lend share one
 # layout within a minor line, independent of features (path+version managed
 # manually, per project convention).

@@ -149,7 +149,7 @@ impl PackState {
 /// field this function writes before it returns.
 ///
 /// Returns `(f_total, fdist, frest)` from that evaluation — the triple the
-/// GENCAN main loop feeds to `flast` / `fimp` / callback `StepInfo`, and the
+/// GENCAN main loop feeds to `flast` / `fimp` / callback `StepReport`, and the
 /// one both growth drivers turn into their `StageOutcome`. On return
 /// `ctx.fdist` / `ctx.frest` / `ctx.fdist_atom` / `ctx.frest_atom` still
 /// describe this unscaled evaluation — that radius-dependent inner state is

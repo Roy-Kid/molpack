@@ -13,7 +13,7 @@ else can:
    (`ac-004`); an empty pipeline is a named ``ValueError``, not a no-op; an
    object that is not a registered entry is a ``TypeError`` that *lists* the
    entries (`ac-002`'s user-visible face).
-3. **Callbacks can see which stage they are in.** ``StepInfo.stage`` carries the
+3. **Callbacks can see which stage they are in.** ``StepReport.stage`` carries the
    ``index`` / ``total`` / ``name`` triple, in a pipeline and in a bare preset
    run alike (`ac-003`).
 4. **The numbers do not drift.** Two hard-coded goldens (`ac-007`).
@@ -38,7 +38,7 @@ from molpack import (
     LatticeGrow,
     Pipeline,
     StepContext,
-    StepInfo,
+    StepReport,
     Target,
     TorsionPrior,
 )
@@ -120,7 +120,7 @@ class _Counter:
     def on_start(self, ntotat: int, ntotmol: int) -> None:
         self.starts += 1
 
-    def on_step(self, info: StepInfo, ctx: StepContext) -> None:
+    def on_step(self, step: StepReport, ctx: StepContext) -> None:
         self.steps += 1
 
     def on_finish(self) -> None:
@@ -128,13 +128,13 @@ class _Counter:
 
 
 class _StageRecorder:
-    """Records the ``StepInfo.stage`` triple of every step it sees."""
+    """Records the ``StepReport.stage`` triple of every step it sees."""
 
     def __init__(self) -> None:
         self.seen: list[tuple[int, int, str]] = []
 
-    def on_step(self, info: StepInfo, ctx: StepContext) -> None:
-        self.seen.append((info.stage.index, info.stage.total, info.stage.name))
+    def on_step(self, step: StepReport, ctx: StepContext) -> None:
+        self.seen.append((step.stage.index, step.stage.total, step.stage.name))
 
 
 # ── happy path ────────────────────────────────────────────────────────────
@@ -176,7 +176,7 @@ def test_pipeline_adopts_stage_callbacks() -> None:
 
 
 def test_step_info_exposes_stage_triple() -> None:
-    """``StepInfo.stage`` names the emitting stage, in both spellings."""
+    """``StepReport.stage`` names the emitting stage, in both spellings."""
     recorder = _StageRecorder()
     Pipeline([CbmcGrow(TorsionPrior.uniform()), GencanPack()]).with_callback(
         recorder
@@ -247,7 +247,7 @@ def test_pipeline_rejects_unknown_stage_with_registry_message() -> None:
     The list comes from the binding's one stage registry, so a fourth entry
     shows up here without anyone editing an error string.
     """
-    # Deliberate misuse: the stub's `StageEntry` union is closed on purpose, so
+    # Deliberate misuse: the stub's `Stage` union is closed on purpose, so
     # the checker is right and the runtime TypeError is the contract under test.
     with pytest.raises(TypeError) as from_ctor:
         Pipeline([object()])  # ty: ignore[invalid-argument-type]

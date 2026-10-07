@@ -85,7 +85,7 @@
 //! | Stage seam (Rust-only) | [`Stage`], [`Requires`], [`Guarantees`], [`StageOutcome`], [`Budget`], [`PackState`], [`Placed`] |
 //! | Per-atom restraints | [`AtomRestraint`], [`RegionRestraint`] (over [`molrs::core::Region`]), [`CellRestraint`] |
 //! | Group restraints | [`Restraint`], [`GroupCtx`], [`GaussianPlane`], [`GaussianPoint`], [`ExponentialPlane`], [`ExponentialPoint`], [`TabulatedPlane`], [`TabulatedPoint`], [`SelfSeparation`] |
-//! | Callback trait + built-ins | [`Callback`], [`LammpsLogCallback`], [`ProgressCallback`], [`EarlyStopCallback`], `XyzTrajectoryCallback` (feature `io`), [`StepInfo`], [`StageInfo`], [`PhaseInfo`], [`PhaseReport`] |
+//! | Callback trait + built-ins | [`Callback`], [`LammpsLogCallback`], [`ProgressCallback`], [`EarlyStopCallback`], `XyzTrajectoryCallback` (feature `io`), [`StepReport`], [`StageProgress`], [`PhaseProgress`], [`PhaseReport`] |
 //! | Objective | [`Objective`], [`EvalMode`], [`EvalOutput`] |
 //! | In-loop optimizer | [`OptimizeSelect`], [`OptimizeMode`], [`GencanPack::with_optimizer`], [`TorsionMcOptimizer`], over molrs's [`molrs::optimize::Optimizer`] trait |
 //! | Errors | [`PackError`] |
@@ -137,8 +137,8 @@ mod test_fixtures;
 #[cfg(feature = "io")]
 pub use callback::XyzTrajectoryCallback;
 pub use callback::{
-    Callback, EarlyStopCallback, LammpsLogCallback, LogLevel, PhaseInfo, PhaseReport,
-    ProgressCallback, StageInfo, StepInfo,
+    Callback, EarlyStopCallback, LammpsLogCallback, LogLevel, PhaseProgress, PhaseReport,
+    ProgressCallback, StageProgress, StepReport,
 };
 pub use context::pack_context::PackContext;
 pub use context::pack_state::{PackState, Placed};

@@ -6,7 +6,7 @@
 //! The constructor accepts a real ``molrs.core.Frame`` (``molpy.Frame`` is the same
 //! class) carrying an ``"atoms"`` block. The frame crosses the
 //! language boundary **zero-copy** through its stable-FFI capsule (see
-//! [`crate::interop`]) — no dict marshalling, no consumer-side data type. The
+//! [`crate::molrs_capsule`]) — no dict marshalling, no consumer-side data type. The
 //! full frame, with topology, is handed to the core [`Target`], which owns the
 //! assembly.
 //!
@@ -25,7 +25,7 @@ use pyo3::types::PyAny;
 /// Shared by [`PyTarget::new`] and the script loader. The frame is converted to
 /// a Rust [`molrs::core::Frame`] so the core retains its full topology.
 pub(crate) fn target_from_frame(frame: &Bound<'_, PyAny>, count: usize) -> PyResult<Target> {
-    let rust_frame = crate::interop::owned_frame_from_py(frame)?;
+    let rust_frame = crate::molrs_capsule::owned_frame_from_py(frame)?;
     // `Target::new` panics on a frame without float coordinates; answer that
     // here as a Python error instead of a panic across the boundary.
     rust_frame

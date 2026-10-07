@@ -49,21 +49,21 @@ not mutate engine state.
 Implement the `Callback` trait when you need structured events from a run:
 
 ```rust
-use molpack::{Callback, PackContext, StepInfo};
+use molpack::{Callback, PackContext, StepReport};
 
 #[derive(Debug)]
 struct WatchFdist;
 
 impl Callback for WatchFdist {
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
-        eprintln!("phase={} loop={} fdist={}", info.phase.phase, info.loop_idx, info.fdist);
+    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
+        eprintln!("phase={} loop={} fdist={}", step.phase.phase, step.loop_idx, step.fdist);
     }
 }
 ```
 
-Every `StepInfo` also says which packing algorithm emitted it. A **stage** is
+Every `StepReport` also says which packing algorithm emitted it. A **stage** is
 one algorithm behind molpack's packing seam (the `Stage` trait), and
-`info.stage` is a `StageInfo` carrying `index` (0-based position of the stage
+`step.stage` is a `StageProgress` carrying `index` (0-based position of the stage
 in the run), `total` (how many stages the run has), and `name` (the stage's own
 name, `"gencan"` for the rigid-body path). One engine entry drives one stage,
 so a plain `GencanPack` or `CbmcGrow` run reports `index = 0`, `total = 1`.
@@ -72,22 +72,22 @@ Two further callbacks bracket a whole stage, the way `on_phase_start` /
 `on_phase_end` bracket one GENCAN phase:
 
 ```rust
-use molpack::StageInfo;
-use molpack::{Callback, PackContext, StageOutcome, StepInfo};
+use molpack::StageProgress;
+use molpack::{Callback, PackContext, StageOutcome, StepReport};
 
 struct WatchStages;
 
 impl Callback for WatchStages {
-    fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {}
+    fn on_step(&mut self, _step: &StepReport, _sys: &PackContext) {}
 
-    fn on_stage_start(&mut self, info: &StageInfo) {
-        eprintln!("stage {}/{} ({}) starting", info.index + 1, info.total, info.name);
+    fn on_stage_start(&mut self, stage: &StageProgress) {
+        eprintln!("stage {}/{} ({}) starting", stage.index + 1, stage.total, stage.name);
     }
 
-    fn on_stage_end(&mut self, info: &StageInfo, outcome: &StageOutcome, sys: &PackContext) {
+    fn on_stage_end(&mut self, stage: &StageProgress, outcome: &StageOutcome, sys: &PackContext) {
         eprintln!(
             "stage {} converged={} degraded={} fdist={} frest={}",
-            info.name, outcome.converged, outcome.degraded, sys.fdist, sys.frest,
+            stage.name, outcome.converged, outcome.degraded, sys.fdist, sys.frest,
         );
     }
 }

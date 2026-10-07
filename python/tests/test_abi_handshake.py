@@ -2,7 +2,7 @@
 
 Minor-line = ABI version: molpack exchanges ``molrs_ffi`` handle capsules with
 the installed ``molcrafts-molrs`` wheel, so both must embed the same molrs
-``major.minor``. The import-time handshake (``interop::check_abi``) already
+``major.minor``. The import-time handshake (``molrs_capsule::check_abi``) already
 passed — this module is importable — so these tests pin the *other* gate: a
 capsule from a different minor line (spelled with the pre-0.14 unversioned
 name here) must be rejected at resolve time, cleanly.

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from .molpack import StepInfo
+from .molpack import StepReport
 
 
 @runtime_checkable
@@ -28,7 +28,7 @@ class Callback(Protocol):
     nothing. Atoms the growth solver has not placed yet sit at their
     sentinel positions.
 
-    ``info.stage`` says which stage of the run the callback came from
+    ``step.stage`` says which stage of the run the callback came from
     (``index`` / ``total`` / ``name``); a single-stage run reports
     ``index == 0`` and ``total == 1``. A callback attached to an entry that
     is then handed to a ``Pipeline`` as a stage is *adopted* by the
@@ -37,7 +37,7 @@ class Callback(Protocol):
 
     def on_start(self, ntotat: int, ntotmol: int) -> None: ...
 
-    def on_step(self, info: StepInfo, ctx) -> bool | None: ...
+    def on_step(self, step: StepReport, ctx) -> bool | None: ...
 
     def on_finish(self) -> None: ...
 

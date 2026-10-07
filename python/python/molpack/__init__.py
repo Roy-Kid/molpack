@@ -25,10 +25,10 @@ from .molpack import (
     Pipeline,
     ScriptJob,
     SelfSeparation,
-    StageInfo,
+    StageProgress,
     State,
     StepContext,
-    StepInfo,
+    StepReport,
     TabulatedPlane,
     TabulatedPoint,
     Target,
@@ -40,7 +40,7 @@ from .molpack import (
 )
 
 # The installed wheel's version. The molrs compatibility check is the
-# extension's import-time ABI handshake (`interop::check_abi`), which runs
+# extension's import-time ABI handshake (`molrs_capsule::check_abi`), which runs
 # when `.molpack` is imported above.
 version: str = _dist_version("molcrafts-molpack")
 
@@ -69,8 +69,8 @@ __all__ = [
     "Pipeline",
     "State",
     "IntraResidual",
-    "StepInfo",
-    "StageInfo",
+    "StepReport",
+    "StageProgress",
     "StepContext",
     # Script loader (`.inp` input)
     "ScriptJob",

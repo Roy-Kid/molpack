@@ -246,11 +246,11 @@ lifecycle points:
 pub trait Callback: Send {
     fn on_start        (&mut self, ntotat, ntotmol)       {}
     fn on_initialized  (&mut self, sys: &PackContext)     {}
-    fn on_step         (&mut self, info: &StepInfo, sys);   // required
-    fn on_phase_start  (&mut self, info: &PhaseInfo)      {}
-    fn on_phase_end    (&mut self, info, report: &PhaseReport) {}
-    fn on_stage_start  (&mut self, info: &StageInfo)      {}
-    fn on_stage_end    (&mut self, info: &StageInfo, outcome: &StageOutcome, sys) {}
+    fn on_step         (&mut self, step: &StepReport, sys);   // required
+    fn on_phase_start  (&mut self, phase: &PhaseProgress)  {}
+    fn on_phase_end    (&mut self, phase, report: &PhaseReport) {}
+    fn on_stage_start  (&mut self, stage: &StageProgress)  {}
+    fn on_stage_end    (&mut self, stage: &StageProgress, outcome: &StageOutcome, sys) {}
     fn on_finish       (&mut self, sys: &PackContext)     {}
     fn should_stop     (&self) -> bool                    { false }
 }
@@ -270,8 +270,8 @@ writer).
 A **stage** is one packing algorithm behind the crate's packing seam — the
 [`Stage`](crate::Stage) trait, whose implementors are `GencanStage`,
 `GrowStage` and `LatticeStage`; [`extending`](crate::extending) walks through
-writing one. Every `StepInfo` names the stage that emitted it in `info.stage`,
-a [`StageInfo`](crate::StageInfo) with three fields: `index` (0-based
+writing one. Every `StepReport` names the stage that emitted it in `step.stage`,
+a [`StageProgress`](crate::StageProgress) with three fields: `index` (0-based
 position of the stage in the run), `total` (how many stages the run has), and
 `name` (the stage's own [`Stage::name`](crate::Stage::name), e.g. `"gencan"`).
 A run driven by one engine entry has one stage, so it reports `index = 0` and
@@ -320,7 +320,7 @@ The run's verdict — `fdist`, `frest`, `converged` — is read off the shared
 assembled from what the individual stages self-reported: the same one-ruler
 rule the Stage explanation describes for a single algorithm, applied across a
 whole chain. `on_stage_start` / `on_stage_end` bracket each stage in turn, so a
-callback watching a two-stage run sees both brackets fire and `info.stage.index`
+callback watching a two-stage run sees both brackets fire and `step.stage.index`
 move from `0` to `1` partway through, while `on_start` / `on_finish` still
 bracket only the run as a whole, once.
 

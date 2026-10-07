@@ -42,8 +42,8 @@ class CallLog:
         self.ntotat = ntotat
         self.ntotmol = ntotmol
 
-    def on_step(self, info: molpack.StepInfo, ctx: molpack.StepContext) -> None:
-        self.steps.append((info.phase, info.loop_idx, info.fdist, info.frest))
+    def on_step(self, step: molpack.StepReport, ctx: molpack.StepContext) -> None:
+        self.steps.append((step.phase, step.loop_idx, step.fdist, step.frest))
 
     def on_finish(self) -> None:
         self.finished = True
@@ -71,19 +71,21 @@ class TestCallbackHooks:
         captured: list[tuple] = []
 
         class Grabber:
-            def on_step(self, info: molpack.StepInfo, ctx: molpack.StepContext) -> None:
+            def on_step(
+                self, step: molpack.StepReport, ctx: molpack.StepContext
+            ) -> None:
                 captured.append(
                     (
-                        info.loop_idx,
-                        info.max_loops,
-                        info.phase,
-                        info.total_phases,
-                        info.molecule_type,
-                        info.fdist,
-                        info.frest,
-                        info.improvement_pct,
-                        info.radscale,
-                        info.precision,
+                        step.loop_idx,
+                        step.max_loops,
+                        step.phase,
+                        step.total_phases,
+                        step.molecule_type,
+                        step.fdist,
+                        step.frest,
+                        step.improvement_pct,
+                        step.radscale,
+                        step.precision,
                     )
                 )
 
@@ -122,8 +124,10 @@ class TestCallbackEarlyStop:
         steps_seen: list[int] = []
 
         class StopAfterOne:
-            def on_step(self, info: molpack.StepInfo, ctx: molpack.StepContext) -> bool:
-                steps_seen.append(info.loop_idx)
+            def on_step(
+                self, step: molpack.StepReport, ctx: molpack.StepContext
+            ) -> bool:
+                steps_seen.append(step.loop_idx)
                 return True  # request immediate stop
 
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
@@ -150,8 +154,10 @@ class TestGencanEarlyStop:
         seen: dict[int, int] = {}
 
         class Count:
-            def on_step(self, info: molpack.StepInfo, ctx: molpack.StepContext) -> None:
-                seen[info.phase] = seen.get(info.phase, 0) + 1
+            def on_step(
+                self, step: molpack.StepReport, ctx: molpack.StepContext
+            ) -> None:
+                seen[step.phase] = seen.get(step.phase, 0) + 1
 
         target = molpack.Target(_two_water_frame(), count=20).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [3.0, 3.0, 3.0])
@@ -176,7 +182,9 @@ class TestGencanEarlyStop:
 class TestCallbackErrorPropagation:
     def test_exception_in_on_step_is_reraised(self):
         class Explodes:
-            def on_step(self, info: molpack.StepInfo, ctx: molpack.StepContext) -> None:
+            def on_step(
+                self, step: molpack.StepReport, ctx: molpack.StepContext
+            ) -> None:
                 raise ValueError("boom from callback")
 
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
@@ -220,8 +228,10 @@ class TestStepContext:
         frames: list = []
 
         class Recorder:
-            def on_step(self, info: molpack.StepInfo, ctx: molpack.StepContext) -> None:
-                frames.append((info.loop_idx, ctx.positions))
+            def on_step(
+                self, step: molpack.StepReport, ctx: molpack.StepContext
+            ) -> None:
+                frames.append((step.loop_idx, ctx.positions))
 
         target = molpack.Target(_two_water_frame(), count=30).with_restraint(
             molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
@@ -241,7 +251,9 @@ class TestStepContext:
         stashed: list = []
 
         class Stasher:
-            def on_step(self, info: molpack.StepInfo, ctx: molpack.StepContext) -> None:
+            def on_step(
+                self, step: molpack.StepReport, ctx: molpack.StepContext
+            ) -> None:
                 if not stashed:
                     assert ctx.natoms == 8
                 stashed.append(ctx)

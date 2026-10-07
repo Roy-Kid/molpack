@@ -115,6 +115,6 @@ rustc. CI caches that dir and runs sccache.
 **molrs ABI line** (the rule itself is law P10): molpack exchanges `molrs_ffi`
 handle capsules with the installed `molcrafts-molrs` wheel; both must embed the
 same molrs **major.minor** (minor line = ABI version — see molrs
-`docs/interop.md`). Gates: `interop::check_abi` (`molrs._ffi_abi_token()`, at
+`docs/interop.md`). Gates: `molrs_capsule::check_abi` (`molrs._ffi_abi_token()`, at
 extension init — the one import-time version check) and the versioned capsule
 names (`molrs.FrameRef/<line>`, `molrs.RegionRef/<line>`) from `molrs_ffi::abi`.

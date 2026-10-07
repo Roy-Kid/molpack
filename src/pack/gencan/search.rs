@@ -83,7 +83,7 @@ pub fn gencan(
 
     // Compute projected gradient
     let (mut gpsupn, mut gpeucn2, mut gieucn2, mut nind) =
-        projected_gradient_info(n, x, g.as_slice(), l, u, ind);
+        projected_gradient_norms(n, x, g.as_slice(), l, u, ind);
 
     // CG epsilon scaling
     let (acgeps, bcgeps) = gp_ieee_signal(gpsupn, cgepsf, cgepsi, cggpnf);
@@ -414,8 +414,8 @@ pub fn gencan(
             sty += ds * dy;
         }
 
-        // Update projected gradient info (reuses pre-allocated ind buffer)
-        let pg = projected_gradient_info(n, x, g.as_slice(), l, u, ind);
+        // Update the projected-gradient norms (reuses pre-allocated ind buffer)
+        let pg = projected_gradient_norms(n, x, g.as_slice(), l, u, ind);
         gpsupn = pg.0;
         gpeucn2 = pg.1;
         gieucn2 = pg.2;
@@ -433,9 +433,9 @@ pub fn gencan(
     }
 }
 
-/// Compute projected gradient info into pre-allocated `ind` buffer.
+/// Compute the projected-gradient norms, filling the pre-allocated `ind` buffer.
 /// Returns (gpsupn, gpeucn2, gieucn2, nind).
-fn projected_gradient_info(
+fn projected_gradient_norms(
     n: usize,
     x: &[F],
     g: &[F],

@@ -151,8 +151,8 @@ fn finish_run(
         return Err(py_err);
     }
     let mut result = result.map_err(pack_error_to_pyerr)?;
-    crate::interop::stamp_box_bounds(&mut result.frame, periodic_box)?;
-    let py_frame = crate::interop::frame_to_py(py, &result.frame)?.unbind();
+    crate::molrs_capsule::stamp_box_bounds(&mut result.frame, periodic_box)?;
+    let py_frame = crate::molrs_capsule::frame_to_py(py, &result.frame)?.unbind();
     Ok(PyState {
         inner: result,
         py_frame,
@@ -250,7 +250,7 @@ macro_rules! packing_method_pymethods {
                 c.shared.log_frequency = Some(n.max(1));
                 c
             }
-            /// Append a Python callback. See :class:`StepInfo` for the
+            /// Append a Python callback. See :class:`StepReport` for the
             /// callback contract.
             fn with_callback(&self, callback: Py<pyo3::types::PyAny>) -> Self {
                 let mut c = self.clone_fields();

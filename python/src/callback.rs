@@ -6,11 +6,11 @@
 //! ```python
 //! class MyHook:
 //!     def on_start(self, ntotat: int, ntotmol: int) -> None: ...
-//!     def on_step(self, info: StepInfo, ctx: StepContext) -> bool | None: ...  # True → stop
+//!     def on_step(self, step: StepReport, ctx: StepContext) -> bool | None: ...  # True → stop
 //!     def on_finish(self) -> None: ...
 //! ```
 //!
-//! `on_step` mirrors the Rust trait's `(info, sys)` pair: `ctx` is a borrow
+//! `on_step` mirrors the Rust trait's `(step, sys)` pair: `ctx` is a borrow
 //! guard over the live packing context, valid only for the duration of the
 //! callback (accessing it afterwards raises `RuntimeError`). Its
 //! `positions` property materialises an owned `(ntotat, 3)` float64 NumPy
@@ -26,23 +26,23 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::errors::stash_err;
 use molpack::PackContext;
-use molpack::{Callback, StepInfo};
+use molpack::{Callback, StepReport};
 use molrs::op::F;
 use numpy::IntoPyArray;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
 // ============================================================================
-// PyStageInfo — which stage of the run a callback came from. Kept nested
-// (unlike `PhaseInfo`, flattened below) because a pipeline's stage identity
-// reads as one thing: `info.stage.index` / `.total` / `.name`.
+// PyStageProgress — which stage of the run a callback came from. Kept nested
+// (unlike `PhaseProgress`, flattened below) because a pipeline's stage identity
+// reads as one thing: `step.stage.index` / `.total` / `.name`.
 // ============================================================================
 
 /// Identifies the stage a callback comes from. A single-stage run reports
 /// ``index == 0`` and ``total == 1``.
-#[pyclass(name = "StageInfo", frozen, skip_from_py_object)]
+#[pyclass(name = "StageProgress", frozen, skip_from_py_object)]
 #[derive(Clone)]
-pub struct PyStageInfo {
+pub struct PyStageProgress {
     /// 0-based index of this stage in the run.
     #[pyo3(get)]
     pub index: usize,
@@ -55,10 +55,10 @@ pub struct PyStageInfo {
 }
 
 #[pymethods]
-impl PyStageInfo {
+impl PyStageProgress {
     fn __repr__(&self) -> String {
         format!(
-            "StageInfo({}, {}/{})",
+            "StageProgress({}, {}/{})",
             self.name,
             self.index + 1,
             self.total
@@ -67,15 +67,15 @@ impl PyStageInfo {
 }
 
 // ============================================================================
-// PyStepInfo — read-only snapshot passed to `on_step`. Flattens Rust's
-// nested `PhaseInfo` for Python ergonomics.
+// PyStepReport — read-only snapshot passed to `on_step`. Flattens Rust's
+// nested `PhaseProgress` for Python ergonomics.
 // ============================================================================
 
-#[pyclass(name = "StepInfo", frozen)]
-pub struct PyStepInfo {
+#[pyclass(name = "StepReport", frozen)]
+pub struct PyStepReport {
     /// Which stage of the run this callback came from.
     #[pyo3(get)]
-    pub stage: PyStageInfo,
+    pub stage: PyStageProgress,
     /// 0-based outer-loop iteration within the current phase.
     #[pyo3(get)]
     pub loop_idx: usize,
@@ -113,34 +113,34 @@ pub struct PyStepInfo {
     pub precision: F,
 }
 
-impl PyStepInfo {
-    fn from_info(info: &StepInfo) -> Self {
+impl PyStepReport {
+    fn from_report(step: &StepReport) -> Self {
         Self {
-            stage: PyStageInfo {
-                index: info.stage.index,
-                total: info.stage.total,
-                name: info.stage.name.to_owned(),
+            stage: PyStageProgress {
+                index: step.stage.index,
+                total: step.stage.total,
+                name: step.stage.name.to_owned(),
             },
-            loop_idx: info.loop_idx,
-            max_loops: info.max_loops,
-            phase: info.phase.phase,
-            total_phases: info.phase.total_phases,
-            molecule_type: info.phase.molecule_type,
-            fdist: info.fdist,
-            frest: info.frest,
-            f: info.f,
-            improvement_pct: info.improvement_pct,
-            radscale: info.radscale,
-            precision: info.precision,
+            loop_idx: step.loop_idx,
+            max_loops: step.max_loops,
+            phase: step.phase.phase,
+            total_phases: step.phase.total_phases,
+            molecule_type: step.phase.molecule_type,
+            fdist: step.fdist,
+            frest: step.frest,
+            f: step.f,
+            improvement_pct: step.improvement_pct,
+            radscale: step.radscale,
+            precision: step.precision,
         }
     }
 }
 
 #[pymethods]
-impl PyStepInfo {
+impl PyStepReport {
     fn __repr__(&self) -> String {
         format!(
-            "StepInfo(stage={} {}/{}, phase={}/{}, loop={}/{}, \
+            "StepReport(stage={} {}/{}, phase={}/{}, loop={}/{}, \
              fdist={:.3e}, frest={:.3e}, improvement={:.2}%)",
             self.stage.name,
             self.stage.index + 1,
@@ -254,10 +254,10 @@ impl Callback for PythonCallback {
         });
     }
 
-    fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, sys: &PackContext) {
         let Some(m) = &self.on_step else { return };
         Python::attach(|py| {
-            let py_info = match Py::new(py, PyStepInfo::from_info(info)) {
+            let py_step = match Py::new(py, PyStepReport::from_report(step)) {
                 Ok(v) => v,
                 Err(e) => {
                     self.fail(e);
@@ -276,7 +276,7 @@ impl Callback for PythonCallback {
                     return;
                 }
             };
-            let ret = m.bind(py).call1((py_info, guard.clone_ref(py)));
+            let ret = m.bind(py).call1((py_step, guard.clone_ref(py)));
             // Stale-handle invalidation: the borrow of `sys` ends here.
             guard.borrow(py).sys.set(None);
             match ret {

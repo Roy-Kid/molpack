@@ -15,7 +15,7 @@ use crate::eval::EvalMode;
 // by this stage: growth evaluates the same way, and the pipeline layer must
 // not import `gencan/`.
 use super::small_floor;
-use crate::callback::{Callback, PhaseInfo, PhaseReport, StageInfo, StepInfo};
+use crate::callback::{Callback, PhaseProgress, PhaseReport, StageProgress, StepReport};
 use crate::context::pack_state::evaluate_unscaled;
 use crate::optimizer::{ResolvedBinding, run_optimizer_bindings};
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
@@ -58,7 +58,7 @@ pub fn run_iteration(
     max_loops: usize,
     is_all: bool,
     phase: usize,
-    phase_info: PhaseInfo,
+    phase_progress: PhaseProgress,
     precision: F,
     disable_movebad: bool,
     movebad_cfg: &MoveBadConfig,
@@ -117,17 +117,17 @@ pub fn run_iteration(
     *fimp_prev = fimp;
 
     if !callbacks.is_empty() {
-        let step_info = StepInfo {
+        let step = StepReport {
             // One stage per run until the pipeline lands; the name is the
             // stage's own, taken from the stage type so the two cannot drift.
-            stage: StageInfo {
+            stage: StageProgress {
                 index: 0,
                 total: 1,
                 name: super::STAGE_NAME,
             },
             loop_idx,
             max_loops,
-            phase: phase_info,
+            phase: phase_progress,
             fdist,
             frest,
             f: fx_unscaled,
@@ -136,7 +136,7 @@ pub fn run_iteration(
             precision,
         };
         for h in callbacks.iter_mut() {
-            h.on_step(&step_info, sys);
+            h.on_step(&step, sys);
         }
 
         if callbacks.iter().any(|h| h.should_stop()) {
@@ -229,7 +229,7 @@ pub fn run_phase(
 ) -> PhaseOutcome {
     let is_all = phase == ntype;
 
-    let phase_info = PhaseInfo {
+    let phase_progress = PhaseProgress {
         phase,
         total_phases,
         molecule_type: if is_all { None } else { Some(phase) },
@@ -237,7 +237,7 @@ pub fn run_phase(
 
     // Reset callback state between phases (e.g. EarlyStopCallback stall counter)
     for h in callbacks.iter_mut() {
-        h.on_phase_start(&phase_info);
+        h.on_phase_start(&phase_progress);
     }
 
     // Set comptype for this phase
@@ -288,7 +288,7 @@ pub fn run_phase(
             converged: true,
         };
         for h in callbacks.iter_mut() {
-            h.on_phase_end(&phase_info, &report);
+            h.on_phase_end(&phase_progress, &report);
         }
         if !is_all {
             swap.save_type(phase, &xwork, sys);
@@ -316,7 +316,7 @@ pub fn run_phase(
             max_loops,
             is_all,
             phase,
-            phase_info,
+            phase_progress,
             precision,
             disable_movebad,
             movebad_cfg,
@@ -350,7 +350,7 @@ pub fn run_phase(
         converged: converged_inner,
     };
     for h in callbacks.iter_mut() {
-        h.on_phase_end(&phase_info, &report);
+        h.on_phase_end(&phase_progress, &report);
     }
 
     // After per-type phase: save results + restore full x

@@ -11,7 +11,7 @@ use molrs::op::F;
 use crate::Invariant;
 use crate::PackError;
 use crate::Target;
-use crate::callback::{Callback, StageInfo};
+use crate::callback::{Callback, StageProgress};
 use crate::context::build::{ContextKnobs, build_context};
 use crate::context::{PackState, Placed};
 use crate::pack_space::{ResolvedSpace, broadcast_global_restraints, resolve_pack_space};
@@ -93,11 +93,11 @@ pub use engine::{EngineSetup, PackEngine, StageFactory};
 ///
 /// # Where the stage index comes from
 ///
-/// A [`Stage`] builds its `StepInfo` with `StageInfo { index: 0, total: 1 }`
+/// A [`Stage`] builds its `StepReport` with `StageProgress { index: 0, total: 1 }`
 /// — correct when it is the whole run, and all it can know otherwise. The
 /// **position** is the pipeline's fact, so the pipeline owns it: every
 /// callback is wrapped once by `bracket.rs`'s private `StageTagger`, which
-/// overwrites `StepInfo.stage` from a shared slot updated before each stage;
+/// overwrites `StepReport.stage` from a shared slot updated before each stage;
 /// neither [`Stage`] nor [`PackState`] learns where it sits.
 ///
 /// # Combinators: what they cost, and how to take them back out
@@ -322,22 +322,22 @@ impl Pipeline {
         let mut last_converged = false;
         for (index, stage) in stages.iter_mut().enumerate() {
             state.invalidate_geometry_cache();
-            let info = StageInfo {
+            let progress = StageProgress {
                 index,
                 total,
                 name: stage.name(),
             };
             for h in callbacks.iter_mut() {
-                h.on_stage_start(&info);
+                h.on_stage_start(&progress);
             }
-            *position.lock().expect("stage position mutex") = info;
+            *position.lock().expect("stage position mutex") = progress;
 
             let outcome = stage.run(state, setup.targets, budget, callbacks)?;
             // By what the stage declared, never by inspecting the result.
             state.set_placed(stage.guarantees().placed);
 
             for h in callbacks.iter_mut() {
-                h.on_stage_end(&info, &outcome, state.ctx());
+                h.on_stage_end(&progress, &outcome, state.ctx());
             }
             degraded += outcome.degraded;
             last_converged = outcome.converged;

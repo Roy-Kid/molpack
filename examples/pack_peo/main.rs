@@ -26,7 +26,7 @@
 
 use molpack::grow::{GrowConfig, TorsionPrior};
 use molpack::{
-    Callback, CbmcGrow, GencanPack, LatticeGrow, PackContext, PackEngine, State, StepInfo, Target,
+    Callback, CbmcGrow, GencanPack, LatticeGrow, PackContext, PackEngine, State, StepReport, Target,
 };
 use molrs::core::Block;
 use molrs::core::Frame;
@@ -70,27 +70,27 @@ impl LadderCallback {
 }
 
 impl Callback for LadderCallback {
-    fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, sys: &PackContext) {
         {
             let mut s = self.state.lock().expect("ladder");
-            s.rounds = info.loop_idx;
-            if info.radscale < 1.0 && s.first_drop.is_none() {
-                s.first_drop = Some((info.loop_idx, info.radscale));
+            s.rounds = step.loop_idx;
+            if step.radscale < 1.0 && s.first_drop.is_none() {
+                s.first_drop = Some((step.loop_idx, step.radscale));
             }
-            if info.radscale < s.rad_min {
-                s.rad_min = info.radscale;
+            if step.radscale < s.rad_min {
+                s.rad_min = step.radscale;
             }
-            if info.loop_idx == 1 || info.loop_idx.is_multiple_of(200) {
+            if step.loop_idx == 1 || step.loop_idx.is_multiple_of(200) {
                 eprintln!(
                     "    round {:>5}  radscale={:.3}  ({:.1}s)",
-                    info.loop_idx,
-                    info.radscale,
+                    step.loop_idx,
+                    step.radscale,
                     s.start.elapsed().as_secs_f64()
                 );
             }
         }
-        let every = if info.loop_idx < 100 { 1 } else { 20 };
-        if self.trace.is_some() && (info.loop_idx == 1 || info.loop_idx.is_multiple_of(every)) {
+        let every = if step.loop_idx < 100 { 1 } else { 20 };
+        if self.trace.is_some() && (step.loop_idx == 1 || step.loop_idx.is_multiple_of(every)) {
             let snap = placed_snapshot(sys);
             if let Some(w) = self.trace.as_mut() {
                 use std::io::Write;
@@ -104,7 +104,7 @@ impl Callback for LadderCallback {
                 let _ = writeln!(
                     w,
                     "{},{:.3},{},{:.4},{},{},{},{},{:.4},{:.4},{:.4e}",
-                    info.loop_idx,
+                    step.loop_idx,
                     elapsed,
                     snap.n_placed,
                     snap.frac,
@@ -114,7 +114,7 @@ impl Callback for LadderCallback {
                     snap.placed_max,
                     snap.min_inter,
                     snap.max_overlap,
-                    info.fdist
+                    step.fdist
                 );
             }
             self.state.lock().expect("ladder").last_hist = snap.per_chain;

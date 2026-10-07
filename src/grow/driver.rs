@@ -46,7 +46,7 @@ use molrs::op::F;
 
 use crate::PackError;
 use crate::Target;
-use crate::callback::{Callback, PhaseInfo, StageInfo, StepInfo};
+use crate::callback::{Callback, PhaseProgress, StageProgress, StepReport};
 use crate::context::pack_state::evaluate_unscaled;
 use crate::context::{PackState, Placed};
 use crate::grow::GrowError;
@@ -79,7 +79,7 @@ pub struct GrowStage {
 
 impl GrowStage {
     /// The name this stage reports, in one place: [`Stage::name`] returns it
-    /// and `StepInfo.stage.name` is filled from it, so the two cannot drift
+    /// and `StepReport.stage.name` is filled from it, so the two cannot drift
     /// apart.
     pub(crate) const NAME: &'static str = "growth";
 
@@ -409,7 +409,7 @@ impl Stage for GrowStage {
                 }
             }
 
-            // Callback visibility: one StepInfo per round. `radscale` carries
+            // Callback visibility: one StepReport per round. `radscale` carries
             // the current hard-core scale (softening is visible live);
             // fdist/frest are constructively 0 while growth holds its
             // guarantees, and `loop_idx` is the 1-based round number.
@@ -418,17 +418,17 @@ impl Stage for GrowStage {
                     sys.xcart[chain.base + a] = *p;
                 }
             }
-            let info = StepInfo {
+            let step = StepReport {
                 // One stage per run until the pipeline lands; the name comes
                 // from the stage type so the two cannot drift.
-                stage: StageInfo {
+                stage: StageProgress {
                     index: 0,
                     total: 1,
                     name: Self::NAME,
                 },
                 loop_idx: round as usize,
                 max_loops: budget.max_loops,
-                phase: PhaseInfo {
+                phase: PhaseProgress {
                     phase: 0,
                     total_phases: 1,
                     molecule_type: None,
@@ -443,7 +443,7 @@ impl Stage for GrowStage {
                 precision: budget.precision,
             };
             for h in callbacks.iter_mut() {
-                h.on_step(&info, sys);
+                h.on_step(&step, sys);
             }
             if callbacks.iter().any(|h| h.should_stop()) {
                 aborted = true;

@@ -75,7 +75,7 @@ use molrs::op::F;
 ///   [`Layers`](crate::Layers), owned by the module that reads it.
 pub trait Stage: Send {
     /// Short identifier for logs and reports. The same string a
-    /// [`StageInfo`](crate::StageInfo) carries to callbacks.
+    /// [`StageProgress`](crate::StageProgress) carries to callbacks.
     fn name(&self) -> &'static str;
 
     /// What the state must already hold for this stage to run.
@@ -229,10 +229,10 @@ mod tests {
     //! cargo test -p molcrafts-molpack --lib
     //! ```
 
-    use crate::StageInfo;
+    use crate::StageProgress;
     use crate::{
         Budget, Callback, Guarantees, PackContext, PackError, PackState, Placed, Requires, Stage,
-        StageOutcome, StepInfo, Target,
+        StageOutcome, StepReport, Target,
     };
 
     // ── the fake stage ─────────────────────────────────────────────────────────
@@ -310,7 +310,7 @@ mod tests {
     struct NoopCallback;
 
     impl Callback for NoopCallback {
-        fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {}
+        fn on_step(&mut self, _step: &StepReport, _sys: &PackContext) {}
     }
 
     /// The degenerate run state: an empty context and no free molecules.
@@ -433,24 +433,24 @@ mod tests {
 
     // ── 5. the stage identity a callback sees ───────────────────────────────────
 
-    /// `StageInfo` is a plain `Copy` struct like `PhaseInfo`: constructible by
+    /// `StageProgress` is a plain `Copy` struct like `PhaseProgress`: constructible by
     /// literal, three public fields, all readable. That literal is what lets a
     /// fake — here and in any downstream callback test — drive the two hooks
     /// without booting a pipeline.
     #[test]
     fn stage_info_is_a_literal_with_three_readable_fields() {
-        let info = StageInfo {
+        let stage = StageProgress {
             index: 0,
             total: 1,
             name: "alpha",
         };
 
         assert_eq!(
-            info.index, 0,
+            stage.index, 0,
             "the single stage of a one-stage run is index 0"
         );
-        assert_eq!(info.total, 1, "a one-stage run reports total 1");
-        assert_eq!(info.name, "alpha", "the name is the stage's own name()");
+        assert_eq!(stage.total, 1, "a one-stage run reports total 1");
+        assert_eq!(stage.name, "alpha", "the name is the stage's own name()");
     }
 
     // ── 6. the two default hooks ───────────────────────────────────────────────
@@ -465,7 +465,7 @@ mod tests {
         // so the hooks are pinned on the trait object and not only on the
         // concrete type.
         let mut callback: Box<dyn Callback> = Box::new(NoopCallback);
-        let info = StageInfo {
+        let stage = StageProgress {
             index: 0,
             total: 1,
             name: "alpha",
@@ -473,8 +473,8 @@ mod tests {
         let outcome = StageOutcome::new(false, 0);
         let sys = PackContext::new(0, 0, 0);
 
-        callback.on_stage_start(&info);
-        callback.on_stage_end(&info, &outcome, &sys);
+        callback.on_stage_start(&stage);
+        callback.on_stage_end(&stage, &outcome, &sys);
     }
 
     // ── 7. the re-entrancy contract ────────────────────────────────────────────

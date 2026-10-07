@@ -14,12 +14,12 @@ use crate::outcome::StageOutcome;
 
 /// Identifies the stage a callback comes from.
 ///
-/// The field shape follows [`PhaseInfo`] on purpose — a stage is to a run
+/// The field shape follows [`PhaseProgress`] on purpose — a stage is to a run
 /// what a phase is to the GENCAN loop, so the two identities read the same
-/// way — and, like `PhaseInfo`, this is a plain `Copy` record a caller may
+/// way — and, like `PhaseProgress`, this is a plain `Copy` record a caller may
 /// build by literal (a callback test drives the two stage hooks with one).
 #[derive(Debug, Clone, Copy)]
-pub struct StageInfo {
+pub struct StageProgress {
     /// 0-based index of this stage in the run.
     pub index: usize,
     /// How many stages the run has. A single-stage run reports `1`.
@@ -28,9 +28,10 @@ pub struct StageInfo {
     pub name: &'static str,
 }
 
-/// Information about the current packing phase.
+/// Where the GENCAN loop is in its phase sequence: phase `phase` of
+/// `total_phases`, and the molecule type that phase compacts.
 #[derive(Debug, Clone, Copy)]
-pub struct PhaseInfo {
+pub struct PhaseProgress {
     /// 0-based phase index.
     pub phase: usize,
     /// Total number of phases (ntype + 1).
@@ -94,9 +95,9 @@ impl LogLevel {
 /// crate emits — readers are unaffected.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct StepInfo {
+pub struct StepReport {
     /// The stage that emitted this step.
-    pub stage: StageInfo,
+    pub stage: StageProgress,
     /// GENCAN: 0-based loop iteration within the current phase. Growth: the
     /// 1-based index of the current round.
     pub loop_idx: usize,
@@ -104,8 +105,8 @@ pub struct StepInfo {
     /// verbatim — *not* the driver's round cap, which is `max_loops × (the
     /// longest chain's steps + 1)`; see the growth driver (`grow/driver.rs`).
     pub max_loops: usize,
-    /// Current phase info.
-    pub phase: PhaseInfo,
+    /// Where the run is in its phase sequence.
+    pub phase: PhaseProgress,
     /// Max inter-molecular overlap violation (0.0 = no overlap).
     pub fdist: F,
     /// Max constraint violation (0.0 = all constraints satisfied).
@@ -141,11 +142,11 @@ pub trait Callback: Send {
     fn on_initialized(&mut self, _sys: &PackContext) {}
 
     /// Called after each outer optimization loop iteration.
-    fn on_step(&mut self, info: &StepInfo, sys: &PackContext);
+    fn on_step(&mut self, step: &StepReport, sys: &PackContext);
 
     /// Called at the start of each packing phase (per-type and all-types).
     /// Allows stateful callbacks to reset between phases.
-    fn on_phase_start(&mut self, _info: &PhaseInfo) {}
+    fn on_phase_start(&mut self, _phase: &PhaseProgress) {}
 
     /// Called once after the packing loop finishes (convergence or max loops).
     fn on_finish(&mut self, _sys: &PackContext) {}
@@ -161,13 +162,13 @@ pub trait Callback: Send {
     /// setup / teardown hooks.
     ///
     /// [`on_phase_start`]: Callback::on_phase_start
-    fn on_phase_end(&mut self, _info: &PhaseInfo, _report: &PhaseReport) {}
+    fn on_phase_end(&mut self, _phase: &PhaseProgress, _report: &PhaseReport) {}
 
     /// Called before a stage starts, with the stage's identity.
     ///
     /// Default: no-op. The **call** belongs to the pipeline that chains
     /// stages; a single-stage run reports `index == 0` and `total == 1`.
-    fn on_stage_start(&mut self, _info: &StageInfo) {}
+    fn on_stage_start(&mut self, _stage: &StageProgress) {}
 
     /// Called after a stage returns, with its identity, its outcome, and the
     /// state it just finished writing.
@@ -181,7 +182,13 @@ pub trait Callback: Send {
     /// exactly as [`on_finish`] does. Same shape, same authority.
     ///
     /// [`on_finish`]: Callback::on_finish
-    fn on_stage_end(&mut self, _info: &StageInfo, _outcome: &StageOutcome, _sys: &PackContext) {}
+    fn on_stage_end(
+        &mut self,
+        _stage: &StageProgress,
+        _outcome: &StageOutcome,
+        _sys: &PackContext,
+    ) {
+    }
 }
 
 // ── XyzTrajectoryCallback ────────────────────────────────────────────────────────────────
@@ -271,9 +278,9 @@ impl XyzTrajectoryCallback {
 
 #[cfg(feature = "io")]
 impl Callback for XyzTrajectoryCallback {
-    fn on_step(&mut self, info: &StepInfo, sys: &PackContext) {
-        if info.loop_idx.is_multiple_of(self.every) {
-            self.write_snapshot(info.loop_idx, sys);
+    fn on_step(&mut self, step: &StepReport, sys: &PackContext) {
+        if step.loop_idx.is_multiple_of(self.every) {
+            self.write_snapshot(step.loop_idx, sys);
         }
     }
 }
@@ -315,23 +322,27 @@ impl Callback for ProgressCallback {
         );
     }
 
-    fn on_phase_start(&mut self, info: &PhaseInfo) {
-        let desc = match info.molecule_type {
+    fn on_phase_start(&mut self, phase: &PhaseProgress) {
+        let desc = match phase.molecule_type {
             Some(itype) => format!("Compacting type {itype}"),
             None => "Optimizing all types together".to_string(),
         };
-        eprintln!("  Phase [{}/{}] {desc}", info.phase + 1, info.total_phases,);
+        eprintln!(
+            "  Phase [{}/{}] {desc}",
+            phase.phase + 1,
+            phase.total_phases,
+        );
     }
 
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
+    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
         let elapsed = self.start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
         eprintln!(
             "    Step [{}/{}]  overlap: {:.2e}  constraints: {:.2e}  improved {:.1}%  ({:.1}s)",
-            info.loop_idx + 1,
-            info.max_loops,
-            info.fdist,
-            info.frest,
-            info.improvement_pct,
+            step.loop_idx + 1,
+            step.max_loops,
+            step.fdist,
+            step.frest,
+            step.improvement_pct,
             elapsed,
         );
     }
@@ -465,16 +476,16 @@ impl Callback for LammpsLogCallback {
         );
     }
 
-    fn on_phase_start(&mut self, info: &PhaseInfo) {
+    fn on_phase_start(&mut self, phase: &PhaseProgress) {
         if !self.level.is_enabled() {
             return;
         }
         self.phase_start = Some(Instant::now());
-        let desc = match info.molecule_type {
+        let desc = match phase.molecule_type {
             Some(itype) => format!("type {itype} compaction"),
             None => "all-type optimization".to_string(),
         };
-        eprintln!("Phase {}/{}: {desc}", info.phase + 1, info.total_phases);
+        eprintln!("Phase {}/{}: {desc}", phase.phase + 1, phase.total_phases);
         if self.level >= LogLevel::Progress {
             if self.level >= LogLevel::Verbose {
                 eprintln!(
@@ -490,40 +501,40 @@ impl Callback for LammpsLogCallback {
         }
     }
 
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
-        if self.level < LogLevel::Progress || !info.loop_idx.is_multiple_of(self.every) {
+    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
+        if self.level < LogLevel::Progress || !step.loop_idx.is_multiple_of(self.every) {
             return;
         }
         if self.level >= LogLevel::Verbose {
             eprintln!(
                 "{:>8} {:>14.6e} {:>14.6e} {:>10.3} {:>10.4} {:>10.3}",
-                info.loop_idx + 1,
-                info.fdist,
-                info.frest,
-                info.improvement_pct,
-                info.radscale,
+                step.loop_idx + 1,
+                step.fdist,
+                step.frest,
+                step.improvement_pct,
+                step.radscale,
                 self.elapsed(),
             );
         } else {
             eprintln!(
                 "{:>8} {:>14.6e} {:>14.6e} {:>10.3} {:>10.3}",
-                info.loop_idx + 1,
-                info.fdist,
-                info.frest,
-                info.improvement_pct,
+                step.loop_idx + 1,
+                step.fdist,
+                step.frest,
+                step.improvement_pct,
                 self.elapsed(),
             );
         }
     }
 
-    fn on_phase_end(&mut self, info: &PhaseInfo, report: &PhaseReport) {
+    fn on_phase_end(&mut self, phase: &PhaseProgress, report: &PhaseReport) {
         if !self.level.is_enabled() {
             return;
         }
         eprintln!(
             "Phase {}/{} summary: steps={} converged={} overlap={:.6e} restraints={:.6e} time={:.3}s",
-            info.phase + 1,
-            info.total_phases,
+            phase.phase + 1,
+            phase.total_phases,
             report.iterations,
             report.converged,
             report.fdist,
@@ -556,7 +567,7 @@ impl Callback for LammpsLogCallback {
 /// Packmol's own quantities (`app/packmol.f90`):
 ///
 /// * the objective is `fx`, the function value at the user's radii after each
-///   loop ([`StepInfo::f`]), and `bestf` is its per-phase minimum
+///   loop ([`StepReport::f`]), and `bestf` is its per-phase minimum
 ///   (packmol.f90:808, 869, 894);
 /// * improvement is Packmol's `fimprov`, `-100 * (fx - bestf) / bestf`, in
 ///   percent, with `bestf == 0` counting as 100 % (packmol.f90:844-845) —
@@ -655,7 +666,7 @@ impl Callback for EarlyStopCallback {
         self.reset();
     }
 
-    fn on_phase_start(&mut self, _info: &PhaseInfo) {
+    fn on_phase_start(&mut self, _phase: &PhaseProgress) {
         self.reset();
     }
 
@@ -663,12 +674,12 @@ impl Callback for EarlyStopCallback {
     /// `on_step` and ends the phase, then calls this. Clearing here keeps the
     /// flag from reaching the pipeline's between-stage check, where it would
     /// also cancel every later stage.
-    fn on_phase_end(&mut self, _info: &PhaseInfo, _report: &PhaseReport) {
+    fn on_phase_end(&mut self, _phase: &PhaseProgress, _report: &PhaseReport) {
         self.reset();
     }
 
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
-        self.observe(info.f, info.radscale);
+    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
+        self.observe(step.f, step.radscale);
     }
 
     fn should_stop(&self) -> bool {
@@ -738,12 +749,12 @@ mod tests {
     fn early_stop_resets_at_phase_end_and_never_fires_on_zero() {
         let mut h = EarlyStopCallback::default();
         assert_eq!(run(&mut h, &[3.0; 11], 1.0), Some(10));
-        let info = PhaseInfo {
+        let phase = PhaseProgress {
             phase: 0,
             total_phases: 1,
             molecule_type: None,
         };
-        h.on_phase_end(&info, &PhaseReport::default());
+        h.on_phase_end(&phase, &PhaseReport::default());
         assert!(!h.should_stop(), "the stop must not outlive its phase");
         assert_eq!(run(&mut h, &[0.0; 40], 1.0), None);
     }

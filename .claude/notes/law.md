@@ -491,7 +491,7 @@ installed `molcrafts-molrs` wheel; both must embed the same molrs
 
 - Never hard-code a capsule name; take the versioned names
   (`molrs.FrameRef/<line>`) from `molrs_ffi::abi`.
-- Never bypass the two gates: `interop::check_abi` (`molrs._ffi_abi_token()`
+- Never bypass the two gates: `molrs_capsule::check_abi` (`molrs._ffi_abi_token()`
   at extension init — the one import-time version check) and the versioned
   capsule names. Never add a second, metadata-based version check beside it.
 

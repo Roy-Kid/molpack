@@ -173,8 +173,8 @@ Callbacks receive structured events from the packing loop. See
 
 ```rust
 impl Callback for WatchFdist {
-    fn on_step(&mut self, info: &StepInfo, _sys: &PackContext) {
-        eprintln!("fdist={}", info.fdist);
+    fn on_step(&mut self, step: &StepReport, _sys: &PackContext) {
+        eprintln!("fdist={}", step.fdist);
     }
 }
 ```

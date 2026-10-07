@@ -107,12 +107,12 @@ impl SwapState {
 pub fn compute_dmax(sys: &mut PackContext) {
     sys.dmax = vec![0.0 as F; sys.ntype];
     for itype in 0..sys.ntype {
-        let idatom_base = sys.idfirst[itype];
+        let idfirst = sys.idfirst[itype];
         let na = sys.natoms[itype];
         for ia in 0..na {
             for ib in (ia + 1)..na {
-                let a = sys.coor[idatom_base + ia];
-                let b = sys.coor[idatom_base + ib];
+                let a = sys.coor[idfirst + ia];
+                let b = sys.coor[idfirst + ib];
                 let d2 = (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2);
                 if d2 > sys.dmax[itype] {
                     sys.dmax[itype] = d2;

@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use crate::errors::stash_err;
-use crate::interop::region_from_py;
+use crate::molrs_capsule::region_from_py;
 use molpack::RegionRestraint;
 use molpack::{
     AtomRestraint, ExponentialPlane, ExponentialPoint, GaussianPlane, GaussianPoint, GroupCtx,

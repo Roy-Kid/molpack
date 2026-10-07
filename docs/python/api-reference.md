@@ -5,7 +5,7 @@ Import surface:
 ```python
 from molpack import (
     # Core
-    Target, State, IntraResidual, StepInfo,
+    Target, State, IntraResidual, StepReport,
     # Engine entries — one per packing algorithm
     GencanPack, CbmcGrow, LatticeGrow,
     # Multi-stage composition
@@ -395,25 +395,25 @@ Geometric data only — never a force field. Static constructors:
 
 ---
 
-## `StepInfo`
+## `StepReport`
 
 Read-only snapshot passed to `Callback.on_step`.
 
 ```python
-info.loop_idx          # outer-loop iteration
-info.max_loops
-info.phase             # phase index
-info.total_phases
-info.molecule_type     # int | None
-info.fdist
-info.frest
-info.improvement_pct
-info.radscale
-info.precision
-info.stage             # StageInfo — which packing algorithm emitted this step
+step.loop_idx          # outer-loop iteration
+step.max_loops
+step.phase             # phase index
+step.total_phases
+step.molecule_type     # int | None
+step.fdist
+step.frest
+step.improvement_pct
+step.radscale
+step.precision
+step.stage             # StageProgress — which packing algorithm emitted this step
 ```
 
-### `StageInfo`
+### `StageProgress`
 
 Read-only triple identifying the stage a step belongs to. Load-bearing
 inside a multi-stage [`Pipeline`](#pipeline); present, with `index = 0` and
@@ -602,7 +602,7 @@ class Restraint(Protocol):
 ```python
 class Callback(Protocol):
     def on_start(self, ntotat: int, ntotmol: int) -> None: ...
-    def on_step(self, info: StepInfo) -> bool | None: ...   # True → stop
+    def on_step(self, step: StepReport) -> bool | None: ...   # True → stop
     def on_finish(self) -> None: ...
 ```
 

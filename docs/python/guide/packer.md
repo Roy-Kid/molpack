@@ -75,12 +75,12 @@ target.
 ## Callbacks
 
 Attach any object implementing some subset of `on_start(ntotat, ntotmol)`,
-`on_step(info) -> bool | None`, `on_finish()`:
+`on_step(step) -> bool | None`, `on_finish()`:
 
 ```python
 class MyCallback:
-    def on_step(self, info, ctx):
-        print(f"phase={info.phase} loop={info.loop_idx} fdist={info.fdist:.3f}")
+    def on_step(self, step, ctx):
+        print(f"phase={step.phase} loop={step.loop_idx} fdist={step.fdist:.3f}")
         return None  # or True to request early stop
 
 packer = packer.with_callback(MyCallback())
@@ -189,7 +189,7 @@ was attached to:
 class CountSteps:
     def __init__(self):
         self.count = 0
-    def on_step(self, info, ctx):
+    def on_step(self, step, ctx):
         self.count += 1
 
 counter = CountSteps()
@@ -197,24 +197,24 @@ result = Pipeline([GencanPack().with_callback(counter)]).run(targets, max_loops=
 assert counter.count > 0
 ```
 
-### `StepInfo.stage` names the running algorithm
+### `StepReport.stage` names the running algorithm
 
-Inside a multi-stage pipeline, `info.stage` on every `StepInfo` a callback
+Inside a multi-stage pipeline, `step.stage` on every `StepReport` a callback
 receives tells you which stage emitted that step:
 
 ```python
 class WatchStages:
-    def on_step(self, info, ctx):
-        s = info.stage
-        print(f"stage {s.index + 1}/{s.total} ({s.name}) loop={info.loop_idx}")
+    def on_step(self, step, ctx):
+        s = step.stage
+        print(f"stage {s.index + 1}/{s.total} ({s.name}) loop={step.loop_idx}")
         return None
 
 Pipeline([CbmcGrow(prior), GencanPack()]).with_callback(WatchStages()).run(targets, max_loops=200)
 ```
 
-`info.stage.index` is 0-based and increases monotonically over the run,
-`info.stage.total` is the number of stages the pipeline holds, and
-`info.stage.name` is the stage's own name — `"gencan"`, `"growth"`, or
+`step.stage.index` is 0-based and increases monotonically over the run,
+`step.stage.total` is the number of stages the pipeline holds, and
+`step.stage.name` is the stage's own name — `"gencan"`, `"growth"`, or
 `"lattice"`. A single-entry run (`GencanPack().run(...)` directly, with no
 `Pipeline`) reports the same triple, with `index = 0` and `total = 1`.
 
