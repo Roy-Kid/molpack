@@ -1,6 +1,6 @@
 [package]
 name = "molcrafts-molpack"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.91"
 authors = ["MolCrafts"]
@@ -28,7 +28,7 @@ name = "molpack"
 # the molpack feature below. molrs's own default is just `rayon`; it is
 # switched off here so parallelism stays molpack's own opt-in (the `rayon`
 # feature below) and wasm / Pyodide builds work.
-molrs = { path = "../molrs/molrs", version = "0.16", package = "molcrafts-molrs", default-features = false }
+molrs = { path = "../molrs/molrs", version = "0.17", package = "molcrafts-molrs", default-features = false }
 rand = "0.10"
 ndarray = "0.17"
 log = "0.4"
@@ -55,7 +55,7 @@ env_logger = "0.11"
 # The optimizer-seam tests bind a real molrs force-field optimizer (`Lbfgs` over
 # `ff::potential::soft::SoftSpec`); a caller does the same on its own molrs
 # dependency, so the library itself has no `ff` feature.
-molrs = { path = "../molrs/molrs", version = "0.16", package = "molcrafts-molrs", default-features = false, features = ["ff"] }
+molrs = { path = "../molrs/molrs", version = "0.17", package = "molcrafts-molrs", default-features = false, features = ["ff"] }
 
 [[bin]]
 name = "molpack"
