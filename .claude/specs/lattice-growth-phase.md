@@ -1,7 +1,7 @@
 # lattice-growth-phase — 金刚石格相生长
 
 状态:v1 LANDED 2026-09-01(线性主链全管线:守卫式 SAW → InternalTree 装饰 →
-共享 objective 如实评估 → `GenCanPack::with_restart` push-off 链)。仍属 DRAFT 的
+共享 objective 如实评估 → `GencanPack::with_restart` push-off 链)。仍属 DRAFT 的
 部分:分支模板(named-reject 占位)、格上 MC 修复(`with_repair_sweeps` 未落地)、
 统计验收全套(内距曲线 / P₂ / 20 种子矩阵)。原型与基准:
 `~/work/molpack-bench/diamond_saw.py`,slurm array 1871323。
@@ -63,13 +63,13 @@
 方法枚举)已随拆分删除,不再存在。
 
 **Rust**
-- 入口 `LatticeGrow`(`src/grow/lattice/entry.rs`,`PackEngine` 的实现之一)。
+- 入口 `LatticeGrow`(`src/grow/lattice/lattice_grow.rs`,`PackEngine` 的实现之一)。
 - `LatticeConfig`(新叶子 `src/grow/lattice/config.rs`,只 import `prior` + molrs):`new(torsion_prior: TorsionPrior)`(强制,无默认——同 `GrowConfig` 的先验条款)、`with_repair_sweeps(n: usize)`(格上 MC 修复扫数,默认待标定)、`with_occupancy_guard(bool)`(近邻位点排斥开关,默认 on)。
 - `LatticeStage`(`src/grow/lattice/mod.rs`),实现 `Stage`(`src/stage.rs`);`grow::lattice::SawSite` 等类型域内命名(避免与 `region.rs` 的 cell/lattice 概念混淆)。
 - 拒绝错误:`GrowError::NonTetrahedralTemplate`(模板键图含非四面体主链节点时)。
 
 **Python**
-- 入口类 `LatticeGrow`(`python/src/entry.rs` 的 `PyLatticeGrow`);`.pyi` 与 `_protocols` 同步。
+- 入口类 `LatticeGrow`(`python/src/packing_methods.rs` 的 `PyLatticeGrow`);`.pyi` 与 `_protocols` 同步。
 
 **CLI**:无(.inp 不新增关键字;spec principle:配置面最小)。
 
@@ -90,7 +90,7 @@
 
 ## Test plan
 
-- 属主模块内单测(原计划的集成测试层 `tests/` 已于 2026-09-20 删除;已落地覆盖:`src/grow/lattice/saw.rs::{t_steps_are_tetrahedral, grow_walk_k1_sites_are_neighbours, grow_walk_recoils_out_of_dead_ends, forced_zigzag_embeds_a_star, walk_skips_blocked_half_space}`、`src/grow/lattice/decorate.rs::analyze_backbone_*` / `decorate_chain_seats_every_backbone_atom_when_rooted_at_hydrogen`、`src/grow/tests/entry.rs::{lattice_grow_rejects_degree_gt_4, lattice_grow_empty_region_is_named, lattice_stage_requires_none_guarantees_all}`;下列统计项仍属 DRAFT):亚格宇称/近邻规则单元测试;SAW 有效性(自回避 + 键角恒 109.47°);占据记账(复用 `field_empty_cell_bookkeeping` 模式);同种子逐位确定性;稀释 C_n 统计;修复后 φ0.23 内距曲线;装饰几何逐位核对;`NonTetrahedralTemplate` / `RingTemplate` 拒绝;**分支模板全链路**(格上分叉生长 + 子树 recoil + 装饰往返,复用 `branched_parts()` 几何)。
+- 属主模块内单测(原计划的集成测试层 `tests/` 已于 2026-09-20 删除;已落地覆盖:`src/grow/lattice/saw.rs::{t_steps_are_tetrahedral, grow_walk_k1_sites_are_neighbours, grow_walk_recoils_out_of_dead_ends, forced_zigzag_embeds_a_star, walk_skips_blocked_half_space}`、`src/grow/lattice/decorate.rs::analyze_backbone_*` / `decorate_chain_seats_every_backbone_atom_when_rooted_at_hydrogen`、`src/grow/tests/refusals.rs::{lattice_grow_rejects_degree_gt_4, lattice_grow_empty_region_is_named, lattice_stage_requires_none_guarantees_all}`;下列统计项仍属 DRAFT):亚格宇称/近邻规则单元测试;SAW 有效性(自回避 + 键角恒 109.47°);占据记账(复用 `field_empty_cell_bookkeeping` 模式);同种子逐位确定性;稀释 C_n 统计;修复后 φ0.23 内距曲线;装饰几何逐位核对;`NonTetrahedralTemplate` / `RingTemplate` 拒绝;**分支模板全链路**(格上分叉生长 + 子树 recoil + 装饰往返,复用 `branched_parts()` 几何)。
 - `python/tests/test_grow.py`:`LatticeGrow` builder 链与 `run` 冒烟(natoms、converged);repr 子串。
 - 20 种子成功率矩阵(`~/work/molpack-bench` 基建)作为性能验收:φ ∈ {0.23, 0.35, 0.5} 全成,单格 < 5 s(Rust)。
 - GENCAN 路径(五个 `--example pack_<name>` 程序)不受影响(纯新增路径;原 `examples_batch` harness 已删)。

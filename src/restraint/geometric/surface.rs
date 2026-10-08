@@ -4,8 +4,8 @@
 //! `impl AtomRestraint` resolves the trait through the unchanged
 //! `crate::restraint` path.
 
-use crate::restraint::AtomRestraint;
-use molrs::types::F;
+use crate::AtomRestraint;
+use molrs::op::F;
 
 /// Packmol kind 10 — quadratic penalty forcing atom above plane `n·x >= d`.
 #[derive(Debug, Clone, Copy)]

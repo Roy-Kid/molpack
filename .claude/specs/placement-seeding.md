@@ -3,13 +3,13 @@
 状态:LANDED 2026-09-01(一次性逐位对照 `free_chain_matches_push_off_bitwise`
 通过后 `with_push_off`/`after_solve` 已删除;常驻测试见 Test plan)。
 现行公开名(2026-09-04 `result-as-state`):结果叫 `State`,接续入口叫
-`GenCanPack::with_restart`;下文已按现行名改写。
+`GencanPack::with_restart`;下文已按现行名改写。
 
 ## Goal
 
 一个入口的运行结果能被下一个入口**逐位原样**接续:`CbmcGrow` 如实报告
 不收敛后,用户把**同一批 target(保持 free)**喂给
-`GenCanPack::with_restart(&grown)`,GENCAN 相位在长成的坐标上做刚体推开
+`GencanPack::with_restart(&grown)`,GENCAN 相位在长成的坐标上做刚体推开
 (Auhl slow push-off)。`CbmcGrow::with_push_off` 与
 `PackEngine::after_solve` 钩子随之删除——增长入口内不再藏第二算法。
 
@@ -31,7 +31,7 @@ Rust:
   coor: Vec<[F;3]>, copy_atoms: Vec<usize>, cell: SimBox }` —— free 副本的
   (COM|Euler) 打包向量、逐副本居中参考构象(xcart 序)、逐副本原子数
   (校验指纹)、本次运行安装的 simbox。
-- `GenCanPack::with_restart(&State) -> Self`(GENCAN 专属,不上 trait
+- `GencanPack::with_restart(&State) -> Self`(GENCAN 专属,不上 trait
   ——增长入口自己造初态,seed 对它无意义)。同时把 seed 的 cell 写入
   `settings.cell = CellDecl::Matrix{…}`:盒子随 seed 流动,**用户不传两遍**
   (门槛 2 判词);用户若又声明 box/density/cell,由**既有**互斥错误具名
@@ -41,14 +41,14 @@ Rust:
 - 新错误:`PackError::SeedMismatch { expected, got }`(seed 的 free 原子
   形状与本次 targets 不符)。
 - 删除:`CbmcGrow::with_push_off`、`PackEngine::after_solve`、
-  (随之)`grow/entry.rs` 对 `gencan` 的全部引用。
+  (随之)`grow/cbmc_grow.rs` 对 `gencan` 的全部引用。
 
-Python 镜像:`GenCanPack.with_restart(state)`;`CbmcGrow.with_push_off`
+Python 镜像:`GencanPack.with_restart(state)`;`CbmcGrow.with_push_off`
 删除;`.pyi` 同步。
 
 ## Semantics
 
-1. **注入点**:`GenCanPack::prepare`(seed 在手时)——
+1. **注入点**:`GencanPack::prepare`(seed 在手时)——
    `install_simbox_and_grid(sys, seed.cell, radmax, discale, ntotat_free)`
    (与 `CbmcGrow::prepare` 同一套安装),然后
    `sys.coor[..ntotat_free] ← seed.coor`、`x ← seed.x` 原样拷贝。
@@ -68,7 +68,7 @@ Python 镜像:`GenCanPack.with_restart(state)`;`CbmcGrow.with_push_off`
 ## Numerical contract
 
 - 迁移期一次性逐位对照(spec 原句):`CbmcGrow` 不收敛样例上,
-  `with_restart` free 链式(同 tolerance/discale、GenCanPack 的 seed =
+  `with_restart` free 链式(同 tolerance/discale、GencanPack 的 seed =
   增长入口的 seed、同 max_loops)产物与 `with_push_off(true)` **逐位一致**
   ——证毕后删除 `with_push_off`,对照测试转为行为不变式(交接连续性
   bitwise、刚体性、verdict 诚实、同种子确定性)。
@@ -86,7 +86,7 @@ Python 镜像:`GenCanPack.with_restart(state)`;`CbmcGrow.with_push_off`
   删除;逐位交接比较不再常驻。)
 - `SeedMismatch` 具名拒绝;seed + `with_periodic_box` 撞既有互斥错误;
   seeded + 追加 fixed 基质一例(§3)——现由
-  `src/grow/tests/entry.rs::seeded_run_contract` 一并钉住。
+  `src/grow/tests/refusals.rs::seeded_run_contract` 一并钉住。
 - Python:`with_restart` 链式冒烟 + one-shot 语义不变;7 文件全绿。
 
 ## Out of scope

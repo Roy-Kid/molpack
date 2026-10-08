@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::restraint::{AtomRestraint, Restraint};
-use molrs::BondDistanceWeights;
-use molrs::types::F;
+use molrs::core::BondDistanceWeights;
+use molrs::op::F;
 
 /// Cartesian axis selector used in `Target::with_rotation_bound` and
 /// other API surfaces that need to name an axis.
@@ -130,7 +130,7 @@ pub struct Target {
     /// replay its full topology (bonds/angles/…) and per-atom metadata onto
     /// the packed coordinates. `None` for targets built from bare coordinates
     /// ([`Target::from_coords`]), whose result frame is coordinates-only.
-    pub template: Option<molrs::Frame>,
+    pub template: Option<molrs::core::Frame>,
     /// Intramolecular skip table. This is not `ForceField::special_bonds`.
     ///
     /// Default is [`BondDistanceWeights::from_exclusion_depth`]`(3)`
@@ -149,7 +149,7 @@ pub struct Target {
 }
 
 impl Target {
-    /// Create a new target from a `molrs::Frame` (read from PDB/XYZ) and a copy count.
+    /// Create a new target from a `molrs::core::Frame` (read from PDB/XYZ) and a copy count.
     ///
     /// Positions are extracted from the `"atoms"` block (`"x"`, `"y"`, `"z"` columns)
     /// and automatically centered at the geometric center.
@@ -158,7 +158,7 @@ impl Target {
     /// # Panics
     /// Panics if the frame has no `"atoms"` block with `"x"` / `"y"` / `"z"`
     /// float columns.
-    pub fn new(frame: molrs::Frame, count: usize) -> Self {
+    pub fn new(frame: molrs::core::Frame, count: usize) -> Self {
         let positions = crate::template::coord_rows(
             &frame
                 .coords()
@@ -483,7 +483,7 @@ impl Target {
     /// coordinate jointly and returns a coupled gradient.
     ///
     /// Here `Restraint` is the **group/collective** trait
-    /// ([`crate::restraint::Restraint`]) — it sees every copy's coordinate at
+    /// ([`crate::Restraint`]) — it sees every copy's coordinate at
     /// once, not the per-atom [`AtomRestraint`].
     pub fn with_collective_restraint(mut self, r: impl Restraint + 'static) -> Self {
         self.collective_restraints.push(Arc::new(r));
@@ -511,10 +511,10 @@ impl Target {
     /// One fixed obstacle target holding a previous pack's entire output,
     /// coordinates kept verbatim (`CenteringMode::Off` + identity placement).
     ///
-    /// The named chaining primitive of engine-entry-split: grow first, then
+    /// The named chaining primitive between engines: grow first, then
     /// pack the next stage around the grown matrix held fixed —
-    /// `GenCanPack::new().run(&[Target::fixed_from(&grown.frame), solvent], …)`.
-    pub fn fixed_from(frame: &molrs::Frame) -> Self {
+    /// `GencanPack::new().run(&[Target::fixed_from(&grown.frame), solvent], …)`.
+    pub fn fixed_from(frame: &molrs::core::Frame) -> Self {
         Self::new(frame.clone(), 1)
             .with_centering(CenteringMode::Off)
             .fixed_at([0.0; 3])
@@ -616,6 +616,13 @@ pub(crate) fn centered_coords(coords: &[[F; 3]]) -> Vec<[F; 3]> {
         .collect()
 }
 
+/// The template's geometric center, summed axis by axis in atom order.
+///
+/// Kept local rather than `molrs::op::centroid` on purpose
+/// (module-responsibility ruling 10): this is Packmol's template centering,
+/// and its exact summation order and seed value fix the bits of every
+/// centered template — and so of every packed coordinate the Packmol-parity
+/// goldens pin. Changing it is a change to Packmol parity, not a refactor.
 fn geometric_center(coords: &[[F; 3]]) -> (F, F, F) {
     if coords.is_empty() {
         return (0.0, 0.0, 0.0);
@@ -630,11 +637,11 @@ fn geometric_center(coords: &[[F; 3]]) -> (F, F, F) {
 /// VdW radius and trimmed symbol per atom, from the `atoms` block's
 /// `element` column. An unknown symbol — or no column at all — is `"X"` at
 /// 1.5 Å.
-fn radii_and_elements(frame: &molrs::Frame, n: usize) -> (Vec<F>, Vec<String>) {
+fn radii_and_elements(frame: &molrs::core::Frame, n: usize) -> (Vec<F>, Vec<String>) {
     let column = frame
         .get("atoms")
-        .and_then(|atoms| atoms.get(molrs::store::keys::ELEMENT))
-        .and_then(molrs::store::block::Column::as_string);
+        .and_then(|atoms| atoms.get(molrs::core::keys::ELEMENT))
+        .and_then(molrs::core::Column::as_string);
     let Some(symbols) = column else {
         return (vec![1.5; n], vec!["X".to_string(); n]);
     };
@@ -642,7 +649,7 @@ fn radii_and_elements(frame: &molrs::Frame, n: usize) -> (Vec<F>, Vec<String>) {
         .iter()
         .map(|sym| {
             let sym = sym.trim();
-            let radius = molrs::Element::by_symbol(sym)
+            let radius = molrs::core::Element::by_symbol(sym)
                 .map(|e| e.vdw_radius() as F)
                 .unwrap_or(1.5);
             (radius, sym.to_string())
@@ -655,11 +662,13 @@ mod tests {
     //! Tests for Target builder: construction, natoms/count, fixed_at,
     //! centering modes, restraint attachment, and hook validation.
 
-    use crate::{BondDistanceWeights, F, GenCanPack, PackEngine, RegionRestraint, Target};
+    use crate::{GencanPack, PackEngine, RegionRestraint, Target};
+    use molrs::core::BondDistanceWeights;
+    use molrs::op::F;
     use std::sync::Arc;
 
-    use crate::testutil::inside_box;
-    use molrs::spatial::region::Sphere;
+    use crate::test_fixtures::inside_box;
+    use molrs::core::Sphere;
     use ndarray::array;
 
     // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
@@ -725,7 +734,7 @@ mod tests {
 
     #[test]
     fn new_uses_geometric_center_even_when_elements_are_known() {
-        use molrs::store::block::Block;
+        use molrs::core::Block;
         use ndarray::Array1;
 
         let mut atoms = Block::new();
@@ -745,7 +754,7 @@ mod tests {
             )
             .expect("insert element");
 
-        let mut frame = molrs::Frame::new();
+        let mut frame = molrs::core::Frame::new();
         frame.insert("atoms", atoms);
 
         let t = Target::new(frame, 1);
@@ -775,9 +784,8 @@ mod tests {
 
     #[test]
     fn with_atom_restraint() {
-        // Indices are now 0-based (matching Rust convention) — no internal
-        // conversion happens. Caller subtracts 1 when porting from Packmol
-        // `.inp` files.
+        // Indices are 0-based (Rust convention) — no internal conversion
+        // happens. Caller subtracts 1 when porting from Packmol `.inp` files.
         let t = Target::from_coords(&water_positions(), &water_radii(), 5)
             .with_atom_restraint(&[0, 1], inside_sphere([0.0, 0.0, 0.0], 5.0));
         assert_eq!(t.atom_restraints.len(), 1);
@@ -823,7 +831,7 @@ mod tests {
         let fixed = Target::from_coords(&[[10.0, 0.0, 0.0], [12.0, 0.0, 0.0]], &[1.0, 1.0], 1)
             .fixed_at([0.0, 0.0, 0.0]);
 
-        let result = GenCanPack::new()
+        let result = GencanPack::new()
             .with_seed(1)
             .run(&[free, fixed], 5)
             .expect("pack should succeed");
@@ -841,7 +849,7 @@ mod tests {
             .with_centering(crate::CenteringMode::Center)
             .fixed_at([0.0, 0.0, 0.0]);
 
-        let result = GenCanPack::new()
+        let result = GencanPack::new()
             .with_seed(1)
             .run(&[free, fixed], 5)
             .expect("pack should succeed");
@@ -930,7 +938,7 @@ mod tests {
     /// carry it.
     #[test]
     fn target_default_special_bonds_is_depth_3() {
-        use molrs::store::block::Block;
+        use molrs::core::Block;
         use ndarray::Array1;
 
         let from_coords = Target::from_coords(&water_positions(), &water_radii(), 5);
@@ -946,7 +954,7 @@ mod tests {
         atoms
             .insert("z", Array1::from_vec(vec![0.0, 0.0]).into_dyn())
             .expect("insert z");
-        let mut frame = molrs::Frame::new();
+        let mut frame = molrs::core::Frame::new();
         frame.insert("atoms", atoms);
 
         let from_frame = Target::new(frame, 1);
@@ -994,7 +1002,8 @@ mod atom_property_tests {
     //! that overrides the selected atoms. Per-atom values are a **per-type
     //! template** — every copy of a type gets the same ones.
 
-    use crate::{F, GenCanPack, PackEngine, Target};
+    use crate::{GencanPack, PackEngine, Target};
+    use molrs::op::F;
 
     // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
 
@@ -1145,7 +1154,7 @@ mod atom_property_tests {
     #[test]
     #[should_panic(expected = "smaller than the tolerance")]
     fn global_short_tolerance_must_be_below_the_tolerance() {
-        let _ = GenCanPack::new()
+        let _ = GencanPack::new()
             .with_tolerance(2.0)
             .with_short_tolerance(4.0, 3.0);
     }

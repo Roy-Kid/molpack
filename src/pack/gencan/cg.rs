@@ -1,10 +1,10 @@
 //! Conjugate Gradient inner solver for the Truncated Newton direction.
 //! Exact algorithmic port of `cg` from `gencan.f`.
 
+use super::{near_zero_norm_floor, positive_norm_floor, small_floor};
+use crate::Objective;
 use crate::eval::EvalMode;
-use crate::numerics::{near_zero_norm_floor, positive_norm_floor, residual_small_floor};
-use crate::objective::Objective;
-use molrs::types::F;
+use molrs::op::F;
 
 /// Reusable CG work vectors, matching packmol `cg` workspace roles.
 pub struct CgScratch {
@@ -61,10 +61,6 @@ impl CgScratch {
 }
 
 pub struct CgResult {
-    pub iter: usize,
-    /// Model value at the CG exit. The GENCAN loop keeps `iter` and `inform`.
-    #[allow(dead_code)]
-    pub q: F,
     pub inform: i32,
     /// Boundary info returned when `inform == 2` (box boundary reached).
     pub rbdind: Option<usize>,
@@ -110,8 +106,6 @@ pub fn cg_solve(
 
     if nind == 0 {
         return CgResult {
-            iter: 0,
-            q: 0.0,
             inform: 0,
             rbdind: None,
             rbdtype: 0,
@@ -128,8 +122,6 @@ pub fn cg_solve(
     }
     if gnorm2 <= 0.0 {
         return CgResult {
-            iter: 0,
-            q: 0.0,
             inform: 0,
             rbdind: None,
             rbdtype: 0,
@@ -171,7 +163,7 @@ pub fn cg_solve(
     loop {
         // Residual convergence
         if rnorm2 <= near_zero_norm_floor() * near_zero_norm_floor()
-            || (((rnorm2 <= eps * eps * gnorm2) || (rnorm2 <= residual_small_floor() && iter != 0))
+            || (((rnorm2 <= eps * eps * gnorm2) || (rnorm2 <= small_floor() && iter != 0))
                 && iter >= 4)
         {
             inform = 0;
@@ -328,7 +320,6 @@ pub fn cg_solve(
         gts = (0..nind).map(|j| gfree[j] * s[j]).sum();
         if gts > 0.0 || gts * gts < theta * theta * gnorm2 * snorm2 {
             s.copy_from_slice(sprev);
-            q = qprev;
             inform = 3;
             break;
         }
@@ -384,8 +375,6 @@ pub fn cg_solve(
     }
 
     CgResult {
-        iter,
-        q,
         inform,
         rbdind,
         rbdtype,

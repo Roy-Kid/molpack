@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
-use molrs::spatial::region::Parallelepiped;
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::core::Parallelepiped;
+use molrs::core::SimBox;
+use molrs::op::F;
 use ndarray::array;
 
 use super::{AtomRestraint, RegionRestraint};
-use crate::error::PackError;
+use crate::PackError;
 
 /// A cell from lengths (Å) and angles (degrees), origin at zero — the one
 /// home of this conversion and its [`PackError::InvalidCell`] wording, shared

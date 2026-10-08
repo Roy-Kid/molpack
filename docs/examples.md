@@ -7,14 +7,15 @@ harness rather than a Packmol workload: it evaluates the chain-growth
 solver against the rigid-body path on a PEO melt
 (`cargo run --release --example pack_peo --features io -- grow 200 25 1.0 42`).
 Polymer PEO scenes are Python-only (`python/examples/pack_peo_*.py`):
-monomers from molrs SMILES + conformer, architecture from molpy
-`PolymerBuilder`, then molpack packing. Linear melt and mixed
-linear+star share `LatticeGrow` @ 2.0 Å then `GenCanPack.with_restart`;
+monomers from molrs SMILES + conformer, architecture from molrs
+(`molrs.builder.Assembler` growing a CGsmiles topology), then molpack
+packing. Linear melt and mixed
+linear+star share `LatticeGrow` @ 2.0 Å then `GencanPack.with_restart`;
 the ring path is `pack_peo_topo.py ring` (named grower reject, rigid
-`GenCanPack`); mesh-confined linear PEO is `pack_peo_mesh.py` (a
-`molrs.Polyhedron` read from STL masks lattice sites outside the mesh), and
+`GencanPack`); mesh-confined linear PEO is `pack_peo_mesh.py` (a
+`molrs.core.Polyhedron` read from STL masks lattice sites outside the mesh), and
 `pack_peo_void.py` grows PEO through the solvent-accessible void of a
-bead-spring frame (`~molrs.SphereUnion` over the bonded beads of a LAMMPS
+bead-spring frame (`~molrs.core.SphereUnion` over the bonded beads of a LAMMPS
 data file).
 `python/examples/pack_ion_dispersion.py` is also Python-only: it packs the
 same ions-in-water box twice, once plain and once with `SelfSeparation`, and

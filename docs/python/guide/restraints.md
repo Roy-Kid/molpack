@@ -14,7 +14,7 @@ Geometry is not molpack's. A region is a molrs solid with a signed distance
 to its boundary — `distance(points)` is negative inside, positive outside —
 and every shape describes its *inside*. Outside, shells and voids are
 compositions: `~`, `&`, `|`. There is no "outside sphere" class; it is
-`~molrs.Sphere(...)`.
+`~molrs.core.Sphere(...)`.
 
 | molrs class     | Constructor                                   | Meaning |
 |-----------------|-----------------------------------------------|---------|
@@ -34,11 +34,11 @@ coordinates (Å for a molpack run).
 import molrs
 from molpack import Target
 
-box    = molrs.Cuboid([0, 0, 0], [40, 40, 40])          # origin, lengths
-ball   = molrs.Sphere([0, 0, 0], 20.0)
-shell  = ball & ~molrs.Sphere([0, 0, 0], 10.0)
-above  = ~molrs.HalfSpace([0, 0, 1], [0, 0, 5.0])        # z >= 5
-below  = molrs.HalfSpace([0, 0, 1], [0, 0, 20.0])        # z <= 20
+box    = molrs.core.Cuboid([0, 0, 0], [40, 40, 40])          # origin, lengths
+ball   = molrs.core.Sphere([0, 0, 0], 20.0)
+shell  = ball & ~molrs.core.Sphere([0, 0, 0], 10.0)
+above  = ~molrs.core.HalfSpace([0, 0, 1], [0, 0, 5.0])        # z >= 5
+below  = molrs.core.HalfSpace([0, 0, 1], [0, 0, 20.0])        # z <= 20
 water  = Target(frame, count=500).with_restraint(box)
 ```
 
@@ -48,25 +48,25 @@ test is the **atom centre**, not the van der Waals ball and not the molecule
 COM. A region reaches this wheel as a `molrs.RegionRef` capsule — no data is
 marshalled, and both wheels must share one molrs minor line.
 
-How each packing entry uses a region is **not** inferred from the shape:
+How each packing engine uses a region is **not** inferred from the shape:
 
-- `GenCanPack` — soft quadratic wall on atom centres (`frest`).
+- `GencanPack` — soft quadratic wall on atom centres (`frest`).
 - `CbmcGrow` — hard reject on `propose`; `force_place` may leave atoms
   outside and counts `degraded`.
 - `LatticeGrow` — diamond sites outside the region are blocked
   (Region ∩ lattice). An empty intersection is a named error. Decorated
-  hydrogens may still sit slightly outside; chain `GenCanPack.with_restart`.
+  hydrogens may still sit slightly outside; chain `GencanPack.with_restart`.
 
 ### A cavity from a mesh
 
 `molrs.io.read_stl` reads an ASCII or binary STL into a `TriMesh`;
-`TriMesh.scaled` converts the file's unit; `molrs.Polyhedron` is the solid
+`TriMesh.scaled` converts the file's unit; `molrs.core.Polyhedron` is the solid
 the mesh bounds. The mesh must be watertight (every edge shared by exactly
 two faces) — an open or self-touching mesh is a `ValueError`, because
 parity cannot decide inside from outside on it.
 
 ```python
-cavity = molrs.Polyhedron(molrs.io.read_stl("cavity.stl").scaled(4.18))
+cavity = molrs.core.Polyhedron(molrs.io.read_stl("cavity.stl").scaled(4.18))
 target = Target(frame, n).with_restraint(cavity)
 ```
 
@@ -82,7 +82,7 @@ bead of radius `bead radius + probe radius` is the solvent-accessible
 volume; its complement is where a probe centre may go:
 
 ```python
-polymer = molrs.SphereUnion(centers, 0.5 * sigma + 1.0, box=frame.box)
+polymer = molrs.core.SphereUnion(centers, 0.5 * sigma + 1.0, box=frame.box)
 void = ~polymer
 target = Target(peo, n).with_restraint(void)
 ```
@@ -93,7 +93,7 @@ threads the channels the solvent left.
 
 ## Periodic boxes
 
-The periodic box is the entry's declaration, `with_periodic_box(min, max)`;
+The periodic box is the engine's declaration, `with_periodic_box(min, max)`;
 a region only confines. See
 [Periodic boundaries](periodic-boundaries.md) for the full semantics and
 validation rules.
@@ -130,7 +130,7 @@ from molpack import SelfSeparation, Target
 
 ions = (
     Target(frame, count=27)
-    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]))
     .with_restraint(SelfSeparation(10.0))  # ions stay 10 Å apart
 )
 ```
@@ -149,7 +149,7 @@ or compose the regions first — the two are equivalent for regions:
 target = (
     Target(frame, count=500)
     .with_name("water")
-    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]) & ~molrs.Sphere([20, 20, 20], 5.0))
+    .with_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]) & ~molrs.core.Sphere([20, 20, 20], 5.0))
 )
 ```
 
@@ -170,21 +170,21 @@ Example — a bilayer: pin heads above z=12, tails below z=2:
 lipid = (
     Target(frame, count=20)
     .with_name("lipid")
-    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 14]))
-    .with_atom_restraint([0, 1],   ~molrs.HalfSpace([0, 0, 1], [0, 0, 12.0]))
-    .with_atom_restraint([30, 31],  molrs.HalfSpace([0, 0, 1], [0, 0, 2.0]))
+    .with_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 14]))
+    .with_atom_restraint([0, 1],   ~molrs.core.HalfSpace([0, 0, 1], [0, 0, 12.0]))
+    .with_atom_restraint([30, 31],  molrs.core.HalfSpace([0, 0, 1], [0, 0, 2.0]))
 )
 ```
 
 ## Global restraints
 
 To apply one restraint to every target in a pack, attach it on the
-engine entry:
+engine:
 
 ```python
 packer = (
-    GenCanPack()
-    .with_global_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
+    GencanPack()
+    .with_global_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]))
 )
 ```
 

@@ -6,7 +6,7 @@
 //! wants force-field-derived weights computes them outside and passes the
 //! numbers in.
 
-use molrs::types::F;
+use molrs::op::F;
 use rand::Rng;
 
 use crate::grow::internal::wrap_pi;
@@ -38,7 +38,7 @@ impl TorsionPrior {
     ///
     /// `template_value` is the template's own dihedral for this variable —
     /// consumed only by [`Template`][Self::Template]; the other priors are
-    /// absolute. All angles share [`dihedral`](super::internal)'s convention:
+    /// absolute. All angles share [`dihedral`](molrs::op::vec3::dihedral)'s convention:
     /// values in `(-π, π]`, trans ≈ ±π for a backbone.
     pub fn sample(&self, template_value: F, rng: &mut impl Rng) -> F {
         match self {

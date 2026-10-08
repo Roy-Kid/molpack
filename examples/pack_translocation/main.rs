@@ -46,7 +46,7 @@
 //!
 //! Run with:
 //! ```sh
-//! cargo run --release --example pack_translocation
+//! cargo run --release --example pack_translocation --features io
 //! ```
 //! `MOLPACK_TRANSLOCATION_XYZ=path` dumps the structure;
 //! `MOLPACK_TRANSLOCATION_LOOPS=n` sets the outer iteration count.
@@ -54,12 +54,13 @@
 mod geometry;
 
 use molpack::{
-    CenteringMode, F, GenCanPack, OptimizeSelect, PackEngine, RegionRestraint, Target,
+    CenteringMode, GencanPack, OptimizeSelect, PackEngine, RegionRestraint, Target,
     TorsionMcOptimizer,
 };
+use molrs::op::F;
 use std::sync::Arc;
 
-use molrs::spatial::region::{Cuboid, Cylinder, HalfSpace, NotRegion};
+use molrs::core::{Cuboid, Cylinder, HalfSpace, NotRegion};
 use ndarray::array;
 
 // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
@@ -213,7 +214,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     targets.push(solvent);
     let mut names: Vec<String> = (0..PORES.len()).map(|i| format!("threaded{i}")).collect();
     names.push("free".to_string());
-    let result = GenCanPack::new()
+    let result = GencanPack::new()
         .with_tolerance(TOLERANCE)
         .with_seed(20_260_807)
         .with_periodic_box(
@@ -290,31 +291,8 @@ fn report(
     );
 
     if let Some(path) = std::env::var_os("MOLPACK_TRANSLOCATION_XYZ") {
-        write_xyz(std::path::Path::new(&path), result)?;
+        molrs::io::write_xyz(&path, &result.frame)?;
         println!("wrote {}", std::path::Path::new(&path).display());
-    }
-    Ok(())
-}
-
-fn write_xyz(
-    path: &std::path::Path,
-    result: &molpack::State,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::Write;
-    let pos = result.positions();
-    let atoms = result
-        .frame
-        .get("atoms")
-        .ok_or("result has no atoms block")?;
-    let elements = atoms
-        .get("element")
-        .and_then(molrs::store::block::Column::as_string);
-    let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
-    writeln!(out, "{}", pos.len())?;
-    writeln!(out, "molpack pack_translocation")?;
-    for (i, p) in pos.iter().enumerate() {
-        let sym = elements.map(|c| c[[i]].as_str()).unwrap_or("X");
-        writeln!(out, "{sym} {:.4} {:.4} {:.4}", p[0], p[1], p[2])?;
     }
     Ok(())
 }

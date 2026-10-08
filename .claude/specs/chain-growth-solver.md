@@ -9,8 +9,8 @@ revised: 2026-08-28 — 合并 /mol:litrev 结论与四条设计原则；per-tar
 
 > **2026-09-29 名称对照**（本 spec 写于 2026-08，设计节里的行号与 `packer.rs` 布局是当时的代码）：
 > `Solver` 接缝 → `Stage`（`src/stage.rs`）；原结果类型 → 冻结的 `State`（`softened` → `State::degraded`）；
-> 跨入口接续 → `GenCanPack::with_restart`；`Target::with_method` / `PackMethod` / `pack_with_report`
-> → 按入口选择（`GenCanPack` / `CbmcGrow` / `LatticeGrow`，经 `Pipeline` 组合）；原集成测试层
+> 跨入口接续 → `GencanPack::with_restart`；`Target::with_method` / `PackMethod` / `pack_with_report`
+> → 按入口选择（`GencanPack` / `CbmcGrow` / `LatticeGrow`，经 `Pipeline` 组合）；原集成测试层
 > 于 2026-09-20 删除，覆盖改为 `src/grow/tests/{internal,field,prior,entry,driver}.rs` 等模块内单测；
 > 独立的校验模块于 2026-09-29 删除，裁决读 `State::fdist` / `frest`。
 
@@ -234,7 +234,7 @@ pub trait Solver: Send {
         targets: &[Target],
         x: PlacementsMut<'_>,
         budget: &Budget,
-        handlers: &mut [Box<dyn Handler>],
+        callbacks: &mut [Box<dyn Callback>],
     ) -> SolveOutcome;
 }
 
@@ -254,7 +254,7 @@ pub struct SolveOutcome { pub converged: bool, pub fdist: F, pub frest: F, pub s
 
 `softened` 的公开载体：`State::degraded: usize`（原计划为结果类型上的 `softened` 字段；
 现为各阶段 `StageOutcome::softened` 之和，gencan 路径恒为 0）——ac-004 的 `softened == 0`
-断言由它承载，`StepInfo.radscale`（§4g）只是过程可见性。
+断言由它承载，`StepReport.radscale`（§4g）只是过程可见性。
 
 **方法选择是 per-target 的**（原则 3；polyply 先例 §5.6）：
 
@@ -388,8 +388,8 @@ log W_new ≥ log W_old 才接受——无条件替换可能把好尾巴换成�
 `min_hard_scale`（默认 0.8，与 Auhl push-off 的 0.8σ 对齐，§5.4）；每次收缩
 计入 `softened` 并进报告；`softened == 0` 才算 `converged`。
 
-**(g) handler 映射。** 每轮发一个 `StepInfo`：`loop_idx` = 轮号，
-`radscale` = 当前 hard_scale（软化对 `ProgressHandler` 直接可见），
+**(g) callback 映射。** 每轮发一个 `StepReport`：`loop_idx` = 轮号，
+`radscale` = 当前 hard_scale（软化对 `ProgressCallback` 直接可见），
 fdist/frest 在硬拒绝成立期间恒为 0（文档写明该语义）；最终数字由共享
 objective 复算（§1 的 `SolveOutcome` 契约）。`Budget.max_loops` 在生长语义下
 是重长事件（死路逃逸 + 松弛轮）的总预算上限，文档写明。
@@ -402,7 +402,7 @@ objective 复算（§1 的 `SolveOutcome` 契约）。`Budget.max_loops` 在生�
 `ff` 门控。`src/grow/` 与接缝文件（现 `src/stage.rs`）进 **default feature**，Python wheel
 无需新 feature。先验是几何数据：用户（或外部工具）可以从力场推导权重，但
 molpack 的 API 只收数据，不收力场（原则 1）。`src/optimizer/` 是唯一经
-`molrs::optimize` 接力场优化器的地方，由 `GenCanPack::with_optimizer` 显式选用
+`molrs::optimize` 接力场优化器的地方，由 `GencanPack::with_optimizer` 显式选用
 （2026-09-29 起不再有 `#![cfg(feature = "ff")]`；`ff` 只透传 `molrs/ff`）。
 
 ### 6. 混合体系：串行组合，复用 fixed 机制
@@ -448,7 +448,7 @@ molpack 的 API 只收数据，不收力场（原则 1）。`src/optimizer/` 是
 | fixed 结构机制（`fixedatom` 等） | **reuse** | 混合体系的刚体阶段，见 §6 |
 | `assemble::assemble_frame` | **reuse** | 输出帧装配不改 |
 | `PackContext` / `Constraints` | **reuse** | 目标函数、判据不改；`SolveOutcome` 由它复算 |
-| `handler::Handler` / `StepInfo` | **reuse** | §4g 的映射 |
+| `callback::Callback` / `StepReport` | **reuse** | §4g 的映射 |
 | `src/gencan/` | **peer** | 并列，不调用；混合时由 `pack` 编排（§6） |
 | `src/optimizer/`（`TorsionMcOptimizer`） | **不动** | 对低密度受约束问题仍有效 |
 | `molrs::builder::SelfAvoidingWalk` | **不采用** | 无化学、逐链生长高密度下 DeadEnd |
@@ -547,9 +547,9 @@ molpack 的 API 只收数据，不收力场（原则 1）。`src/optimizer/` 是
    ✅ 2026-08-28（RestraintTable 硬拒绝进 score/relax；frest==0 构造性判据过；
    不可满足约束经预算加速软化 + force_place 有限终止；修复 visit 计数活锁——
    提议全拒时也消费 visit，防同流重放）
-7. **Wire** handler（§4g）。
-   ✅ 2026-08-28（每轮 StepInfo：loop_idx=1-based 轮号、radscale=hard_scale、
-   xcart 每轮同步供 XYZHandler；should_stop 生效→converged=false）
+7. **Wire** callback（§4g）。
+   ✅ 2026-08-28（每轮 StepReport：loop_idx=1-based 轮号、radscale=hard_scale、
+   xcart 每轮同步供 XyzTrajectoryCallback；should_stop 生效→converged=false）
 8. **Add** `Molpack::with_density`（§7：全 targets 总质量、互斥校验、无默认）。
    ✅ 2026-08-29（4 测试全绿：立方盒解析 1e-9、互斥报错、UnknownMass 具名、
    gencan 同样可用；`Target::with_mass` 落地）

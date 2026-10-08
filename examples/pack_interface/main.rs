@@ -27,13 +27,14 @@ use std::fs::create_dir_all;
 use std::path::PathBuf;
 
 use molpack::{
-    Angle, CenteringMode, F, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target,
-    XYZHandler,
+    Angle, CenteringMode, GencanPack, PackEngine, ProgressCallback, RegionRestraint, Target,
+    XyzTrajectoryCallback,
 };
+use molrs::op::F;
 use std::sync::Arc;
 
-use molrs::io::data::pdb::read_pdb_frame;
-use molrs::spatial::region::Cuboid;
+use molrs::core::Cuboid;
+use molrs::io::read_pdb;
 use ndarray::array;
 
 // ── molrs regions lifted to "stay inside" (the one geometric restraint) ─────
@@ -51,9 +52,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .expect("file path has no parent")
         .to_path_buf();
-    let water = read_pdb_frame(base.join("water.pdb"))?;
-    let chloroform = read_pdb_frame(base.join("chloroform.pdb"))?;
-    let t3 = read_pdb_frame(base.join("t3.pdb"))?;
+    let water = read_pdb(base.join("water.pdb"))?;
+    let chloroform = read_pdb(base.join("chloroform.pdb"))?;
+    let t3 = read_pdb(base.join("t3.pdb"))?;
 
     let water_target = Target::new(water, 100)
         .with_restraint(inside_box([-20.0, 0.0, 0.0], [0.0, 39.0, 39.0]))
@@ -73,14 +74,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Angle::from_radians(1.57),
         ]);
 
-    let mut packer = GenCanPack::new();
+    let mut packer = GencanPack::new();
     if std::env::var_os("MOLPACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.with_handler(Box::new(ProgressHandler::new()));
+        packer = packer.with_callback(Box::new(ProgressCallback::new()));
     }
     if std::env::var_os("MOLPACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.with_handler(Box::new(XYZHandler::new(out_dir.join("interface.xyz"), 10)));
+        packer = packer.with_callback(Box::new(XyzTrajectoryCallback::new(
+            out_dir.join("interface.xyz"),
+            10,
+        )));
     }
 
     let targets = vec![water_target, chloro_target, t3_target];

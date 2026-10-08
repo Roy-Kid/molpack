@@ -13,14 +13,14 @@ molpack is a Rust packing engine with three public surfaces:
 - [Architecture](../architecture.md) maps modules, data flow, optimizer loops,
   and the objective-evaluation hot path.
 - [Extending](../extending.md) walks through custom `AtomRestraint`,
-  `Region`, and `Handler` implementations, plus binding a custom in-loop
+  `Region`, and `Callback` implementations, plus binding a custom in-loop
   optimizer.
 
 ## Validation commands
 
 ```bash
-cargo test -p molcrafts-molpack --lib --features cli,ff
-cargo test -p molcrafts-molpack --doc --features cli,ff
+cargo test -p molcrafts-molpack --lib --features cli
+cargo test -p molcrafts-molpack --doc --features cli
 cd python
 maturin develop --release
 pytest

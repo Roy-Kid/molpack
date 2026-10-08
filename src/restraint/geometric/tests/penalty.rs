@@ -1,14 +1,14 @@
 //! Tests for every restraint type: `f()` = 0 when satisfied, `f()` > 0 when
 //! violated, and gradient points in the correct direction.
 
-use crate::F;
-use crate::restraint::AtomRestraint;
+use crate::AtomRestraint;
 use crate::restraint::geometric::{
     AbovePlaneRestraint, BelowPlaneRestraint, InsideBoxRestraint, InsideCubeRestraint,
     InsideCylinderRestraint, InsideEllipsoidRestraint, InsideSphereRestraint, OutsideBoxRestraint,
     OutsideCubeRestraint, OutsideCylinderRestraint, OutsideEllipsoidRestraint,
     OutsideSphereRestraint,
 };
+use molrs::op::F;
 
 const TOL: F = 1e-6;
 const SCALE: F = 1.0;
@@ -291,7 +291,7 @@ fn gradient_accumulates() {
     assert!((g[2] - 100.0).abs() < TOL);
 }
 
-// ── Phase B.6 acceptance: user-plugin type equality + scope equivalence ────
+// ── User-plugin type equality + scope equivalence ──────────────────────────
 
 /// User-defined `AtomRestraint` — identical in shape to the 14 built-ins.
 /// Demonstrates direction-3: no ceremony to plug in your own geometry.

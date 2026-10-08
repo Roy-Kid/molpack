@@ -1,13 +1,13 @@
 //! Coarse-grain geometry, synthesized in process — no data files, no `io`.
 //!
-//! Every species is built as a `molrs::Frame` (an `atoms` block, plus a `bonds`
+//! Every species is built as a `molrs::core::Frame` (an `atoms` block, plus a `bonds`
 //! block for the chain) so targets come from [`Target::new`] and carry their
 //! topology into the packed result.
 
-use molpack::F;
-use molrs::store::block::Block;
-use molrs::store::frame::Frame;
-use molrs::system::atomistic::Atomistic;
+use molrs::core::Atomistic;
+use molrs::core::Block;
+use molrs::core::Frame;
+use molrs::op::F;
 use ndarray::Array1;
 
 /// Bead label for a chain backbone site.
@@ -58,7 +58,7 @@ fn frame_of(atoms: Block) -> Frame {
 /// # Bond classes
 ///
 /// The `bonds` block states connectivity only. molrs reads that faithfully, so
-/// every bond arrives as `BondType::Unknown`; `TorsionMcOptimizer` supplies the
+/// every bond arrives as `BondOrder::Unknown`; `TorsionMcOptimizer` supplies the
 /// single-bond fallback that rotatable-bond perception needs. Nothing here has
 /// to know about `bond_type`.
 pub fn chain(n_beads: usize, bond_len: F, sticky_every: usize) -> (Frame, Atomistic, Vec<usize>) {

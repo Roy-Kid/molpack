@@ -11,19 +11,19 @@ reference output.
 
 ```python
 import molrs
-from molpack import GenCanPack, Target
+from molpack import GencanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    .with_restraint(molrs.core.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
-packer = GenCanPack().with_tolerance(2.0).with_seed(42)
+packer = GencanPack().with_tolerance(2.0).with_seed(42)
 result = packer.run([water], max_loops=200)
-print(f"packed {result.frame['atoms'].nrows} atoms")
+print(f"packed {result.frame['atoms'].n_rows} atoms")
 ```
 
 ## Next steps
@@ -47,11 +47,11 @@ print(f"packed {result.frame['atoms'].nrows} atoms")
   </a>
   <a href="guide/packer/">
     <strong>Packer</strong>
-    <em>Builder options, diagnostics, handlers.</em>
+    <em>Builder options, diagnostics, callbacks.</em>
   </a>
   <a href="guide/growth/">
     <strong>Chain growth</strong>
-    <em>Dense polymer melts via the CbmcGrow entry.</em>
+    <em>Dense polymer melts via the CbmcGrow engine.</em>
   </a>
   <a href="guide/periodic-boundaries/">
     <strong>Periodic boundaries</strong>

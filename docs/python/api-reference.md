@@ -5,9 +5,9 @@ Import surface:
 ```python
 from molpack import (
     # Core
-    Target, State, IntraResidual, StepInfo,
-    # Engine entries — one per packing algorithm
-    GenCanPack, CbmcGrow, LatticeGrow,
+    Target, State, IntraResidual, StepReport,
+    # Engines — one per packing algorithm
+    GencanPack, CbmcGrow, LatticeGrow,
     # Multi-stage composition
     Pipeline,
     # Typed values
@@ -26,14 +26,14 @@ from molpack import (
     # Parallel evaluation
     rayon_enabled, num_threads, init_thread_pool,
     # Protocols
-    Handler, Restraint,
+    Callback, Restraint,
     # Errors
     PackError,
     ConstraintsFailedError,
     MaxIterationsError,
     NoTargetsError,
     EmptyMoleculeError,
-    InvalidPBCBoxError,
+    InvalidPbcBoxError,
 )
 ```
 
@@ -78,7 +78,7 @@ instances.
 Target(frame, count: int)
 ```
 
-- `frame` — a `molrs.Frame` (`molpy.Frame` is the same class) with atom
+- `frame` — a `molrs.core.Frame` (`molpy.Frame` is the same class) with atom
   columns `"x"`, `"y"`, `"z"`, and `"element"`.
   Resolved zero-copy via its FFI capsule; a plain dict is not accepted.
 - `count` — number of copies to produce.
@@ -126,8 +126,8 @@ Target(frame, count: int)
 - `Target.fixed_from(result: State)` — wrap a previous run's whole
   output as one fixed obstacle, coordinates kept verbatim. The chaining
   primitive for staged packs: grow with `CbmcGrow`, then pack the next
-  species around the frozen matrix with `GenCanPack`. See
-  [Engine entries](#engine-entries).
+  species around the frozen matrix with `GencanPack`. See
+  [Engines](#engines).
 
 **Properties**
 
@@ -142,29 +142,29 @@ Target(frame, count: int)
 
 ---
 
-## Engine entries
+## Engines
 
-One entry class per packing algorithm; you pick the algorithm by picking
-the entry. All three are immutable builders — every `with_*` returns a new
+One engine class per packing algorithm; you pick the algorithm by picking
+the engine. All three are immutable builders — every `with_*` returns a new
 instance — and all three expose the same terminal verb:
 
 ```python
 .run(targets: list[Target], max_loops: int) -> State
 ```
 
-`run()` consumes the entry (one engine, one run): a second call on the
+`run()` consumes the engine (one engine, one run): a second call on the
 same object raises `RuntimeError`. Raises a typed `PackError` subclass on
 packing failure.
 
 ### Shared builders
 
-Available on `GenCanPack` **and** `CbmcGrow`:
+Available on `GencanPack` **and** `CbmcGrow`:
 
 - `.with_tolerance(t: float)` — minimum pairwise distance (Å; default 2.0).
 - `.with_precision(p: float)` — convergence threshold (default 0.01).
 - `.with_seed(seed: int)` — deterministic RNG (default Packmol's 1234567).
 - `.with_periodic_box(min: [x,y,z], max: [x,y,z])` — declare a
-  fully-periodic box directly on the entry (Packmol `pbc`); see
+  fully-periodic box directly on the engine (Packmol `pbc`); see
   [Periodic boundaries](guide/periodic-boundaries.md).
 - `.with_density(rho: float)` — size the box from a target mass density
   (g/cm³) instead of declaring it: `run()` resolves a cubic, fully
@@ -173,18 +173,18 @@ Available on `GenCanPack` **and** `CbmcGrow`:
   raises `ValueError`. Mutually exclusive with `.with_periodic_box`.
 - `.with_parallel_eval(enabled: bool)` — rayon-backed pair eval. Raises
   `RuntimeError` if the wheel lacks the `rayon` feature (fail-fast).
-- `.with_progress(on: bool = True)` — LAMMPS-style screen output
-  (off by default).
-- `.with_handler(handler)` — attach a custom `Handler` (stackable).
+- `.with_log_level(level: str)` — screen log: `"quiet"` (the default),
+  `"summary"`, `"progress"` (LAMMPS-style thermo lines) or `"verbose"`.
+- `.with_callback(callback)` — attach a custom `Callback` (stackable).
 - `.with_global_restraint(r)` — broadcast to every target (stackable).
 
-### `GenCanPack`
+### `GencanPack`
 
 Rigid-body placement driven by the three-phase GENCAN optimizer — the
 Packmol algorithm. Zero-arg constructor.
 
 ```python
-GenCanPack()
+GencanPack()
 ```
 
 GENCAN-only builders, on top of the shared ones:
@@ -266,24 +266,24 @@ rejections.
 
 ### `Pipeline`
 
-Composes stage objects — `GenCanPack`, `CbmcGrow`, and `LatticeGrow`
+Composes stage objects — `GencanPack`, `CbmcGrow`, and `LatticeGrow`
 instances — into one multi-algorithm run: grow a chain, then hand it to
 rigid-body descent, in one lifecycle and one `State` rather than two
 separate `run()` calls. See [Composing stages](guide/packer.md#composing-stages)
 for the full walkthrough.
 
 ```python
-Pipeline(stages: Sequence[GenCanPack | CbmcGrow | LatticeGrow] | None = None)
+Pipeline(stages: Sequence[GencanPack | CbmcGrow | LatticeGrow] | None = None)
 ```
 
 **Builders**
 
-- `.with_stage(stage: GenCanPack | CbmcGrow | LatticeGrow)` — append one
+- `.with_stage(stage: GencanPack | CbmcGrow | LatticeGrow)` — append one
   more stage; returns a new `Pipeline`.
-- The shared builders — same as [`GenCanPack`](#shared-builders):
+- The shared builders — same as [`GencanPack`](#shared-builders):
   `.with_tolerance`, `.with_precision`, `.with_seed`,
   `.with_periodic_box`, `.with_density`, `.with_parallel_eval`,
-  `.with_progress`, `.with_handler`, `.with_global_restraint`. Set these on
+  `.with_log_level`, `.with_callback`, `.with_global_restraint`. Set these on
   the `Pipeline`, never on a stage object that goes into one — a stage
   carrying a non-default shared setting raises `ValueError` naming the
   stage and the setting.
@@ -294,27 +294,27 @@ Pipeline(stages: Sequence[GenCanPack | CbmcGrow | LatticeGrow] | None = None)
 .run(targets: list[Target], max_loops: int) -> State
 ```
 
-Each stage's own `.with_handler(...)` callbacks are adopted into the
-pipeline's handler set and fire for every stage in the run, not only the
+Each stage's own `.with_callback(...)` callbacks are adopted into the
+pipeline's callback set and fire for every stage in the run, not only the
 one they were attached to. Raises `ValueError` for an empty pipeline, a
 stage-ordering error, or a stage carrying a non-default shared setting
 (each naming the offending stage); raises `TypeError`, listing the three
-supported entries, for any object passed to `Pipeline([...])` or
-`.with_stage(x)` that is not a `GenCanPack`, `CbmcGrow`, or `LatticeGrow`.
+supported engines, for any object passed to `Pipeline([...])` or
+`.with_stage(x)` that is not a `GencanPack`, `CbmcGrow`, or `LatticeGrow`.
 
-### Chaining two entries
+### Chaining two engines
 
-An entry's own `run()` never mixes algorithms, and there is no hidden
+An engine's own `run()` never mixes algorithms, and there is no hidden
 fallback between them. Outside `Pipeline` (above), stage it in user code
 instead, in one of two shapes:
 
 ```python
 # Push-off: continue the SAME free targets on the grown state.
 grown = CbmcGrow(prior).with_density(0.9).run([chain], max_loops=60)
-pushed = GenCanPack().with_restart(grown).with_seed(7).run([chain], max_loops=60)
+pushed = GencanPack().with_restart(grown).with_seed(7).run([chain], max_loops=60)
 
 # Fixed matrix: freeze the first result, pack new species around it.
-full = GenCanPack().run([Target.fixed_from(grown), solvent], max_loops=200)
+full = GencanPack().run([Target.fixed_from(grown), solvent], max_loops=200)
 ```
 
 ---
@@ -323,12 +323,12 @@ full = GenCanPack().run([Target.fixed_from(grown), solvent], max_loops=200)
 
 Frozen outcome of one `run()`. Diagnostics (`frame`, `fdist`, `frest`,
 `converged`, `degraded`, `intra`) live on this object; pass the same
-object to `GenCanPack.with_restart` or `Target.fixed_from` to continue.
+object to `GencanPack.with_restart` or `Target.fixed_from` to continue.
 
 **Properties**
 
 - `.positions : ndarray (N, 3) float64`
-- `.frame : molrs.Frame` — topology-complete frame (periodic box stamped if one was declared).
+- `.frame : molrs.core.Frame` — topology-complete frame (periodic box stamped if one was declared).
 - `.elements : list[str]`
 - `.natoms : int`
 - `.converged : bool`
@@ -355,8 +355,6 @@ Nested diagnostic on [`State`](#state). Empty class is `+∞`.
   target's skip table scores (Å).
 - `.exempted : float` — minimum same-copy pair distance among pairs the
   table exempts (Å).
-
-There are no `min_intra_*` aliases.
 
 ---
 
@@ -395,29 +393,40 @@ Geometric data only — never a force field. Static constructors:
 
 ---
 
-## `StepInfo`
+## `StepReport`
 
-Read-only snapshot passed to `Handler.on_step`.
+Read-only snapshot passed to `Callback.on_step`.
 
 ```python
-info.loop_idx          # outer-loop iteration
-info.max_loops
-info.phase             # phase index
-info.total_phases
-info.molecule_type     # int | None
-info.fdist
-info.frest
-info.improvement_pct
-info.radscale
-info.precision
-info.stage             # StageInfo — which packing algorithm emitted this step
+step.loop_idx          # outer-loop iteration
+step.max_loops
+step.phase             # phase index
+step.total_phases
+step.molecule_type     # int | None
+step.fdist
+step.frest
+step.improvement_pct
+step.radscale
+step.precision
+step.stage             # StageProgress — which packing algorithm emitted this step
 ```
 
-### `StageInfo`
+## `PackSystemView`
+
+The second argument of `Callback.on_step`: a guard over the live packing
+system, valid only inside that call (any access afterwards raises
+`RuntimeError`). Properties copy on access.
+
+```python
+sys.positions          # (natoms, 3) float64 array; unplaced atoms sit at their sentinel
+sys.natoms
+```
+
+### `StageProgress`
 
 Read-only triple identifying the stage a step belongs to. Load-bearing
 inside a multi-stage [`Pipeline`](#pipeline); present, with `index = 0` and
-`total = 1`, on every single-entry run too.
+`total = 1`, on every single-engine run too.
 
 - `.index : int` — 0-based position of this stage in the run; monotonic
   across a multi-stage `Pipeline`.
@@ -430,13 +439,13 @@ inside a multi-stage [`Pipeline`](#pipeline); present, with `index = 0` and
 ## Restraints
 
 All restraint classes are immutable. Two families, both attached with
-`target.with_restraint(r)` (or the entry's `with_global_restraint(r)`):
+`target.with_restraint(r)` (or the engine's `with_global_restraint(r)`):
 **molrs regions** lifted to a per-atom penalty (below) and **collective**
 distribution-matching restraints ([next section](#collective-distribution-matching-restraints)).
 
 ### molrs regions as restraints
 
-Any molrs region object attaches as a restraint: `molrs.Sphere`, `Cuboid`,
+Any molrs region object attaches as a restraint: `molrs.core.Sphere`, `Cuboid`,
 `Parallelepiped`, `HalfSpace`, `Cylinder`, `Ellipsoid`, `Polyhedron`,
 `SphereUnion`, or any `&` / `|` / `~` composition of them. The region
 crosses the wheel boundary as a `molrs.RegionRef` capsule (both wheels on
@@ -447,7 +456,7 @@ the shapes, their constructors and their `contains` / `distance` /
 `bounds` queries are documented with molrs. Solver split (the same for
 every region, not inferred from the shape):
 
-- `GenCanPack` — soft exterior penalty.
+- `GencanPack` — soft exterior penalty.
 - `CbmcGrow` — hard reject on propose; `force_place` may sit outside.
 - `LatticeGrow` — sites outside the mesh are blocked (Region ∩ lattice), and
   the backbone atoms **are** those sites, so the mask's guarantee is the
@@ -460,7 +469,7 @@ returns `(n,)` bool; `distance` returns `(n,)` Å, negative inside. Together
 they say what the packer was told to enforce:
 
 ```python
-cavity = molrs.Polyhedron(molrs.io.read_stl("dendrite.stl"))
+cavity = molrs.core.Polyhedron(molrs.io.read_stl("dendrite.stl"))
 depth = cavity.distance(state.positions)
 print(f"{(depth > 0).sum()} atoms outside, worst {depth.max():.2f} Å")
 ```
@@ -533,7 +542,7 @@ from molpack import SelfSeparation, Target
 
 ions = (
     Target(frame, count=27)
-    .with_restraint(molrs.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]))
     .with_restraint(SelfSeparation(10.0))
 )
 ```
@@ -542,12 +551,13 @@ ions = (
 
 ## Script loader
 
-### `load_script(path, *, read_frame=None) -> ScriptJob`
+### `load_script(path, *, loader=None) -> ScriptJob`
 
 Parse and lower a Packmol-compatible `.inp` script. Template files are
-read on the Python side (defaulting to `molrs.io.read_pdb` / `read_xyz` by
-extension), so the wheel stays free of `molrs-io`. Pass `read_frame`
-— a callable `(path, filetype) -> molrs.Frame` — to plug in another
+read on the Python side (defaulting to the `molrs.io` reader of the format the
+script's `filetype` or the file name names: `read_pdb`, `read_xyz`, …), so the
+wheel stays free of `molrs-io`. Pass `loader`
+— a callable `(path, filetype) -> molrs.core.Frame` — to plug in another
 loader (mdtraj, ASE, …).
 
 ### `ScriptJob`
@@ -560,12 +570,12 @@ job = load_script("mix.inp")
 packer, targets, output, nloop = load_script("mix.inp")   # same object
 ```
 
-- `.packer : GenCanPack` — pre-configured with the script's `tolerance`,
-  `seed`, and any `pbc` box. `.inp` scripts always lower to the
-  rigid-body entry.
+- `.packer : GencanPack` — pre-configured with the script's `tolerance`,
+  `seed`, `pbc` box or `cell`, and `avoid_overlap`. `.inp` scripts always lower to the
+  rigid-body engine.
 - `.targets : list[Target]`
 - `.output : pathlib.Path` — resolved output path.
-- `.nloop : int` — outer-loop cap (`nloop` keyword; default 400).
+- `.nloop : int` — outer-loop cap (`nloop` keyword; default `200 * ntype`).
 
 ---
 
@@ -596,16 +606,16 @@ class Restraint(Protocol):
     ) -> tuple[float, tuple[float, float, float]]: ...
 ```
 
-### `Handler`
+### `Callback`
 
 ```python
-class Handler(Protocol):
+class Callback(Protocol):
     def on_start(self, ntotat: int, ntotmol: int) -> None: ...
-    def on_step(self, info: StepInfo) -> bool | None: ...   # True → stop
+    def on_step(self, step: StepReport, sys: PackSystemView) -> bool | None: ...   # True → stop
     def on_finish(self) -> None: ...
 ```
 
-All `Handler` methods are optional — missing ones are silently skipped.
+All `Callback` methods are optional — missing ones are silently skipped.
 
 ---
 
@@ -620,7 +630,7 @@ subclass). Catch the base to handle any packing failure uniformly.
 - `MaxIterationsError` — ran out of outer loops.
 - `NoTargetsError` — empty target list.
 - `EmptyMoleculeError` — a target has zero atoms.
-- `InvalidPBCBoxError` — periodic box has a non-positive extent.
+- `InvalidPbcBoxError` — periodic box has a non-positive extent.
 
 `ValueError` / `TypeError` still surface on Python-side invariants
 (bad atom indices, wrong restraint object, etc.). Growth and density

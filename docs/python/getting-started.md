@@ -13,13 +13,13 @@ import molrs
 frame = molrs.io.read_pdb("water.pdb")
 ```
 
-No PDB file? Build a `molrs.Frame` from arrays:
+No PDB file? Build a `molrs.core.Frame` from arrays:
 
 ```python
 import molrs
 import numpy as np
 
-frame = molrs.Frame({
+frame = molrs.core.Frame({
     "atoms": {
         "x": np.array([0.00,  0.96, -0.24]),
         "y": np.array([0.00,  0.00,  0.93]),
@@ -42,7 +42,7 @@ water = Target(frame, count=100).with_name("water")
 
 Arguments:
 
-- `frame` — a `molrs.Frame` (`molpy.Frame` is the same class) with columns
+- `frame` — a `molrs.core.Frame` (`molpy.Frame` is the same class) with columns
   `"x"`, `"y"`, `"z"`, and `"element"`.
 - `count` — number of copies to produce.
 
@@ -59,7 +59,7 @@ should be packed into.
 import molrs
 
 water = water.with_restraint(
-    molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])   # origin, lengths
+    molrs.core.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0])   # origin, lengths
 )
 ```
 
@@ -73,20 +73,20 @@ repeated `.with_restraint()` calls — see
 ## 4. Pack
 
 ```python
-from molpack import GenCanPack
+from molpack import GencanPack
 
-packer = GenCanPack().with_tolerance(2.0).with_seed(42)
+packer = GencanPack().with_tolerance(2.0).with_seed(42)
 result = packer.run([water], max_loops=200)
 frame = result.frame
 
-print(frame["atoms"].nrows)
+print(frame["atoms"].n_rows)
 ```
 
-`GenCanPack` is the rigid-body entry — you choose the packing algorithm
-by choosing the entry, and `CbmcGrow` is the chain-growth one. Both have
+`GencanPack` is the rigid-body engine — you choose the packing algorithm
+by choosing the engine, and `CbmcGrow` is the chain-growth one. Both have
 the same builders and the same terminal verb, `run()`, which returns a
 `State` with `.frame`, `.converged`, `.fdist`, `.frest`,
-`.positions`, `.degraded`, and `.intra`. An entry runs once: build a
+`.positions`, `.degraded`, and `.intra`. An engine runs once: build a
 new one for each pack.
 
 ## 5. Save
@@ -102,27 +102,27 @@ molrs.io.write_xyz("packed.xyz", frame)
 
 `result.frame` is the same object — keep the `State` around when you
 need the diagnostic fields, or to continue with
-`GenCanPack().with_restart(result)` / `Target.fixed_from(result)`.
+`GencanPack().with_restart(result)` / `Target.fixed_from(result)`.
 
 ## Full script
 
 ```python
 import molrs
-from molpack import GenCanPack, Target
+from molpack import GencanPack, Target
 
 frame = molrs.io.read_pdb("water.pdb")
 
 water = (
     Target(frame, count=100)
     .with_name("water")
-    .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
+    .with_restraint(molrs.core.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 40.0]))
 )
 
 result = (
-    GenCanPack().with_tolerance(2.0).with_seed(42).run([water], max_loops=200)
+    GencanPack().with_tolerance(2.0).with_seed(42).run([water], max_loops=200)
 )
 
-print(f"packed {result.frame['atoms'].nrows} atoms")
+print(f"packed {result.frame['atoms'].n_rows} atoms")
 ```
 
 ## Next steps

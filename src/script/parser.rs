@@ -34,7 +34,7 @@ pub struct Script {
     pub nloop: usize,
     /// Whether to reject initial random placements that overlap a fixed
     /// molecule (`avoid_overlap`, default on). Wired through `Script::build`
-    /// to `GenCanPack::with_avoid_overlap`.
+    /// to `GencanPack::with_avoid_overlap`.
     pub avoid_overlap: bool,
     /// Periodic-boundary box (`pbc` keyword). When set, it seeds the
     /// packer's cell grid so the initial ±`sidemax` random placement
@@ -477,7 +477,7 @@ pub fn parse(src: &str) -> Result<Script, ScriptError> {
         seed,
         filetype,
         output: output.ok_or(ScriptError::MissingOutput)?,
-        nloop: nloop.unwrap_or(crate::GenCanPack::default_max_loops(structures.len())),
+        nloop: nloop.unwrap_or(crate::GencanPack::default_max_loops(structures.len())),
         avoid_overlap,
         pbc,
         cell,
@@ -585,10 +585,10 @@ fn parse_outside(tokens: &[&str], lineno: usize) -> Result<RestraintSpec, Script
 fn parse_cube_args(
     tokens: &[&str],
     lineno: usize,
-    ctx: &str,
+    label: &str,
 ) -> Result<([f64; 3], f64), ScriptError> {
-    let origin = parse_vec3(tokens, 2, ctx, lineno)?;
-    let side = parse_f64(tokens, 5, ctx, lineno)?;
+    let origin = parse_vec3(tokens, 2, label, lineno)?;
+    let side = parse_f64(tokens, 5, label, lineno)?;
     Ok((origin, side))
 }
 
@@ -596,17 +596,17 @@ fn parse_cube_args(
 fn parse_ellipsoid_args(
     tokens: &[&str],
     lineno: usize,
-    ctx: &str,
+    label: &str,
 ) -> Result<([f64; 3], [f64; 3], f64), ScriptError> {
-    let center = parse_vec3(tokens, 2, ctx, lineno)?;
-    let axes = parse_vec3(tokens, 5, ctx, lineno)?;
+    let center = parse_vec3(tokens, 2, label, lineno)?;
+    let axes = parse_vec3(tokens, 5, label, lineno)?;
     if axes.iter().any(|&a| a <= 0.0) {
         return Err(parse_err(
             lineno,
-            format!("{ctx} semi-axes must be strictly positive, got {axes:?}"),
+            format!("{label} semi-axes must be strictly positive, got {axes:?}"),
         ));
     }
-    let exponent = parse_f64(tokens, 8, ctx, lineno)?;
+    let exponent = parse_f64(tokens, 8, label, lineno)?;
     Ok((center, axes, exponent))
 }
 
@@ -614,18 +614,18 @@ fn parse_ellipsoid_args(
 fn parse_cylinder_args(
     tokens: &[&str],
     lineno: usize,
-    ctx: &str,
+    label: &str,
 ) -> Result<([f64; 3], [f64; 3], f64, f64), ScriptError> {
-    let center = parse_vec3(tokens, 2, ctx, lineno)?;
-    let axis = parse_vec3(tokens, 5, ctx, lineno)?;
+    let center = parse_vec3(tokens, 2, label, lineno)?;
+    let axis = parse_vec3(tokens, 5, label, lineno)?;
     if axis == [0.0; 3] {
         return Err(parse_err(
             lineno,
-            format!("{ctx} axis must be a non-zero direction"),
+            format!("{label} axis must be a non-zero direction"),
         ));
     }
-    let radius = parse_f64(tokens, 8, ctx, lineno)?;
-    let length = parse_f64(tokens, 9, ctx, lineno)?;
+    let radius = parse_f64(tokens, 8, label, lineno)?;
+    let length = parse_f64(tokens, 9, label, lineno)?;
     Ok((center, axis, radius, length))
 }
 
@@ -762,47 +762,64 @@ fn parse_pbc(tokens: &[&str], lineno: usize) -> Result<PbcSpec, ScriptError> {
 pub(super) fn parse_f64(
     tokens: &[&str],
     idx: usize,
-    ctx: &str,
+    label: &str,
     lineno: usize,
 ) -> Result<f64, ScriptError> {
-    let tok = tokens
-        .get(idx)
-        .ok_or_else(|| parse_err(lineno, format!("`{ctx}` — missing value at position {idx}")))?;
+    let tok = tokens.get(idx).ok_or_else(|| {
+        parse_err(
+            lineno,
+            format!("`{label}` — missing value at position {idx}"),
+        )
+    })?;
     tok.parse::<f64>()
-        .map_err(|_| parse_err(lineno, format!("`{ctx}` — `{tok}` is not a valid number")))
+        .map_err(|_| parse_err(lineno, format!("`{label}` — `{tok}` is not a valid number")))
 }
 
-fn parse_u64(tokens: &[&str], idx: usize, ctx: &str, lineno: usize) -> Result<u64, ScriptError> {
-    let tok = tokens
-        .get(idx)
-        .ok_or_else(|| parse_err(lineno, format!("`{ctx}` — missing value at position {idx}")))?;
-    tok.parse::<u64>()
-        .map_err(|_| parse_err(lineno, format!("`{ctx}` — `{tok}` is not a valid integer")))
+fn parse_u64(tokens: &[&str], idx: usize, label: &str, lineno: usize) -> Result<u64, ScriptError> {
+    let tok = tokens.get(idx).ok_or_else(|| {
+        parse_err(
+            lineno,
+            format!("`{label}` — missing value at position {idx}"),
+        )
+    })?;
+    tok.parse::<u64>().map_err(|_| {
+        parse_err(
+            lineno,
+            format!("`{label}` — `{tok}` is not a valid integer"),
+        )
+    })
 }
 
 fn parse_usize(
     tokens: &[&str],
     idx: usize,
-    ctx: &str,
+    label: &str,
     lineno: usize,
 ) -> Result<usize, ScriptError> {
-    let tok = tokens
-        .get(idx)
-        .ok_or_else(|| parse_err(lineno, format!("`{ctx}` — missing value at position {idx}")))?;
-    tok.parse::<usize>()
-        .map_err(|_| parse_err(lineno, format!("`{ctx}` — `{tok}` is not a valid integer")))
+    let tok = tokens.get(idx).ok_or_else(|| {
+        parse_err(
+            lineno,
+            format!("`{label}` — missing value at position {idx}"),
+        )
+    })?;
+    tok.parse::<usize>().map_err(|_| {
+        parse_err(
+            lineno,
+            format!("`{label}` — `{tok}` is not a valid integer"),
+        )
+    })
 }
 
 pub(super) fn parse_vec3(
     tokens: &[&str],
     start: usize,
-    ctx: &str,
+    label: &str,
     lineno: usize,
 ) -> Result<[f64; 3], ScriptError> {
     Ok([
-        parse_f64(tokens, start, ctx, lineno)?,
-        parse_f64(tokens, start + 1, ctx, lineno)?,
-        parse_f64(tokens, start + 2, ctx, lineno)?,
+        parse_f64(tokens, start, label, lineno)?,
+        parse_f64(tokens, start + 1, label, lineno)?,
+        parse_f64(tokens, start + 2, label, lineno)?,
     ])
 }
 
@@ -813,11 +830,11 @@ pub(super) fn parse_err(lineno: usize, message: impl Into<String>) -> ScriptErro
     }
 }
 
-fn unknown_keyword(lineno: usize, keyword: &str, context: &'static str) -> ScriptError {
+fn unknown_keyword(lineno: usize, keyword: &str, section: &'static str) -> ScriptError {
     ScriptError::UnknownKeyword {
         line: lineno,
         keyword: keyword.to_string(),
-        context,
+        section,
     }
 }
 
@@ -1059,9 +1076,9 @@ end structure
 
     #[test]
     fn parse_unknown_top_level_keyword_errors() {
-        // Regression: parser used to silently drop unknown top-level
-        // keywords, which caused `pbc` to be dropped and drove the cell
-        // grid to ~10⁸ cells at pack time.
+        // An unknown top-level keyword is an error: dropping it silently
+        // (a mistyped `pbc`, say) drives the cell grid to ~10⁸ cells at
+        // pack time.
         let src = "\
 output out.pdb
 wibble 1 2 3
@@ -1073,10 +1090,10 @@ end structure
         let err = parse(src).expect_err("should fail");
         match err {
             ScriptError::UnknownKeyword {
-                keyword, context, ..
+                keyword, section, ..
             } => {
                 assert_eq!(keyword, "wibble");
-                assert_eq!(context, "top-level");
+                assert_eq!(section, "top-level");
             }
             other => panic!("expected UnknownKeyword, got {other:?}"),
         }
@@ -1095,10 +1112,10 @@ end structure
         let err = parse(src).expect_err("should fail");
         match err {
             ScriptError::UnknownKeyword {
-                keyword, context, ..
+                keyword, section, ..
             } => {
                 assert_eq!(keyword, "nonsense");
-                assert_eq!(context, "structure block");
+                assert_eq!(section, "structure block");
             }
             other => panic!("expected UnknownKeyword, got {other:?}"),
         }

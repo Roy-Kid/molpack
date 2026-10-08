@@ -22,14 +22,15 @@ workspace/
 The root `Cargo.toml` uses a path dependency on `../molrs/molrs`. With the
 sibling layout above everything resolves automatically.
 
-**Version pins:** a local build uses the sibling checkouts (`../molrs`, and
-`../molpy` for the Python tests). The version fields name the **0.15.***
-minor line (see `Cargo.toml` and `python/pyproject.toml`). CI, and the
-pre-push hooks, build against `MolCrafts/molrs` and `MolCrafts/molpy` at the
-commits `.github/partners.env` pins, in a layout of their own -- not your
-siblings. `Cargo.lock`, `python/Cargo.lock` and `python/uv.lock` are committed
-and every cargo / uv call in the gates is `--locked`; bumping a pin means
-relocking in the same commit (the recipe is in `.github/partners.env`).
+**Version pins:** a local build uses the sibling checkout `../molrs`. The
+version fields name the **0.16.*** minor line (see `Cargo.toml` and
+`python/pyproject.toml`). CI, and the pre-push hooks, build against
+`MolCrafts/molrs` at the commit `scripts/partners.py` resolves (molrs's
+`dev`; see [Partners](#partners)), in a layout of their own -- not your
+sibling. `Cargo.lock`, `python/Cargo.lock` and `python/uv.lock` are committed
+and every cargo / uv call in the gates is `--locked`; they record molrs's
+package metadata, not a commit, so relock only when molrs's `dev` changes its
+version or dependencies (the recipe is in `.github/partners.env`).
 The Python wheel checks this on ``import molpack`` — a molrs minor mismatch is an
 ``ImportError``, not a later FFI segfault.
 
@@ -49,14 +50,14 @@ cargo build -p molcrafts-molpack
 ## Running tests
 
 prek pre-push and CI run the **same** commands (spelled out in
-`.pre-commit-config.yaml` and `.github/workflows/ci.yml`):
+`.pre-commit-config.yaml` and `.github/workflows/`):
 
 ```bash
-# Rust — same as CI "rust tests" job. Behaviour lives in `#[cfg(test)]`
+# Rust — same as CI `test / rust`. Behaviour lives in `#[cfg(test)]`
 # modules next to the code; there is no tests/ directory.
-cargo test --locked --lib --features cli,ff
-cargo test --locked --doc --features cli,ff
-cargo check --locked --all-targets --features cli,ff      # bin + examples must compile
+cargo test --locked --lib --features cli
+cargo test --locked --doc --features cli
+cargo check --locked --all-targets --features cli      # bin + examples must compile
 cargo check --locked --no-default-features && cargo check --locked --features rayon
 
 # Python — tox isolated env (tox itself from python/ dependency-group dev)
@@ -73,24 +74,24 @@ venv; **do not** rely on that for the gate — pre-push always uses
 ## Hooks
 
 `prek install` installs both hook types from `.pre-commit-config.yaml`; every
-command in `.github/workflows/ci.yml` has a hook. **Never `git commit
+command in `.github/workflows/{lint,test,docs}.yml` has a hook. **Never `git commit
 --no-verify` or `git push --no-verify`, and never merge a red pull request.**
 
 - **pre-commit** (staged files, nothing compiles, in place): file hygiene
   (whitespace, final newline, YAML/TOML, merge markers, line endings), ruff
   format + ruff (`python/`), rustfmt, and the no-ignored-tests guard.
 - **pre-push**:
-  - the pre-commit hooks again on `--all-files` (CI `lint` runs them so);
-  - `scripts/partners.py check` — every pin in `.github/partners.env` exists
-    on its remote, every path dependency (`../molrs`, `../../molpy`, ...)
+  - the pre-commit hooks again on `--all-files` (CI `lint / hooks` runs them so);
+  - `scripts/partners.py check` — every partner in `.github/partners.env`
+    resolves, every path dependency (`../molrs`, `../../molrs`, ...)
     lands in a checkout CI makes, and no workflow spells a partner ref of its
     own;
-  - the three lock files are current against the pinned molrs/molpy;
+  - the three lock files are current against the resolved molrs;
   - the docs build (`zensical build --clean --strict` from the `doc` group)
     when docs/ or zensical.toml changed;
   - clippy (`--all-targets --all-features -D warnings`), ty, the rust tests
     and tox -- each in CI's sibling layout (`scripts/partners.py run`: a copy
-    of this tree next to molrs and molpy at their pinned commits), `--locked`,
+    of this tree next to molrs at its resolved commit), `--locked`,
     on the toolchain `rust-toolchain.toml` pins (1.99.0, the same as molrs)
     and Python 3.12.
 - **Dispatch on the MolCrafts cluster:** the compiling gates go through
@@ -99,9 +100,69 @@ command in `.github/workflows/ci.yml` has a hook. **Never `git commit
   shared `core.hooksPath` sets it to `.build-alloc/hookrun`, which runs the
   command on a compute node (allocation `$USER-hooks`; it fails after 20
   minutes without a node, never passes) and sets `$MOLCRAFTS_PARTNER_CACHE` so
-  the pinned checkouts and their `target/` stay warm between pushes.
+  the partner checkouts and their `target/` stay warm between pushes.
   Everything else runs in place, so a commit never waits for Slurm. Elsewhere
   nothing sets the variables: every hook runs locally, in a temp layout.
+
+## Partners
+
+On `dev`, partners are tracked, not pinned. `.github/partners.env` names
+molrs's branch (`MOLRS_REF=dev`), and `scripts/partners.py` resolves it -- for
+CI (`partners.py fetch`, into `../molrs`) and for the hooks (`partners.py
+run`) alike -- to the first of:
+
+1. molrs's branch named like the one being built (CI: the pushed branch or a
+   pull request's head branch; locally: the checked-out branch), looked up
+   first on the fork the build comes from (`<owner>/molrs`, where `<owner>`
+   owns the pull request's head repository or the repository CI runs in; in a
+   git hook, the remote being pushed to), then on MolCrafts/molrs;
+2. outside CI only, that branch in your sibling clone `../molrs`, when it has
+   one and neither remote does yet;
+3. MolCrafts/molrs's `dev`.
+
+A change that needs a molrs change lands as two same-named branches, never by
+skipping a gate: create the same branch (say `converge/x`) in both checkouts;
+push both to your forks, never to MolCrafts (molpack's gates take molrs's
+branch from your fork, or from your sibling before it is pushed); each push
+runs the full CI tier on your fork, and molpack's run resolves molrs's
+`converge/x` there; only once both forks are
+green, open the pull requests into MolCrafts `dev`, land molrs's, then
+molpack's (never a red one), and delete the branches.
+
+**Releasing.** A release builds against a fixed molrs: the release commit on
+`master` sets `MOLRS_REF` to the molrs release tag of the line `Cargo.toml`
+names (`vX.Y.Z`), relocks if that changes molrs's metadata, and is tagged;
+`release.yml` resolves that tag. When `master` is merged back into `dev`, keep
+`MOLRS_REF=dev` there.
+
+## CI
+
+One workflow per kind of work. Every push of any branch runs `lint`, `test`
+and `docs`, on a fork as on MolCrafts. A pull request into `dev` or `master`
+runs them again unless it is a pull request inside a fork (that branch was
+already built, full tier, by its push). Those decisions (tier, fork or
+upstream, the duplicate pull request) are made in one place: every
+workflow's first job, `<file> / context`, runs
+`MolCrafts/molcrafts-ci/actions/ci-context@master`, and every other job reads
+its outputs.
+
+| workflow | feature-branch push to MolCrafts | everything else: `dev`/`master`/`main` on MolCrafts, pull requests, tags, dispatches, any push to a fork | upstream only |
+| --- | --- | --- | --- |
+| `lint.yml` | `lint / hooks` (commit hooks on every file, partners, lock files), `lint / clippy` (clippy, ty) | same | — |
+| `test.yml` | fast: `test / rust`, `test / python (ubuntu-latest)` | full: `test / rust`, `test / python` on Linux, macOS and Windows | — |
+| `docs.yml` | `docs / build` (zensical `--strict`) | same | Cloudflare Pages deploys the site from MolCrafts |
+| `release.yml` | — | dispatch: dry run (gates, builds, `cargo publish --dry-run`, uploads nothing) | `v*` tag: crates.io, PyPI wheels + sdist, GitHub Release |
+
+So a fork branch gets the full tier on its push: push to your fork, wait for
+green, then open the pull request into MolCrafts `dev`. Branches pushed to
+MolCrafts itself (Dependabot's) get the fast tier, and their pull requests the
+full one. The `require-green-ci` (`dev`) and `protect-master` rulesets require
+`test / context` and the full tier's jobs. A release tag must be `v` + the `Cargo.toml` version, on
+`master`; trusted publishing on crates.io and PyPI names `release.yml` and the
+`crates-io` and `pypi` environments.
+Shared setup is MolCrafts/molcrafts-ci's `actions/setup-rust`,
+`actions/setup-python` and `actions/setup-partners` (`@master`), the same
+actions every MolCrafts repository uses.
 
 ## Code style
 

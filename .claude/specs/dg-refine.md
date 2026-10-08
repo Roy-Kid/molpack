@@ -47,7 +47,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
   （`topology-model`）。
 - 不做格上 MC 修复（R3）、不做拓扑守卫的键段交叉检查（守卫族，`ring-closure` spec 引入
   `Invariant` 实现；本 spec 只在每级之间留 `Guarded` 挂点）。
-- 不替换 `GenCanPack` 的刚体 push-off：R2 仍是刚性构象体系的正确工具。
+- 不替换 `GencanPack` 的刚体 push-off：R2 仍是刚性构象体系的正确工具。
 - 不做 rayon 新并行：pair kernel 已有的并行路径原样复用。
 
 ## Public surface
@@ -73,7 +73,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
   - `IntraOverlapTerm`：**同分子**、排除深度之外的对，用同一半径与 scale，自带排除表感知的
     cell 遍历（不改 `pair_term` 热循环——`examples_batch` 逐位风险）；没有它，链只有弹簧
     没有分子内斥力，会自穿；
-  - `BondTerm`、`Angle13Term`、`Dihedral14Term`：距离弹簧，成键对来自 `molrs::Topology`
+  - `BondTerm`、`Angle13Term`、`Dihedral14Term`：距离弹簧，成键对来自 `molrs::core::Topology`
     （直接消费，不从 `grow::internal` 取、不 import `topology_for_growth`——避免 refine → grow 的跨族边）；
   - `ChiralTerm`（签名体积，数据）、`RestraintTerm`（既有 `AtomRestraint::f/fg`）。
   所有项无量纲化到 overlap 项的自然尺度（`tol⁴`）：`E_bond = k_b · tol⁴ · Σ ((d − d₀)/d₀)²`，
@@ -116,17 +116,17 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
 | `src/refine/ladder.rs` | 半径调度，走 `PackContext::set_radius` | ≤ 150 |
 | `src/objective/cartesian.rs`（前置拆分产物） | `bin_xcart_into_cells`、`accumulate_cartesian_fg` | ≤ 200 |
 
-- **依赖方向**：`refine/*` → `stage` / `context::pack_state` / `molrs::Topology` / `objective::cartesian` /
+- **依赖方向**：`refine/*` → `stage` / `system::pack_state` / `molrs::core::Topology` / `objective::cartesian` /
   `gencan::{spg, cg}` / `restraint`。允许 `refine → gencan::{spg, cg}`：原则 2 与
   `chain-growth-solver.acceptance.md:30` 点名禁止的是 `pgencan / run_phase / run_iteration`
   这些刚体驱动，不是线搜索原语；本 spec 的验收 grep 把同一条禁令扩到 `src/refine/`，并
   追加 `gencan::solver / phases / entry / mod::gencan(` 四项。
-- **不**从 `grow::internal` 取键图（跨族边）；refine 直接消费 `molrs::Topology`，永不 import `topology_for_growth`。
+- **不**从 `grow::internal` 取键图（跨族边）；refine 直接消费 `molrs::core::Topology`，永不 import `topology_for_growth`。
 - `gencan/mod.rs`（987 行）本 spec 一行不加；若将来要复用其外循环，先把
   `tn_linesearch`（:611-987）拆到 `gencan/tnls.rs`，那是独立的 hygiene 改动。
 - `Term` trait 住 `refine/terms.rs`，不进 `restraint/`：约束是逐点谓词，项是全局可加能量。
   `Term` 与 `CartesianObjective` Rust-only；Python 只镜像 `DgRefine` 预设。
-- 命名：`DgRefine` 是 `Stage`，**不是** `optimizer/` 里的 in-loop optimizer（`GenCanPack::with_optimizer`）——模块文档写明；
+- 命名：`DgRefine` 是 `Stage`，**不是** `optimizer/` 里的 in-loop optimizer（`GencanPack::with_optimizer`）——模块文档写明；
   无 "packmol"；泛型标记若将来引入用 `CartesianVars / SpgMinimizer` 而非 `Cartesian / Spg`
   （后者与模块 `gencan::spg` 混视）。
 - 无 `ff`：`grep -rn 'molrs::ff\|molrs::optimize' src/refine/` 无命中（crate 内已无 `cfg(feature = "ff")`，`ff` 只透传 `molrs/ff`）。
@@ -142,12 +142,12 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
   （独立复算，不走 `fdist`——`fdist` 按 Packmol 语义只计分子间对，本 spec 不改这把尺）。
 - **裁决**：末级在 scale = 1.0 上由共享 objective 评估 `fdist / frest`；本阶段不自报。
 - **确定性**：同 seed 逐位一致；退火扰动走 `stream(seed, atom, rung, 0, SALT_ANNEAL)`。
-- **单调性不作保证**：级间 fdist 可能上升（半径变大）；记录每级 fdist 到 `StepInfo`
+- **单调性不作保证**：级间 fdist 可能上升（半径变大）；记录每级 fdist 到 `StepReport`
   （`loop_idx` = 级号，`radscale` = 当前 scale）。
 
 ## Test plan
 
-- `DgRefine` 属主模块内的 `#[cfg(test)] mod tests`（新，default feature；crate 无 `tests/` 目录，共享夹具走 `src/testutil.rs`）：
+- `DgRefine` 属主模块内的 `#[cfg(test)] mod tests`（新，default feature；crate 无 `tests/` 目录，共享夹具走 `src/test_fixtures.rs`）：
   1. 各 `Term` 有限差分梯度（含跨周期边界的键、含 fixed 邻居）；
   2. 扰动链恢复：对模板链加 0.3 Å 随机扰动，仅 Bond + Angle13 项精修后成键几何回到
      容差内；
@@ -155,7 +155,7 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
      `DgRefine` 到 `fdist < precision`；
   4. **刚体做不到、精修做得到**：重建原 `lattice_grow_then_seeded_push_off_dense`（已随 `tests/` 于 2026-09-20 删除）的
      20 × 24 珠 / 22 Å 算例，断言 `DgRefine` 末级 `fdist ≤ 0.1 × grown.fdist` 且严格小于
-     `GenCanPack::with_restart` 同预算的结果；
+     `GencanPack::with_restart` 同预算的结果；
   5. L2 守恒：精修前后每链 R_g 相对变化 ≤ 3%；
   6. 约束项：`InsideSphereRestraint` 下精修不把原子推出球（`frest == 0`）；
   7. 手性：给定四元组符号，精修后签名体积符号不变；
@@ -173,9 +173,9 @@ assert!(refined.fdist < 0.01 || refined.fdist < grown.fdist * 0.1);
 
 - `CLAUDE.md` 架构表加 `src/refine/` 行；回归命令不变。
 - `docs/python/guide/growth.md`「Reading softened」与「Melt density」两节改写：push-off
-  的推荐做法是 `DgRefine`，`GenCanPack::with_restart` 保留为刚性构象体系的工具；
+  的推荐做法是 `DgRefine`，`GencanPack::with_restart` 保留为刚性构象体系的工具；
   新节「Refining with distance geometry」（阶梯、刚度、手性数据、残余的含义）。
-- `docs/python/api-reference.md`、`docs/rust/handlers-optimizers.md`（`StepInfo` 在精修阶段
+- `docs/python/api-reference.md`、`docs/rust/callbacks-optimizers.md`（`StepReport` 在精修阶段
   的字段语义）。
 - `src/refine/mod.rs` 模块文档：与 Crippen–Havel / ETKDG 的关系、与 Auhl push-off 的关系、
   "无力场"边界（刚度是相对 overlap 项的无量纲几何参数）。

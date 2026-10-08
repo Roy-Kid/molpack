@@ -12,17 +12,18 @@
 //!   8. Random angles
 //!   9. Phase 2: constraint-only GENCAN per type (reduced x!)
 
-use molrs::spatial::simbox::SimBox;
-use molrs::types::F;
+use molrs::core::SimBox;
+use molrs::op::F;
 use ndarray::array;
 use std::time::Instant;
 
-use crate::context::{NONE_IDX, PackContext, RigidView};
+use crate::Objective;
 use crate::eval::EvalMode;
 use crate::pack::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::pack::movebad::{MoveBadConfig, movebad};
 use crate::pack::restmol::restmol;
 use crate::random::uniform01;
+use crate::system::{NONE_IDX, PackSystem, RigidView};
 
 use rand::Rng;
 
@@ -42,7 +43,7 @@ pub struct SwapState {
 
 impl SwapState {
     /// action=0: save full x.
-    pub fn init(x: &[F], sys: &PackContext) -> Self {
+    pub fn init(x: &[F], sys: &PackSystem) -> Self {
         SwapState {
             xfull: x.to_vec(),
             ntotmol_full: sys.ntotmol,
@@ -53,7 +54,7 @@ impl SwapState {
     ///
     /// Returns the compact x vector (length = `nmols[itype]` * 6).
     /// Also updates `sys.ntotmol` and `sys.comptype`.
-    pub fn set_type(&self, itype: usize, sys: &mut PackContext) -> Vec<F> {
+    pub fn set_type(&self, itype: usize, sys: &mut PackSystem) -> Vec<F> {
         // Byte-offsets in xfull for this type's COM/euler variables
         // (Packmol swaptype.f90 action 1, with 0-based indexing)
         let ilubar_start: usize = sys.nmols[0..itype].iter().sum::<usize>() * 3;
@@ -74,7 +75,7 @@ impl SwapState {
     }
 
     /// action=2: save per-type results back into xfull.
-    pub fn save_type(&mut self, itype: usize, xtype: &[F], sys: &PackContext) {
+    pub fn save_type(&mut self, itype: usize, xtype: &[F], sys: &PackSystem) {
         let ilubar_start: usize = sys.nmols[0..itype].iter().sum::<usize>() * 3;
         let ilugan_start: usize = self.ntotmol_full * 3 + ilubar_start;
         let nm = sys.nmols[itype];
@@ -84,7 +85,7 @@ impl SwapState {
     }
 
     /// action=3: restore full x and ntotmol.
-    pub fn restore(&self, x: &mut [F], sys: &mut PackContext) {
+    pub fn restore(&self, x: &mut [F], sys: &mut PackSystem) {
         debug_assert_eq!(x.len(), self.xfull.len());
         x.copy_from_slice(&self.xfull);
         sys.ntotmol = self.ntotmol_full;
@@ -103,15 +104,15 @@ impl SwapState {
 /// is still identical, so copy 0 is representative. `dmax` only sizes the
 /// initial placement grid — it is not consulted after in-loop optimizers let
 /// the copies' conformations diverge.
-pub fn compute_dmax(sys: &mut PackContext) {
+pub fn compute_dmax(sys: &mut PackSystem) {
     sys.dmax = vec![0.0 as F; sys.ntype];
     for itype in 0..sys.ntype {
-        let idatom_base = sys.idfirst[itype];
+        let idfirst = sys.idfirst[itype];
         let na = sys.natoms[itype];
         for ia in 0..na {
             for ib in (ia + 1)..na {
-                let a = sys.coor[idatom_base + ia];
-                let b = sys.coor[idatom_base + ib];
+                let a = sys.coor[idfirst + ia];
+                let b = sys.coor[idfirst + ib];
                 let d2 = (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2);
                 if d2 > sys.dmax[itype] {
                     sys.dmax[itype] = d2;
@@ -141,7 +142,7 @@ fn init_loop_one_type(
     itype: usize,
     nloop0: usize,
     xtype: &mut [F],
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     precision: F,
     gencan_maxit: usize,
     movebad_cfg: &MoveBadConfig<'_>,
@@ -154,7 +155,6 @@ fn init_loop_one_type(
     let params = GencanParams {
         maxit: gencan_maxit,
         maxfc: gencan_maxit * 10,
-        iprint: 0,
         ..Default::default()
     };
 
@@ -207,7 +207,7 @@ fn init_loop_one_type(
 #[allow(clippy::too_many_arguments)]
 pub fn initial(
     view: &mut RigidView,
-    sys: &mut PackContext,
+    sys: &mut PackSystem,
     precision: F,
     discale: F,
     sidemax: F,
@@ -231,7 +231,7 @@ pub fn initial(
 
     // Packmol initial.f90 line 50-51
     sys.scale = 1.0;
-    sys.scale2 = crate::numerics::DEFAULT_SCALE2;
+    sys.scale2 = crate::system::DEFAULT_SCALE2;
 
     // ── 1. compute dmax ──────────────────────────────────────────────────────
     log::debug!("[{:.3}s] computing dmax", t0.elapsed().as_secs_f64());
@@ -302,7 +302,7 @@ pub fn initial(
 
     let free_atoms = sys.ntotat - sys.nfixedat;
     // Packmol's initial.f90 lines 140-165 re-flip fixedatom=true on the
-    // fixed-atom tail here, but by this point context construction has already
+    // fixed-atom tail here, but by this point system construction has already
     // done that and called `sync_atom_props` — writing the `Vec<bool>`
     // directly would desynchronize `atom_props` and trip the debug
     // invariant in `compute_f`. The assertion below confirms the state
@@ -358,7 +358,7 @@ pub fn initial(
     view.write_xcart(sys);
     let x = view.as_mut_slice();
 
-    let radmax = crate::context::grid::coverage_radmax(sys);
+    let radmax = crate::system::grid::coverage_radmax(sys);
 
     let mut smin = [1.0e20 as F; 3];
     let mut smax = [-1.0e20 as F; 3];
@@ -446,7 +446,7 @@ pub fn initial(
         )
         .expect("fallback cell must have positive extent on every axis"),
     };
-    crate::context::grid::install_simbox_and_grid(sys, simbox, radmax, discale, free_atoms);
+    crate::system::grid::install_simbox_and_grid(sys, simbox, radmax, discale, free_atoms);
 
     // ── 7. Random initial point using cm_min/cm_max ───────────────────────────
     // Packmol initial.f90 lines 362-427
@@ -502,8 +502,8 @@ pub fn initial(
                         // Reject a seed that lands in, or next to, a cell
                         // holding fixed atoms. The stencil drops out-of-range
                         // offsets on non-periodic axes instead of wrapping to
-                        // the opposite face, so this no longer inspects cells
-                        // on the far side of a confined direction.
+                        // the opposite face, so cells on the far side of a
+                        // confined direction are never inspected.
                         let icell = sys.grid.cell_of(&sys.simbox, pos);
                         let mut stencil = [0usize; 27];
                         let n = sys.grid.stencil_all(icell, &mut stencil);
@@ -589,7 +589,7 @@ pub fn initial(
     log::debug!("[{:.3}s] initial() complete", t0.elapsed().as_secs_f64());
 }
 
-fn random_angle_for_type(itype: usize, axis: usize, sys: &PackContext, rng: &mut impl Rng) -> F {
+fn random_angle_for_type(itype: usize, axis: usize, sys: &PackSystem, rng: &mut impl Rng) -> F {
     if sys.constrain_rot[itype][axis] {
         let center = sys.rot_bound[itype][axis][0];
         let half_width = sys.rot_bound[itype][axis][1].abs();

@@ -9,12 +9,12 @@ from molpack import Angle, Axis, CenteringMode
 def _make_frame(
     n: int = 1,
     elements: list[str] | None = None,
-) -> molrs.Frame:
+) -> molrs.core.Frame:
     """Minimal frame with n atoms at the origin."""
     if elements is None:
         elements = ["X"] * n
     positions = np.zeros((n, 3), dtype=np.float64)
-    return molrs.Frame(
+    return molrs.core.Frame(
         {
             "atoms": {
                 "x": positions[:, 0].copy(),
@@ -26,9 +26,9 @@ def _make_frame(
     )
 
 
-def _make_two_atom_frame() -> molrs.Frame:
+def _make_two_atom_frame() -> molrs.core.Frame:
     positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float64)
-    return molrs.Frame(
+    return molrs.core.Frame(
         {
             "atoms": {
                 "x": positions[:, 0].copy(),
@@ -62,12 +62,12 @@ class TestTargetConstructor:
     def test_missing_atoms_block_raises(self):
         with pytest.raises((ValueError, KeyError)):
             molpack.Target(
-                molrs.Frame({}),
+                molrs.core.Frame({}),
                 1,
             )
 
     def test_missing_x_column_raises(self):
-        frame = molrs.Frame(
+        frame = molrs.core.Frame(
             {
                 "atoms": {
                     "y": np.array([0.0]),
@@ -80,11 +80,11 @@ class TestTargetConstructor:
             molpack.Target(frame, 1)
 
     def test_mismatched_lengths_raises(self):
-        # ``molrs.Frame`` enforces uniform column lengths at construction, so
+        # ``molrs.core.Frame`` enforces uniform column lengths at construction, so
         # the ValueError now fires at frame build (before ``Target``) — same
         # exception type the test has always asserted.
         with pytest.raises(ValueError):
-            molrs.Frame(
+            molrs.core.Frame(
                 {
                     "atoms": {
                         "x": np.array([0.0, 1.0], dtype=np.float64),
@@ -111,15 +111,15 @@ class TestTargetBuilder:
 
     def test_with_restraint(self):
         t = self._make_target()
-        c = molrs.Cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
+        c = molrs.core.Cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
         t2 = t.with_restraint(c)
         assert t2 is not t
 
     def test_with_multiple_restraints(self):
         t = self._make_target()
         t2 = t.with_restraint(
-            molrs.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
-        ).with_restraint(~molrs.Sphere([10.0, 10.0, 10.0], 2.0))
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
+        ).with_restraint(~molrs.core.Sphere([10.0, 10.0, 10.0], 2.0))
         assert t2 is not t
 
     def test_with_restraint_type_error(self):
@@ -129,14 +129,14 @@ class TestTargetBuilder:
 
     def test_with_atom_restraint(self):
         t = self._make_two_atom_target()
-        c = molrs.Sphere([0.0, 0.0, 0.0], 5.0)
+        c = molrs.core.Sphere([0.0, 0.0, 0.0], 5.0)
         # 0-based: atom index 0 is the first atom.
         t2 = t.with_atom_restraint([0], c)
         assert t2 is not t
 
     def test_with_atom_restraint_rejects_out_of_range(self):
         t = self._make_two_atom_target()
-        c = molrs.Sphere([0.0, 0.0, 0.0], 5.0)
+        c = molrs.core.Sphere([0.0, 0.0, 0.0], 5.0)
         with pytest.raises(ValueError, match="0-based"):
             t.with_atom_restraint([2], c)
 
@@ -197,21 +197,21 @@ class TestTargetBuilder:
         assert "natoms=1" in r
 
 
-class TestGenCanPack:
+class TestGencanPack:
     def test_creation_default(self):
-        p = molpack.GenCanPack()
+        p = molpack.GencanPack()
         r = repr(p)
-        assert "GenCanPack" in r
+        assert "GencanPack" in r
 
     def test_builder_immutability(self):
-        p1 = molpack.GenCanPack()
+        p1 = molpack.GencanPack()
         p2 = p1.with_tolerance(3.0)
         p3 = p1.with_precision(0.5)
         p4 = p1.with_inner_iterations(50)
         p5 = p1.with_init_passes(40)
         p6 = p1.with_init_box_half_size(200.0)
         p7 = p1.with_perturb(0.1, random=True, enabled=False)
-        p8 = p1.with_progress(False)
+        p8 = p1.with_log_level("quiet")
         p9 = p1.with_seed(42)
         p10 = p1.with_parallel_eval(True)
         p11 = p1.with_avoid_overlap(False)
@@ -219,14 +219,14 @@ class TestGenCanPack:
             assert later is not p1
 
 
-class TestGenCanPackRun:
+class TestGencanPackRun:
     def _make_target(self, count: int = 3) -> molpack.Target:
         return molpack.Target(_make_frame(), count).with_restraint(
-            molrs.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
+            molrs.core.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0])
         )
 
-    def _packer(self) -> molpack.GenCanPack:
-        return molpack.GenCanPack().with_tolerance(2.0).with_progress(False)
+    def _packer(self) -> molpack.GencanPack:
+        return molpack.GencanPack().with_tolerance(2.0)
 
     def test_minimal_packing(self):
         result = self._packer().with_seed(42).run([self._make_target()], max_loops=50)
@@ -239,7 +239,7 @@ class TestGenCanPackRun:
     def test_run_returns_frame(self):
         result = self._packer().with_seed(42).run([self._make_target()], max_loops=50)
 
-        assert result.frame["atoms"].nrows == 3
+        assert result.frame["atoms"].n_rows == 3
 
     def test_result_elements_match_positions(self):
         result = self._packer().with_seed(42).run([self._make_target()], max_loops=50)
@@ -249,7 +249,7 @@ class TestGenCanPackRun:
         assert all(e == "X" for e in result.elements)
 
     def test_result_elements_from_frame(self):
-        frame = molrs.Frame(
+        frame = molrs.core.Frame(
             {
                 "atoms": {
                     "x": np.array([0.0, 0.96, -0.24], dtype=np.float64),
@@ -262,7 +262,7 @@ class TestGenCanPackRun:
         target = (
             molpack.Target(frame, count=2)
             .with_name("water")
-            .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]))
+            .with_restraint(molrs.core.Cuboid([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]))
         )
 
         result = self._packer().with_seed(42).run([target], max_loops=50)
@@ -273,7 +273,7 @@ class TestGenCanPackRun:
         assert set(result.elements) == {"O", "H"}
 
     def test_result_elements_order_multiple_targets(self):
-        box_c = molrs.Cuboid([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
+        box_c = molrs.core.Cuboid([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
         t1 = molpack.Target(_make_frame(1), 2).with_restraint(box_c)
         t2 = molpack.Target(_make_frame(2, ["C", "H"]), 3).with_restraint(box_c)
 
@@ -283,7 +283,7 @@ class TestGenCanPackRun:
         assert result.positions.shape[0] == 8
 
     def test_no_targets_raises_typed_error(self):
-        packer = molpack.GenCanPack().with_progress(False)
+        packer = molpack.GencanPack()
         with pytest.raises(molpack.NoTargetsError):
             packer.run([], max_loops=10)
 
@@ -307,7 +307,7 @@ class TestParallelEval:
     def test_with_parallel_eval_does_not_raise_when_compiled(self):
         # Fail-fast only triggers in a wheel built without rayon; here it must
         # return a configured builder.
-        p = molpack.GenCanPack().with_parallel_eval(True)
+        p = molpack.GencanPack().with_parallel_eval(True)
         assert p is not None
 
     def test_init_thread_pool_rejects_zero(self):

@@ -120,7 +120,7 @@ therefore floating-point summation order, so it cannot be validated by the
 ## Files
 
 - `molpack/src/cell.rs` — **deleted**
-- `molpack/src/context/pack_context.rs` — `SimBox` + `CellGrid` fields; rebuild
+- `molpack/src/system/pack_context.rs` — `SimBox` + `CellGrid` fields; rebuild
   `neighbor_cells_f/g` from `CellGrid::stencil_forward`
 - `molpack/src/objective.rs` — cell assignment and minimum image via molrs
 - `molpack/src/initial.rs` — random placement drawn in fractional coordinates;
@@ -128,9 +128,9 @@ therefore floating-point summation order, so it cannot be validated by the
 - `molpack/src/restraint/mod.rs`, `molpack/src/restraint/geometric/bounded.rs` —
   fractional `InsideCell`; periodic-axis rejection for plane restraints
 - `molpack/src/region.rs` — `CellRestraint` in the `And`/`Or`/`Not` algebra
-- `molpack/src/packer.rs`, `molpack/src/handler.rs`, `molpack/src/script/build.rs`
+- `molpack/src/packer.rs`, `molpack/src/callback.rs`, `molpack/src/script/build.rs`
   — builder + script plumbing
-- `molpack/src/context/work_buffers.rs` — buffer sizing from `CellGrid::n_cells`
+- `molpack/src/system/work_buffers.rs` — buffer sizing from `CellGrid::n_cells`
 - ~~`molpack/benches/pack_end_to_end.rs`, `molpack/benches/pair_kernel.rs` —
   triclinic variants added~~ (`benches/` deleted 2026-09-20; no replacement yet)
 - ~~`molpack/tests/` — new `triclinic.rs`; existing `packer.rs`,

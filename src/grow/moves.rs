@@ -9,18 +9,18 @@
 
 use std::sync::Arc;
 
-use molrs::types::F;
+use molrs::op::F;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-use crate::context::PackContext;
+use crate::AtomRestraint;
 use crate::euler::eulerrmat;
 use crate::grow::config::{GrowConfig, crowding_cap};
 use crate::grow::field::{BlockKind, OverlapField, Probe};
 use crate::grow::internal::InternalTree;
 use crate::grow::prior::{AnglePrior, TorsionPrior};
 use crate::random::uniform01;
-use crate::restraint::AtomRestraint;
+use crate::system::PackSystem;
 
 pub(super) const TWO_PI: F = std::f64::consts::TAU as F;
 
@@ -43,7 +43,7 @@ pub(super) struct Chain {
     /// Global molecule index (type-major, copy-major — the `x` order).
     pub(super) mol: usize,
     /// First `icart` of this copy.
-    pub(super) base: usize,
+    pub(super) first_icart: usize,
     /// 0 = seed pending; `1 + k` = tree step `k` pending; done at
     /// `1 + n_steps`.
     pub(super) stage: usize,
@@ -101,22 +101,22 @@ pub(super) struct Trial {
     pub(super) penalty: F,
 }
 
-/// Per-atom restraint lookup, cloned out of the context once so the round
+/// Per-atom restraint lookup, cloned out of the system once so the round
 /// loop holds no borrow on `sys`. Restraints are **hard** during growth: a
 /// candidate violating any of its atom's restraints is rejected outright,
 /// exactly like a hard-core overlap — which is what makes `frest == 0` a
 /// constructive guarantee rather than a convergence hope (spec Design §3).
 pub(super) struct RestraintTable {
     pub(super) offsets: Vec<usize>,
-    pub(super) data: Vec<usize>,
+    pub(super) indices: Vec<usize>,
     pub(super) restraints: Vec<Arc<dyn AtomRestraint>>,
 }
 
 impl RestraintTable {
-    pub(super) fn from_context(sys: &PackContext) -> Self {
+    pub(super) fn from_system(sys: &PackSystem) -> Self {
         Self {
             offsets: sys.iratom_offsets.clone(),
-            data: sys.iratom_data.clone(),
+            indices: sys.iratom_indices.clone(),
             restraints: sys.restraints.clone(),
         }
     }
@@ -124,9 +124,9 @@ impl RestraintTable {
     /// `true` when any restraint on atom `icart` is violated at `p`.
     /// Scales mirror the shared objective's final-evaluation settings.
     pub(super) fn violated(&self, icart: usize, p: &[F; 3]) -> bool {
-        self.data[self.offsets[icart]..self.offsets[icart + 1]]
+        self.indices[self.offsets[icart]..self.offsets[icart + 1]]
             .iter()
-            .any(|&r| self.restraints[r].f(p, 1.0, crate::numerics::DEFAULT_SCALE2) > 0.0)
+            .any(|&r| self.restraints[r].f(p, 1.0, crate::system::DEFAULT_SCALE2) > 0.0)
     }
 }
 
@@ -142,10 +142,6 @@ pub(super) fn stream(seed: u64, mol: u64, stage: u64, visit: u64, salt: u64) -> 
     SmallRng::seed_from_u64(z ^ (z >> 31))
 }
 
-pub(super) fn uniform(rng: &mut SmallRng) -> F {
-    uniform01(rng)
-}
-
 /// Seed-anchor draw. Uniform over the box by default; with
 /// [`GrowConfig::with_void_bias`] the anchor comes from a uniformly chosen
 /// *empty* field cell (cavity seeding), falling back to uniform when no cell
@@ -159,7 +155,12 @@ fn draw_anchor(
     rng: &mut SmallRng,
 ) -> [F; 3] {
     if cfg.void_bias {
-        let u = [uniform(rng), uniform(rng), uniform(rng), uniform(rng)];
+        let u = [
+            uniform01(rng),
+            uniform01(rng),
+            uniform01(rng),
+            uniform01(rng),
+        ];
         return field.empty_cell_point(u).unwrap_or([
             origin[0] + u[1] * lengths[0],
             origin[1] + u[2] * lengths[1],
@@ -167,9 +168,9 @@ fn draw_anchor(
         ]);
     }
     [
-        origin[0] + uniform(rng) * lengths[0],
-        origin[1] + uniform(rng) * lengths[1],
-        origin[2] + uniform(rng) * lengths[2],
+        origin[0] + uniform01(rng) * lengths[0],
+        origin[1] + uniform01(rng) * lengths[1],
+        origin[2] + uniform01(rng) * lengths[2],
     ]
 }
 
@@ -227,9 +228,9 @@ pub(super) fn propose(
         for _ in 0..cfg.trials {
             let anchor = draw_anchor(cfg, field, origin, lengths, &mut rng);
             let (v1, v2, v3) = eulerrmat(
-                uniform(&mut rng) * TWO_PI,
-                uniform(&mut rng) * TWO_PI,
-                uniform(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
             );
             let rot = [
                 [v1[0], v2[0], v3[0]],
@@ -304,7 +305,7 @@ pub(super) fn propose(
         .map(|t| (-beta * (t.penalty - u_min)).exp())
         .collect();
     let total: F = weights.iter().sum();
-    let mut ticket = uniform(&mut rng) * total;
+    let mut ticket = uniform01(&mut rng) * total;
     let mut chosen = trials.len() - 1;
     for (i, w) in weights.iter().enumerate() {
         if ticket < *w {
@@ -339,7 +340,7 @@ pub(super) fn score_atoms(
     let mut placed = Vec::new();
     let mut penalty = 0.0;
     for a in atoms {
-        let slot = chain.base + a;
+        let slot = chain.first_icart + a;
         if restraints.violated(slot, &scratch[a]) {
             return Err(DeadEnd::Restraint);
         }
@@ -448,11 +449,11 @@ pub(super) fn retract(chain: &mut Chain, sp: &Species, field: &mut OverlapField,
         chain.stage -= 1;
         if chain.stage == 0 {
             for a in sp.tree.seed_atoms() {
-                field.remove(chain.base + a);
+                field.remove(chain.first_icart + a);
             }
         } else {
             for a in sp.tree.step_atoms(chain.stage - 1) {
-                field.remove(chain.base + a);
+                field.remove(chain.first_icart + a);
             }
         }
     }
@@ -462,7 +463,7 @@ pub(super) fn retract(chain: &mut Chain, sp: &Species, field: &mut OverlapField,
 /// the hard core, so the driver can terminate.
 ///
 /// The driver calls this in exactly two situations — a chain still wedged at
-/// the softening floor, and an abort (a handler stop, or the exhausted round
+/// the softening floor, and an abort (a callback stop, or the exhausted round
 /// cap) that leaves later stages unplaced. Either way the constructive
 /// no-overlap guarantee is broken, so the caller counts every call as a
 /// softening event and the run's result is never `converged`.
@@ -492,9 +493,9 @@ pub(super) fn force_place(
         let (atoms, var): (Vec<PlacedAtom>, Option<F>) = if chain.stage == 0 {
             let anchor = draw_anchor(&sp.cfg, field, origin, lengths, &mut rng);
             let (v1, v2, v3) = eulerrmat(
-                uniform(&mut rng) * TWO_PI,
-                uniform(&mut rng) * TWO_PI,
-                uniform(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
+                uniform01(&mut rng) * TWO_PI,
             );
             let rot = [
                 [v1[0], v2[0], v3[0]],
@@ -507,7 +508,7 @@ pub(super) fn force_place(
                 sp.tree
                     .seed_atoms()
                     .iter()
-                    .map(|&a| (chain.base + a, a, scratch[a]))
+                    .map(|&a| (chain.first_icart + a, a, scratch[a]))
                     .collect(),
                 None,
             )
@@ -524,7 +525,7 @@ pub(super) fn force_place(
             (
                 sp.tree
                     .step_atoms(k)
-                    .map(|a| (chain.base + a, a, scratch[a]))
+                    .map(|a| (chain.first_icart + a, a, scratch[a]))
                     .collect(),
                 var,
             )
@@ -578,7 +579,7 @@ pub(super) fn relax(
     let old_vars = chain.vars.clone();
     for k in first..n_steps {
         for a in sp.tree.step_atoms(k) {
-            field.remove(chain.base + a);
+            field.remove(chain.first_icart + a);
         }
     }
 
@@ -587,7 +588,7 @@ pub(super) fn relax(
     let mut old_ok = true;
     'old: for k in first..n_steps {
         for a in sp.tree.step_atoms(k) {
-            let slot = chain.base + a;
+            let slot = chain.first_icart + a;
             match field.probe(
                 slot,
                 old_coords[a],
@@ -608,7 +609,7 @@ pub(super) fn relax(
     // Remove whatever the scoring pass re-inserted.
     for k in first..n_steps {
         for a in sp.tree.step_atoms(k) {
-            field.remove(chain.base + a);
+            field.remove(chain.first_icart + a);
         }
     }
     if !old_ok {
@@ -647,12 +648,12 @@ pub(super) fn relax(
             let mut ok = true;
             let mut atoms = Vec::new();
             for a in sp.tree.step_atoms(k) {
-                if restraints.violated(chain.base + a, &scratch[a]) {
+                if restraints.violated(chain.first_icart + a, &scratch[a]) {
                     ok = false;
                     break;
                 }
                 match field.probe(
-                    chain.base + a,
+                    chain.first_icart + a,
                     scratch[a],
                     sp.tree.exclusions(a),
                     hard_scale,
@@ -675,7 +676,7 @@ pub(super) fn relax(
             Some((u, atoms, var)) => {
                 for &(a, p) in &atoms {
                     chain.coords[a] = p;
-                    field.insert(chain.base + a, p);
+                    field.insert(chain.first_icart + a, p);
                 }
                 if let (Some(phi), Some(v)) = (var, sp.tree.step_var(k)) {
                     chain.vars[v] = phi;
@@ -693,7 +694,7 @@ pub(super) fn relax(
         // Restore the old tail verbatim.
         for k in first..n_steps {
             for a in sp.tree.step_atoms(k) {
-                let slot = chain.base + a;
+                let slot = chain.first_icart + a;
                 if field.is_placed(slot) {
                     field.remove(slot);
                 }
@@ -703,7 +704,7 @@ pub(super) fn relax(
         chain.vars = old_vars;
         for k in first..n_steps {
             for a in sp.tree.step_atoms(k) {
-                field.insert(chain.base + a, chain.coords[a]);
+                field.insert(chain.first_icart + a, chain.coords[a]);
             }
         }
     }

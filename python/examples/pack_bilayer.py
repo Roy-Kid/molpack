@@ -27,43 +27,49 @@ def main() -> None:
     water_low = (
         molpack.Target(water_frame, count=50)
         .with_name("water_low")
-        .with_restraint(molrs.Cuboid([0.0, 0.0, -10.0], [40.0, 40.0, 10.0]))
+        .with_restraint(molrs.core.Cuboid([0.0, 0.0, -10.0], [40.0, 40.0, 10.0]))
     )
 
     water_high = (
         molpack.Target(water_frame, count=50)
         .with_name("water_high")
-        .with_restraint(molrs.Cuboid([0.0, 0.0, 28.0], [40.0, 40.0, 10.0]))
+        .with_restraint(molrs.core.Cuboid([0.0, 0.0, 28.0], [40.0, 40.0, 10.0]))
     )
 
     lipid_low = (
         molpack.Target(lipid_frame, count=10)
         .with_name("lipid_low")
-        .with_restraint(molrs.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 14.0]))
+        .with_restraint(molrs.core.Cuboid([0.0, 0.0, 0.0], [40.0, 40.0, 14.0]))
         # 0-based: Packmol .inp atoms 32/33 → indices 31/32 for tails below z=2
         .with_atom_restraint(
-            [30, 31], molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 2.0])
+            [30, 31], molrs.core.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 2.0])
         )
         # Packmol .inp atoms 1/2 → indices 0/1 for heads above z=12
         .with_atom_restraint(
-            [0, 1], ~molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 12.0])
+            [0, 1], ~molrs.core.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 12.0])
         )
     )
 
     lipid_high = (
         molpack.Target(lipid_frame, count=10)
         .with_name("lipid_high")
-        .with_restraint(molrs.Cuboid([0.0, 0.0, 14.0], [40.0, 40.0, 14.0]))
+        .with_restraint(molrs.core.Cuboid([0.0, 0.0, 14.0], [40.0, 40.0, 14.0]))
         # heads below z=16
-        .with_atom_restraint([0, 1], molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 16.0]))
+        .with_atom_restraint(
+            [0, 1], molrs.core.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 16.0])
+        )
         # tails above z=26
         .with_atom_restraint(
-            [30, 31], ~molrs.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 26.0])
+            [30, 31], ~molrs.core.HalfSpace([0.0, 0.0, 1.0], [0.0, 0.0, 26.0])
         )
     )
 
-    show_progress = os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
-    packer = molpack.GenCanPack().with_progress(show_progress)
+    log_level = (
+        "progress"
+        if os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
+        else "quiet"
+    )
+    packer = molpack.GencanPack().with_log_level(log_level)
 
     result = packer.run(
         [water_low, water_high, lipid_low, lipid_high],
@@ -77,20 +83,20 @@ def main() -> None:
     packed = result.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.Box.from_bounds(
+        packed.box = molrs.core.Box.from_bounds(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),
             padding=np.ones(3),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec(str(OUT / "pack_bilayer.mrec"), packed)
-    molrs.io.write_lammps_trajectory(
+    molrs.io.write_mrec_frame(str(OUT / "pack_bilayer.mrec"), packed)
+    molrs.io.write_lammps_dump_trajectory(
         str(OUT / "pack_bilayer.lammpstrj"),
         [packed],
         columns=["id", "element", "mol", "x", "y", "z"],
     )
-    if "bonds" in packed and packed["bonds"].nrows:
+    if "bonds" in packed and packed["bonds"].n_rows:
         molrs.io.write_lammps_dump_local(str(OUT / "pack_bilayer.dump.local"), [packed])
 
 

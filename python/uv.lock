@@ -3,15 +3,6 @@ revision = 3
 requires-python = ">=3.12"
 
 [[package]]
-name = "annotated-doc"
-version = "0.0.5"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5a/8e/38aa427ed5402449e226975b649c5dc73ccadfefeb95e6aecb8f8ea4b6b6/annotated_doc-0.0.5.tar.gz", hash = "sha256:c7e58ce09192557605d8bbd92836d7e1d520ac9580096042c0bfd197efacf1bb", size = 10758, upload-time = "2026-07-28T13:50:58.129Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl", hash = "sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101", size = 5302, upload-time = "2026-07-28T13:50:57.239Z" },
-]
-
-[[package]]
 name = "cachetools"
 version = "7.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -105,18 +96,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f8/4f/700155c8c20d9e655dd0732b5fc3c7614f291b9148da271d7388e50bf774/markdown-3.11.tar.gz", hash = "sha256:180224db6aed87ba9ce1f2781ebcd5826253de8ff637112090e24b84502bbf9f", size = 485623, upload-time = "2026-09-25T13:46:23.473Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/1e/32971905a7ab47f8b66866ed949fa48b104ba1c4a6fa57794c4f2c4b2cb8/markdown-3.11-py3-none-any.whl", hash = "sha256:cd6c89e7eb308c8b332ed673215a52d208a43f8bacc030b1419376129408719e", size = 111296, upload-time = "2026-09-25T13:46:22.163Z" },
-]
-
-[[package]]
-name = "markdown-it-py"
-version = "4.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "mdurl" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/06/ff/7841249c247aa650a76b9ee4bbaeae59370dc8bfd2f6c01f3630c35eb134/markdown_it_py-4.2.0.tar.gz", hash = "sha256:04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49", size = 82454, upload-time = "2026-05-07T12:08:28.36Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl", hash = "sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a", size = 91687, upload-time = "2026-05-07T12:08:27.182Z" },
 ]
 
 [[package]]
@@ -254,15 +233,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mdurl"
-version = "0.1.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
-]
-
-[[package]]
 name = "mergedeep"
 version = "1.3.4"
 source = { registry = "https://pypi.org/simple" }
@@ -341,37 +311,12 @@ wheels = [
 ]
 
 [[package]]
-name = "molcrafts-molcfg"
-version = "1.5.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pyyaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d2/ed/a365b3d798bf42860a933d675f0ebeeff64cfdb8444e34891bacab885c9e/molcrafts_molcfg-1.5.0.tar.gz", hash = "sha256:3d6fb7cba5ddd87b1370f94486740b40359e3af9639d7cb8b926657424cb9116", size = 43912, upload-time = "2026-08-09T10:06:43.786Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8d/83/de3456513176b0e0a0876bd7fbf3db4925be8db29f889bdee7b00eb331ac/molcrafts_molcfg-1.5.0-py3-none-any.whl", hash = "sha256:61c5db3cfff5f8ec5a407bc0bbbec73585c29520e1860dc4bf7d8f454564ce31", size = 23623, upload-time = "2026-08-09T10:06:42.368Z" },
-]
-
-[[package]]
-name = "molcrafts-mollog"
-version = "1.3.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "rich" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/7a/d8/3bccffd0be892859bd74c0c29e60419455bce1440d9b8e76b9d4673f6c01/molcrafts_mollog-1.3.0.tar.gz", hash = "sha256:4ce63b5089a69ddb188e842155881f0aef4728f1d2229597f9f8d5da17b23870", size = 48173, upload-time = "2026-08-10T12:39:04.332Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d7/f0/5adb77f4e0dd8e288f53c35d641afa8dd91290185d1b055c01ffe0bad718/molcrafts_mollog-1.3.0-py3-none-any.whl", hash = "sha256:c80d50b9e9f21c4ff1ea2854cbae8c6cbe702b15db8c8318b98be330c37a281e", size = 27476, upload-time = "2026-08-10T12:39:02.952Z" },
-]
-
-[[package]]
 name = "molcrafts-molpack"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "molcrafts-molrs" },
     { name = "numpy" },
-    { name = "typer" },
 ]
 
 [package.optional-dependencies]
@@ -379,21 +324,16 @@ doc = [
     { name = "molcrafts-zensical-theme" },
     { name = "zensical" },
 ]
-molpy = [
-    { name = "molcrafts-molpy" },
-]
 
 [package.dev-dependencies]
 dev = [
     { name = "maturin" },
-    { name = "molcrafts-molpy" },
     { name = "molcrafts-molrs" },
     { name = "numpy" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "tox" },
     { name = "ty" },
-    { name = "typer" },
 ]
 doc = [
     { name = "molcrafts-zensical-theme" },
@@ -403,40 +343,33 @@ test = [
     { name = "molcrafts-molrs" },
     { name = "numpy" },
     { name = "pytest" },
-    { name = "typer" },
 ]
 typecheck = [
-    { name = "molcrafts-molpy" },
     { name = "molcrafts-molrs" },
     { name = "numpy" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "ty" },
-    { name = "typer" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "molcrafts-molpy", marker = "extra == 'molpy'", directory = "../../molpy" },
     { name = "molcrafts-molrs", editable = "../../molrs/molrs-python" },
     { name = "molcrafts-zensical-theme", marker = "extra == 'doc'", specifier = ">=0.2.5" },
     { name = "numpy", specifier = ">=2.0" },
-    { name = "typer", specifier = ">=0.12" },
     { name = "zensical", marker = "extra == 'doc'", specifier = ">=0.0.53" },
 ]
-provides-extras = ["molpy", "doc"]
+provides-extras = ["doc"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "maturin" },
-    { name = "molcrafts-molpy", directory = "../../molpy" },
     { name = "molcrafts-molrs", editable = "../../molrs/molrs-python" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "tox", specifier = ">=4.23" },
     { name = "ty" },
-    { name = "typer", specifier = ">=0.12" },
 ]
 doc = [
     { name = "molcrafts-zensical-theme", specifier = ">=0.2.5" },
@@ -446,50 +379,18 @@ test = [
     { name = "molcrafts-molrs", editable = "../../molrs/molrs-python" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pytest" },
-    { name = "typer", specifier = ">=0.12" },
 ]
 typecheck = [
-    { name = "molcrafts-molpy", directory = "../../molpy" },
     { name = "molcrafts-molrs", editable = "../../molrs/molrs-python" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "ty" },
-    { name = "typer", specifier = ">=0.12" },
 ]
-
-[[package]]
-name = "molcrafts-molpy"
-source = { directory = "../../molpy" }
-dependencies = [
-    { name = "molcrafts-molcfg" },
-    { name = "molcrafts-mollog" },
-    { name = "molcrafts-molrs" },
-    { name = "numpy" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "mkdocstrings", extras = ["python"], marker = "extra == 'doc'", specifier = ">=0.24.0" },
-    { name = "molcrafts-molcfg", specifier = ">=1.2.0" },
-    { name = "molcrafts-mollog", specifier = ">=1.0.0" },
-    { name = "molcrafts-molpy", extras = ["dev", "doc"], marker = "extra == 'all'" },
-    { name = "molcrafts-molrs", specifier = ">=0.15.0,<0.16" },
-    { name = "molcrafts-zensical-theme", marker = "extra == 'doc'", specifier = ">=0.2.9" },
-    { name = "numpy", specifier = ">=2.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=6.0.0" },
-    { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.0" },
-    { name = "rdkit", marker = "extra == 'rdkit'" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.1" },
-    { name = "tox", marker = "extra == 'dev'", specifier = ">=4.23" },
-    { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.65" },
-    { name = "zensical", marker = "extra == 'doc'", specifier = ">=0.0.53" },
-]
-provides-extras = ["dev", "rdkit", "doc", "all"]
 
 [[package]]
 name = "molcrafts-molrs"
-version = "0.15.1"
+version = "0.16.0"
 source = { editable = "../../molrs/molrs-python" }
 dependencies = [
     { name = "numpy" },
@@ -764,19 +665,6 @@ wheels = [
 ]
 
 [[package]]
-name = "rich"
-version = "15.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "markdown-it-py" },
-    { name = "pygments" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c0/8f/0722ca900cc807c13a6a0c696dacf35430f72e0ec571c4275d2371fca3e9/rich-15.0.0.tar.gz", hash = "sha256:edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36", size = 230680, upload-time = "2026-04-12T08:24:00.75Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl", hash = "sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb", size = 310654, upload-time = "2026-04-12T08:24:02.83Z" },
-]
-
-[[package]]
 name = "ruff"
 version = "0.16.10"
 source = { registry = "https://pypi.org/simple" }
@@ -799,15 +687,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/78/fa/0f9c2020dc316c53d983be011720b8157cc052b97e3f4dfa7db6d0f880a6/ruff-0.16.10-py3-none-win32.whl", hash = "sha256:2a12e01cb9156c10c466f63b46eaae5ecea28dfbd21b5836353ae498e7d1349a", size = 10139176, upload-time = "2026-10-01T18:03:13.267Z" },
     { url = "https://files.pythonhosted.org/packages/99/29/cfb0df9448d4d4ad48c2de029ada9ebd71baa6da983a6c77ee6c6cd0fe82/ruff-0.16.10-py3-none-win_amd64.whl", hash = "sha256:97f2015c92aa97105b0eab19eb5d224884399281cfc5da86a92db4ab5e7fb2ca", size = 10584734, upload-time = "2026-10-01T18:03:16.006Z" },
     { url = "https://files.pythonhosted.org/packages/fc/05/c16957eb287c3fc062e032619a25868d93d408a844b725bcf514f7a378ff/ruff-0.16.10-py3-none-win_arm64.whl", hash = "sha256:25a65fe998c4e6861ec079ada5826a2fc605e6cbccbe9dcd7fac1f54e791621b", size = 10366440, upload-time = "2026-10-01T18:03:19.04Z" },
-]
-
-[[package]]
-name = "shellingham"
-version = "1.5.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de", size = 10310, upload-time = "2023-10-24T04:13:40.426Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755, upload-time = "2023-10-24T04:13:38.866Z" },
 ]
 
 [[package]]
@@ -918,21 +797,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/9c/f4/ae7dbd118425c850981d23efb850f0d9d7f6b8d2b852bde2767434f668b4/ty-0.0.84-py3-none-win32.whl", hash = "sha256:4bdc85f91cbaae35825f2b17bb4ac5de0563367875cb0f42b2bf07a1bf7ff2ba", size = 13176439, upload-time = "2026-09-24T13:16:15.049Z" },
     { url = "https://files.pythonhosted.org/packages/29/ec/994d87252f065dda5a500bc8afc726d18f6582d81d6f4ff1feb8a267c800/ty-0.0.84-py3-none-win_amd64.whl", hash = "sha256:71cc9aa7a7c89d4e12c6a814e9c0c3310ad5bee44efedbd6f5a42d91e9ac0f0d", size = 13962879, upload-time = "2026-09-24T13:16:18.191Z" },
     { url = "https://files.pythonhosted.org/packages/6d/1c/e6e91852b72566b1ab9aca504712857dfb89324c12092a5bd61d42d34427/ty-0.0.84-py3-none-win_arm64.whl", hash = "sha256:6c9d3718c4a0d318bc9c92af9b2aa85c3294e7dff54cf1d69ad79568f56516da", size = 13656453, upload-time = "2026-09-24T13:16:21.51Z" },
-]
-
-[[package]]
-name = "typer"
-version = "0.27.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "annotated-doc" },
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "rich" },
-    { name = "shellingham" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/16/f7/57713ba479fd405eb76de31404b2c744c289e336b2d999511ebf51e496f7/typer-0.27.2.tar.gz", hash = "sha256:269b7eb9d3c202ca84b4bc9618cb04ebb43d3d4d1e567e4c768607232c05f945", size = 204045, upload-time = "2026-08-28T10:26:55.046Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/dc/bf/205d0004930ede8f542fb58f601526fccf4ae7626075ca1e6c4de5d3d652/typer-0.27.2-py3-none-any.whl", hash = "sha256:b3a5fc4342d5fc8fda8fc3010b1cf117e9249aab7fae800c2eff62fd3842d97d", size = 123130, upload-time = "2026-08-28T10:26:53.752Z" },
 ]
 
 [[package]]

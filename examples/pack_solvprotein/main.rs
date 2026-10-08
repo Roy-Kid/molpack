@@ -31,12 +31,14 @@ use std::fs::create_dir_all;
 use std::path::PathBuf;
 
 use molpack::{
-    CenteringMode, F, GenCanPack, PackEngine, ProgressHandler, RegionRestraint, Target, XYZHandler,
+    CenteringMode, GencanPack, PackEngine, ProgressCallback, RegionRestraint, Target,
+    XyzTrajectoryCallback,
 };
+use molrs::op::F;
 use std::sync::Arc;
 
-use molrs::io::data::pdb::read_pdb_frame;
-use molrs::spatial::region::Sphere;
+use molrs::core::Sphere;
+use molrs::io::read_pdb;
 use ndarray::array;
 
 fn inside_sphere(center: [F; 3], radius: F) -> RegionRestraint {
@@ -52,10 +54,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .expect("file path has no parent")
         .to_path_buf();
-    let protein = read_pdb_frame(base.join("protein.pdb"))?;
-    let water = read_pdb_frame(base.join("water.pdb"))?;
-    let sodium = read_pdb_frame(base.join("sodium.pdb"))?;
-    let chloride = read_pdb_frame(base.join("chloride.pdb"))?;
+    let protein = read_pdb(base.join("protein.pdb"))?;
+    let water = read_pdb(base.join("water.pdb"))?;
+    let sodium = read_pdb(base.join("sodium.pdb"))?;
+    let chloride = read_pdb(base.join("chloride.pdb"))?;
 
     let sphere = inside_sphere([0.0, 0.0, 0.0], 50.0);
 
@@ -76,14 +78,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_restraint(sphere)
         .with_name("chloride");
 
-    let mut packer = GenCanPack::new();
+    let mut packer = GencanPack::new();
     if std::env::var_os("MOLPACK_EXAMPLE_PROGRESS").is_some() {
-        packer = packer.with_handler(Box::new(ProgressHandler::new()));
+        packer = packer.with_callback(Box::new(ProgressCallback::new()));
     }
     if std::env::var_os("MOLPACK_EXAMPLE_XYZ").is_some() {
         let out_dir = base.join("out");
         create_dir_all(&out_dir)?;
-        packer = packer.with_handler(Box::new(XYZHandler::new(
+        packer = packer.with_callback(Box::new(XyzTrajectoryCallback::new(
             out_dir.join("solvprotein.xyz"),
             10,
         )));

@@ -8,10 +8,11 @@
 //! Because the quantiles are non-negative, both members place the densest copies
 //! at the plane/centre (`ξ = 0`) and thin them out with decay length `λ`.
 
-use molrs::types::F;
+use molrs::op::F;
+use molrs::op::vec3::normalize;
 
-use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg, unit};
-use super::{GroupCtx, Restraint};
+use super::geometry::{plane_match_f, plane_match_fg, point_match_f, point_match_fg};
+use super::{GroupEvaluation, Restraint};
 
 /// Exponential target quantile `q(p) = −λ·ln(1 − p)` (`≥ 0` for `p ∈ (0, 1)`).
 #[inline]
@@ -27,7 +28,7 @@ fn exponential_quantile(p: F, lambda: F) -> F {
 /// exponential distribution `∝ e^(−ξ/λ)` (`ξ ≥ 0`) — a layer densest at the plane
 /// and decaying along `+n̂` with decay length `λ` (a diffuse layer).
 ///
-/// `strength` (`λ_pen`) scales the squared-Wasserstein penalty; the [`GroupCtx`]
+/// `strength` (`λ_pen`) scales the squared-Wasserstein penalty; the [`GroupEvaluation`]
 /// is accepted for trait symmetry but unused.
 #[derive(Debug, Clone)]
 pub struct ExponentialPlane {
@@ -48,7 +49,7 @@ impl ExponentialPlane {
     pub fn new(normal: [F; 3], offset: F, strength: F, lambda: F) -> Self {
         assert!(lambda > 0.0, "ExponentialPlane lambda must be positive");
         Self {
-            normal: unit(normal),
+            normal: normalize(normal).expect("normal must be non-zero"),
             offset,
             strength,
             lambda,
@@ -62,7 +63,7 @@ impl ExponentialPlane {
 }
 
 impl Restraint for ExponentialPlane {
-    fn f(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>) -> F {
+    fn f(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>) -> F {
         plane_match_f(
             coords,
             &self.normal,
@@ -72,7 +73,7 @@ impl Restraint for ExponentialPlane {
         )
     }
 
-    fn fg(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
+    fn fg(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>, grads: &mut [[F; 3]]) -> F {
         plane_match_fg(
             coords,
             &self.normal,
@@ -125,11 +126,11 @@ impl ExponentialPoint {
 }
 
 impl Restraint for ExponentialPoint {
-    fn f(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>) -> F {
+    fn f(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>) -> F {
         point_match_f(coords, &self.center, self.strength, self.quantile())
     }
 
-    fn fg(&self, coords: &[[F; 3]], _ctx: GroupCtx<'_>, grads: &mut [[F; 3]]) -> F {
+    fn fg(&self, coords: &[[F; 3]], _evaluation: GroupEvaluation<'_>, grads: &mut [[F; 3]]) -> F {
         point_match_fg(coords, &self.center, self.strength, self.quantile(), grads)
     }
 
@@ -140,7 +141,7 @@ impl Restraint for ExponentialPoint {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testutil::{assert_fd_grad, ctx_free, free_box, rng_uniform};
+    use super::super::test_fixtures::{assert_fd_grad, free_box, free_evaluation, rng_uniform};
     use super::*;
 
     #[test]
@@ -192,6 +193,6 @@ mod tests {
         let coords: Vec<[F; 3]> = (0..n)
             .map(|k| [0.0, 0.0, exponential_quantile((k as F + 0.5) / n as F, 4.0)])
             .collect();
-        assert!(r.f(&coords, ctx_free(&free_box(1_000.0), 1)) < 1e-6);
+        assert!(r.f(&coords, free_evaluation(&free_box(1_000.0), 1)) < 1e-6);
     }
 }

@@ -4,8 +4,18 @@
 //!   beta  = rotation about y-axis
 //!   gama  = rotation about z-axis
 //!   teta  = rotation about x-axis
+//!
+//! Kept local rather than composed from `molrs::op::rigid` on purpose
+//! (module-responsibility ruling 10): these are Packmol's two Euler
+//! conventions with Packmol's products in Packmol's order, and every rigid
+//! placement — so every packed coordinate the Packmol-parity goldens pin, and
+//! the analytic Euler gradient in the objective — goes through them. molrs
+//! has no Euler parameterization to delegate to, and building one from axis
+//! rotations would change the bits. Changing them is a change to Packmol
+//! parity, not a refactor.
 
-use molrs::types::F;
+use molrs::op::F;
+
 /// Compute rotation matrix columns from Euler angles.
 /// Port of Fortran `eulerrmat`.
 ///
@@ -109,8 +119,8 @@ mod tests {
     //! Tests for Euler angle functions: eulerrmat, compcart, eulerfixed,
     //! eulerrmat_derivatives.
 
-    use crate::F;
     use crate::euler::{compcart, eulerfixed, eulerrmat, eulerrmat_derivatives};
+    use molrs::op::F;
 
     const TOL: F = 1e-6;
     const PI: F = std::f64::consts::PI as F;

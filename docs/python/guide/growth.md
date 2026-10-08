@@ -17,7 +17,7 @@ torsion at a time, inside the final box.
 not a preprocessor for it: growth consumes the same radii, tolerance,
 and restraints, is judged by the same `fdist` / `frest` objective, and
 returns the same `State`. You choose the algorithm by choosing the
-entry — `GenCanPack` places rigid bodies, `CbmcGrow` grows chains — and
+engine — `GencanPack` places rigid bodies, `CbmcGrow` grows chains — and
 every target in that call is handled by it. molpack never infers the
 algorithm from the molecule and never silently falls back from one to
 the other.
@@ -51,12 +51,12 @@ print(result.converged, result.degraded)
 
 The torsion prior is `CbmcGrow`'s one mandatory constructor argument;
 the growth knobs (`with_trials`, `with_retract`, `with_relax`, …) are
-builders on the entry, alongside the shared ones (`with_density`,
+builders on the engine, alongside the shared ones (`with_density`,
 `with_seed`, `with_tolerance`, …).
 
 A target that cannot be grown — no bond graph, fewer than 3 atoms, a
 `fixed_at` placement, or no box — makes `run()` raise `ValueError`
-naming the problem and suggesting `GenCanPack` where that is the right
+naming the problem and suggesting `GencanPack` where that is the right
 fix.
 
 ## Staging a mixed pack
@@ -67,16 +67,16 @@ second:
 
 ```python
 import molrs
-from molpack import CbmcGrow, GenCanPack, Target
+from molpack import CbmcGrow, GencanPack, Target
 
 grown = CbmcGrow(prior).with_density(0.5).with_seed(42).run([peo], max_loops=60)
 
 # Same cell for stage two — read it off the grown frame, or declare the
 # lengths you sized the melt to.
-cell = molrs.Cuboid([0.0, 0.0, 0.0], [l, l, l])
+cell = molrs.core.Cuboid([0.0, 0.0, 0.0], [l, l, l])
 
 result = (
-    GenCanPack()
+    GencanPack()
     .with_seed(42)
     .with_periodic_box([0.0, 0.0, 0.0], [l, l, l])
     .run([Target.fixed_from(grown), salt.with_restraint(cell)], max_loops=200)
@@ -89,16 +89,16 @@ only the new species and never disturbs the grown chains.
 
 ## Branched trees and rings
 
-Build the chemistry with molrs (SMILES + conformer) and molpy
-`PolymerBuilder` — do not invent coordinates. A 4-arm star is a
-tetrafunctional core plus EO arms (`build_star`); a macrocycle is
-`build_ring`. Both `CbmcGrow` and `LatticeGrow` consume the **bond
+Build the chemistry with molrs (SMILES + conformer) and grow the
+architecture with `molrs.builder.Assembler` — do not invent coordinates. A
+4-arm star is a tetrafunctional core plus EO arms (`make_star`); a
+macrocycle is `make_ring`. Both `CbmcGrow` and `LatticeGrow` consume the **bond
 graph**: a tree is legal for either grower; a cycle raises
-`RingTemplate` on both, so `pack_ring` then picks rigid `GenCanPack`.
+`RingTemplate` on both, so `pack_ring` then picks rigid `GencanPack`.
 
 `python/examples/pack_peo_topo.py` `pack_star` is one explicit pick:
 `LatticeGrow` @ 2.0 Å (occupancy guard on) then caller-side
-`GenCanPack.with_restart` @ 2.0 Å — the same lattice-then-push-off
+`GencanPack.with_restart` @ 2.0 Å — the same lattice-then-push-off
 shape as the melt sample below. `CbmcGrow` remains a peer tree grower;
 its reduced-EV (0.6 Å) then 2.0 Å push-off recipe stays on the
 `CbmcGrow` path and is not copied onto `LatticeGrow`.
@@ -114,10 +114,10 @@ python python/examples/pack_peo_void.py frame.data 4 4 42
 
 `pack_peo_mix.py` puts two topologies in **one** `LatticeGrow.run` (linear
 `Target` + 4-arm star `Target`, density-sized box). `pack_peo_mesh.py` is
-the mesh-cavity scene: attach a `molrs.Polyhedron` read from STL and grow
+the mesh-cavity scene: attach a `molrs.core.Polyhedron` read from STL and grow
 with `LatticeGrow` — diamond sites outside the mesh are blocked
 (Region ∩ lattice). `pack_peo_void.py` is the same grow through
-`~molrs.SphereUnion`, the solvent-accessible void of a bead-spring frame.
+`~molrs.core.SphereUnion`, the solvent-accessible void of a bead-spring frame.
 
 ## The torsion prior is load-bearing
 
@@ -214,11 +214,11 @@ rigid-body path it is always zero.
 
 Softening is not a dead end, but the remedy is something you ask for —
 an explicit second stage, never a hidden fallback. Feed the **same free
-targets** to a seeded `GenCanPack`:
+targets** to a seeded `GencanPack`:
 
 ```python
 grown = CbmcGrow(prior).with_density(0.9).run([peo], max_loops=60)
-pushed = GenCanPack().with_restart(grown).with_seed(7).run([peo], max_loops=60)
+pushed = GencanPack().with_restart(grown).with_seed(7).run([peo], max_loops=60)
 ```
 
 The seeded run continues on the very same state — zero coordinate
@@ -270,7 +270,7 @@ grown = (
     .with_density(1.1)
     .run([Target(frame, 200)], max_loops=60)
 )
-pushed = GenCanPack().with_restart(grown).with_seed(42).run([Target(frame, 200)], max_loops=200)
+pushed = GencanPack().with_restart(grown).with_seed(42).run([Target(frame, 200)], max_loops=200)
 ```
 
 A template supplies its topology, not its geometry. The backbone's torsions
@@ -282,7 +282,7 @@ geometry. Which atoms are hydrogens is per-target data: element symbol `H` by
 default, or `Target.with_hydrogens(indices)` for a model that names them
 differently (`[]` puts every atom of a coarse-grained chain on the lattice). The force field downstream sets bonded geometry in its first steps;
 it cannot as cheaply undo a chain threaded through a wall, which is what
-rebuilding from template internal coordinates used to cost. Residual contacts
+rebuilding from template internal coordinates costs. Residual contacts
 are reported honestly in `fdist` and belong to the seeded push-off.
 
 This repository's polymer-melt benchmark claim cap is ρ = 1.2 g/cm³; the

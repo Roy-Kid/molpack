@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use molpack::script::{self, BuildResult, ScriptError};
+use molpack::script::{self, ScriptError, ScriptJob, StructureFormat};
 use molpack::{LogLevel, PackEngine};
 
 #[derive(Parser, Debug)]
@@ -59,13 +59,7 @@ fn main() {
                 eprintln!("Error: cannot read `{}`: {e}", path.display());
                 std::process::exit(1);
             });
-            let base = path
-                .canonicalize()
-                .unwrap_or_else(|_| path.to_path_buf())
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from("."));
-            (src, base)
+            (src, script::base_dir(path))
         }
         None => {
             let mut buf = String::new();
@@ -114,8 +108,8 @@ fn configure_parallel(threads: Option<usize>) -> Result<(), String> {
 
 fn run(src: &str, base_dir: &std::path::Path, parallel: bool) -> Result<(), ScriptError> {
     let script_ast = script::parse(src)?;
-    let BuildResult {
-        mut entry,
+    let ScriptJob {
+        mut packer,
         targets,
         output,
         nloop,
@@ -123,13 +117,13 @@ fn run(src: &str, base_dir: &std::path::Path, parallel: bool) -> Result<(), Scri
 
     // CLI defaults to screen output; library callers stay headless unless
     // configured on the builder.
-    entry = entry.with_log_level(LogLevel::Progress);
+    packer = packer.with_log_level(LogLevel::Progress);
     if parallel {
-        entry = entry.with_parallel_eval(true);
+        packer = packer.with_parallel_eval(true);
     }
 
-    let frame = entry.run(&targets, nloop)?.frame;
-    script::write_frame(&output, &frame)?;
+    let frame = packer.run(&targets, nloop)?.frame;
+    StructureFormat::resolve(&output, None)?.write(&output, &frame)?;
     println!("Output written to: {}", output.display());
 
     Ok(())

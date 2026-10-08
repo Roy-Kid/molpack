@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "molcrafts-molpack"
-version = "0.3.0"
+version = "0.4.0"
 description = "Python bindings for molpack molecular packing (Packmol port)"
 requires-python = ">=3.12"
 readme = "README.md"
@@ -12,8 +12,7 @@ license = "BSD-3-Clause"
 # Minor-line pin — same major.minor as molrs; patch may drift.
 dependencies = [
   "numpy>=2.0",
-  "typer>=0.12",
-  "molcrafts-molrs>=0.15.0,<0.16",
+  "molcrafts-molrs>=0.16.0,<0.17",
 ]
 
 # Installable "extra" carrying the docs-build deps. Unlike the [dependency-groups]
@@ -22,11 +21,6 @@ dependencies = [
 #   pip install "molcrafts-molpack[doc]"
 # That is the build command a Cloudflare Pages Git-integration build should use.
 [project.optional-dependencies]
-# molpy is not imported by molpack; the polymer examples (`pack_peo_*.py`)
-# build their chains with it. Same minor line as molrs, which molpy pins too.
-molpy = [
-  "molcrafts-molpy>=0.15.0,<0.16",
-]
 doc = [
   "zensical>=0.0.53",
   "molcrafts-zensical-theme>=0.2.5",
@@ -40,19 +34,15 @@ doc = [
 typecheck = [
   "ruff",
   "ty",
-  "typer>=0.12",
   "numpy>=2.0",
-  "molcrafts-molrs>=0.15.0,<0.16",
-  # `ty check` walks examples/, several of which build templates with molpy.
-  "molcrafts-molpy>=0.15.0,<0.16",
+  "molcrafts-molrs>=0.16.0,<0.17",
   # `ty check` walks tests/ which imports pytest.
   "pytest",
 ]
 test = [
   "pytest",
-  "typer>=0.12",
   "numpy>=2.0",
-  "molcrafts-molrs>=0.15.0,<0.16",
+  "molcrafts-molrs>=0.16.0,<0.17",
 ]
 dev = [
   {include-group = "typecheck"},
@@ -70,9 +60,6 @@ doc = [
   # The molcrafts docs theme (zensical.toml sets `theme.name = "molcrafts"`).
   "molcrafts-zensical-theme>=0.2.5",
 ]
-
-[project.scripts]
-molpack = "molpack.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/MolCrafts/molpack"
@@ -92,6 +79,12 @@ exclude = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `python -X warn_default_encoding -m pytest` (how the suite is run) makes
+# every text-mode open without encoding= warn, and this makes the warning an
+# error: Python would decode with the locale, cp1252 on Windows, so such a
+# read passes on Linux and fails only on Windows. Ruff's PLW1514 catches it
+# statically only where it can tell the receiver is a Path.
+filterwarnings = ["error::EncodingWarning"]
 
 [tool.ruff]
 line-length = 88
@@ -105,7 +98,14 @@ select = [
   "F",   # pyflakes
   "I",   # isort
   "UP",  # pyupgrade
+  # Text-mode file I/O names its encoding. Unnamed, Python decodes with the
+  # locale -- cp1252 on Windows -- so a read that passes every Linux hook
+  # fails only on CI's Windows leg. A preview rule: explicit-preview-rules
+  # keeps every other preview rule off.
+  "PLW1514",
 ]
+preview = true
+explicit-preview-rules = true
 ignore = [
   "E501", # line too long — enforced by formatter, not linter
 ]
@@ -118,10 +118,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.uv.sources]
-# Same path and editable flag as molpy. The dev group pulls molpy in, and uv
-# rejects two source rows for molcrafts-molrs that disagree on editable.
 molcrafts-molrs = { path = "../../molrs/molrs-python", editable = true }
-molcrafts-molpy = { path = "../../molpy" }
 
 [tool.ty]
 [tool.ty.environment]
@@ -132,8 +129,8 @@ extra-paths = ["examples"]
 
 # Isolated binding tests — prek pre-push + CI call: `tox -c python -e py`
 # Non-editable only: sibling molrs path install + maturin wheel + pytest.
-# Requires ../../molrs on the 0.15.* minor line. The hooks and CI both run it
-# in a layout whose ../../molrs is the commit .github/partners.env pins.
+# Requires ../../molrs on the 0.16.* minor line. The hooks and CI both run it
+# in a layout whose ../../molrs is the commit scripts/partners.py resolves.
 # Both builds are --locked (MATURIN_PEP517_ARGS reaches the molrs wheel).
 [tool.tox]
 requires = ["tox>=4.23"]
@@ -147,7 +144,6 @@ deps = [
   "maturin>=1.0,<2.0",
   "pytest",
   "numpy>=2.0",
-  "typer>=0.12",
 ]
 pass_env = [
   "HOME",
@@ -157,9 +153,8 @@ pass_env = [
   "RUSTUP_HOME",
   # Standard cargo variable, none of ours: passed through so a developer's own
   # flags (e.g. `-C target-cpu=native` for a bench build) survive tox's clean
-  # env. Nothing in this repo sets it, and LTO no longer rides on the
-  # environment at all — `lto` lives in `[profile.release]` in the manifests,
-  # where tox cannot strip it.
+  # env. Nothing in this repo sets it; `lto` lives in `[profile.release]` in
+  # the manifests, where tox cannot strip it.
   "RUSTFLAGS",
   # sccache (CI compile cache) — harmless when unset locally.
   "RUSTC_WRAPPER",
@@ -174,12 +169,12 @@ pass_env = [
 set_env = { MATURIN_PEP517_ARGS = "--locked" }
 allowlist_externals = ["maturin"]
 # toxinidir is python/ when config lives here; sibling molrs is ../.. /molrs.
-# Minor-line only: 0.15.* (patch may differ).
+# Minor-line only: 0.16.* (patch may differ).
 commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import tomllib; from pathlib import Path; p=Path('{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text())['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,15), f'sibling molrs {{v}} not on 0.15.*'",
+    "import tomllib; from pathlib import Path; p=Path(r'{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text(encoding='utf-8'))['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,16), f'sibling molrs {{v}} not on 0.16.*'",
   ],
   [
     "{envpython}",
@@ -191,7 +186,7 @@ commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,15), v",
+    "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,16), v",
   ],
   ["maturin", "build", "--release", "--locked", "-o", "{env_tmp_dir}/wheels"],
   [
@@ -206,5 +201,5 @@ commands_pre = [
   ],
 ]
 commands = [
-  ["{envpython}", "-m", "pytest", "-v"],
+  ["{envpython}", "-X", "warn_default_encoding", "-m", "pytest", "-v"],
 ]

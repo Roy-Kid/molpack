@@ -2,10 +2,10 @@
 
 Minor-line = ABI version: molpack exchanges ``molrs_ffi`` handle capsules with
 the installed ``molcrafts-molrs`` wheel, so both must embed the same molrs
-``major.minor``. The import-time handshake (``interop::check_abi``) already
+``major.minor``. The import-time handshake (``molrs_capsule::check_abi``) already
 passed — this module is importable — so these tests pin the *other* gate: a
-capsule from a different minor line (spelled with the pre-0.14 unversioned
-name here) must be rejected at resolve time, cleanly.
+capsule whose name carries no matching minor line must be rejected at resolve
+time, cleanly.
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ import pytest
 import molpack
 
 
-class _LegacyFrame:
-    """Quacks like a molrs Frame but exports a pre-0.14 unversioned capsule."""
+class _OtherLineFrame:
+    """Quacks like a molrs Frame but exports a capsule with no ABI line in its name."""
 
     def _ffi_frameref_capsule(self):  # noqa: ANN202 — mirrors the duck-typed contract
         new_capsule = ctypes.pythonapi.PyCapsule_New
@@ -33,13 +33,13 @@ class _LegacyFrame:
 class TestVersionedCapsuleGate:
     def test_cross_minor_capsule_is_rejected_at_resolve(self) -> None:
         with pytest.raises(ValueError, match="minor line"):
-            molpack.Target(_LegacyFrame(), 1)
+            molpack.Target(_OtherLineFrame(), 1)
 
     def test_same_line_frame_resolves(self) -> None:
         import numpy as np
 
-        frame = molrs.Frame()
-        block = molrs.Block()
+        frame = molrs.core.Frame()
+        block = molrs.core.Block()
         block.insert("x", np.array([0.0, 1.0]))
         block.insert("y", np.array([0.0, 0.0]))
         block.insert("z", np.array([0.0, 0.0]))
@@ -48,8 +48,8 @@ class TestVersionedCapsuleGate:
         assert molpack.Target(frame, 1) is not None
 
 
-class _LegacyRegion:
-    """Quacks like a molrs region but exports an unversioned capsule."""
+class _OtherLineRegion:
+    """Quacks like a molrs region but exports a capsule with no ABI line in its name."""
 
     def _ffi_regionref_capsule(self):  # noqa: ANN202 — mirrors the duck-typed contract
         new_capsule = ctypes.pythonapi.PyCapsule_New
@@ -67,8 +67,8 @@ class TestRegionCapsuleGate:
     def _target(self):
         import numpy as np
 
-        frame = molrs.Frame()
-        block = molrs.Block()
+        frame = molrs.core.Frame()
+        block = molrs.core.Block()
         block.insert("x", np.array([0.0]))
         block.insert("y", np.array([0.0]))
         block.insert("z", np.array([0.0]))
@@ -78,7 +78,7 @@ class TestRegionCapsuleGate:
 
     def test_cross_minor_region_is_rejected_at_resolve(self) -> None:
         with pytest.raises(ValueError, match="minor line"):
-            self._target().with_restraint(_LegacyRegion())
+            self._target().with_restraint(_OtherLineRegion())
 
     def test_capsule_returning_non_capsule_is_typeerror(self) -> None:
         with pytest.raises(TypeError, match="PyCapsule"):
@@ -87,5 +87,5 @@ class TestRegionCapsuleGate:
     def test_same_line_region_resolves(self) -> None:
         import numpy as np
 
-        region = molrs.Sphere(np.zeros(3), 5.0)
+        region = molrs.core.Sphere(np.zeros(3), 5.0)
         assert self._target().with_restraint(region) is not None

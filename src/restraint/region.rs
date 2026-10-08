@@ -1,14 +1,14 @@
 //! The one geometric restraint: stay inside a molrs region.
 //!
-//! Geometry is molrs's ([`molrs::spatial::region`]: shapes, meshes, unions
+//! Geometry is molrs's ([`molrs::core`]: shapes, meshes, unions
 //! of spheres, and their `And` / `Or` / `Not` compositions). What is
 //! molpack's is the penalty that turns a region's signed distance into a
 //! term of the shared objective, and that is all this type is.
 
 use std::sync::Arc;
 
-use molrs::spatial::region::Region;
-use molrs::types::F;
+use molrs::core::Region;
+use molrs::op::F;
 
 use super::AtomRestraint;
 
@@ -23,7 +23,7 @@ use super::AtomRestraint;
 /// `2 · scale · distance · ∇distance`, the region's outward direction.
 /// The penalty is quadratic in the length by which the boundary is missed,
 /// so it consumes `scale` like the `.inp` box and plane kernels (the
-/// two-scale contract in [`super`]): `precision = 0.01` reads as "within
+/// two-scale contract on [`AtomRestraint`](crate::AtomRestraint)): `precision = 0.01` reads as "within
 /// 0.1 Å" of any region, and a `Cuboid` reproduces the box kernel's value.
 ///
 /// The region is shared: `Arc<dyn Region + Send + Sync>` is what molrs's
@@ -35,8 +35,8 @@ use super::AtomRestraint;
 /// ```
 /// use std::sync::Arc;
 /// use molpack::RegionRestraint;
-/// use molpack::restraint::AtomRestraint;
-/// use molrs::spatial::region::Sphere;
+/// use molpack::AtomRestraint;
+/// use molrs::core::Sphere;
 /// use ndarray::array;
 ///
 /// let ball = RegionRestraint(Arc::new(Sphere::new(array![0.0, 0.0, 0.0], 5.0)));
@@ -83,7 +83,7 @@ impl AtomRestraint for RegionRestraint {
     /// Both halves of the rule come from the region itself: it repeats along
     /// `shift` (molrs [`Region::repeats_along`]), or it is bounded along it.
     ///
-    /// [`Region::repeats_along`]: molrs::spatial::region::Region::repeats_along
+    /// [`Region::repeats_along`]: molrs::core::Region::repeats_along
     fn holds_along(&self, shift: [F; 3]) -> bool {
         self.0.repeats_along(shift) || self.bounded_along(shift)
     }
@@ -92,7 +92,7 @@ impl AtomRestraint for RegionRestraint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use molrs::spatial::region::{AndRegion, Cuboid, NotRegion, Sphere};
+    use molrs::core::{AndRegion, Cuboid, NotRegion, Sphere};
     use ndarray::array;
 
     fn ball() -> RegionRestraint {

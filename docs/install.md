@@ -31,13 +31,15 @@ Optional features (crate defaults to none enabled):
 | Feature | Purpose |
 |---|---|
 | `cli` | `molpack` binary + clap (implies `io`) |
-| `io` | PDB / XYZ / SDF / LAMMPS readers via molrs |
+| `io` | Template reading / output writing through the molrs reader and writer of each file's format (`script::StructureFormat`), and `XyzTrajectoryCallback` |
 | `rayon` | Parallel objective evaluation |
-| `ff` | Forwards molrs's force-field module, for binding a force-field optimizer (e.g. `LBFGS`) through `with_optimizer` |
+
+A force-field optimizer bound through `with_optimizer` (e.g. molrs's `Lbfgs`)
+needs molrs's `ff` feature; enable it on your own `molcrafts-molrs` dependency.
 
 ```toml
 # Cargo.toml — common combinations
-molcrafts-molpack = { version = "0.3", features = ["io", "rayon"] }
+molcrafts-molpack = { version = "0.4", features = ["io", "rayon"] }
 ```
 
 ## Python binding
@@ -48,13 +50,13 @@ For notebooks and pipelines (Python 3.12+):
 pip install molcrafts-molpack
 ```
 
-`molcrafts-molrs` is installed as a dependency and provides `molrs.Frame` plus
+`molcrafts-molrs` is installed as a dependency and provides `molrs.core.Frame` plus
 PDB / XYZ readers. The wheel itself is I/O-free — pass frames in, get frames
 out.
 
 ```python
 import molpack
-print(molpack.GenCanPack)
+print(molpack.GencanPack)
 ```
 
 !!! note "Pre-built wheels"
@@ -65,8 +67,8 @@ print(molpack.GenCanPack)
 ## Build from source
 
 When you are modifying the crate or Python binding, check out **molrs** as a
-sibling (path deps resolve `../molrs/molrs`). molpack 0.3 builds on the molrs
-**0.15** line — the `v0.15.0` tag or a later 0.15 commit:
+sibling (path deps resolve `../molrs/molrs`). molpack 0.4 builds on the molrs
+**0.16** line — the `v0.16.0` tag or a later 0.16 commit:
 
 ```bash
 # sibling layout

@@ -1,6 +1,6 @@
 //! Lower a parsed [`Script`] to either a frame-loader-agnostic
 //! [`ScriptPlan`] (no I/O) or — when the `io` feature is on — a fully
-//! built `BuildResult` with templates already read from disk.
+//! built `ScriptJob` with templates already read from disk.
 //!
 //! Front-ends pick whichever fits:
 //!
@@ -19,7 +19,7 @@ use crate::restraint::geometric::{
     OutsideCubeRestraint, OutsideCylinderRestraint, OutsideEllipsoidRestraint,
     OutsideSphereRestraint,
 };
-use crate::{Angle, AtomRestraint, CenteringMode, GenCanPack, PackEngine, Target};
+use crate::{Angle, AtomRestraint, CenteringMode, GencanPack, PackEngine, Target};
 
 use super::error::ScriptError;
 use super::parser::{AtomGroup, RestraintSpec, Script, Structure};
@@ -33,8 +33,8 @@ use super::parser::{AtomGroup, RestraintSpec, Script, Structure};
 /// stamp on the script's restraints / centering / fixed placement.
 pub struct ScriptPlan {
     /// Engine pre-configured with `tolerance`, `seed`, and (optional) `pbc`.
-    pub entry: GenCanPack,
-    /// One entry per `structure … end structure` block, in source order.
+    pub packer: GencanPack,
+    /// One plan per `structure … end structure` block, in source order.
     pub structures: Vec<StructurePlan>,
     /// Resolved output file path.
     pub output: PathBuf,
@@ -88,17 +88,17 @@ impl Script {
             return Err(ScriptError::NoStructures);
         }
 
-        let mut entry = GenCanPack::new()
+        let mut packer = GencanPack::new()
             .with_tolerance(self.tolerance)
             .with_avoid_overlap(self.avoid_overlap);
         if let Some(seed) = self.seed {
-            entry = entry.with_seed(seed);
+            packer = packer.with_seed(seed);
         }
         if let Some(pbc) = self.pbc {
-            entry = entry.with_periodic_box(pbc.min, pbc.max, [true; 3]);
+            packer = packer.with_periodic_box(pbc.min, pbc.max, [true; 3]);
         }
         if let Some(cell) = self.cell {
-            entry = entry.with_cell(cell.lengths, cell.angles_deg, cell.pbc);
+            packer = packer.with_cell(cell.lengths, cell.angles_deg, cell.pbc);
         }
 
         let structures: Vec<StructurePlan> = self
@@ -108,7 +108,7 @@ impl Script {
             .collect();
 
         Ok(ScriptPlan {
-            entry,
+            packer,
             structures,
             output: resolve(base_dir, &self.output),
             nloop: self.nloop,
@@ -273,14 +273,19 @@ fn apply_atom_group(mut target: Target, group: &AtomGroup) -> Target {
 /// Everything a script expanded to: a configured packer, the target
 /// list, the resolved output path, and the outer-loop iteration cap.
 ///
-/// The packer is not yet equipped with a handler; callers decide
-/// whether to attach a [`ProgressHandler`](crate::ProgressHandler),
-/// a custom handler, or none.
+/// The packer is not yet equipped with a callback; callers decide
+/// whether to attach a [`ProgressCallback`](crate::ProgressCallback),
+/// a custom callback, or none.
 #[cfg(feature = "io")]
-pub struct BuildResult {
-    pub entry: GenCanPack,
+pub struct ScriptJob {
+    /// Engine pre-configured with the script's `tolerance`, `seed`, `pbc`
+    /// box or `cell`, and `avoid_overlap`.
+    pub packer: GencanPack,
+    /// One target per `structure … end structure` block, in source order.
     pub targets: Vec<Target>,
+    /// Resolved output file path.
     pub output: PathBuf,
+    /// Outer-loop iteration cap (`nloop` keyword; default `200 * ntype`).
     pub nloop: usize,
 }
 
@@ -289,21 +294,24 @@ impl Script {
     /// Lower the script *and* read each template via molrs-io.
     ///
     /// Available when the `io` feature is on; equivalent to calling
-    /// [`Script::lower`] then loading each structure file with
-    /// [`super::io::read_frame`] and applying its [`StructurePlan`].
-    pub fn build(&self, base_dir: &Path) -> Result<BuildResult, ScriptError> {
+    /// [`Script::lower`] then reading each structure file with the molrs
+    /// reader of its [`StructureFormat`](crate::script::StructureFormat)
+    /// (the script's `filetype`, else the file name) and applying its
+    /// [`StructurePlan`].
+    pub fn build(&self, base_dir: &Path) -> Result<ScriptJob, ScriptError> {
         let plan = self.lower(base_dir)?;
         let filetype = plan.filetype.as_deref();
         let targets: Vec<Target> = plan
             .structures
             .iter()
             .map(|sp| -> Result<Target, ScriptError> {
-                let frame = super::io::read_frame(&sp.filepath, filetype)?;
+                let frame = crate::script::StructureFormat::resolve(&sp.filepath, filetype)?
+                    .read(&sp.filepath)?;
                 Ok(sp.apply(Target::new(frame, sp.number)))
             })
             .collect::<Result<_, _>>()?;
-        Ok(BuildResult {
-            entry: plan.entry,
+        Ok(ScriptJob {
+            packer: plan.packer,
             targets,
             output: plan.output,
             nloop: plan.nloop,

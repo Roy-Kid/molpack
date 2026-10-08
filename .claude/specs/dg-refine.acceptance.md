@@ -33,7 +33,7 @@ criteria:
       两条人工自穿链经 IntraOverlapTerm 精修后，各自 `Target.special_bonds` 表外的同分子最小距离 ≥ tolerance − 1e-9
       （两张 Target 各一张表：深度 1 与深度 3）；
       20 × 24 珠链 / 22 Å 盒（重建原 lattice 稠密算例，该集成测试已于 2026-09-20 删除）经 DgRefine 末级
-      `fdist ≤ 0.1 × 初态 fdist` 且严格小于同 max_loops 下 `GenCanPack::with_restart` 的 fdist；
+      `fdist ≤ 0.1 × 初态 fdist` 且严格小于同 max_loops 下 `GencanPack::with_restart` 的 fdist；
       两者的 `fdist` 都来自管线末尾共享 objective 在 scale = 1.0 的评估。
     status: pending
 
@@ -63,7 +63,7 @@ criteria:
     pass_when: |
       `bin_xcart_into_cells` 与 `accumulate_cartesian_fg` 抽出后
       五个 `cargo run --release --features io --example pack_<name>` 程序收敛（原 `examples_batch` harness 已于 2026-09-20 删除），
-      fast tier 全绿；GenCanPack 路径行为不变（`src/gencan/entry.rs::gencan_entry_is_deterministic`；原单阶段逐位等价集成测试已于 2026-09-20 删除，逐位比较不再作验收）。
+      fast tier 全绿；GencanPack 路径行为不变（`src/gencan/gencan_pack.rs::gencan_pack_is_deterministic`；原单阶段逐位等价集成测试已于 2026-09-20 删除，逐位比较不再作验收）。
     status: pending
 
   - id: ac-007

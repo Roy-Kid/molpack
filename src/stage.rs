@@ -1,79 +1,81 @@
-//! The packing-stage seam.
-//!
-//! [`PackEngine::run`](crate::PackEngine::run) is five stages; the middle
-//! two — initial state and the iteration driver — are *the algorithm*, and
-//! everything around them (target lowering, `PackContext` construction,
-//! frame assembly) is shared infrastructure. A [`Stage`] is one
-//! interchangeable implementation of that middle: it receives the run's
-//! [`PackState`], drives it towards a feasible configuration, and declares
-//! what it needed on the way in and what it promises on the way out.
-//!
-//! Every algorithm in this crate is a peer on this seam — a stage never
-//! reaches into another stage's driver, and the verdict on a run always
-//! comes from the shared objective evaluated on the final state, never from
-//! a stage's own bookkeeping.
-//!
-//! **Rust-only:** this module ([`Stage`], [`Requires`], [`Guarantees`],
-//! [`StageOutcome`], [`Budget`]) is deliberately not mirrored in the Python
-//! wheel — Python picks the algorithm by picking the entry (`GenCanPack` /
-//! `CbmcGrow` / `LatticeGrow`), and implementing a custom stage is a
-//! Rust-level extension point.
-//!
-//! # The repair-cost ladder
-//!
-//! Structural defects are not equally expensive to repair, and the crate
-//! orders them as a six-rung ladder L0–L5. The ladder is a **type**, and it
-//! lives with its only reader: [`Layers`](crate::invariant::Layers), next to
-//! [`Invariant::layer`](crate::Invariant::layer). Nothing here branches on a
-//! rung — this seam's declarations ([`Requires`] / [`Guarantees`]) are about
-//! placement shape — so the table and the rung names are documented there,
-//! once.
-//!
-//! **The rule the ladder exists for: a stage is responsible only for the
-//! layers it declares.** A stage that promises nothing about chain
-//! statistics has not failed when they are poor; a stage that promises no
-//! overlaps has failed when overlaps remain. A caller composes a run by
-//! stacking stages until every rung it cares about is owned by someone, and
-//! guards the ones that matter with
-//! [`Pipeline::with_guarded`](crate::Pipeline::with_guarded).
-//!
-//! # Where the verdict lives
-//!
-//! The two violation maxima the shared objective produces — the largest
-//! inter-molecular contact violation and the largest restraint violation,
-//! the pair [`State`](crate::State) reports — are **authoritative
-//! on the state after [`Stage::run`] returns**, where the context owns them
-//! as its own fields. [`StageOutcome`] carries no verdict: a stage reports
-//! only what it alone knows (whether it hit its own convergence criterion,
-//! and how many times it had to relax a constructive guarantee). A handler
-//! that wants the numbers reads them off the context in
-//! [`Handler::on_stage_end`], which is handed the state precisely so that no
-//! stage can self-report a verdict the shared ruler would disagree with.
-//!
-//! # What this seam deliberately does not have
-//!
-//! * **No `validate` hook.** Not one implementor in this crate would
-//!   override it: the rigid-body path validates its targets from its entry,
-//!   and both growth paths validate their cell from theirs. A pre-flight
-//!   hook nobody implements is a step a caller can forget plus a concept
-//!   nobody pays for. The seam is exactly four methods.
-//! * **No layer type of its own.** The ladder is
-//!   [`Layers`](crate::invariant::Layers), owned by the module that reads it.
+//! The packing-stage seam: [`Stage`](crate::Stage) and its documentation.
 
-use crate::context::{PackState, Placed};
-use crate::error::PackError;
-use crate::handler::Handler;
+use crate::Callback;
+use crate::PackError;
+use crate::system::{PackState, Placed};
 
+use crate::Target;
 pub use crate::outcome::StageOutcome;
-use crate::target::Target;
-use molrs::types::F;
+use molrs::op::F;
 
-/// One packing algorithm, selected by picking its engine entry
-/// ([`GenCanPack`](crate::GenCanPack), [`CbmcGrow`](crate::CbmcGrow),
+/// One packing algorithm, selected by picking its engine
+/// ([`GencanPack`](crate::GencanPack), [`CbmcGrow`](crate::CbmcGrow),
 /// [`LatticeGrow`](crate::LatticeGrow)).
+///
+/// The packing-stage seam.
+///
+/// [`PackEngine::run`](crate::PackEngine::run) is five stages; the middle
+/// two — initial state and the iteration driver — are *the algorithm*, and
+/// everything around them (target lowering, `PackSystem` construction,
+/// frame assembly) is shared infrastructure. A [`Stage`] is one
+/// interchangeable implementation of that middle: it receives the run's
+/// [`PackState`], drives it towards a feasible configuration, and declares
+/// what it needed on the way in and what it promises on the way out.
+///
+/// Every algorithm in this crate is a peer on this seam — a stage never
+/// reaches into another stage's driver, and the verdict on a run always
+/// comes from the shared objective evaluated on the final state, never from
+/// a stage's own bookkeeping.
+///
+/// **Rust-only:** this module ([`Stage`], [`Requires`], [`Guarantees`],
+/// [`StageOutcome`], [`Budget`]) is deliberately not mirrored in the Python
+/// wheel — Python picks the algorithm by picking the engine (`GencanPack` /
+/// `CbmcGrow` / `LatticeGrow`), and implementing a custom stage is a
+/// Rust-level extension point.
+///
+/// # The repair-cost ladder
+///
+/// Structural defects are not equally expensive to repair, and the crate
+/// orders them as a six-rung ladder L0–L5. The ladder is a **type**, and it
+/// lives with its only reader: [`Layers`](crate::Layers), next to
+/// [`Invariant::layer`](crate::Invariant::layer). Nothing here branches on a
+/// rung — this seam's declarations ([`Requires`] / [`Guarantees`]) are about
+/// placement shape — so the table and the rung names are documented there,
+/// once.
+///
+/// **The rule the ladder exists for: a stage is responsible only for the
+/// layers it declares.** A stage that promises nothing about chain
+/// statistics has not failed when they are poor; a stage that promises no
+/// overlaps has failed when overlaps remain. A caller composes a run by
+/// stacking stages until every rung it cares about is owned by someone, and
+/// guards the ones that matter with
+/// [`Pipeline::with_guarded`](crate::Pipeline::with_guarded).
+///
+/// # Where the verdict lives
+///
+/// The two violation maxima the shared objective produces — the largest
+/// inter-molecular contact violation and the largest restraint violation,
+/// the pair [`State`](crate::State) reports — are **authoritative
+/// on the state after [`Stage::run`] returns**, where the system owns them
+/// as its own fields. [`StageOutcome`] carries no verdict: a stage reports
+/// only what it alone knows (whether it hit its own convergence criterion,
+/// and how many times it had to relax a constructive guarantee). A callback
+/// that wants the numbers reads them off the system in
+/// [`Callback::on_stage_end`], which is handed the state precisely so that no
+/// stage can self-report a verdict the shared ruler would disagree with.
+///
+/// # What this seam deliberately does not have
+///
+/// * **No `validate` hook.** Not one implementor in this crate would
+///   override it: the rigid-body path validates its targets from its engine,
+///   and both growth paths validate their cell from theirs. A pre-flight
+///   hook nobody implements is a step a caller can forget plus a concept
+///   nobody pays for. The seam is exactly four methods.
+/// * **No layer type of its own.** The ladder is
+///   [`Layers`](crate::Layers), owned by the module that reads it.
 pub trait Stage: Send {
     /// Short identifier for logs and reports. The same string a
-    /// [`StageInfo`](crate::handler::StageInfo) carries to handlers.
+    /// [`StageProgress`](crate::StageProgress) carries to callbacks.
     fn name(&self) -> &'static str;
 
     /// What the state must already hold for this stage to run.
@@ -88,10 +90,10 @@ pub trait Stage: Send {
     /// `CellGrid`). `targets` are the targets this stage is responsible for
     /// — the same objects the caller handed to
     /// [`PackEngine::run`](crate::PackEngine::run), so chemistry has exactly
-    /// one source of truth. A stage takes the context and the rigid
+    /// one source of truth. A stage takes the system and the rigid
     /// placement vector apart with
     /// [`PackState::rigid_split_mut`], writes the per-copy conformers into
-    /// the context's `coor` and the placements into the
+    /// the system's `coor` and the placements into the
     /// [`RigidView`](crate::RigidView), and returns its outcome.
     ///
     /// Those two together are what the run's output is made of: once `run`
@@ -101,7 +103,7 @@ pub trait Stage: Send {
     /// directly (both growth drivers do) must therefore capture them back
     /// with
     /// [`RigidView::capture_from_xcart`](crate::RigidView::capture_from_xcart)
-    /// before returning; anything left only in the context's `xcart` is
+    /// before returning; anything left only in the system's `xcart` is
     /// overwritten.
     ///
     /// # Re-entrancy contract
@@ -131,7 +133,7 @@ pub trait Stage: Send {
         state: &mut PackState,
         targets: &[Target],
         budget: &Budget,
-        handlers: &mut [Box<dyn Handler>],
+        callbacks: &mut [Box<dyn Callback>],
     ) -> Result<StageOutcome, PackError>;
 }
 
@@ -183,7 +185,7 @@ pub struct Budget {
     /// Outer-iteration allowance. The GENCAN path reads this as its loop
     /// count; growth reads it as an allowance of *passes over a chain*, so its
     /// round loop is capped at `max_loops × (the longest species' n_steps + 1)`
-    /// rounds — see [`grow::driver`](crate::grow::driver). Serial growth
+    /// rounds — see the growth driver (`grow/driver.rs`). Serial growth
     /// scheduling advances only one chain per round
     /// ([`GrowConfig::with_serial`](crate::grow::GrowConfig::with_serial)), so
     /// finishing every chain then needs `max_loops ≥ n_chains`.
@@ -209,15 +211,15 @@ mod tests {
     //! Everything here runs on **fake stages**. The seam's own behaviour is
     //! object safety, the two declaration methods and their composition along a
     //! chain, the constructor paths of its three `#[non_exhaustive]` structs, the
-    //! two default handler hooks, and the re-entrancy contract on
+    //! two default callback hooks, and the re-entrancy contract on
     //! [`Stage::run`](crate::Stage::run) — none of which needs a real algorithm,
     //! and all of which a real algorithm would only obscure. What each concrete
     //! implementor declares belongs to that implementor's owner
-    //! (`gencan::tests`, `grow::tests`), so this file boots no engine entry
+    //! (`gencan::tests`, `grow::tests`), so this file boots no engine
     //! and names no production stage (acceptance ac-008).
     //!
-    //! Fixture: `PackState::new(PackContext::new(0, 0, 0), 0)` — the degenerate
-    //! context of `pack_context.rs::geometry_cache_tests` / `src/context/pack_state/tests.rs`,
+    //! Fixture: `PackState::new(PackSystem::new(0, 0, 0), 0)` — the degenerate
+    //! system of `pack_system.rs::geometry_cache_tests` / `src/system/pack_state/tests.rs`,
     //! which is all a stage that does no geometry can legitimately need. No RNG,
     //! no clock, no filesystem, no network.
     //!
@@ -227,10 +229,10 @@ mod tests {
     //! cargo test -p molcrafts-molpack --lib
     //! ```
 
-    use crate::handler::StageInfo;
+    use crate::StageProgress;
     use crate::{
-        Budget, Guarantees, Handler, PackContext, PackError, PackState, Placed, Requires, Stage,
-        StageOutcome, StepInfo, Target,
+        Budget, Callback, Guarantees, PackError, PackState, PackSystem, Placed, Requires, Stage,
+        StageOutcome, StepReport, Target,
     };
 
     // ── the fake stage ─────────────────────────────────────────────────────────
@@ -292,7 +294,7 @@ mod tests {
             state: &mut PackState,
             _targets: &[Target],
             _budget: &Budget,
-            _handlers: &mut [Box<dyn Handler>],
+            _callbacks: &mut [Box<dyn Callback>],
         ) -> Result<StageOutcome, PackError> {
             self.runs += 1;
             // Read the configuration; deliberately do NOT move or drain it — a
@@ -303,17 +305,17 @@ mod tests {
         }
     }
 
-    /// A handler that implements only the one required method, so every stage
+    /// A callback that implements only the one required method, so every stage
     /// hook it answers is the trait's provided default.
-    struct NoopHandler;
+    struct NoopCallback;
 
-    impl Handler for NoopHandler {
-        fn on_step(&mut self, _info: &StepInfo, _sys: &PackContext) {}
+    impl Callback for NoopCallback {
+        fn on_step(&mut self, _step: &StepReport, _sys: &PackSystem) {}
     }
 
-    /// The degenerate run state: an empty context and no free molecules.
+    /// The degenerate run state: an empty system and no free molecules.
     fn empty_state() -> PackState {
-        PackState::new(PackContext::new(0, 0, 0), 0)
+        PackState::new(PackSystem::new(0, 0, 0), 0)
     }
 
     /// The budget every fake here is run with; no fake reads it.
@@ -429,50 +431,50 @@ mod tests {
         );
     }
 
-    // ── 5. the stage identity a handler sees ───────────────────────────────────
+    // ── 5. the stage identity a callback sees ───────────────────────────────────
 
-    /// `StageInfo` is a plain `Copy` struct like `PhaseInfo`: constructible by
+    /// `StageProgress` is a plain `Copy` struct like `PhaseProgress`: constructible by
     /// literal, three public fields, all readable. That literal is what lets a
-    /// fake — here and in any downstream handler test — drive the two hooks
+    /// fake — here and in any downstream callback test — drive the two hooks
     /// without booting a pipeline.
     #[test]
     fn stage_info_is_a_literal_with_three_readable_fields() {
-        let info = StageInfo {
+        let stage = StageProgress {
             index: 0,
             total: 1,
             name: "alpha",
         };
 
         assert_eq!(
-            info.index, 0,
+            stage.index, 0,
             "the single stage of a one-stage run is index 0"
         );
-        assert_eq!(info.total, 1, "a one-stage run reports total 1");
-        assert_eq!(info.name, "alpha", "the name is the stage's own name()");
+        assert_eq!(stage.total, 1, "a one-stage run reports total 1");
+        assert_eq!(stage.name, "alpha", "the name is the stage's own name()");
     }
 
     // ── 6. the two default hooks ───────────────────────────────────────────────
 
-    /// `on_stage_start` / `on_stage_end` are *provided* methods: a handler that
+    /// `on_stage_start` / `on_stage_end` are *provided* methods: a callback that
     /// implements only `on_step` still answers both, and answering them does
     /// nothing. The test passes iff neither call panics — reaching the end of the
     /// body is the assertion, exactly as for the trait's other defaults.
     #[test]
     fn the_two_stage_hooks_default_to_no_ops() {
-        // Driven through the same `Box<dyn Handler>` shape `Stage::run` receives,
+        // Driven through the same `Box<dyn Callback>` shape `Stage::run` receives,
         // so the hooks are pinned on the trait object and not only on the
         // concrete type.
-        let mut handler: Box<dyn Handler> = Box::new(NoopHandler);
-        let info = StageInfo {
+        let mut callback: Box<dyn Callback> = Box::new(NoopCallback);
+        let stage = StageProgress {
             index: 0,
             total: 1,
             name: "alpha",
         };
         let outcome = StageOutcome::new(false, 0);
-        let sys = PackContext::new(0, 0, 0);
+        let sys = PackSystem::new(0, 0, 0);
 
-        handler.on_stage_start(&info);
-        handler.on_stage_end(&info, &outcome, &sys);
+        callback.on_stage_start(&stage);
+        callback.on_stage_end(&stage, &outcome, &sys);
     }
 
     // ── 7. the re-entrancy contract ────────────────────────────────────────────
@@ -489,13 +491,13 @@ mod tests {
         let mut state = empty_state();
         let targets: Vec<Target> = Vec::new();
         let budget = tiny_budget();
-        let mut handlers: Vec<Box<dyn Handler>> = Vec::new();
+        let mut callbacks: Vec<Box<dyn Callback>> = Vec::new();
 
         let mut stage = FakeStage::new("alpha", Placed::None, Placed::All, 0);
         let config_at_construction = stage.config.len();
 
         let first = stage
-            .run(&mut state, &targets, &budget, &mut handlers)
+            .run(&mut state, &targets, &budget, &mut callbacks)
             .expect("the fake stage runs");
         let config_after_first = stage.config.len();
         assert_eq!(
@@ -505,7 +507,7 @@ mod tests {
         );
 
         let second = stage
-            .run(&mut state, &targets, &budget, &mut handlers)
+            .run(&mut state, &targets, &budget, &mut callbacks)
             .expect("the fake stage runs a second time");
 
         assert_eq!(stage.runs, 2, "both calls must reach the stage body");

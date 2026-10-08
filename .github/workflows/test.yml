@@ -1,0 +1,93 @@
+name: test
+
+# Rust and Python tests against molrs at the commit scripts/partners.py
+# resolves, in two tiers (`test / context` decides):
+#
+#   fast  a feature-branch push to MolCrafts: the Rust tests, and the Python
+#         suite on Linux.
+#   full  every push to a fork (proven before its pull request), dev, master
+#         and main on MolCrafts, pull requests, tags (release.yml) and
+#         dispatches: the Python suite on Linux, macOS and Windows.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [dev, master, main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# One group per file, workflow, event and ref. Under workflow_call (release.yml
+# running lint/test) github.workflow and github.event_name are the caller's, so
+# a called run never shares, and so never cancels, a direct run's group.
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # uv builds molrs and molpack through maturin's PEP 517 hook; this makes
+  # those cargo builds --locked as well.
+  MATURIN_PEP517_ARGS: --locked
+
+jobs:
+  # Where this run happens, decided once: MolCrafts/molcrafts-ci/actions/ci-context.
+  context:
+    name: test / context
+    runs-on: ubuntu-latest
+    outputs:
+      tier: ${{ steps.context.outputs.tier }}
+      upstream: ${{ steps.context.outputs.upstream }}
+      integration: ${{ steps.context.outputs.integration }}
+      skip-pr: ${{ steps.context.outputs.skip-pr }}
+      cancel: ${{ steps.context.outputs.cancel }}
+    steps:
+      - id: context
+        uses: MolCrafts/molcrafts-ci/actions/ci-context@master
+
+  # Behaviour lives in `#[cfg(test)]` modules next to the code (no tests/
+  # directory); every other target and feature set still has to compile.
+  rust:
+    name: test / rust
+    needs: context
+    if: needs.context.outputs.skip-pr != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@master
+        with:
+          cache: rust
+          workspaces: . -> ../molrs/target
+      - run: |
+          cargo test --locked --lib --features cli
+          cargo test --locked --doc --features cli
+          cargo check --locked --all-targets --features cli
+          cargo check --locked --no-default-features
+          cargo check --locked --features rayon
+
+  # tox -e py: the wheel built isolated and installed non-editable.
+  python:
+    name: test / python (${{ matrix.os }})
+    needs: context
+    if: needs.context.outputs.skip-pr != 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.context.outputs.tier == 'full' && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@master
+        with:
+          cache: python
+          workspaces: . -> ../molrs/target
+      - run: uv run --locked --python 3.12 --directory python --group dev tox -e py

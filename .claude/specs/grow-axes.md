@@ -118,7 +118,7 @@ chain: packing-taxonomy（03 of 3；依赖 stage-pipeline 的 PackState / Stage�
 
 **Rust 删除**：`src/grow/moves.rs`（拆入 chain.rs / commit.rs / escape.rs / space/continuum.rs）、
 `src/grow/lattice/{mod,saw,decorate}.rs`（拆入 entry/lattice.rs、space/diamond/、
-exclusion/occupancy.rs）、`src/grow/field.rs`（搬入 exclusion/field.rs）、`src/grow/entry.rs`
+exclusion/occupancy.rs）、`src/grow/field.rs`（搬入 exclusion/field.rs）、`src/grow/cbmc_grow.rs`
 （→ entry/cbmc.rs）、`GrowConfig::with_relax / with_serial / with_void_bias`、
 `CbmcGrow::with_relax / with_serial / with_void_bias`、`LatticeConfig::with_max_backtrack /
 with_max_reseed`（→ `Escape` 列表）。不留别名。
@@ -169,7 +169,7 @@ with_max_reseed`（→ `Escape` 列表）。不留别名。
 - **CbmcGrow 守门**：~~对原集成 fixture（`grow_pack` 8 × 12 珠、双物种、KG 熔体、约束算例）
   于重构前记录坐标哈希、重构后逐位相同~~——2026-09-29 撤：这些 fixture 已于 2026-09-20 删除，
   且 conventions 禁止 golden / 逐位连续性测试。改为：`src/grow/tests/` 全绿 + 同种子确定性单测
-  （形式同 `gencan/entry.rs::gencan_entry_is_deterministic`）。RNG 契约不变：每步的抽样次数与顺序保持（种子 3 + 3 uniform，
+  （形式同 `gencan/gencan_pack.rs::gencan_pack_is_deterministic`）。RNG 契约不变：每步的抽样次数与顺序保持（种子 3 + 3 uniform，
   每 trial 1 torsion + 角先验 draws，选择 1 uniform）。
 - **LatticeGrow 统计守门**（顺序 → 轮转、全局 RNG → 哈希流，数值必变）：
   原集成测试 `lattice_grow_bead_chain_constructive`（2026-09-20 删除）的 `fdist == 0`、`softened == 0`、
@@ -222,7 +222,7 @@ with_max_reseed`（→ `Escape` 列表）。不留别名。
    的含义。
 5. **`WalkGrow` 的 1-5 自穿**：无排除体积意味着链可能局部自穿（g±g∓ 类构型）；这是 L4
    缺陷，交给精修（dg-refine 的 `IntraOverlapTerm`）；验收只看统计与成键几何。
-6. **对 stage-pipeline 的依赖**：三个预设写在今天的 `PackEngine`（`src/entry/mod.rs:108`）
+6. **对 stage-pipeline 的依赖**：三个预设写在今天的 `PackEngine`（`src/settings.rs:108`）
    上即可落地，不阻塞于 stage-pipeline；接缝升级时预设只改 trait 名与 `stages()` 签名。
    但 `src/topology.rs` 叶子（键图 / 排除表）是两者共用的前置，先落地。
 7. **这不是纯重构**（架构师 CRITICAL）：格相从全局 `SmallRng` 改为哈希流、从顺序改为轮转，
