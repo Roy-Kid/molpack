@@ -2,7 +2,8 @@ name: lint
 
 # Format, linters, type checks and lock files, against molrs at the commit
 # scripts/partners.py resolves (molrs's dev, or its branch named like this
-# one). Same in every context; see "CI" in CONTRIBUTING.md.
+# one), and the workflows against the CI scheme (check-workflows). Same in
+# every context; see "CI" in CONTRIBUTING.md.
 on:
   push:
     branches: ["**"]
@@ -31,7 +32,7 @@ jobs:
       upstream: ${{ steps.context.outputs.upstream }}
       integration: ${{ steps.context.outputs.integration }}
       skip-pr: ${{ steps.context.outputs.skip-pr }}
-      cancel: ${{ steps.context.outputs.cancel }}
+      publish: ${{ steps.context.outputs.publish }}
     steps:
       - id: context
         uses: MolCrafts/molcrafts-ci/actions/ci-context@master
@@ -75,3 +76,13 @@ jobs:
           workspaces: . -> ../molrs/target
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: uv run --locked --python 3.12 --directory python --group typecheck ty check python tests examples
+
+  workflows:
+    name: lint / workflows
+    needs: context
+    # Every workflow against the CI scheme: MolCrafts/molcrafts-ci/actions/check-workflows.
+    if: needs.context.outputs.skip-pr != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: MolCrafts/molcrafts-ci/actions/check-workflows@master

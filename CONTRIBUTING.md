@@ -148,10 +148,10 @@ its outputs.
 
 | workflow | feature-branch push to MolCrafts | everything else: `dev`/`master`/`main` on MolCrafts, pull requests, tags, dispatches, any push to a fork | upstream only |
 | --- | --- | --- | --- |
-| `lint.yml` | `lint / hooks` (commit hooks on every file, partners, lock files), `lint / clippy` (clippy, ty) | same | — |
+| `lint.yml` | `lint / hooks` (commit hooks on every file, partners, lock files), `lint / clippy` (clippy, ty), `lint / workflows` (`check-workflows`) | same | — |
 | `test.yml` | fast: `test / rust`, `test / python (ubuntu-latest)` | full: `test / rust`, `test / python` on Linux, macOS and Windows | — |
 | `docs.yml` | `docs / build` (zensical `--strict`) | same | Cloudflare Pages deploys the site from MolCrafts |
-| `release.yml` | — | dispatch: dry run (gates, builds, `cargo publish --dry-run`, uploads nothing) | `v*` tag: crates.io, PyPI wheels + sdist, GitHub Release |
+| `release.yml` | — | dispatch: dry run (gates, builds, `release / crate (dry run)`: `cargo publish --dry-run`; the upload jobs are skipped) | `v*` tag (`publish` from `release / context`): crates.io, PyPI wheels + sdist, GitHub Release |
 
 So a fork branch gets the full tier on its push: push to your fork, wait for
 green, then open the pull request into MolCrafts `dev`. Branches pushed to
