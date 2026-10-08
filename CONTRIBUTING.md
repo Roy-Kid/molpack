@@ -154,7 +154,8 @@ green, then open the pull request into MolCrafts `dev`. Branches pushed to
 MolCrafts itself (Dependabot's) get the fast tier, and their pull requests the
 full one. The `require-green-ci` (`dev`) and `protect-master` rulesets require
 `test / tier` and the full tier's jobs. A release tag must be `v` + the `Cargo.toml` version, on
-`master`; trusted publishing on crates.io and PyPI names `release.yml`.
+`master`; trusted publishing on crates.io and PyPI names `release.yml` and the
+`crates-io` and `pypi` environments.
 Shared setup is MolCrafts/molcrafts-ci's `actions/setup-rust`,
 `actions/setup-python` and `actions/setup-partners` (`@master`), the same
 actions every MolCrafts repository uses.
