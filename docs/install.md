@@ -39,7 +39,7 @@ needs molrs's `ff` feature; enable it on your own `molcrafts-molrs` dependency.
 
 ```toml
 # Cargo.toml — common combinations
-molcrafts-molpack = { version = "0.4", features = ["io", "rayon"] }
+molcrafts-molpack = { version = "0.5", features = ["io", "rayon"] }
 ```
 
 ## Python binding
@@ -67,8 +67,8 @@ print(molpack.GencanPack)
 ## Build from source
 
 When you are modifying the crate or Python binding, check out **molrs** as a
-sibling (path deps resolve `../molrs/molrs`). molpack 0.4 builds on the molrs
-**0.16** line — the `v0.16.0` tag or a later 0.16 commit:
+sibling (path deps resolve `../molrs/molrs`). molpack 0.5 builds on the molrs
+**0.17** line — molrs `dev`, or the `v0.17.0` tag once that line is released:
 
 ```bash
 # sibling layout

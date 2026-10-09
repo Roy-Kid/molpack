@@ -23,7 +23,7 @@ The root `Cargo.toml` uses a path dependency on `../molrs/molrs`. With the
 sibling layout above everything resolves automatically.
 
 **Version pins:** a local build uses the sibling checkout `../molrs`. The
-version fields name the **0.16.*** minor line (see `Cargo.toml` and
+version fields name the **0.17.*** minor line (see `Cargo.toml` and
 `python/pyproject.toml`). CI, and the pre-push hooks, build against
 `MolCrafts/molrs` at the commit `scripts/partners.py` resolves (molrs's
 `dev`; see [Partners](#partners)), in a layout of their own -- not your
