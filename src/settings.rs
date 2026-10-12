@@ -24,18 +24,18 @@ use molrs::op::F;
 use crate::LogLevel;
 use crate::pack_space::{CellDecl, PeriodicSpec};
 
-/// Built-in screen logging: detail level + print cadence.
+/// Built-in screen logging: detail level and how many loops pass between lines.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LogSpec {
     pub(crate) level: LogLevel,
-    pub(crate) frequency: usize,
+    pub(crate) nsteps: usize,
 }
 
 impl Default for LogSpec {
     fn default() -> Self {
         Self {
             level: LogLevel::Quiet,
-            frequency: 1,
+            nsteps: 1,
         }
     }
 }
@@ -133,7 +133,7 @@ impl PackSettings {
         if cell.is_some() {
             return Some("cell");
         }
-        if log.level != default.log.level || log.frequency != default.log.frequency {
+        if log.level != default.log.level || log.nsteps != default.log.nsteps {
             return Some("log");
         }
         // Restraint objects are `dyn` and not comparable; the default is the

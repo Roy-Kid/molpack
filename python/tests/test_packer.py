@@ -211,7 +211,7 @@ class TestGencanPack:
         p5 = p1.with_init_passes(40)
         p6 = p1.with_init_box_half_size(200.0)
         p7 = p1.with_perturb(0.1, random=True, enabled=False)
-        p8 = p1.with_log_level("quiet")
+        p8 = p1.with_log("quiet")
         p9 = p1.with_seed(42)
         p10 = p1.with_parallel_eval(True)
         p11 = p1.with_avoid_overlap(False)

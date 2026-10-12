@@ -60,7 +60,7 @@ pub(super) fn open_bracket(
     if log.level.is_enabled() {
         collected.push(Box::new(LammpsLogCallback::new(
             log.level,
-            log.frequency,
+            log.nsteps,
             setup.settings.tolerance(),
             budget.precision,
             setup.settings.seed(),

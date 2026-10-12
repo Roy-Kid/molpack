@@ -69,7 +69,7 @@ def main() -> None:
         if os.environ.get("MOLPACK_EXAMPLE_PROGRESS", "1") != "0"
         else "quiet"
     )
-    packer = molpack.GencanPack().with_log_level(log_level)
+    packer = molpack.GencanPack().with_log(log_level)
 
     result = packer.run(
         [water_low, water_high, lipid_low, lipid_high],

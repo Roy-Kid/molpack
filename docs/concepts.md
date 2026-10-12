@@ -463,7 +463,7 @@ per algorithm, all with the same builders and the same terminal verb.
 
 ```text
 GencanPack::new()
-    .with_log_level(...)
+    .with_log(LogLevel::Progress, nsteps)
     .with_callback(...)
     .with_global_restraint(...)  // broadcast to every target
     .with_periodic_box(min, max)

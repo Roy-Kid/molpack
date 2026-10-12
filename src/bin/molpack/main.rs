@@ -117,7 +117,7 @@ fn run(src: &str, base_dir: &std::path::Path, parallel: bool) -> Result<(), Scri
 
     // CLI defaults to screen output; library callers stay headless unless
     // configured on the builder.
-    packer = packer.with_log_level(LogLevel::Progress);
+    packer = packer.with_log(LogLevel::Progress, 1);
     if parallel {
         packer = packer.with_parallel_eval(true);
     }

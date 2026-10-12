@@ -147,7 +147,7 @@ def lattice_then_push(
         .with_seed(seed)
         .with_tolerance(2.0)
         .with_density(density)
-        .with_log_level(_log_level())
+        .with_log(_log_level())
         .run(targets, max_loops=max_grow)
     )
     print(
@@ -160,7 +160,7 @@ def lattice_then_push(
         .with_restart(grown)
         .with_seed(seed)
         .with_tolerance(2.0)
-        .with_log_level(_log_level())
+        .with_log(_log_level())
         .run(targets, max_loops=max_push)
     )
     print(f"  push-off     : converged={pushed.converged}  fdist={pushed.fdist:.4e}")
@@ -203,7 +203,7 @@ def pack_ring(dp: int, n_mol: int, density: float, seed: int) -> molpack.State:
         .with_seed(seed)
         .with_tolerance(2.0)
         .with_density(density)
-        .with_log_level(_log_level())
+        .with_log(_log_level())
         .run([target], max_loops=max(40, n_mol * 8))
     )
     print(

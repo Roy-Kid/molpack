@@ -16,8 +16,10 @@ from molpack import GencanPack
 packer = GencanPack().with_periodic_box([0.0, 0.0, 0.0], [30.0, 30.0, 30.0])
 ```
 
-Only orthorhombic cells are supported through this builder; a triclinic
-cell is `with_cell(lengths, angles, pbc)`.
+This builder declares an orthorhombic, fully periodic cell. A triclinic
+cell is the `.inp` keyword `cell a b c alpha beta gamma`, or Rust
+`PackEngine::with_cell` / `with_cell_matrix`. The Python binding has no
+`with_cell`.
 
 A region does not declare periodicity — it only confines. To keep every
 atom centre inside the cell as well, attach a `molrs.core.Cuboid` with the same

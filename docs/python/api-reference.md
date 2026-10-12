@@ -152,6 +152,10 @@ instance — and all three expose the same terminal verb:
 .run(targets: list[Target], max_loops: int) -> State
 ```
 
+`CbmcGrow`, `LatticeGrow`, and `Pipeline` require `max_loops`.
+`GencanPack.run` leaves it optional and then uses Packmol's `nloop`,
+`200 * len(targets)`.
+
 `run()` consumes the engine (one engine, one run): a second call on the
 same object raises `RuntimeError`. Raises a typed `PackError` subclass on
 packing failure.
@@ -173,8 +177,11 @@ Available on `GencanPack` **and** `CbmcGrow`:
   raises `ValueError`. Mutually exclusive with `.with_periodic_box`.
 - `.with_parallel_eval(enabled: bool)` — rayon-backed pair eval. Raises
   `RuntimeError` if the wheel lacks the `rayon` feature (fail-fast).
-- `.with_log_level(level: str)` — screen log: `"quiet"` (the default),
-  `"summary"`, `"progress"` (LAMMPS-style thermo lines) or `"verbose"`.
+- `.with_log(level: str, nsteps: int = 1)` — screen log. `level` is
+  `"quiet"` (the default), `"summary"`, `"progress"` (LAMMPS-style thermo
+  lines) or `"verbose"`. `nsteps` is how many loops pass between progress
+  lines (at least 1; the default is every loop). Same words as Rust
+  `with_log(level, nsteps)`.
 - `.with_callback(callback)` — attach a custom `Callback` (stackable).
 - `.with_global_restraint(r)` — broadcast to every target (stackable).
 
@@ -204,6 +211,12 @@ GENCAN-only builders, on top of the shared ones:
   vs worst-first selection, and the master switch.
 - `.with_avoid_overlap(on: bool = True)` — reject initial random placements
   overlapping a fixed molecule (Packmol `avoid_overlap`; default True).
+- `.with_early_stop(enabled: bool = True, *, threshold_pct: float = 10.0, patience: int = 10)`
+  — end a GENCAN phase, once radii are back at the user's
+  (`radscale == 1`), when Packmol's `bestf` has improved by less than
+  `threshold_pct` percent over `patience` loops. On by default (10 % is
+  Packmol's movebad threshold). `enabled=False` runs every phase out to
+  `max_loops`. A stopped final phase leaves `State.converged` false.
 
 ### `CbmcGrow`
 
@@ -283,7 +296,8 @@ Pipeline(stages: Sequence[GencanPack | CbmcGrow | LatticeGrow] | None = None)
 - The shared builders — same as [`GencanPack`](#shared-builders):
   `.with_tolerance`, `.with_precision`, `.with_seed`,
   `.with_periodic_box`, `.with_density`, `.with_parallel_eval`,
-  `.with_log_level`, `.with_callback`, `.with_global_restraint`. Set these on
+  `.with_log`, `.with_callback`,
+  `.with_global_restraint`. Set these on
   the `Pipeline`, never on a stage object that goes into one — a stage
   carrying a non-default shared setting raises `ValueError` naming the
   stage and the setting.

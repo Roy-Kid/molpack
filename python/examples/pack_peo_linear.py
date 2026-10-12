@@ -98,7 +98,7 @@ def pack_linear(n: int, n_mol: int, density: float, seed: int):
         .with_seed(seed)
         .with_tolerance(2.0)
         .with_density(density)
-        .with_log_level(log_level)
+        .with_log(log_level)
         .run([target], max_loops=max(40, n_mol * 8))
     )
     print(
@@ -111,7 +111,7 @@ def pack_linear(n: int, n_mol: int, density: float, seed: int):
         .with_restart(grown)
         .with_seed(seed)
         .with_tolerance(2.0)
-        .with_log_level(log_level)
+        .with_log(log_level)
         .run([target], max_loops=80)
     )
     print(f"  push-off     : converged={pushed.converged}  fdist={pushed.fdist:.4e}")

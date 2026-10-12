@@ -147,12 +147,13 @@ pub trait PackEngine: StageFactory + Sized {
         self.settings_mut().parallel_eval = on;
         self
     }
-    fn with_log_level(mut self, level: LogLevel) -> Self {
-        self.settings_mut().log.level = level;
-        self
-    }
-    fn with_log_frequency(mut self, n: usize) -> Self {
-        self.settings_mut().log.frequency = n.max(1);
+    /// Screen log. `level` is the detail; `nsteps` is how many loops pass
+    /// between progress lines (at least 1). The library default is quiet
+    /// and every loop; the CLI turns progress on.
+    fn with_log(mut self, level: LogLevel, nsteps: usize) -> Self {
+        let log = &mut self.settings_mut().log;
+        log.level = level;
+        log.nsteps = nsteps.max(1);
         self
     }
     fn with_callback(mut self, callback: Box<dyn Callback>) -> Self {

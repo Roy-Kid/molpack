@@ -10,13 +10,12 @@ Enable LAMMPS-style progress output through the builder:
 ```rust
 use molpack::{GencanPack, LogLevel, PackEngine};
 
-let engine = GencanPack::new()
-    .with_log_level(LogLevel::Progress)
-    .with_log_frequency(10);
+let engine = GencanPack::new().with_log(LogLevel::Progress, 10);
 ```
 
-The CLI enables screen output by default; library callers stay quiet unless you
-opt in.
+`nsteps` is how many loops pass between progress lines (at least 1). The
+library default is quiet and every loop; the CLI turns progress on. Python
+is the same call: `with_log(level, nsteps=1)`.
 
 ## Built-in callbacks
 

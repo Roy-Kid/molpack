@@ -363,12 +363,11 @@ impl Callback for ProgressCallback {
 /// LAMMPS-style screen log for packing runs.
 ///
 /// Most users should enable this through
-/// [`PackEngine::with_log_level`][crate::PackEngine::with_log_level]
-/// or [`with_log_frequency`][crate::PackEngine::with_log_frequency]
+/// [`PackEngine::with_log`][crate::PackEngine::with_log]
 /// instead of attaching the callback manually.
 pub struct LammpsLogCallback {
     level: LogLevel,
-    every: usize,
+    nsteps: usize,
     tolerance: F,
     precision: F,
     seed: u64,
@@ -383,7 +382,7 @@ impl LammpsLogCallback {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         level: LogLevel,
-        every: usize,
+        nsteps: usize,
         tolerance: F,
         precision: F,
         seed: u64,
@@ -393,7 +392,7 @@ impl LammpsLogCallback {
     ) -> Self {
         Self {
             level,
-            every: every.max(1),
+            nsteps: nsteps.max(1),
             tolerance,
             precision,
             seed,
@@ -497,7 +496,7 @@ impl Callback for LammpsLogCallback {
     }
 
     fn on_step(&mut self, step: &StepReport, _sys: &PackSystem) {
-        if self.level < LogLevel::Progress || !step.loop_idx.is_multiple_of(self.every) {
+        if self.level < LogLevel::Progress || !step.loop_idx.is_multiple_of(self.nsteps) {
             return;
         }
         if self.level >= LogLevel::Verbose {

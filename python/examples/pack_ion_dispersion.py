@@ -66,7 +66,7 @@ def pack(*, separate: bool, log_level: str) -> tuple[np.ndarray, object]:
     if separate:
         ions = ions.with_restraint(molpack.SelfSeparation(D_MIN))
 
-    packer = molpack.GencanPack().with_log_level(log_level).with_seed(SEED)
+    packer = molpack.GencanPack().with_log(log_level).with_seed(SEED)
     result = packer.run([water, ions], max_loops=200)
 
     # Targets are packed in the order given, so the ions are the trailing

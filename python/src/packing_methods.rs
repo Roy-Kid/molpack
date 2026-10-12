@@ -43,8 +43,8 @@ struct EngineKnobs {
     cell: Option<([F; 3], [F; 3], [bool; 3])>,
     density: Option<F>,
     parallel_eval: Option<bool>,
-    log_level: Option<LogLevel>,
-    log_frequency: Option<usize>,
+    /// `(level, nsteps)` from :meth:`with_log`. Unset keeps the library default.
+    log: Option<(LogLevel, usize)>,
     py_callbacks: Vec<Py<pyo3::types::PyAny>>,
     global_restraints: Vec<Py<pyo3::types::PyAny>>,
     consumed: bool,
@@ -60,8 +60,7 @@ impl EngineKnobs {
             cell: self.cell,
             density: self.density,
             parallel_eval: self.parallel_eval,
-            log_level: self.log_level,
-            log_frequency: self.log_frequency,
+            log: self.log,
             py_callbacks: self.py_callbacks.iter().map(|h| h.clone_ref(py)).collect(),
             global_restraints: self
                 .global_restraints
@@ -97,9 +96,8 @@ impl EngineKnobs {
         for gr in &self.global_restraints {
             engine = engine.with_global_restraint(extract_restraint(gr.bind(py))?);
         }
-        engine = engine.with_log_level(self.log_level.unwrap_or(LogLevel::Quiet));
-        if let Some(n) = self.log_frequency {
-            engine = engine.with_log_frequency(n);
+        if let Some((level, nsteps)) = self.log {
+            engine = engine.with_log(level, nsteps);
         }
         // One flag per `apply` call — shared by the callbacks this call
         // attaches, whether they land on a standalone engine or on one stage
@@ -229,18 +227,16 @@ macro_rules! packing_method_pymethods {
                 c.knobs.global_restraints.push(restraint);
                 c
             }
-            /// Screen-log detail: ``"quiet"`` (the default) / ``"summary"`` /
-            /// ``"progress"`` (LAMMPS-style thermo lines) / ``"verbose"``.
-            fn with_log_level(&self, level: &str) -> PyResult<Self> {
+            /// Screen log. ``level`` is ``"quiet"`` (the default) /
+            /// ``"summary"`` / ``"progress"`` (LAMMPS-style thermo lines) /
+            /// ``"verbose"``. ``nsteps`` is how many loops pass between
+            /// progress lines (at least 1; the default is every loop).
+            #[pyo3(signature = (level, nsteps = 1))]
+            fn with_log(&self, level: &str, nsteps: usize) -> PyResult<Self> {
                 let parsed = parse_log_level(level)?;
                 let mut c = self.clone_fields();
-                c.knobs.log_level = Some(parsed);
+                c.knobs.log = Some((parsed, nsteps.max(1)));
                 Ok(c)
-            }
-            fn with_log_frequency(&self, n: usize) -> Self {
-                let mut c = self.clone_fields();
-                c.knobs.log_frequency = Some(n.max(1));
-                c
             }
             /// Append a Python callback. See :class:`StepReport` for the
             /// callback contract.

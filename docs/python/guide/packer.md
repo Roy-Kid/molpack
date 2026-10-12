@@ -1,9 +1,9 @@
 # Packer
 
-`GencanPack` drives the GENCAN-based three-phase optimizer. It is one of
-two engines — the other, `CbmcGrow`, grows chains instead of
-placing rigid bodies; see [Chain growth](growth.md). You pick the
-algorithm by picking the engine, and both share the builder names below.
+`GencanPack` drives the GENCAN-based three-phase optimizer. Chain growth
+is `CbmcGrow` or `LatticeGrow`; see [Chain growth](growth.md). You pick
+the algorithm by picking the engine. The builders below are
+`GencanPack`'s; the shared ones also exist on the growth engines.
 All tuning is through `with_*` builder methods — the `GencanPack`
 constructor takes no arguments.
 
@@ -33,29 +33,40 @@ packer = (
     .with_perturb(0.05, False, True)  # stall heuristic: fraction, random pick, on/off
     .with_seed(42)                  # deterministic RNG
     .with_parallel_eval(False)      # rayon-backed pair-kernel eval (opt-in)
-    .with_log_level("progress")     # LAMMPS-style screen output
+    .with_log("progress", nsteps=10)  # LAMMPS-style lines, every 10th loop
 )
 ```
 
-Runs are silent by default (`"quiet"`); `.with_log_level(level)` picks
-`"quiet"`, `"summary"`, `"progress"` (LAMMPS-style thermo lines) or
-`"verbose"`, and `.with_log_frequency(n)` prints every *n*-th loop.
+Runs are silent by default. `.with_log(level, nsteps=1)` sets the screen
+log: `level` is `"quiet"` (the default), `"summary"`, `"progress"`
+(LAMMPS-style thermo lines) or `"verbose"`. `nsteps` is how many loops
+pass between progress lines (at least 1; the default is every loop).
+The Rust builder is the same call: `with_log(level, nsteps)`.
+
+Early stop is on. Once radii are back at the user's (`radscale == 1`),
+a phase ends when Packmol's `bestf` has improved by less than 10 % over
+10 loops — Packmol's movebad threshold. `enabled=False` runs every phase
+out to `max_loops`. A stopped final phase leaves `State.converged` false.
+
+```python
+packer = packer.with_early_stop(threshold_pct=10.0, patience=10)
+packer = packer.with_early_stop(enabled=False)
+```
 
 A few more builders cover specific needs:
 
 ```python
-packer = (
-    packer
-    .with_periodic_box([0, 0, 0], [30, 30, 30])  # fully-periodic cell (Packmol `pbc`)
-    .with_density(0.9)                            # or: size a cubic cell from g/cm³
-    .with_avoid_overlap(True)                     # reject init placements onto a fixed molecule
-)
+# One of these two; they are mutually exclusive.
+packer = packer.with_periodic_box([0, 0, 0], [30, 30, 30])  # Packmol `pbc`
+packer = packer.with_density(0.9)                           # cubic cell from g/cm³
+packer = packer.with_avoid_overlap(True)                    # reject init placements onto a fixed molecule
 ```
 
 `with_tolerance`, `with_precision`, `with_seed`, `with_periodic_box`,
-`with_density`, `with_parallel_eval`, `with_log_level`, `with_callback`,
-and `with_global_restraint` are the shared engine builders — they exist
-on `CbmcGrow` too. The rest are GENCAN-only.
+`with_density`, `with_parallel_eval`, `with_log`,
+`with_callback`, and `with_global_restraint` are
+the shared engine builders — they exist on `CbmcGrow` and `LatticeGrow`
+too. The rest are GENCAN-only.
 
 ## Global restraints
 
@@ -101,7 +112,9 @@ result = packer.run(targets, max_loops=200)
 ```
 
 - `targets`   — list of `Target` objects (must be non-empty).
-- `max_loops` — per-phase outer-iteration budget.
+- `max_loops` — per-phase outer-iteration budget. Omitted on
+  `GencanPack`, it is Packmol's `nloop`: `200 * len(targets)`.
+  `CbmcGrow`, `LatticeGrow`, and `Pipeline` require it.
 
 Raises one of the typed `PackError` subclasses on failure
 (`NoTargetsError`, `InvalidPbcBoxError`, …).

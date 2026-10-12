@@ -162,6 +162,29 @@ target = target.with_atom_radius(h_indices, 0.85)   # then explicit hydrogen
 All-atom chains with explicit hydrogen keep the default depth-3 skip
 table and shrink hydrogen here (~0.85 Å). Indices are **0-based**.
 
+## Hydrogens
+
+Lattice growth places these atoms off their backbone neighbour instead
+of on a lattice site. The default is every atom whose element symbol is
+`H`. Pass indices to override that, or `[]` for a coarse-grained model.
+An out-of-range index raises `ValueError`.
+
+```python
+target = target.with_hydrogens(h_indices)
+```
+
+`molpy.builder.PackingTemplate` reads those indices off an assembled
+`Atomistic` (element `H` on `mol.to_frame()`). `template.frame` is a
+`molpy.Frame`, the same class as `molrs.core.Frame`:
+
+```python
+import molpy as mp
+from molpack import Target
+
+template = mp.builder.PackingTemplate(chain)
+target = Target(template.frame, 10).with_hydrogens(template.hydrogens)
+```
+
 ## Intramolecular skip table
 
 Atom pairs close along the chain are exempt from the hard core. The

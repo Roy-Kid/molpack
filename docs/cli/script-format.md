@@ -52,7 +52,9 @@ inputs from falling through to an expensive or invalid packing run.
 The parser covers the Packmol syntax used by the bundled examples and
 regression suite:
 
-- global `tolerance`, `seed`, `filetype`, `output`, `nloop`, and `pbc`;
+- global `tolerance`, `seed`, `filetype`, `output`, `nloop`, `pbc`, and
+  `cell a b c alpha beta gamma` (optional trailing `periodic x y z`;
+  mutually exclusive with `pbc`);
 - `structure ... end structure` blocks;
 - `number`, `center`, `centerofmass`, and `fixed`;
 - whole-molecule and `atoms ... end atoms` restraints;
