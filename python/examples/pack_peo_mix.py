@@ -43,7 +43,7 @@ def _grow(topology: str, library: dict[str, Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
     sites = molpy.io.cgsmiles.read_cgsmiles(topology).to_coarsegrain()
     return molpy.builder.Assembler(library, molpy.builder.GrowthPlacer()).assemble(
-        sites, Atomistic
+        sites
     )
 
 

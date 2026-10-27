@@ -61,9 +61,7 @@ def main() -> None:
         columns=["id", "element", "mol", "x", "y", "z"],
     )
     if "bonds" in packed and packed["bonds"].n_rows:
-        molpy.io.write_lammps_dump_local(
-            str(OUT / "pack_water_cube.dump.local"), [packed]
-        )
+        molpy.io.write_lammps_dump_local(OUT / "pack_water_cube.dump.local", [packed])
 
 
 if __name__ == "__main__":

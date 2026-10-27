@@ -70,7 +70,7 @@ def _grow(topology: str, library: dict[str, Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
     sites = molpy.io.cgsmiles.read_cgsmiles(topology).to_coarsegrain()
     return molpy.builder.Assembler(library, molpy.builder.GrowthPlacer()).assemble(
-        sites, Atomistic
+        sites
     )
 
 
@@ -156,9 +156,7 @@ def main(argv: list[str] | None = None) -> None:
         columns=["id", "element", "mol", "x", "y", "z"],
     )
     if "bonds" in packed and packed["bonds"].n_rows:
-        molpy.io.write_lammps_dump_local(
-            str(OUT / "pack_peo_mesh.dump.local"), [packed]
-        )
+        molpy.io.write_lammps_dump_local(OUT / "pack_peo_mesh.dump.local", [packed])
     print(f"  wall         : {time.perf_counter() - t0:.3f} s")
 
 

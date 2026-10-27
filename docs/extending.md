@@ -417,7 +417,7 @@ Two conventions the packer relies on:
 
 ```rust
 use molrs::core::Frame;
-use molrs::optimize::{OptimizationReport, Optimizer};
+use molrs::optimize::{OptimizationReport, OptimizeError, Optimizer};
 use molrs::op::{F, Fnx3};
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
@@ -448,13 +448,13 @@ fn score(coords: &Fnx3, free: &[bool]) -> F {
 }
 
 impl Optimizer for JiggleOptimizer {
-    fn minimize(&mut self, frame: &mut Frame) -> Result<OptimizationReport, String> {
-        let mut best = frame.coords().map_err(|e| e.to_string())?;
+    fn minimize(&mut self, frame: &mut Frame) -> Result<OptimizationReport, OptimizeError> {
+        let mut best = frame.coords()?;
         let n = best.nrows();
         let free: Vec<bool> = match frame
             .get("atoms")
             .and_then(|a| a.get("free"))
-            .and_then(|c| c.as_bool())
+            .and_then(|c| c.get::<bool>())
         {
             Some(col) if col.len() == n => col.iter().copied().collect(),
             _ => vec![true; n],
@@ -487,7 +487,7 @@ impl Optimizer for JiggleOptimizer {
             }
         }
 
-        frame.set_coords(best.view()).map_err(|e| e.to_string())?;
+        frame.set_coords(best.view())?;
         Ok(OptimizationReport {
             converged: accepted > 0,
             n_steps: self.steps,
@@ -510,11 +510,11 @@ atom within `rcut` ångström as frozen context, so a chain folds against its
 real neighbours rather than empty space.
 
 ```no_run
-# use molrs::{core::Frame, optimize::{OptimizationReport, Optimizer}, op::F};
+# use molrs::{core::Frame, optimize::{OptimizationReport, OptimizeError, Optimizer}, op::F};
 # struct JiggleOptimizer;
 # impl JiggleOptimizer { fn new(_: usize, _: F, _: u64) -> Self { Self } }
 # impl Optimizer for JiggleOptimizer {
-#     fn minimize(&mut self, _: &mut Frame) -> Result<OptimizationReport, String> { unimplemented!() }
+#     fn minimize(&mut self, _: &mut Frame) -> Result<OptimizationReport, OptimizeError> { unimplemented!() }
 # }
 # let targets: Vec<molpack::Target> = Vec::new();
 use molpack::{GencanPack, OptimizeSelect, PackEngine};
