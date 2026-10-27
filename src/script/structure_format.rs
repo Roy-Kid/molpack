@@ -158,19 +158,12 @@ impl StructureFormat {
             StructureFormat::Mol2 => io::read_mol2(path).map_err(|e| e.to_string()),
             StructureFormat::Gro => io::read_gro(path).map_err(|e| e.to_string()),
             StructureFormat::Cif => io::read_cif(path).map_err(|e| e.to_string()),
-            StructureFormat::VaspPoscar => io::read_vasp_poscar(path).map_err(|e| e.to_string()),
+            StructureFormat::VaspPoscar => io::read_poscar(path).map_err(|e| e.to_string()),
             StructureFormat::Xsf => io::read_xsf(path).map_err(|e| e.to_string()),
             StructureFormat::Cube => io::read_cube(path).map_err(|e| e.to_string()),
-            StructureFormat::AmberInpcrd => io::read_amber_inpcrd(path).map_err(|e| e.to_string()),
+            StructureFormat::AmberInpcrd => io::read_inpcrd(path).map_err(|e| e.to_string()),
             StructureFormat::LammpsData => io::read_lammps_data(path).map_err(|e| e.to_string()),
-            StructureFormat::LammpsDump => io::read_lammps_dump_trajectory(path)
-                .map_err(|e| e.to_string())
-                .and_then(|frames| {
-                    frames
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| "the lammps_dump file holds no frame".to_string())
-                }),
+            StructureFormat::LammpsDump => io::read_lammps_dump(path).map_err(|e| e.to_string()),
         };
         read.map_err(|e| io_err(format!("reading {self}: {e}")))
     }
@@ -185,17 +178,14 @@ impl StructureFormat {
             StructureFormat::Mol2 => io::write_mol2(path, frame).map_err(|e| e.to_string()),
             StructureFormat::Gro => io::write_gro(path, frame).map_err(|e| e.to_string()),
             StructureFormat::Cif => io::write_cif(path, frame).map_err(|e| e.to_string()),
-            StructureFormat::VaspPoscar => {
-                io::write_vasp_poscar(path, frame).map_err(|e| e.to_string())
-            }
+            StructureFormat::VaspPoscar => io::write_poscar(path, frame).map_err(|e| e.to_string()),
             StructureFormat::Xsf => io::write_xsf(path, frame).map_err(|e| e.to_string()),
             StructureFormat::Cube => io::write_cube(path, frame).map_err(|e| e.to_string()),
             StructureFormat::LammpsData => {
                 io::write_lammps_data(path, frame).map_err(|e| e.to_string())
             }
             StructureFormat::LammpsDump => {
-                io::write_lammps_dump_trajectory(path, std::slice::from_ref(frame), None)
-                    .map_err(|e| e.to_string())
+                io::write_lammps_dump(path, frame, None).map_err(|e| e.to_string())
             }
             StructureFormat::Sdf | StructureFormat::AmberInpcrd => {
                 Err("molrs has no writer for this format".to_string())

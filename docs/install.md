@@ -50,7 +50,7 @@ For notebooks and pipelines (Python 3.12+):
 pip install molcrafts-molpack
 ```
 
-`molcrafts-molrs` is installed as a dependency and provides `molrs.core.Frame` plus
+`molcrafts-molpy` is installed as a dependency and provides `molpy.core.Frame` plus
 PDB / XYZ readers. The wheel itself is I/O-free — pass frames in, get frames
 out.
 
@@ -66,9 +66,9 @@ print(molpack.GencanPack)
 
 ## Build from source
 
-When you are modifying the crate or Python binding, check out **molrs** as a
-sibling (path deps resolve `../molrs/molrs`). molpack 0.5 builds on the molrs
-**0.17** line — molrs `dev`, or the `v0.17.0` tag once that line is released:
+When you are modifying the crate or Python binding, check out **molpy** as a
+sibling directory named `molrs` (path deps resolve `../molrs/crates/molrs`).
+molpack 0.6 builds on the molpy **0.20** line — `MolCrafts/molpy` `dev`:
 
 ```bash
 # sibling layout

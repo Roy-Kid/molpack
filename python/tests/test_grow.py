@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 
-import molrs
+import molpy
 import numpy as np
 import pytest
 
@@ -29,7 +29,7 @@ from molpack import (
 )
 
 
-def _chain_frame(n: int, bond: float = 1.53, bonds: bool = True) -> molrs.core.Frame:
+def _chain_frame(n: int, bond: float = 1.53, bonds: bool = True) -> molpy.core.Frame:
     """Planar zigzag bead chain with tetrahedral (109.5°) angles — the Rust
     suite's ``chain_frame`` fixture. ``bonds=False`` drops the bonds block:
     the "bare coordinates" shape a grow target must reject by name."""
@@ -50,7 +50,7 @@ def _chain_frame(n: int, bond: float = 1.53, bonds: bool = True) -> molrs.core.F
             "atomi": np.arange(0, n - 1, dtype=np.uint64),
             "atomj": np.arange(1, n, dtype=np.uint64),
         }
-    return molrs.core.Frame(blocks)
+    return molpy.core.Frame(blocks)
 
 
 def _grow() -> CbmcGrow:

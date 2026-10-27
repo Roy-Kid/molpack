@@ -67,13 +67,13 @@ impl InternalTree {
     /// Decompose a template frame using `weights` as the intramolecular skip
     /// table. A non-0/1 weight is [`GrowError::NonBinarySpecialBond`] before
     /// exclusions are compiled. The all-atom convention is
-    /// [`molrs::core::BondDistanceWeights::from_exclusion_depth`]`(3)`.
+    /// [`crate::BondDistanceWeights::from_exclusion_depth`]`(3)`.
     ///
     /// Coordinates are in Å. The frame must carry an `atoms` block with
     /// `x`/`y`/`z` and a connected acyclic bond graph of at least 3 atoms.
     pub fn from_frame(
         frame: &Frame,
-        weights: &molrs::core::BondDistanceWeights,
+        weights: &crate::BondDistanceWeights,
     ) -> Result<Self, GrowError> {
         if let Some((index, weight)) = super::config::binary_violation(weights) {
             return Err(GrowError::NonBinarySpecialBond { index, weight });
@@ -87,7 +87,8 @@ impl InternalTree {
         // Rotatable bonds, as an unordered key set. PDB / GROMACS / XYZ
         // connectivity reads back as `BondOrder::Unknown`; for a conformer
         // search an unclassed bond is a rotatable single bond.
-        let graph = Atomistic::from_frame(frame).map_err(|e| GrowError::Perceive(e.to_string()))?;
+        let graph = crate::template::atomistic_from_frame(frame)
+            .map_err(|e| GrowError::Perceive(e.to_string()))?;
         let rotatable = rotatable_bond_keys(&graph);
 
         let seed = [order[0], order[1], order[2]];
@@ -188,8 +189,7 @@ impl InternalTree {
         steps.push((start, sites.len()));
         step_var.push(current);
 
-        let exclusions = topo
-            .exclusions(weights)
+        let exclusions = crate::special_bonds::exclusions(&topo, weights)
             .into_iter()
             .map(|row| row.into_iter().map(|i| i as u32).collect())
             .collect();

@@ -17,11 +17,11 @@ fn atoms_block(elements: Vec<String>, xs: Vec<F>, ys: Vec<F>, zs: Vec<F>) -> Blo
     let mut atoms = Block::new();
     for (k, v) in [("x", xs), ("y", ys), ("z", zs)] {
         atoms
-            .insert(k, Array1::from_vec(v).into_dyn())
+            .insert(k, Array1::from_vec(v).into_dyn(), None)
             .expect("coordinate column");
     }
     atoms
-        .insert("element", Array1::from_vec(elements).into_dyn())
+        .insert("element", Array1::from_vec(elements).into_dyn(), None)
         .expect("element column");
     atoms
 }
@@ -91,18 +91,21 @@ pub fn chain(
     bonds
         .insert(
             "atomi",
-            Array1::from_vec((0..n_beads as u32 - 1).collect::<Vec<u32>>()).into_dyn(),
+            Array1::from_vec((0..n_beads as u64 - 1).collect::<Vec<u64>>()).into_dyn(),
+            None,
         )
         .expect("atomi column");
     bonds
         .insert(
             "atomj",
-            Array1::from_vec((1..n_beads as u32).collect::<Vec<u32>>()).into_dyn(),
+            Array1::from_vec((1..n_beads as u64).collect::<Vec<u64>>()).into_dyn(),
+            None,
         )
         .expect("atomj column");
 
     let mut frame = frame_of(atoms_block(elements, xs, vec![0.0; n_beads], zs));
     frame.insert("bonds", bonds);
+    molrs::core::Element::fill_atomic_numbers(&mut frame).expect("elements");
     let graph = Atomistic::from_frame(&frame).expect("chain graph");
     (frame, graph, segments)
 }

@@ -7,11 +7,11 @@
 //!
 //! The loader does **not** touch molecule files in Rust. Each
 //! ``structure``'s template is read on the Python side, defaulting to the
-//! ``molrs.io`` reader of its [`StructureFormat`] (the script's ``filetype``,
-//! else the file name: ``molrs.io.read_pdb``, ``read_xyz``, …) but pluggable
+//! ``molpy.io`` reader of its [`StructureFormat`] (the script's ``filetype``,
+//! else the file name: ``molpy.io.read_pdb``, ``read_xyz``, …) but pluggable
 //! via the ``loader`` argument. This keeps the PyO3 wheel free of
-//! ``molrs-io`` and lets users plug in their own loader (mdtraj, ASE, …) as
-//! long as it returns a ``molrs.core.Frame``.
+//! molrs ``io`` and lets users plug in their own loader (mdtraj, ASE, …) as
+//! long as it returns a ``molpy.core.Frame``.
 
 use std::path::PathBuf;
 
@@ -166,14 +166,14 @@ fn build_target<'py>(
     })
 }
 
-/// ``molrs.io``, the default loader's home.
+/// ``molpy.io``, the default loader's home.
 ///
-/// Failures (e.g. ``molrs`` not installed) surface as :class:`ImportError`
+/// Failures (e.g. ``molpy`` not installed) surface as :class:`ImportError`
 /// from the script-loading site.
 fn import_molrs_io(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
-    py.import("molrs.io").map_err(|e| {
+    py.import("molpy.io").map_err(|e| {
         PyImportError::new_err(format!(
-            "loading template files needs `molcrafts-molrs` (or pass loader=...): {e}"
+            "loading template files needs `molcrafts-molpy` (or pass loader=...): {e}"
         ))
     })
 }
@@ -192,16 +192,15 @@ fn read_with_molrs<'py>(
         StructureFormat::Mol2 => "read_mol2",
         StructureFormat::Gro => "read_gro",
         StructureFormat::Cif => "read_cif",
-        StructureFormat::VaspPoscar => "read_vasp_poscar",
+        StructureFormat::VaspPoscar => "read_poscar",
         StructureFormat::Xsf => "read_xsf",
         StructureFormat::Cube => "read_cube",
-        StructureFormat::AmberInpcrd => "read_amber_inpcrd",
+        StructureFormat::AmberInpcrd => "read_inpcrd",
         StructureFormat::LammpsData => "read_lammps_data",
-        StructureFormat::LammpsDump => {
-            // A dump is a trajectory: its first snapshot is the template.
-            let trajectory = io.getattr("read_lammps_dump_trajectory")?.call1((path,))?;
-            return trajectory.call_method1("read_frame", (0,));
-        }
+        StructureFormat::LammpsDump => "read_lammps_dump",
     };
+    let path = pyo3::types::PyModule::import(io.py(), "pathlib")?
+        .getattr("Path")?
+        .call1((path,))?;
     io.getattr(reader)?.call1((path,))
 }

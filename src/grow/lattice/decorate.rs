@@ -424,7 +424,7 @@ pub(crate) fn decorate_chain(
 #[allow(clippy::needless_range_loop)]
 mod tests {
     use super::*;
-    use molrs::core::BondDistanceWeights;
+    use crate::BondDistanceWeights;
 
     use molrs::core::Frame;
     use ndarray::Array1;
@@ -434,7 +434,7 @@ mod tests {
         frame
             .get("atoms")
             .and_then(|b| b.get("element"))
-            .and_then(molrs::core::Column::as_string)
+            .and_then(|c| c.get::<String>())
             .map(|c| c.iter().map(|e| e.eq_ignore_ascii_case("H")).collect())
             .unwrap_or_default()
     }
@@ -489,7 +489,7 @@ mod tests {
         elements[n_heavy] = "O".to_string();
         let mut atoms = frame.get("atoms").expect("atoms").clone();
         atoms
-            .insert("element", Array1::from_vec(elements).into_dyn())
+            .insert("element", Array1::from_vec(elements).into_dyn(), None)
             .expect("element");
         frame.insert("atoms", atoms);
 

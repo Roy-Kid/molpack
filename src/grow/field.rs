@@ -100,9 +100,9 @@ impl OverlapField {
         let slots = radius.len();
         debug_assert_eq!(slots, mol_of.len());
         debug_assert_eq!(slots, atom_of.len());
-        let bx = SimBox::ortho(
-            ndarray::array![length[0], length[1], length[2]],
-            ndarray::array![origin[0], origin[1], origin[2]],
+        let bx = SimBox::new(
+            molrs::core::Cell::Lengths([length[0], length[1], length[2]]),
+            [origin[0], origin[1], origin[2]],
             pbc,
         )
         .expect("the growth box is validated by the engine before a field is built");
@@ -145,10 +145,12 @@ impl OverlapField {
     }
 
     /// Wrap a point into the box along every periodic axis
-    /// ([`SimBox::wrap_row`]: single point, no allocation on this hot path).
+    /// ([`SimBox::wrap`]).
     #[inline]
     pub fn wrap(&self, p: [F; 3]) -> [F; 3] {
-        self.bx.wrap_row(p)
+        let view = ndarray::ArrayView2::from_shape((1, 3), &p).expect("one point");
+        let (wrapped, _) = self.bx.wrap(view);
+        [wrapped[[0, 0]], wrapped[[0, 1]], wrapped[[0, 2]]]
     }
 
     /// The cell holding `p`, then its stencil neighbours written into `buf`.

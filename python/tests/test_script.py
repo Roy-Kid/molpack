@@ -1,6 +1,6 @@
 import pathlib
 
-import molrs
+import molpy
 import numpy as np
 
 import molpack
@@ -45,10 +45,10 @@ def test_load_script_default_loader_reads_templates_and_packs(tmp_path):
 def test_load_script_loader_replaces_the_molrs_reader(tmp_path):
     seen: list[tuple[str, str | None]] = []
 
-    def loader(path: str, filetype: str | None) -> molrs.core.Frame:
+    def loader(path: str, filetype: str | None) -> molpy.core.Frame:
         seen.append((path, filetype))
         xyz = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
-        return molrs.core.Frame(
+        return molpy.core.Frame(
             {
                 "atoms": {
                     "x": xyz[:, 0].copy(),

@@ -14,7 +14,7 @@
 
 use molrs::core::SimBox;
 use molrs::op::F;
-use ndarray::array;
+
 use std::time::Instant;
 
 use crate::Objective;
@@ -435,13 +435,13 @@ pub fn initial(
     // atoms found in phase 1.
     let simbox = match cell {
         Some(bx) => bx,
-        None => SimBox::ortho(
-            array![
+        None => SimBox::new(
+            molrs::core::Cell::Lengths([
                 sys.sizemax[0] - sys.sizemin[0],
                 sys.sizemax[1] - sys.sizemin[1],
-                sys.sizemax[2] - sys.sizemin[2]
-            ],
-            array![sys.sizemin[0], sys.sizemin[1], sys.sizemin[2]],
+                sys.sizemax[2] - sys.sizemin[2],
+            ]),
+            [sys.sizemin[0], sys.sizemin[1], sys.sizemin[2]],
             [false; 3],
         )
         .expect("fallback cell must have positive extent on every axis"),

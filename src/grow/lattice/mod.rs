@@ -193,10 +193,7 @@ impl Stage for LatticeStage {
         }
 
         let (sys, x) = state.rigid_split_mut();
-        let origin: [F; 3] = {
-            let v = sys.simbox.origin_view();
-            [v[0], v[1], v[2]]
-        };
+        let origin: [F; 3] = sys.simbox.origin();
         let lengths: [F; 3] = {
             let v = sys.simbox.lengths();
             [v[0], v[1], v[2]]

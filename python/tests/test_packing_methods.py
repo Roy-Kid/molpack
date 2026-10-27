@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import molrs
+import molpy
 import numpy as np
 import pytest
 
@@ -11,7 +11,7 @@ import molpack
 
 def _dimer():
 
-    fr = molrs.core.Frame()
+    fr = molpy.core.Frame()
     fr["atoms"] = {
         "x": np.array([0.0, 1.5]),
         "y": np.zeros(2),
@@ -24,7 +24,7 @@ def _dimer():
 def _chain5():
 
     n = 5
-    fr = molrs.core.Frame()
+    fr = molpy.core.Frame()
     fr["atoms"] = {
         "x": np.arange(n) * 1.5,
         "y": np.zeros(n),
@@ -146,7 +146,7 @@ class TestEngineErrorPaths:
     def test_invalid_pbc_raises_typed_error(self):
 
         positions = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
-        frame = molrs.core.Frame(
+        frame = molpy.core.Frame(
             {
                 "atoms": {
                     "x": positions[:, 0],

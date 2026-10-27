@@ -64,8 +64,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .expect("file path has no parent")
         .to_path_buf();
-    let water = read_pdb(base.join("water.pdb"))?;
-    let lipid = read_pdb(base.join("palmitoil.pdb"))?;
+    let water = read_pdb(&base.join("water.pdb"))?;
+    let lipid = read_pdb(&base.join("palmitoil.pdb"))?;
 
     let water_low = Target::new(water.clone(), 50)
         .with_restraint(inside_box([0.0, 0.0, -10.0], [40.0, 40.0, 0.0]))

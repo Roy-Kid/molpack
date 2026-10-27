@@ -438,7 +438,7 @@ impl Callback for LammpsLogCallback {
         eprintln!("  nloop          = {}", self.max_loops);
         match &self.cell {
             Some(cell) => {
-                let (o, h) = (cell.origin_view(), cell.h_view());
+                let (o, h) = (cell.origin(), cell.matrix());
                 eprintln!(
                     "  cell origin    = [{:.6}, {:.6}, {:.6}]  pbc={:?}",
                     o[0],
@@ -449,9 +449,7 @@ impl Callback for LammpsLogCallback {
                 for (k, axis) in ["a", "b", "c"].iter().enumerate() {
                     eprintln!(
                         "  cell {axis}         = [{:.6}, {:.6}, {:.6}]",
-                        h[[0, k]],
-                        h[[1, k]],
-                        h[[2, k]]
+                        h[0][k], h[1][k], h[2][k]
                     );
                 }
             }

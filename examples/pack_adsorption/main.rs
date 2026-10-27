@@ -265,7 +265,7 @@ fn report(result: &molpack::State, sticky: &[usize]) -> Result<(), Box<dyn std::
     }
 
     if let Some(path) = std::env::var_os("MOLPACK_ADSORPTION_XYZ") {
-        molrs::io::write_xyz(&path, &result.frame)?;
+        molrs::io::write_xyz(std::path::Path::new(&path), &result.frame)?;
         println!("\nwrote {}", std::path::Path::new(&path).display());
     }
     Ok(())

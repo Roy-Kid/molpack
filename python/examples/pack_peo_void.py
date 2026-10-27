@@ -5,7 +5,7 @@ LJ units. Every atom that appears in ``Bonds`` is the polymer; everything
 else is solvent and is dropped — the void is what the solvent occupied.
 
 The region is built from the atoms, in memory, with no mesh: one sphere per
-polymer bead of radius ``bead radius + probe radius`` (``molrs.core.SphereUnion``,
+polymer bead of radius ``bead radius + probe radius`` (``molpy.core.SphereUnion``,
 minimum image on the box's periodic axes) is the solvent-accessible volume,
 and ``~polymer`` is the space a PEO atom centre may occupy. ``LatticeGrow``
 walks Region ∩ lattice, so the chains thread the solvent channels by
@@ -29,9 +29,9 @@ import sys
 import time
 from pathlib import Path
 
-import molrs
+import molpy
 import numpy as np
-from molrs.core import Atomistic
+from molpy.core import Atomistic
 
 import molpack
 
@@ -53,14 +53,14 @@ CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
 
 def _unit(name: str, body: str, seed: int) -> Atomistic:
     """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
-    template = molrs.io.smiles.SmilesIr.from_fragment(body).to_template()
-    return molrs.conformer.Conformer(seed=seed).generate(template)[0]
+    template = molpy.io.smiles.read_smiles_fragment(body).to_template()
+    return molpy.conformer.Conformer(seed=seed).generate(template)[0]
 
 
 def _grow(topology: str, library: dict[str, Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
-    sites = molrs.io.cgsmiles.CgSmilesIr(topology).to_coarsegrain()
-    return molrs.builder.Assembler(library, molrs.builder.GrowthPlacer()).assemble(
+    sites = molpy.io.cgsmiles.read_cgsmiles(topology).to_coarsegrain()
+    return molpy.builder.Assembler(library, molpy.builder.GrowthPlacer()).assemble(
         sites, Atomistic
     )
 
@@ -96,10 +96,10 @@ def select_polymer(frame) -> np.ndarray:
 def void_region(frame, sigma: float = SIGMA_A, probe: float = PROBE_A):
     """``~SphereUnion`` over the polymer beads, in Å, periodic like the frame's box."""
     centers = select_polymer(frame) * sigma
-    h = np.asarray(frame.box.h) * sigma
+    h = np.asarray(frame.box.matrix) * sigma
     origin = np.asarray(frame.box.origin) * sigma
-    box = molrs.core.Box(h, origin, np.asarray(frame.box.pbc))
-    polymer = molrs.core.SphereUnion(
+    box = molpy.core.Box(h, origin, np.asarray(frame.box.pbc))
+    polymer = molpy.core.SphereUnion(
         centers, BEAD_RADIUS_SIGMA * sigma + probe, box=box
     )
     return ~polymer, box
@@ -117,10 +117,10 @@ def main(argv: list[str] | None = None) -> None:
     probe = float(args[5]) if len(args) > 5 else PROBE_A
 
     t0 = time.perf_counter()
-    frame = molrs.io.read_lammps_data(str(data))
+    frame = molpy.io.read_lammps_data(data)
     void, box = void_region(frame, sigma, probe)
     lo = np.asarray(box.origin)
-    hi = lo + np.diag(np.asarray(box.h))
+    hi = lo + np.diag(np.asarray(box.matrix))
     grid = np.stack(
         np.meshgrid(
             *[np.linspace(a, b, 30, endpoint=False) for a, b in zip(lo, hi)],
@@ -167,14 +167,14 @@ def main(argv: list[str] | None = None) -> None:
 
     OUT.mkdir(parents=True, exist_ok=True)
     packed = grown.frame
-    molrs.io.write_mrec_frame(str(OUT / "pack_peo_void.mrec"), packed)
-    molrs.io.write_lammps_dump_trajectory(
-        str(OUT / "pack_peo_void.lammpstrj"),
-        [packed],
+    molpy.io.write_mrec(OUT / "pack_peo_void.mrec", frame=packed)
+    molpy.io.write_lammps_dump(
+        OUT / "pack_peo_void.lammpstrj",
+        packed,
         columns=["id", "element", "mol", "x", "y", "z"],
     )
     if "bonds" in packed and packed["bonds"].n_rows:
-        molrs.io.write_lammps_dump_local(
+        molpy.io.write_lammps_dump_local(
             str(OUT / "pack_peo_void.dump.local"), [packed]
         )
     print(f"  wall         : {time.perf_counter() - t0:.1f} s")

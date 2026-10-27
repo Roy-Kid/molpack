@@ -14,7 +14,7 @@ Geometry is not molpack's. A region is a molrs solid with a signed distance
 to its boundary — `distance(points)` is negative inside, positive outside —
 and every shape describes its *inside*. Outside, shells and voids are
 compositions: `~`, `&`, `|`. There is no "outside sphere" class; it is
-`~molrs.core.Sphere(...)`.
+`~molpy.core.Sphere(...)`.
 
 | molrs class     | Constructor                                   | Meaning |
 |-----------------|-----------------------------------------------|---------|
@@ -31,21 +31,21 @@ Length-3 arguments accept plain lists. Lengths are in the same unit as the
 coordinates (Å for a molpack run).
 
 ```python
-import molrs
+import molpy
 from molpack import Target
 
-box    = molrs.core.Cuboid([0, 0, 0], [40, 40, 40])          # origin, lengths
-ball   = molrs.core.Sphere([0, 0, 0], 20.0)
-shell  = ball & ~molrs.core.Sphere([0, 0, 0], 10.0)
-above  = ~molrs.core.HalfSpace([0, 0, 1], [0, 0, 5.0])        # z >= 5
-below  = molrs.core.HalfSpace([0, 0, 1], [0, 0, 20.0])        # z <= 20
+box    = molpy.core.Cuboid([0, 0, 0], [40, 40, 40])          # origin, lengths
+ball   = molpy.core.Sphere([0, 0, 0], 20.0)
+shell  = ball & ~molpy.core.Sphere([0, 0, 0], 10.0)
+above  = ~molpy.core.HalfSpace([0, 0, 1], [0, 0, 5.0])        # z >= 5
+below  = molpy.core.HalfSpace([0, 0, 1], [0, 0, 20.0])        # z <= 20
 water  = Target(frame, count=500).with_restraint(box)
 ```
 
 molpack lifts the region to a quadratic exterior penalty,
 `scale · max(0, distance)²`, which is zero inside and on the boundary. The
 test is the **atom centre**, not the van der Waals ball and not the molecule
-COM. A region reaches this wheel as a `molrs.RegionRef` capsule — no data is
+COM. A region reaches this wheel as a `molpy.RegionRef` capsule — no data is
 marshalled, and both wheels must share one molrs minor line.
 
 How each packing engine uses a region is **not** inferred from the shape:
@@ -59,14 +59,14 @@ How each packing engine uses a region is **not** inferred from the shape:
 
 ### A cavity from a mesh
 
-`molrs.io.read_stl` reads an ASCII or binary STL into a `TriMesh`;
-`TriMesh.scaled` converts the file's unit; `molrs.core.Polyhedron` is the solid
+`molpy.io.read_stl` reads an ASCII or binary STL into a `TriMesh`;
+`TriMesh.scaled` converts the file's unit; `molpy.core.Polyhedron` is the solid
 the mesh bounds. The mesh must be watertight (every edge shared by exactly
 two faces) — an open or self-touching mesh is a `ValueError`, because
 parity cannot decide inside from outside on it.
 
 ```python
-cavity = molrs.core.Polyhedron(molrs.io.read_stl("cavity.stl").scaled(4.18))
+cavity = molpy.core.Polyhedron(molpy.io.read_stl("cavity.stl").scaled(4.18))
 target = Target(frame, n).with_restraint(cavity)
 ```
 
@@ -82,7 +82,7 @@ bead of radius `bead radius + probe radius` is the solvent-accessible
 volume; its complement is where a probe centre may go:
 
 ```python
-polymer = molrs.core.SphereUnion(centers, 0.5 * sigma + 1.0, box=frame.box)
+polymer = molpy.core.SphereUnion(centers, 0.5 * sigma + 1.0, box=frame.box)
 void = ~polymer
 target = Target(peo, n).with_restraint(void)
 ```
@@ -125,12 +125,12 @@ copies of one species from a copy of each of two. `SelfSeparation` is the
 missing bound: no two copies closer than `d_min`, centre to centre.
 
 ```python
-import molrs
+import molpy
 from molpack import SelfSeparation, Target
 
 ions = (
     Target(frame, count=27)
-    .with_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_restraint(molpy.core.Cuboid([0, 0, 0], [40, 40, 40]))
     .with_restraint(SelfSeparation(10.0))  # ions stay 10 Å apart
 )
 ```
@@ -149,7 +149,7 @@ or compose the regions first — the two are equivalent for regions:
 target = (
     Target(frame, count=500)
     .with_name("water")
-    .with_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]) & ~molrs.core.Sphere([20, 20, 20], 5.0))
+    .with_restraint(molpy.core.Cuboid([0, 0, 0], [40, 40, 40]) & ~molpy.core.Sphere([20, 20, 20], 5.0))
 )
 ```
 
@@ -170,9 +170,9 @@ Example — a bilayer: pin heads above z=12, tails below z=2:
 lipid = (
     Target(frame, count=20)
     .with_name("lipid")
-    .with_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 14]))
-    .with_atom_restraint([0, 1],   ~molrs.core.HalfSpace([0, 0, 1], [0, 0, 12.0]))
-    .with_atom_restraint([30, 31],  molrs.core.HalfSpace([0, 0, 1], [0, 0, 2.0]))
+    .with_restraint(molpy.core.Cuboid([0, 0, 0], [40, 40, 14]))
+    .with_atom_restraint([0, 1],   ~molpy.core.HalfSpace([0, 0, 1], [0, 0, 12.0]))
+    .with_atom_restraint([30, 31],  molpy.core.HalfSpace([0, 0, 1], [0, 0, 2.0]))
 )
 ```
 
@@ -184,7 +184,7 @@ engine:
 ```python
 packer = (
     GencanPack()
-    .with_global_restraint(molrs.core.Cuboid([0, 0, 0], [40, 40, 40]))
+    .with_global_restraint(molpy.core.Cuboid([0, 0, 0], [40, 40, 40]))
 )
 ```
 

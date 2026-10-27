@@ -8,20 +8,20 @@ from __future__ import annotations
 
 import math
 
-import molrs
+import molpy
 import numpy as np
 import pytest
 
 from molpack import Target
 
 
-def _chain_frame(n: int = 5, bond: float = 1.53) -> molrs.core.Frame:
+def _chain_frame(n: int = 5, bond: float = 1.53) -> molpy.core.Frame:
     """Planar zigzag bead chain — local copy of the grow fixture."""
     theta = math.radians(109.5)
     alpha = (math.pi - theta) / 2.0
     dx, dz = bond * math.cos(alpha), bond * math.sin(alpha)
     idx = np.arange(n)
-    return molrs.core.Frame(
+    return molpy.core.Frame(
         {
             "atoms": {
                 "x": idx.astype(np.float64) * dx,

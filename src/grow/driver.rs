@@ -162,10 +162,7 @@ impl Stage for GrowStage {
 
         let (sys, x) = state.rigid_split_mut();
         // ── Field over the final box ───────────────────────────────────────
-        let origin: [F; 3] = {
-            let v = sys.simbox.origin_view();
-            [v[0], v[1], v[2]]
-        };
+        let origin: [F; 3] = sys.simbox.origin();
         let lengths: [F; 3] = {
             let v = sys.simbox.lengths();
             [v[0], v[1], v[2]]

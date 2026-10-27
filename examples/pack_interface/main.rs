@@ -52,9 +52,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .expect("file path has no parent")
         .to_path_buf();
-    let water = read_pdb(base.join("water.pdb"))?;
-    let chloroform = read_pdb(base.join("chloroform.pdb"))?;
-    let t3 = read_pdb(base.join("t3.pdb"))?;
+    let water = read_pdb(&base.join("water.pdb"))?;
+    let chloroform = read_pdb(&base.join("chloroform.pdb"))?;
+    let t3 = read_pdb(&base.join("t3.pdb"))?;
 
     let water_target = Target::new(water, 100)
         .with_restraint(inside_box([-20.0, 0.0, 0.0], [0.0, 39.0, 39.0]))

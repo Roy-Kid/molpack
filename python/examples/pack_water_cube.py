@@ -1,6 +1,6 @@
 """Pack 100 water molecules into a 30x30x30 cubic box.
 
-Minimal example — builds the template with ``molrs.core.Frame`` (no PDB
+Minimal example — builds the template with ``molpy.core.Frame`` (no PDB
 file), so it needs ``molcrafts-molrs`` but no structure files on disk.
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import molrs
+import molpy
 import numpy as np
 
 import molpack
@@ -18,7 +18,7 @@ OUT = Path(__file__).resolve().parent / "out"
 
 def main() -> None:
     # Water geometry: O at origin, two Hs 0.96 Å away.
-    frame = molrs.core.Frame(
+    frame = molpy.core.Frame(
         {
             "atoms": {
                 "x": np.array([0.0, 0.9572, -0.2400], dtype=np.float64),
@@ -32,7 +32,7 @@ def main() -> None:
     water = (
         molpack.Target(frame, count=100)
         .with_name("water")
-        .with_restraint(molrs.core.Cuboid([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
+        .with_restraint(molpy.core.Cuboid([0.0, 0.0, 0.0], [30.0, 30.0, 30.0]))
     )
 
     packer = molpack.GencanPack()
@@ -46,21 +46,22 @@ def main() -> None:
     packed = result.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.core.Box.from_bounds(
+        packed.box = molpy.core.Box.bounding(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),
-            padding=np.ones(3),
+            np.ones(3),
+            np.array([False, False, False]),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec_frame(str(OUT / "pack_water_cube.mrec"), packed)
-    molrs.io.write_lammps_dump_trajectory(
-        str(OUT / "pack_water_cube.lammpstrj"),
-        [packed],
+    molpy.io.write_mrec(OUT / "pack_water_cube.mrec", frame=packed)
+    molpy.io.write_lammps_dump(
+        OUT / "pack_water_cube.lammpstrj",
+        packed,
         columns=["id", "element", "mol", "x", "y", "z"],
     )
     if "bonds" in packed and packed["bonds"].n_rows:
-        molrs.io.write_lammps_dump_local(
+        molpy.io.write_lammps_dump_local(
             str(OUT / "pack_water_cube.dump.local"), [packed]
         )
 

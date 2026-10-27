@@ -121,10 +121,10 @@ fn grow_rejects_no_atoms_block() {
     let mut frame = Frame::new();
     let mut bonds = Block::new();
     bonds
-        .insert("atomi", Array1::from_vec(vec![0u32, 1]).into_dyn())
+        .insert("atomi", Array1::from_vec(vec![0u32, 1]).into_dyn(), None)
         .expect("atomi column");
     bonds
-        .insert("atomj", Array1::from_vec(vec![1u32, 2]).into_dyn())
+        .insert("atomj", Array1::from_vec(vec![1u32, 2]).into_dyn(), None)
         .expect("atomj column");
     frame.insert("bonds", bonds);
 
@@ -144,17 +144,17 @@ fn grow_rejects_atoms_block_missing_z() {
     for (name, k) in [("x", 0), ("y", 1)] {
         let col: Vec<F> = coords.iter().map(|p| p[k]).collect();
         atoms
-            .insert(name, Array1::from_vec(col).into_dyn())
+            .insert(name, Array1::from_vec(col).into_dyn(), None)
             .expect("coordinate column");
     }
     let mut frame = Frame::new();
     frame.insert("atoms", atoms);
     let mut bonds = Block::new();
     bonds
-        .insert("atomi", Array1::from_vec(vec![0u32, 1]).into_dyn())
+        .insert("atomi", Array1::from_vec(vec![0u32, 1]).into_dyn(), None)
         .expect("atomi column");
     bonds
-        .insert("atomj", Array1::from_vec(vec![1u32, 2]).into_dyn())
+        .insert("atomj", Array1::from_vec(vec![1u32, 2]).into_dyn(), None)
         .expect("atomj column");
     frame.insert("bonds", bonds);
 
@@ -511,7 +511,6 @@ fn grow_and_push_off_are_deterministic_for_a_seed() {
 fn grow_stage_two_targets_keep_distinct_tables() {
     use crate::grow::driver::GrowStage;
     use molrs::core::SimBox;
-    use ndarray::array;
 
     let coords: Vec<[F; 3]> = (0..5).map(|i| [i as F, 0.0, 0.0]).collect();
     let frame = frame_from_parts(&coords, &chain_bonds(5));
@@ -543,9 +542,9 @@ fn grow_stage_two_targets_keep_distinct_tables() {
         "GrowStage must not min-fold two tables into one skip set"
     );
 
-    let cell = SimBox::ortho(
-        array![100.0, 100.0, 100.0],
-        array![0.0, 0.0, 0.0],
+    let cell = SimBox::new(
+        molrs::core::Cell::Lengths([100.0, 100.0, 100.0]),
+        [0.0, 0.0, 0.0],
         [false; 3],
     )
     .expect("orthorhombic box");

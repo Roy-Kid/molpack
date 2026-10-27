@@ -29,7 +29,7 @@ use crate::grow::{GrowConfig, GrowError, TorsionPrior};
 use crate::{CbmcGrow, GencanPack, IntraResidual, PackEngine, PackError, RegionRestraint, Target};
 use molrs::op::F;
 
-use molrs::core::BondDistanceWeights;
+use crate::BondDistanceWeights;
 
 use molrs::core::Block;
 

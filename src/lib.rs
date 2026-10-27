@@ -124,6 +124,7 @@ mod random;
 mod restraint;
 pub mod script;
 mod settings;
+mod special_bonds;
 mod stage;
 mod state;
 pub mod system;
@@ -152,6 +153,7 @@ pub use restraint::{
     GroupEvaluation, RegionRestraint, Restraint, SelfSeparation, TabulatedPlane, TabulatedPoint,
 };
 pub use settings::PackSettings;
+pub use special_bonds::BondDistanceWeights;
 pub use stage::{Budget, Guarantees, Requires, Stage, StageOutcome};
 pub use state::{IntraResidual, State};
 pub use system::pack_state::{PackState, Placed};

@@ -56,7 +56,8 @@ fn single_atom_system(nmol: usize) -> PackSystem {
 fn setup_cells(sys: &mut PackSystem, cell_n: usize, cell_len: F) {
     let side = cell_len * cell_n as F;
     sys.simbox =
-        molrs::core::SimBox::cube(side, molrs::op::F3::zeros(3), [false; 3]).expect("cell");
+        molrs::core::SimBox::new(molrs::core::Cell::Lengths([side; 3]), [0.0; 3], [false; 3])
+            .expect("cell");
     sys.grid = molrs::core::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
     sys.resize_cell_arrays();
 }

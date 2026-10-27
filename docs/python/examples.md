@@ -4,12 +4,12 @@ Packmol workloads ported to Python live under `python/examples/`. The five
 `.inp` analogues are regression-tested against the equivalent Rust example
 (same RNG seed → identical final coordinates). Polymer scenes sit beside
 them: chemistry and architecture from molrs (CGsmiles units + conformer,
-grown by `molrs.builder.Assembler`), packing from molpack — no hand-placed
+grown by `molpy.builder.Assembler`), packing from molpack — no hand-placed
 coordinates.
 
 | Script                | Packmol analogue  | What it shows |
 |-----------------------|-------------------|---------------|
-| `pack_water_cube.py`  | —                 | hello-world: 100 waters in a box, frame via `molrs.core.Frame` |
+| `pack_water_cube.py`  | —                 | hello-world: 100 waters in a box, frame via `molpy.core.Frame` |
 | `pack_mixture.py`     | `mixture.inp`     | two species co-packed in one box |
 | `pack_bilayer.py`     | `bilayer.inp`     | atom-subset restraints for layer-molecule orientation |
 | `pack_interface.py`   | `interface.inp`   | fixed reference molecule + two solvents |
@@ -19,8 +19,8 @@ coordinates.
 | `pack_peo_linear.py`  | —                 | open-space linear PEO: `LatticeGrow` @ 2.0 Å then `GencanPack.with_restart` |
 | `pack_peo_mix.py`     | —                 | linear + 4-arm star, two `Target`s, one box, one `LatticeGrow.run` |
 | `pack_peo_topo.py`    | —                 | 4-arm star (`LatticeGrow`) and ring (named reject, then `GencanPack`) |
-| `pack_peo_mesh.py`    | —                 | linear PEO inside a branched mesh cavity (a `molrs.core.Polyhedron` masks `LatticeGrow` sites) |
-| `pack_peo_void.py`    | —                 | linear PEO through the solvent-accessible void of a bead-spring frame (`~molrs.core.SphereUnion`) |
+| `pack_peo_mesh.py`    | —                 | linear PEO inside a branched mesh cavity (a `molpy.core.Polyhedron` masks `LatticeGrow` sites) |
+| `pack_peo_void.py`    | —                 | linear PEO through the solvent-accessible void of a bead-spring frame (`~molpy.core.SphereUnion`) |
 
 Install molpack once; the `molrs` dependency comes with it, and every
 script needs nothing else:
@@ -30,13 +30,13 @@ pip install molcrafts-molpack
 ```
 
 Each script is standalone: no shared helper. `pack_water_cube.py` builds
-its frame in memory with `molrs.core.Frame` (no PDB file). The Packmol-port
-scripts load PDB files via `molrs.io.read_pdb`. The `pack_peo_*.py`
+its frame in memory with `molpy.core.Frame` (no PDB file). The Packmol-port
+scripts load PDB files via `molpy.io.read_pdb`. The `pack_peo_*.py`
 scenes build polymers from CGsmiles units
-(`molrs.io.smiles.SmilesIr.from_fragment(body).to_template()`, given 3D
-coordinates by `molrs.conformer.Conformer`) grown by
-`molrs.builder.Assembler` with `molrs.builder.GrowthPlacer` instead. Writes
-go through molrs (`molrs.io.write_mrec_frame`, `write_lammps_dump_trajectory`,
+(`molpy.io.smiles.SmilesIr.from_fragment(body).to_template()`, given 3D
+coordinates by `molpy.conformer.Conformer`) grown by
+`molpy.builder.Assembler` with `molpy.builder.GrowthPlacer` instead. Writes
+go through molrs (`molpy.io.write_mrec_frame`, `write_lammps_dump_trajectory`,
 `write_lammps_dump_local`).
 
 ## Running
@@ -89,7 +89,7 @@ Each example writes its outputs to `python/examples/out/` (created on
 demand, git-ignored) — the path is script-relative, so the working
 directory does not matter:
 
-- `{stem}.mrec` — molrs scientific record (`molrs.io.write_mrec_frame`)
+- `{stem}.mrec` — molrs scientific record (`molpy.io.write_mrec_frame`)
 - `{stem}.lammpstrj` — LAMMPS dump custom (OVITO particle topology)
 - `{stem}.dump.local` — LAMMPS dump local bonds (`batom1`/`batom2`), for
   OVITO [Load trajectory](https://www.ovito.org/manual/reference/pipelines/modifiers/load_trajectory.html)
@@ -100,14 +100,14 @@ A molrs region answers the two region questions for a batch of points, so
 a caller can check what the packer was told to enforce:
 
 ```python
-cavity = molrs.core.Polyhedron(molrs.io.read_stl("dendrite.stl"))
+cavity = molpy.core.Polyhedron(molpy.io.read_stl("dendrite.stl"))
 inside = cavity.contains(state.positions)   # (n,) bool
 depth = cavity.distance(state.positions)    # (n,) Å, negative inside
 ```
 
 `pack_peo_void.py` needs no mesh at all: it reads a LAMMPS data file with
-`molrs.io.read_lammps_data`, takes the bonded atoms as the polymer, builds
-`molrs.core.SphereUnion(centers, bead_radius + probe, box=...)` and grows PEO
+`molpy.io.read_lammps_data`, takes the bonded atoms as the polymer, builds
+`molpy.core.SphereUnion(centers, bead_radius + probe, box=...)` and grows PEO
 inside `~polymer` — the solvent-accessible void, periodic like the frame.
 
 ## Example: mixture
@@ -115,13 +115,15 @@ inside `~polymer` — the solvent-accessible void, periodic like the frame.
 The `pack_mixture.py` example reproduces Packmol's classic `mixture.inp`:
 
 ```python
-import molrs
+from pathlib import Path
+
+import molpy
 from molpack import GencanPack, Target
 
-water_frame = molrs.io.read_pdb("water.pdb")
-urea_frame  = molrs.io.read_pdb("urea.pdb")
+water_frame = molpy.io.read_pdb(Path("water.pdb"))
+urea_frame  = molpy.io.read_pdb(Path("urea.pdb"))
 
-box = molrs.core.Cuboid([0, 0, 0], [40, 40, 40])
+box = molpy.core.Cuboid([0, 0, 0], [40, 40, 40])
 
 water = Target(water_frame, count=1000).with_name("water").with_restraint(box)
 urea  = Target(urea_frame,  count=400).with_name("urea").with_restraint(box)
@@ -134,11 +136,11 @@ print(f"converged={result.converged}  natoms={result.natoms}")
 ## Example: water cube
 
 ```python
-import molrs
+import molpy
 import numpy as np
 from molpack import GencanPack, Target
 
-frame = molrs.core.Frame({
+frame = molpy.core.Frame({
     "atoms": {
         "x": np.array([0.00,  0.9572, -0.2400]),
         "y": np.array([0.00,  0.0000,  0.9266]),
@@ -148,7 +150,7 @@ frame = molrs.core.Frame({
 })
 
 water = Target(frame, count=100).with_name("water").with_restraint(
-    molrs.core.Cuboid([0, 0, 0], [30, 30, 30])
+    molpy.core.Cuboid([0, 0, 0], [30, 30, 30])
 )
 packer = GencanPack().with_tolerance(2.0).with_seed(42)
 result = packer.run([water], max_loops=200)

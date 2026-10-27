@@ -120,8 +120,12 @@ pub fn stamp_box_bounds(frame: &mut Frame, box_bounds: Option<([F; 3], [F; 3])>)
     };
     let lengths = Array1::from_vec(vec![hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]);
     let origin = Array1::from_vec(lo.to_vec());
-    let simbox = SimBox::ortho(lengths, origin, [true, true, true])
-        .map_err(|e| PyValueError::new_err(format!("building periodic box: {e:?}")))?;
+    let simbox = SimBox::new(
+        molrs::core::Cell::Lengths([lengths[0], lengths[1], lengths[2]]),
+        [origin[0], origin[1], origin[2]],
+        [true, true, true],
+    )
+    .map_err(|e| PyValueError::new_err(format!("building periodic box: {e:?}")))?;
     frame.simbox = Some(simbox);
     Ok(())
 }
@@ -131,11 +135,13 @@ pub fn stamp_box_bounds(frame: &mut Frame, box_bounds: Option<([F; 3], [F; 3])>)
 /// Two cdylibs cannot share a pyclass, so this clones into a standalone
 /// ``FrameRef`` capsule. Do it once and keep the Python object.
 pub fn frame_to_py<'py>(py: Python<'py>, frame: &Frame) -> PyResult<Bound<'py, PyAny>> {
-    let fref = FrameRef::new_standalone();
-    fref.with_mut(|slot| *slot = frame.clone())
+    let fref = FrameRef::default();
+    fref.arena
+        .borrow_mut()
+        .set_frame(fref.id, frame.deep_copy())
         .map_err(ffi_err)?;
     let capsule = export_frame_capsule(py, fref)?;
-    PyModule::import(py, "molrs.core")?
+    PyModule::import(py, "molpy.core")?
         .getattr("Frame")?
         .call_method1("_from_ffi_frameref_capsule", (capsule,))
 }
@@ -157,41 +163,41 @@ fn export_frame_capsule<'py>(py: Python<'py>, fref: FrameRef) -> PyResult<Bound<
     })
 }
 
-/// Import-time ABI handshake against the installed `molcrafts-molrs` wheel.
+/// Import-time ABI handshake against the installed `molcrafts-molpy` wheel.
 ///
-/// Calls `molrs._ffi_abi_token()` and compares its ABI line against the line
-/// molpack embeds. Runs once from the `#[pymodule]` init so a minor-line
-/// mismatch is a clear `ImportError` naming both versions, not a later
-/// capsule-name `ValueError` deep inside a pack run.
+/// Calls `molpy._ffi_abi_token()` and compares its ABI line and frame-capsule
+/// name against the molrs this wheel embeds. Runs once from the `#[pymodule]`
+/// init so a minor-line or layout mismatch is a clear `ImportError`, not a
+/// later capsule-name `ValueError` deep inside a pack run.
 pub fn check_abi(py: Python<'_>) -> PyResult<()> {
     let embedded = molrs_ffi::abi::abi_line();
-    let molrs = PyModule::import(py, "molrs")?;
-    let token = match molrs.getattr("_ffi_abi_token") {
+    let expected = molrs_ffi::abi::frameref_capsule_name()
+        .to_string_lossy()
+        .into_owned();
+    let molpy = PyModule::import(py, "molpy")?;
+    let token = match molpy.getattr("_ffi_abi_token") {
         Ok(f) => f.call0()?,
         Err(_) => {
-            // A molrs without the token cannot be on molpack's line.
             return Err(pyo3::exceptions::PyImportError::new_err(format!(
                 "molpack embeds molrs ABI line {embedded}, but the installed \
-                 molcrafts-molrs has no ABI token. Install a matching wheel: \
-                 pip install 'molcrafts-molrs>={embedded}.0,<{next}' / \
-                 已安装的 molcrafts-molrs 与 molpack 不匹配，请安装 {embedded}.* 版本。",
+                 molcrafts-molpy has no ABI token. Install a matching wheel: \
+                 pip install 'molcrafts-molpy>={embedded}.0,<{next}'.",
                 next = next_minor(embedded),
             )));
         }
     };
-    let (line, version): (String, String) = token
-        .cast::<pyo3::types::PyTuple>()
-        .map_err(|_| {
-            pyo3::exceptions::PyImportError::new_err("molrs._ffi_abi_token() returned a non-tuple")
-        })
-        .and_then(|t| Ok((t.get_item(0)?.extract()?, t.get_item(1)?.extract()?)))?;
-    if line != embedded {
+    let tuple = token.cast::<pyo3::types::PyTuple>().map_err(|_| {
+        pyo3::exceptions::PyImportError::new_err("molpy._ffi_abi_token() returned a non-tuple")
+    })?;
+    let line: String = tuple.get_item(0)?.extract()?;
+    let version: String = tuple.get_item(1)?.extract()?;
+    let frame_name: String = tuple.get_item(2)?.extract()?;
+    if line != embedded || frame_name != expected {
         return Err(pyo3::exceptions::PyImportError::new_err(format!(
-            "Minor-line mismatch: molpack embeds molrs ABI line {embedded}, \
-             but the installed molcrafts-molrs is {version} (line {line}). \
-             Handles cannot cross minor lines — install a matching wheel: \
-             pip install 'molcrafts-molrs>={embedded}.0,<{next}' / molpack \
-             与已安装的 molcrafts-molrs({version})minor 版本线不一致，请对齐。",
+            "ABI mismatch: molpack embeds molrs line {embedded} (capsule \
+             {expected}), but the installed molcrafts-molpy is {version} \
+             (line {line}, capsule {frame_name}). Install a matching wheel: \
+             pip install 'molcrafts-molpy>={embedded}.0,<{next}'.",
             next = next_minor(embedded),
         )));
     }

@@ -297,7 +297,12 @@ mod tests {
     use molrs::core::SimBox;
 
     fn cube(side: F, periodic: bool) -> SimBox {
-        SimBox::cube(side, molrs::op::F3::zeros(3), [periodic; 3]).expect("test box")
+        SimBox::new(
+            molrs::core::Cell::Lengths([side; 3]),
+            [0.0; 3],
+            [periodic; 3],
+        )
+        .expect("test box")
     }
 
     /// An evaluation whose minimum image and partition come from the *same* box —
@@ -310,7 +315,7 @@ mod tests {
             scale2: 1.0,
             natoms_per_copy,
             cell,
-            mic: cell.mic().simplified(),
+            mic: cell.mic(),
         }
     }
 

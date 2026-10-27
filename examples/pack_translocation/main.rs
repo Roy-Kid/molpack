@@ -291,7 +291,7 @@ fn report(
     );
 
     if let Some(path) = std::env::var_os("MOLPACK_TRANSLOCATION_XYZ") {
-        molrs::io::write_xyz(&path, &result.frame)?;
+        molrs::io::write_xyz(std::path::Path::new(&path), &result.frame)?;
         println!("wrote {}", std::path::Path::new(&path).display());
     }
     Ok(())

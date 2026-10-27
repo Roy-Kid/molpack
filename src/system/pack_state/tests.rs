@@ -125,8 +125,9 @@ fn six_dimers() -> (PackSystem, Vec<F>) {
     sys.sizemin = [0.0; 3];
     sys.sizemax = [BOX; 3];
 
-    sys.simbox = molrs::core::SimBox::cube(BOX, molrs::op::F3::zeros(3), [false; 3])
-        .expect("cubic packing cell");
+    sys.simbox =
+        molrs::core::SimBox::new(molrs::core::Cell::Lengths([BOX; 3]), [0.0; 3], [false; 3])
+            .expect("cubic packing cell");
     sys.grid = molrs::core::CellGrid::with_dims([2; 3], [false; 3]);
     sys.resize_cell_arrays();
     sys.sync_atom_props();

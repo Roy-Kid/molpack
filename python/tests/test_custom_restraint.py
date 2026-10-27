@@ -9,15 +9,15 @@ per-atom path; only Python objects route to the group form.)
 
 from __future__ import annotations
 
-import molrs
+import molpy
 import numpy as np
 import pytest
 
 import molpack
 
 
-def _single_atom_frame() -> molrs.core.Frame:
-    return molrs.core.Frame(
+def _single_atom_frame() -> molpy.core.Frame:
+    return molpy.core.Frame(
         {
             "atoms": {
                 "x": np.array([0.0]),
@@ -121,7 +121,7 @@ class TestPackingBehavior:
         radius = 12.0
         target = (
             molpack.Target(_single_atom_frame(), count=40)
-            .with_restraint(molrs.core.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
+            .with_restraint(molpy.core.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
             .with_restraint(
                 InsideSpherePy(sphere_center.tolist(), radius, strength=2000.0)
             )
@@ -157,7 +157,7 @@ class TestCallContract:
 
         target = (
             molpack.Target(_single_atom_frame(), count=count)
-            .with_restraint(molrs.core.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
+            .with_restraint(molpy.core.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
             .with_restraint(Recorder())
         )
         _packer().with_seed(1).with_tolerance(2.0).run([target], max_loops=20)
@@ -182,7 +182,7 @@ class TestErrorPropagation:
 
         target = (
             molpack.Target(_single_atom_frame(), count=60)
-            .with_restraint(molrs.core.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
+            .with_restraint(molpy.core.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
             .with_restraint(Explodes())
         )
         with pytest.raises(ValueError, match="boom from restraint"):
@@ -198,7 +198,7 @@ class TestErrorPropagation:
 
         target = (
             molpack.Target(_single_atom_frame(), count=60)
-            .with_restraint(molrs.core.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
+            .with_restraint(molpy.core.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO)))
             .with_restraint(WrongShape())
         )
         with pytest.raises(TypeError, match="fg.* must return"):

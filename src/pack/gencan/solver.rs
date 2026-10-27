@@ -310,7 +310,6 @@ impl Stage for GencanStage {
 #[cfg(test)]
 mod tests {
     use molrs::core::SimBox;
-    use ndarray::Array1;
 
     use super::*;
     use crate::system::build::{SystemKnobs, build_system};
@@ -334,12 +333,8 @@ mod tests {
         .expect("system builds");
         let mut state = PackState::new(built.sys, built.ntotmol_free);
 
-        let cell = SimBox::ortho(
-            Array1::from_vec(vec![20.0, 20.0, 20.0]),
-            Array1::from_vec(vec![0.0, 0.0, 0.0]),
-            [true; 3],
-        )
-        .expect("orthorhombic box");
+        let cell = SimBox::new(molrs::core::Cell::Lengths([20.0; 3]), [0.0; 3], [true; 3])
+            .expect("orthorhombic box");
 
         let settings = GencanSettings {
             seed: 7,
@@ -411,7 +406,8 @@ mod tests {
             fn minimize(
                 &mut self,
                 _frame: &mut molrs::core::Frame,
-            ) -> Result<molrs::optimize::OptimizationReport, String> {
+            ) -> Result<molrs::optimize::OptimizationReport, molrs::optimize::OptimizeError>
+            {
                 self.calls.fetch_add(1, Ordering::Relaxed);
                 Ok(molrs::optimize::OptimizationReport {
                     converged: true,
@@ -440,12 +436,8 @@ mod tests {
         )
         .expect("system builds");
 
-        let cell = SimBox::ortho(
-            Array1::from_vec(vec![20.0, 20.0, 20.0]),
-            Array1::from_vec(vec![0.0, 0.0, 0.0]),
-            [true; 3],
-        )
-        .expect("orthorhombic box");
+        let cell = SimBox::new(molrs::core::Cell::Lengths([20.0; 3]), [0.0; 3], [true; 3])
+            .expect("orthorhombic box");
 
         let calls = Arc::new(AtomicUsize::new(0));
         let settings = GencanSettings {

@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import molrs
+import molpy
 import numpy as np
 
 import molpack
@@ -53,9 +53,9 @@ def ion_statistics(pos: np.ndarray) -> dict[str, float]:
 
 def pack(*, separate: bool, log_level: str) -> tuple[np.ndarray, object]:
     """Pack water + ions once. ``separate`` toggles the one line under test."""
-    water_frame = molrs.io.read_pdb(str(DATA / "water.pdb"))
-    ion_frame = molrs.io.read_pdb(str(DATA / "sodium.pdb"))
-    box = molrs.core.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO))
+    water_frame = molpy.io.read_pdb(DATA / "water.pdb")
+    ion_frame = molpy.io.read_pdb(DATA / "sodium.pdb")
+    box = molpy.core.Cuboid(BOX_LO, np.subtract(BOX_HI, BOX_LO))
 
     water = (
         molpack.Target(water_frame, count=N_WATER)
@@ -90,17 +90,18 @@ def write(name: str, result) -> None:
     packed = result.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.core.Box.from_bounds(
+        packed.box = molpy.core.Box.bounding(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),
-            padding=np.ones(3),
+            np.ones(3),
+            np.array([False, False, False]),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec_frame(str(OUT / f"{name}.mrec"), packed)
-    molrs.io.write_lammps_dump_trajectory(
-        str(OUT / f"{name}.lammpstrj"),
-        [packed],
+    molpy.io.write_mrec(OUT / f"{name}.mrec", frame=packed)
+    molpy.io.write_lammps_dump(
+        OUT / f"{name}.lammpstrj",
+        packed,
         columns=["id", "element", "mol", "x", "y", "z"],
     )
 

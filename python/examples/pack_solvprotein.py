@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import molrs
+import molpy
 import numpy as np
 
 import molpack
@@ -22,12 +22,12 @@ OUT = HERE / "out"
 
 
 def main() -> None:
-    protein_frame = molrs.io.read_pdb(str(DATA / "protein.pdb"))
-    water_frame = molrs.io.read_pdb(str(DATA / "water.pdb"))
-    sodium_frame = molrs.io.read_pdb(str(DATA / "sodium.pdb"))
-    chloride_frame = molrs.io.read_pdb(str(DATA / "chloride.pdb"))
+    protein_frame = molpy.io.read_pdb(DATA / "protein.pdb")
+    water_frame = molpy.io.read_pdb(DATA / "water.pdb")
+    sodium_frame = molpy.io.read_pdb(DATA / "sodium.pdb")
+    chloride_frame = molpy.io.read_pdb(DATA / "chloride.pdb")
 
-    sphere = molrs.core.Sphere([0.0, 0.0, 0.0], 50.0)
+    sphere = molpy.core.Sphere([0.0, 0.0, 0.0], 50.0)
 
     protein = (
         molpack.Target(protein_frame, count=1)
@@ -70,21 +70,22 @@ def main() -> None:
     packed = result.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.core.Box.from_bounds(
+        packed.box = molpy.core.Box.bounding(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),
-            padding=np.ones(3),
+            np.ones(3),
+            np.array([False, False, False]),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec_frame(str(OUT / "pack_solvprotein.mrec"), packed)
-    molrs.io.write_lammps_dump_trajectory(
-        str(OUT / "pack_solvprotein.lammpstrj"),
-        [packed],
+    molpy.io.write_mrec(OUT / "pack_solvprotein.mrec", frame=packed)
+    molpy.io.write_lammps_dump(
+        OUT / "pack_solvprotein.lammpstrj",
+        packed,
         columns=["id", "element", "mol", "x", "y", "z"],
     )
     if "bonds" in packed and packed["bonds"].n_rows:
-        molrs.io.write_lammps_dump_local(
+        molpy.io.write_lammps_dump_local(
             str(OUT / "pack_solvprotein.dump.local"), [packed]
         )
 

@@ -113,7 +113,6 @@ mod tests {
     use crate::objective::compute_f;
     use molrs::core::SimBox;
     use molrs::op::F;
-    use molrs::op::F3;
 
     const DISCALE: F = 1.1;
 
@@ -135,7 +134,8 @@ mod tests {
         sys.iratom_offsets = vec![0, 0, 0];
         sys.sync_atom_props();
 
-        let cell = SimBox::cube(20.0, F3::zeros(3), [false; 3]).expect("box");
+        let cell =
+            SimBox::new(molrs::core::Cell::Lengths([20.0; 3]), [0.0; 3], [false; 3]).expect("box");
         install_resolved_cell(&mut sys, &cell, DISCALE);
 
         // Placed off the cell boundary so the pair straddles two cell widths

@@ -4,9 +4,9 @@
 forking three times into 29 branches, 8732 triangles, authored for a
 130 Å cell whose cavity is ≈362 000 Å³. The default 200 × EO25 fills that
 at ≈1.03 g/cm³, PEO melt density.
-The region is molrs's: ``molrs.io.read_stl`` reads the mesh,
+The region is molrs's: ``molpy.io.read_stl`` reads the mesh,
 ``TriMesh.scaled`` maps the file to whatever ``edge`` you ask for, and
-``molrs.core.Polyhedron`` is the solid it bounds. ``Target.with_restraint``
+``molpy.core.Polyhedron`` is the solid it bounds. ``Target.with_restraint``
 confines the chains to it, and ``LatticeGrow`` at 2.0 Å walks
 Region ∩ lattice — diamond sites outside the mesh are blocked.
 
@@ -41,9 +41,9 @@ import sys
 import time
 from pathlib import Path
 
-import molrs
+import molpy
 import numpy as np
-from molrs.core import Atomistic
+from molpy.core import Atomistic
 
 import molpack
 
@@ -62,14 +62,14 @@ CORE_UNIT = "C(C[>])(C[>])(C[>])C[>]"  # pentaerythritol-like four-arm core
 
 def _unit(name: str, body: str, seed: int) -> Atomistic:
     """One CGsmiles unit with its ports, as a 3D molecule with hydrogens."""
-    template = molrs.io.smiles.SmilesIr.from_fragment(body).to_template()
-    return molrs.conformer.Conformer(seed=seed).generate(template)[0]
+    template = molpy.io.smiles.read_smiles_fragment(body).to_template()
+    return molpy.conformer.Conformer(seed=seed).generate(template)[0]
 
 
 def _grow(topology: str, library: dict[str, Atomistic]) -> Atomistic:
     """Grow the CGsmiles ``topology`` from ``library`` into one molecule."""
-    sites = molrs.io.cgsmiles.CgSmilesIr(topology).to_coarsegrain()
-    return molrs.builder.Assembler(library, molrs.builder.GrowthPlacer()).assemble(
+    sites = molpy.io.cgsmiles.read_cgsmiles(topology).to_coarsegrain()
+    return molpy.builder.Assembler(library, molpy.builder.GrowthPlacer()).assemble(
         sites, Atomistic
     )
 
@@ -93,7 +93,7 @@ def pack_mesh(
     scale: float = 1.0,
 ) -> molpack.State:
     frame = make_linear(n, seed=seed).to_frame()
-    cavity = molrs.core.Polyhedron(molrs.io.read_stl(str(stl_path)).scaled(scale))
+    cavity = molpy.core.Polyhedron(molpy.io.read_stl(stl_path).scaled(scale))
     target = (
         molpack.Target(frame, n_mol)
         .with_name("lin-PEO")
@@ -139,23 +139,24 @@ def main(argv: list[str] | None = None) -> None:
     packed = state.frame
     if packed.box is None:
         a = packed["atoms"]
-        packed.box = molrs.core.Box.from_bounds(
+        packed.box = molpy.core.Box.bounding(
             np.column_stack(
                 [np.asarray(a["x"]), np.asarray(a["y"]), np.asarray(a["z"])]
             ),
-            padding=np.ones(3),
+            np.ones(3),
+            np.array([False, False, False]),
         )
     OUT.mkdir(parents=True, exist_ok=True)
-    molrs.io.write_mrec_frame(str(OUT / "pack_peo_mesh.mrec"), packed)
+    molpy.io.write_mrec(OUT / "pack_peo_mesh.mrec", frame=packed)
     # The frame carries the template's chemistry (mass, res_name, …); the dump
     # is for a viewer, so it gets the `dump custom` line a viewer reads.
-    molrs.io.write_lammps_dump_trajectory(
-        str(OUT / "pack_peo_mesh.lammpstrj"),
-        [packed],
+    molpy.io.write_lammps_dump(
+        OUT / "pack_peo_mesh.lammpstrj",
+        packed,
         columns=["id", "element", "mol", "x", "y", "z"],
     )
     if "bonds" in packed and packed["bonds"].n_rows:
-        molrs.io.write_lammps_dump_local(
+        molpy.io.write_lammps_dump_local(
             str(OUT / "pack_peo_mesh.dump.local"), [packed]
         )
     print(f"  wall         : {time.perf_counter() - t0:.3f} s")

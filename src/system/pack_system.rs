@@ -7,7 +7,6 @@ use molrs::core::CellGrid;
 use molrs::core::Element;
 use molrs::core::SimBox;
 use molrs::op::F;
-use ndarray::array;
 
 use super::geometry::GeometryKey;
 use super::work_buffers::WorkBuffers;
@@ -289,8 +288,8 @@ pub struct PackSystem {
 impl PackSystem {
     /// Allocate and zero-initialize all arrays.
     pub fn new(ntotat: usize, ntotmol: usize, ntype: usize) -> Self {
-        let simbox =
-            SimBox::cube(1.0, array![0.0, 0.0, 0.0], [false; 3]).expect("unit placeholder cell");
+        let simbox = SimBox::new(molrs::core::Cell::Lengths([1.0; 3]), [0.0; 3], [false; 3])
+            .expect("unit placeholder cell");
         let grid = CellGrid::with_dims([1; 3], [false; 3]);
         let ncell_total = grid.n_cells();
         debug_assert!(
@@ -706,23 +705,14 @@ impl PackSystem {
     /// partitions. Comparing this is what lets a repeated evaluation at the
     /// same coordinates reuse the previous cell assignment.
     pub fn geometry_key(&self) -> GeometryKey {
-        let h = self.simbox.h_view();
-        let o = self.simbox.origin_view();
+        let h = self.simbox.matrix();
         GeometryKey {
             celldim: self.grid.celldim(),
             pbc: self.grid.pbc(),
             h: [
-                h[[0, 0]],
-                h[[0, 1]],
-                h[[0, 2]],
-                h[[1, 0]],
-                h[[1, 1]],
-                h[[1, 2]],
-                h[[2, 0]],
-                h[[2, 1]],
-                h[[2, 2]],
+                h[0][0], h[0][1], h[0][2], h[1][0], h[1][1], h[1][2], h[2][0], h[2][1], h[2][2],
             ],
-            origin: [o[0], o[1], o[2]],
+            origin: self.simbox.origin(),
         }
     }
 }
@@ -933,7 +923,8 @@ mod neighbor_table_tests {
 
     fn system_with_grid(celldim: [u32; 3], pbc: [bool; 3]) -> PackSystem {
         let mut sys = PackSystem::new(1, 1, 1);
-        sys.simbox = SimBox::cube(10.0, array![0.0, 0.0, 0.0], pbc).expect("cell");
+        sys.simbox =
+            SimBox::new(molrs::core::Cell::Lengths([10.0; 3]), [0.0; 3], pbc).expect("cell");
         sys.grid = CellGrid::with_dims(celldim, pbc);
         sys.resize_cell_arrays();
         sys
@@ -1016,7 +1007,8 @@ mod geometry_cache_tests {
     fn setup_cells(sys: &mut PackSystem, cell_n: usize, cell_len: F) {
         let side = cell_len * cell_n as F;
         sys.simbox =
-            molrs::core::SimBox::cube(side, molrs::op::F3::zeros(3), [false; 3]).expect("cell");
+            molrs::core::SimBox::new(molrs::core::Cell::Lengths([side; 3]), [0.0; 3], [false; 3])
+                .expect("cell");
         sys.grid = molrs::core::CellGrid::with_dims([cell_n as u32; 3], [false; 3]);
         sys.resize_cell_arrays();
     }

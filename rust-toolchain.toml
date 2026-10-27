@@ -1,8 +1,7 @@
-# One exact toolchain for every local build, prek hook and CI job, and the
-# same one molrs pins: the shared ../molrs/target build cache (see
-# .cargo/config.toml) then fingerprints against one rustc, and CI cannot pick
-# up a newer clippy than the machine that ran the hooks. Bump it together with
-# molrs's rust-toolchain.toml.
+# Floating `stable`: the molrs-ffi ABI fingerprint hashes `rustc -V`, so molpy
+# and molpack must be built by one toolchain. Keep this file identical to
+# ../molrs/rust-toolchain.toml.
 [toolchain]
-channel = "1.99.0"
+channel = "stable"
 components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

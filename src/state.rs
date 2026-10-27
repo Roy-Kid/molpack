@@ -84,7 +84,7 @@ impl IntraResidual {
                 None => IntraSkip::Identity,
                 Some(frame) => match molrs::core::Topology::from_frame(frame) {
                     Ok(topo) if topo.n_bonds() == 0 => IntraSkip::Identity,
-                    Ok(topo) => IntraSkip::Partners(topo.exclusions(table)),
+                    Ok(topo) => IntraSkip::Partners(crate::special_bonds::exclusions(&topo, table)),
                     Err(_) => IntraSkip::Omit,
                 },
             };
@@ -97,8 +97,9 @@ impl IntraResidual {
                 let base = offset + c * n;
                 for i in 0..n {
                     for j in (i + 1)..n {
-                        let dr =
-                            simbox.shortest_vector_impl(positions[base + i], positions[base + j]);
+                        let a = positions[base + i];
+                        let b = positions[base + j];
+                        let dr = simbox.mic().apply([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
                         let dist = (dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2]).sqrt();
                         let pair_exempted = match &skip {
                             IntraSkip::Identity => false,
@@ -216,13 +217,12 @@ pub(crate) fn positions_in_target_order(
 #[cfg(test)]
 mod tests {
     use super::IntraResidual;
+    use crate::BondDistanceWeights;
     use crate::Target;
     use crate::test_fixtures::{chain_bonds, frame_from_parts};
-    use molrs::core::BondDistanceWeights;
     use molrs::core::SimBox;
 
     use molrs::op::F;
-    use ndarray::array;
 
     fn along_x(n: usize) -> Vec<[F; 3]> {
         (0..n).map(|i| [i as F, 0.0, 0.0]).collect()
@@ -233,9 +233,9 @@ mod tests {
     }
 
     fn open_box() -> SimBox {
-        SimBox::ortho(
-            array![100.0, 100.0, 100.0],
-            array![0.0, 0.0, 0.0],
+        SimBox::new(
+            molrs::core::Cell::Lengths([100.0, 100.0, 100.0]),
+            [0.0, 0.0, 0.0],
             [false; 3],
         )
         .expect("orthorhombic box")
@@ -357,9 +357,9 @@ mod tests {
         ];
         let target = bonded_target(&positions, 1)
             .with_special_bonds(BondDistanceWeights::from_exclusion_depth(3));
-        let cell = SimBox::ortho(
-            array![10.0, 20.0, 20.0],
-            array![0.0, 0.0, 0.0],
+        let cell = SimBox::new(
+            molrs::core::Cell::Lengths([10.0, 20.0, 20.0]),
+            [0.0, 0.0, 0.0],
             [true, false, false],
         )
         .expect("orthorhombic box");

@@ -11,27 +11,28 @@ development environment, run tests, and get a PR merged.
 - [prek](https://github.com/j178/prek) for git hooks (drop-in for pre-commit)
 - [uv](https://docs.astral.sh/uv/) (hooks run `uv run --group dev tox …`; tox is in
   `python/` dependency-group `dev`, not a separate global install)
-- The [molrs](https://github.com/MolCrafts/molrs) repo checked out as a sibling:
+- The [molpy](https://github.com/MolCrafts/molpy) repo checked out as a sibling
+  directory named `molrs`:
 
 ```
 workspace/
-├── molrs/      ← git clone https://github.com/MolCrafts/molrs
+├── molrs/      ← git clone https://github.com/MolCrafts/molpy
 └── molpack/    ← this repo
 ```
 
-The root `Cargo.toml` uses a path dependency on `../molrs/molrs`. With the
+The root `Cargo.toml` uses a path dependency on `../molrs/crates/molrs`. With the
 sibling layout above everything resolves automatically.
 
 **Version pins:** a local build uses the sibling checkout `../molrs`. The
-version fields name the **0.17.*** minor line (see `Cargo.toml` and
+version fields name the **0.20.*** minor line (see `Cargo.toml` and
 `python/pyproject.toml`). CI, and the pre-push hooks, build against
-`MolCrafts/molrs` at the commit `scripts/partners.py` resolves (molrs's
+`MolCrafts/molpy` at the commit `scripts/partners.py` resolves (molpy's
 `dev`; see [Partners](#partners)), in a layout of their own -- not your
 sibling. `Cargo.lock`, `python/Cargo.lock` and `python/uv.lock` are committed
-and every cargo / uv call in the gates is `--locked`; they record molrs's
-package metadata, not a commit, so relock only when molrs's `dev` changes its
+and every cargo / uv call in the gates is `--locked`; they record molpy's
+package metadata, not a commit, so relock only when molpy's `dev` changes its
 version or dependencies (the recipe is in `.github/partners.env`).
-The Python wheel checks this on ``import molpack`` — a molrs minor mismatch is an
+The Python wheel checks this on ``import molpack`` — a molpy minor mismatch is an
 ``ImportError``, not a later FFI segfault.
 
 **First-time setup:**

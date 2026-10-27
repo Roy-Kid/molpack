@@ -7,12 +7,14 @@ use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 
 use molrs::core::Frame;
+use molrs::core::Topology;
 use molrs::core::{Atomistic, NodeId};
-use molrs::core::{BondDistanceWeights, Topology};
+
+use crate::BondDistanceWeights;
 use molrs::op::F;
 use molrs::op::centroid;
 use molrs::op::{axis_angle, rotation_about, transform_point, vec3};
-use molrs::optimize::{OptimizationReport, Optimizer};
+use molrs::optimize::{OptimizationReport, OptimizeError, Optimizer};
 use molrs::perceive::RotatableBond;
 use rand::Rng;
 use rand::SeedableRng;
@@ -62,7 +64,8 @@ impl TorsionMcOptimizer {
             .bonds()
             .map(|(_, b)| [id_to_idx[&b.nodes[0]], id_to_idx[&b.nodes[1]]])
             .collect();
-        let topology = Topology::from_edges(id_to_idx.len(), &edges);
+        let mut topology = Topology::with_atoms(id_to_idx.len());
+        topology.add_bonds(&edges);
         Self {
             bonds: crate::template::rotatable_bonds(graph),
             steps: 10,
@@ -114,7 +117,7 @@ impl TorsionMcOptimizer {
 }
 
 impl Optimizer for TorsionMcOptimizer {
-    fn minimize(&mut self, frame: &mut Frame) -> Result<OptimizationReport, String> {
+    fn minimize(&mut self, frame: &mut Frame) -> Result<OptimizationReport, OptimizeError> {
         if self.bonds.is_empty() {
             return Ok(OptimizationReport {
                 converged: true,
@@ -124,7 +127,7 @@ impl Optimizer for TorsionMcOptimizer {
                 final_grad_rms: 0.0,
             });
         }
-        let xyz = frame.coords().map_err(|e| e.to_string())?;
+        let xyz = frame.coords()?;
         let n = xyz.nrows();
         let coords = crate::template::coord_rows(&xyz);
 
@@ -132,7 +135,7 @@ impl Optimizer for TorsionMcOptimizer {
         let free: Vec<bool> = match frame
             .get("atoms")
             .and_then(|a| a.get("free"))
-            .and_then(molrs::core::Column::as_bool)
+            .and_then(|c| c.get::<bool>())
         {
             Some(col) if col.len() == n => col.iter().copied().collect(),
             _ => vec![true; n],
@@ -191,7 +194,7 @@ impl Optimizer for TorsionMcOptimizer {
         }
 
         let out = ndarray::Array2::from(best);
-        frame.set_coords(out.view()).map_err(|e| e.to_string())?;
+        frame.set_coords(out.view())?;
         Ok(OptimizationReport {
             converged: accepts > 0 || self.steps == 0,
             n_steps: self.steps,
@@ -283,8 +286,7 @@ fn metropolis_accept(f_trial: F, f_current: F, temperature: F, rng: &mut dyn Rng
 /// Unordered `(i, j)`, `i < j`, pairs the table exempts, from molrs's
 /// bond-distance walk.
 fn excluded_pairs(topology: &Topology, weights: &BondDistanceWeights) -> HashSet<(usize, usize)> {
-    topology
-        .exclusions(weights)
+    crate::special_bonds::exclusions(topology, weights)
         .into_iter()
         .enumerate()
         .flat_map(|(i, partners)| {

@@ -128,8 +128,7 @@ fn replayed(template: &molrs::core::Frame) -> Result<molrs::core::Frame, PackErr
     let carried: Vec<&str> = atoms.keys().filter(|k| !NOT_CARRIED.contains(k)).collect();
     let carried = if carried.is_empty() {
         let mut rows = Block::new();
-        rows.resize(atoms.n_rows().unwrap_or(0))
-            .map_err(column_error)?;
+        rows.resize(atoms.n_rows().unwrap_or(0));
         rows
     } else {
         atoms.select_columns(&carried).map_err(column_error)?
@@ -188,10 +187,14 @@ pub(crate) fn coords_frame(
     let n = positions.len();
     let mut atoms = Block::new();
     let inserted = atoms
-        .insert(keys::ID, (1..=n as Idx).collect::<Array1<Idx>>().into_dyn())
+        .insert(
+            keys::ID,
+            (1..=n as Idx).collect::<Array1<Idx>>().into_dyn(),
+            None,
+        )
         .and_then(|()| atoms.set_coords(xyz(positions).view()))
-        .and_then(|()| atoms.insert(keys::MOL_ID, mol_ids.into_dyn()))
-        .and_then(|()| atoms.insert(keys::ELEMENT, Array1::from_vec(elements).into_dyn()));
+        .and_then(|()| atoms.insert(keys::MOL_ID, mol_ids.into_dyn(), None))
+        .and_then(|()| atoms.insert(keys::ELEMENT, Array1::from_vec(elements).into_dyn(), None));
     inserted.expect("one element and one molecule ID per position");
 
     let mut frame = molrs::core::Frame::new();
@@ -215,7 +218,9 @@ fn insert_front<T: molrs::core::BlockDtype>(
     index: usize,
     values: Array1<T>,
 ) -> Result<(), PackError> {
-    block.insert(key, values.into_dyn()).map_err(column_error)?;
+    block
+        .insert(key, values.into_dyn(), None)
+        .map_err(column_error)?;
     block.move_column(key, index).map_err(column_error)
 }
 
@@ -228,7 +233,6 @@ fn column_error(err: impl std::fmt::Display) -> PackError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use molrs::core::Column;
     use ndarray::ArrayD;
 
     fn col_uint(frame: &molrs::core::Frame, block: &str, key: &str) -> Vec<Idx> {
@@ -236,7 +240,7 @@ mod tests {
             .get(block)
             .unwrap()
             .get(key)
-            .and_then(Column::as_uint)
+            .and_then(|c| c.get::<Idx>())
             .unwrap()
             .iter()
             .copied()
@@ -248,7 +252,7 @@ mod tests {
             .get(block)
             .unwrap()
             .get(key)
-            .and_then(Column::as_string)
+            .and_then(|c| c.get::<String>())
             .unwrap()
             .iter()
             .cloned()
@@ -261,25 +265,31 @@ mod tests {
             .insert(
                 "element",
                 Array1::from_vec(vec!["C".to_string(), "H".to_string()]).into_dyn(),
+                None,
             )
             .unwrap();
         atoms
             .insert(
                 "type",
                 Array1::from_vec(vec!["A".to_string(), "B".to_string()]).into_dyn(),
+                None,
             )
             .unwrap();
         for c in keys::COORDS {
             atoms
-                .insert(c, Array1::from_vec(vec![0.0 as F, 1.0 as F]).into_dyn())
+                .insert(
+                    c,
+                    Array1::from_vec(vec![0.0 as F, 1.0 as F]).into_dyn(),
+                    None,
+                )
                 .unwrap();
         }
         let mut bonds = Block::new();
         bonds
-            .insert("atomi", Array1::from_vec(vec![0 as Idx]).into_dyn())
+            .insert("atomi", Array1::from_vec(vec![0 as Idx]).into_dyn(), None)
             .unwrap();
         bonds
-            .insert("atomj", Array1::from_vec(vec![1 as Idx]).into_dyn())
+            .insert("atomj", Array1::from_vec(vec![1 as Idx]).into_dyn(), None)
             .unwrap();
         let mut frame = molrs::core::Frame::new();
         frame.insert("atoms", atoms);
@@ -293,11 +303,12 @@ mod tests {
             .insert(
                 "element",
                 Array1::from_vec(vec!["Ar".to_string()]).into_dyn(),
+                None,
             )
             .unwrap();
         for c in keys::COORDS {
             atoms
-                .insert(c, Array1::from_vec(vec![0.0 as F]).into_dyn())
+                .insert(c, Array1::from_vec(vec![0.0 as F]).into_dyn(), None)
                 .unwrap();
         }
         let mut frame = molrs::core::Frame::new();
@@ -333,7 +344,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("x")
-            .and_then(Column::as_float)
+            .and_then(|c| c.get::<F>())
             .unwrap()
             .iter()
             .copied()
@@ -388,11 +399,15 @@ mod tests {
     }
 
     fn col_i16(frame: &molrs::core::Frame, block: &str, key: &str) -> Vec<i16> {
-        let column = frame.get(block).unwrap().get(key).unwrap();
-        match column {
-            Column::I16(h) => h.array().iter().copied().collect(),
-            other => panic!("expected i16, got {}", other.dtype()),
-        }
+        frame
+            .get(block)
+            .unwrap()
+            .get(key)
+            .and_then(|c| c.get::<i16>())
+            .unwrap()
+            .iter()
+            .copied()
+            .collect()
     }
 
     /// A column in a narrow width tiles like any other; the hand-rolled
@@ -404,7 +419,7 @@ mod tests {
         frame
             .get_mut("atoms")
             .unwrap()
-            .insert_column("flag", Column::from_i16(flag))
+            .insert("flag", flag, None)
             .unwrap();
         let out = assemble_frame(&[Target::new(frame, 2)], &positions(4)).unwrap();
         assert_eq!(col_i16(&out, "atoms", "flag"), [-1, 1, -1, 1]);
@@ -417,10 +432,18 @@ mod tests {
         let mut frame = diatomic();
         let mut pairs = Block::new();
         pairs
-            .insert(keys::ATOMI, Array1::from_vec(vec![0 as Idx]).into_dyn())
+            .insert(
+                keys::ATOMI,
+                Array1::from_vec(vec![0 as Idx]).into_dyn(),
+                None,
+            )
             .unwrap();
         pairs
-            .insert(keys::ATOMJ, Array1::from_vec(vec![1 as Idx]).into_dyn())
+            .insert(
+                keys::ATOMJ,
+                Array1::from_vec(vec![1 as Idx]).into_dyn(),
+                None,
+            )
             .unwrap();
         frame.insert("pairs", pairs);
         let out = assemble_frame(&[Target::new(frame, 2)], &positions(4)).unwrap();
@@ -447,7 +470,7 @@ mod tests {
         frame
             .get_mut("atoms")
             .unwrap()
-            .insert(keys::IX, Array1::from_vec(vec![1i32]).into_dyn())
+            .insert(keys::IX, Array1::from_vec(vec![1i32]).into_dyn(), None)
             .unwrap();
         let out = assemble_frame(&[Target::new(frame, 2)], &positions(2)).unwrap();
         assert!(!out.get("atoms").unwrap().contains_key(keys::IX));
@@ -464,13 +487,14 @@ mod tests {
             .insert(
                 "label",
                 Array1::from_vec(vec!["a".to_string(), "b".to_string()]).into_dyn(),
+                None,
             )
             .unwrap();
         let mut numbered = argon();
         numbered
             .get_mut("atoms")
             .unwrap()
-            .insert("label", Array1::from_vec(vec![7i32]).into_dyn())
+            .insert("label", Array1::from_vec(vec![7i32]).into_dyn(), None)
             .unwrap();
         let targets = [Target::new(labelled, 1), Target::new(numbered, 1)];
         assert!(matches!(

@@ -13,7 +13,6 @@ use molrs::core::SimBox;
 use molrs::core::UnitFactor;
 use molrs::core::constants::AVOGADRO;
 use molrs::op::F;
-use ndarray::array;
 
 use crate::AtomRestraint;
 use crate::PackError;
@@ -224,9 +223,9 @@ pub(crate) fn resolve_pack_space(
     let cell = match (declared_cell, declared_box) {
         (Some(cell), _) => Some(cell),
         (None, Some((min, max, periodic))) => Some(
-            SimBox::ortho(
-                array![max[0] - min[0], max[1] - min[1], max[2] - min[2]],
-                array![min[0], min[1], min[2]],
+            SimBox::new(
+                molrs::core::Cell::Lengths([max[0] - min[0], max[1] - min[1], max[2] - min[2]]),
+                [min[0], min[1], min[2]],
                 periodic,
             )
             .map_err(|_| PackError::InvalidPbcBox { min, max })?,

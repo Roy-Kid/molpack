@@ -102,6 +102,9 @@ pub(crate) fn topology_for_growth(
         Err(molrs::core::TopologyError::MissingEndpoint { column, .. }) => {
             return Err(GrowError::MissingBondEndpoint { column });
         }
+        Err(molrs::core::TopologyError::NullEndpoint { column, .. }) => {
+            return Err(GrowError::MissingBondEndpoint { column });
+        }
         Err(
             molrs::core::TopologyError::MissingBlock { .. }
             | molrs::core::TopologyError::NoRows { .. },

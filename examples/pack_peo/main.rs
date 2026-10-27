@@ -409,24 +409,28 @@ fn synthesize_peo(dp: usize) -> Frame {
         .insert(
             "x",
             Array1::from_vec(pos.iter().map(|p| p[0]).collect()).into_dyn(),
+            None,
         )
         .unwrap();
     atoms
         .insert(
             "y",
             Array1::from_vec(pos.iter().map(|p| p[1]).collect()).into_dyn(),
+            None,
         )
         .unwrap();
     atoms
         .insert(
             "z",
             Array1::from_vec(pos.iter().map(|p| p[2]).collect()).into_dyn(),
+            None,
         )
         .unwrap();
     atoms
         .insert(
             "element",
             Array1::from_vec(elem.iter().map(|s| s.to_string()).collect()).into_dyn(),
+            None,
         )
         .unwrap();
     let mut bblock = Block::new();
@@ -434,12 +438,14 @@ fn synthesize_peo(dp: usize) -> Frame {
         .insert(
             "atomi",
             Array1::from_vec(bonds.iter().map(|b| b.0).collect()).into_dyn(),
+            None,
         )
         .unwrap();
     bblock
         .insert(
             "atomj",
             Array1::from_vec(bonds.iter().map(|b| b.1).collect()).into_dyn(),
+            None,
         )
         .unwrap();
     let mut frame = Frame::new();
@@ -594,7 +600,7 @@ fn report(
         .frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::core::Column::as_string)
+        .and_then(|c| c.get::<String>())
     {
         let names: Vec<String> = elem.iter().take(na).map(|s| s.to_string()).collect();
         print_closest_scored(&pos[..na], bonds, &names, na);
@@ -668,7 +674,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let template_path = args.get(11);
 
     let frame = match template_path {
-        Some(p) => molrs::io::read_pdb(p)?,
+        Some(p) => molrs::io::read_pdb(std::path::Path::new(p))?,
         None => synthesize_peo(dp),
     };
     let na = frame.get("atoms").and_then(|a| a.n_rows()).unwrap_or(0);
@@ -676,11 +682,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let b = frame.get("bonds").expect("template bonds");
         let i = b
             .get("atomi")
-            .and_then(molrs::core::Column::as_uint)
+            .and_then(|c| c.get::<molrs::op::Idx>())
             .expect("bonds.atomi");
         let j = b
             .get("atomj")
-            .and_then(molrs::core::Column::as_uint)
+            .and_then(|c| c.get::<molrs::op::Idx>())
             .expect("bonds.atomj");
         i.iter()
             .zip(j.iter())
@@ -690,14 +696,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let m_chain: F = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::core::Column::as_string)
+        .and_then(|c| c.get::<String>())
         .map(|e| {
             e.iter()
                 .filter_map(|s| {
-                    use std::str::FromStr;
-                    molrs::core::Element::from_str(s.trim())
-                        .ok()
-                        .map(|el| el.atomic_mass() as F)
+                    molrs::core::Element::by_symbol(s.trim()).map(|el| el.atomic_mass() as F)
                 })
                 .sum()
         })
@@ -709,7 +712,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tmpl_elem: Vec<String> = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::core::Column::as_string)
+        .and_then(|c| c.get::<String>())
         .map(|e| e.iter().map(|s| s.to_string()).collect())
         .unwrap_or_default();
     let tmpl_pos: Vec<[F; 3]> = frame
@@ -736,7 +739,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let h_idx: Vec<usize> = frame
         .get("atoms")
         .and_then(|a| a.get("element"))
-        .and_then(molrs::core::Column::as_string)
+        .and_then(|c| c.get::<String>())
         .map(|e| {
             e.iter()
                 .enumerate()

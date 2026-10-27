@@ -5,7 +5,7 @@
 //! a dependency cycle between the engine layer and the growth module. Only
 //! sibling leaves (`prior`) and `molrs` types are allowed.
 
-use molrs::core::BondDistanceWeights;
+use crate::BondDistanceWeights;
 use molrs::op::F;
 
 use crate::grow::prior::{AnglePrior, TorsionPrior};

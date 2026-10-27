@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "molcrafts-molpack"
-version = "0.5.0"
+version = "0.6.0"
 description = "Python bindings for molpack molecular packing (Packmol port)"
 requires-python = ">=3.12"
 readme = "README.md"
@@ -12,7 +12,7 @@ license = "BSD-3-Clause"
 # Minor-line pin — same major.minor as molrs; patch may drift.
 dependencies = [
   "numpy>=2.0",
-  "molcrafts-molrs>=0.17.0,<0.18",
+  "molcrafts-molpy>=0.20.0,<0.21",
 ]
 
 # Installable "extra" carrying the docs-build deps. Unlike the [dependency-groups]
@@ -35,14 +35,14 @@ typecheck = [
   "ruff",
   "ty",
   "numpy>=2.0",
-  "molcrafts-molrs>=0.17.0,<0.18",
+  "molcrafts-molpy>=0.20.0,<0.21",
   # `ty check` walks tests/ which imports pytest.
   "pytest",
 ]
 test = [
   "pytest",
   "numpy>=2.0",
-  "molcrafts-molrs>=0.17.0,<0.18",
+  "molcrafts-molpy>=0.20.0,<0.21",
 ]
 dev = [
   {include-group = "typecheck"},
@@ -118,7 +118,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.uv.sources]
-molcrafts-molrs = { path = "../../molrs/molrs-python", editable = true }
+molcrafts-molpy = { path = "../../molrs/molpy", editable = true }
 
 [tool.ty]
 [tool.ty.environment]
@@ -129,9 +129,10 @@ extra-paths = ["examples"]
 
 # Isolated binding tests — prek pre-push + CI call: `tox -c python -e py`
 # Non-editable only: sibling molrs path install + maturin wheel + pytest.
-# Requires ../../molrs on the 0.17.* minor line. The hooks and CI both run it
-# in a layout whose ../../molrs is the commit scripts/partners.py resolves.
-# Both builds are --locked (MATURIN_PEP517_ARGS reaches the molrs wheel).
+# Requires ../../molrs (the molpy checkout) on the 0.20.* minor line. The hooks
+# and CI both run it in a layout whose ../../molrs is the commit
+# scripts/partners.py resolves. Both builds are --locked
+# (MATURIN_PEP517_ARGS reaches the molpy wheel).
 [tool.tox]
 requires = ["tox>=4.23"]
 env_list = ["py"]
@@ -168,25 +169,25 @@ pass_env = [
 ]
 set_env = { MATURIN_PEP517_ARGS = "--locked" }
 allowlist_externals = ["maturin"]
-# toxinidir is python/ when config lives here; sibling molrs is ../.. /molrs.
-# Minor-line only: 0.17.* (patch may differ).
+# toxinidir is python/ when config lives here; sibling molpy is ../.. /molrs.
+# Minor-line only: 0.20.* (patch may differ).
 commands_pre = [
   [
     "{envpython}",
     "-c",
-    "import tomllib; from pathlib import Path; p=Path(r'{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text(encoding='utf-8'))['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,17), f'sibling molrs {{v}} not on 0.17.*'",
+    "import tomllib; from pathlib import Path; p=Path(r'{toxinidir}')/'..'/'..'/'molrs'/'Cargo.toml'; v=tomllib.loads(p.read_text(encoding='utf-8'))['workspace']['package']['version']; assert tuple(map(int, v.split('.')[:2]))==(0,20), f'sibling molpy {{v}} not on 0.20.*'",
   ],
   [
     "{envpython}",
     "-m",
     "pip",
     "install",
-    "{toxinidir}/../../molrs/molrs-python",
+    "{toxinidir}/../../molrs/molpy",
   ],
   [
     "{envpython}",
     "-c",
-    "import importlib.metadata as m; v=m.version('molcrafts-molrs'); assert tuple(map(int, v.split('.')[:2]))==(0,17), v",
+    "import importlib.metadata as m; v=m.version('molcrafts-molpy'); assert tuple(map(int, v.split('.')[:2]))==(0,20), v",
   ],
   ["maturin", "build", "--release", "--locked", "-o", "{env_tmp_dir}/wheels"],
   [

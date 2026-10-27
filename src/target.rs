@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
+use crate::BondDistanceWeights;
 use crate::restraint::{AtomRestraint, Restraint};
-use molrs::core::BondDistanceWeights;
 use molrs::op::F;
 
 /// Cartesian axis selector used in `Target::with_rotation_bound` and
@@ -641,7 +641,7 @@ fn radii_and_elements(frame: &molrs::core::Frame, n: usize) -> (Vec<F>, Vec<Stri
     let column = frame
         .get("atoms")
         .and_then(|atoms| atoms.get(molrs::core::keys::ELEMENT))
-        .and_then(molrs::core::Column::as_string);
+        .and_then(|c| c.get::<String>());
     let Some(symbols) = column else {
         return (vec![1.5; n], vec!["X".to_string(); n]);
     };
@@ -662,8 +662,8 @@ mod tests {
     //! Tests for Target builder: construction, natoms/count, fixed_at,
     //! centering modes, restraint attachment, and hook validation.
 
+    use crate::BondDistanceWeights;
     use crate::{GencanPack, PackEngine, RegionRestraint, Target};
-    use molrs::core::BondDistanceWeights;
     use molrs::op::F;
     use std::sync::Arc;
 
@@ -739,18 +739,19 @@ mod tests {
 
         let mut atoms = Block::new();
         atoms
-            .insert("x", Array1::from_vec(vec![0.0, 1.0]).into_dyn())
+            .insert("x", Array1::from_vec(vec![0.0, 1.0]).into_dyn(), None)
             .expect("insert x");
         atoms
-            .insert("y", Array1::from_vec(vec![0.0, 0.0]).into_dyn())
+            .insert("y", Array1::from_vec(vec![0.0, 0.0]).into_dyn(), None)
             .expect("insert y");
         atoms
-            .insert("z", Array1::from_vec(vec![0.0, 0.0]).into_dyn())
+            .insert("z", Array1::from_vec(vec![0.0, 0.0]).into_dyn(), None)
             .expect("insert z");
         atoms
             .insert(
                 "element",
                 Array1::from_vec(vec!["O".to_string(), "H".to_string()]).into_dyn(),
+                None,
             )
             .expect("insert element");
 
@@ -946,13 +947,13 @@ mod tests {
 
         let mut atoms = Block::new();
         atoms
-            .insert("x", Array1::from_vec(vec![0.0, 1.0]).into_dyn())
+            .insert("x", Array1::from_vec(vec![0.0, 1.0]).into_dyn(), None)
             .expect("insert x");
         atoms
-            .insert("y", Array1::from_vec(vec![0.0, 0.0]).into_dyn())
+            .insert("y", Array1::from_vec(vec![0.0, 0.0]).into_dyn(), None)
             .expect("insert y");
         atoms
-            .insert("z", Array1::from_vec(vec![0.0, 0.0]).into_dyn())
+            .insert("z", Array1::from_vec(vec![0.0, 0.0]).into_dyn(), None)
             .expect("insert z");
         let mut frame = molrs::core::Frame::new();
         frame.insert("atoms", atoms);

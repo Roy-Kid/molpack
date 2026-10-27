@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import ctypes
 
-import molrs
+import molpy
 import pytest
 
 import molpack
@@ -27,7 +27,7 @@ class _OtherLineFrame:
         new_capsule.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p]
         # Bogus payload on purpose: the name check must reject the capsule
         # before any dereference happens.
-        return new_capsule(ctypes.c_void_p(0xDEAD), b"molrs.FrameRef", None)
+        return new_capsule(ctypes.c_void_p(0xDEAD), b"molpy.FrameRef", None)
 
 
 class TestVersionedCapsuleGate:
@@ -38,8 +38,8 @@ class TestVersionedCapsuleGate:
     def test_same_line_frame_resolves(self) -> None:
         import numpy as np
 
-        frame = molrs.core.Frame()
-        block = molrs.core.Block()
+        frame = molpy.core.Frame()
+        block = molpy.core.Block()
         block.insert("x", np.array([0.0, 1.0]))
         block.insert("y", np.array([0.0, 0.0]))
         block.insert("z", np.array([0.0, 0.0]))
@@ -55,7 +55,7 @@ class _OtherLineRegion:
         new_capsule = ctypes.pythonapi.PyCapsule_New
         new_capsule.restype = ctypes.py_object
         new_capsule.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p]
-        return new_capsule(ctypes.c_void_p(0xDEAD), b"molrs.RegionRef", None)
+        return new_capsule(ctypes.c_void_p(0xDEAD), b"molpy.RegionRef", None)
 
 
 class _NotACapsule:
@@ -67,8 +67,8 @@ class TestRegionCapsuleGate:
     def _target(self):
         import numpy as np
 
-        frame = molrs.core.Frame()
-        block = molrs.core.Block()
+        frame = molpy.core.Frame()
+        block = molpy.core.Block()
         block.insert("x", np.array([0.0]))
         block.insert("y", np.array([0.0]))
         block.insert("z", np.array([0.0]))
@@ -87,5 +87,5 @@ class TestRegionCapsuleGate:
     def test_same_line_region_resolves(self) -> None:
         import numpy as np
 
-        region = molrs.core.Sphere(np.zeros(3), 5.0)
+        region = molpy.core.Sphere(np.zeros(3), 5.0)
         assert self._target().with_restraint(region) is not None

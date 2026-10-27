@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import molrs
+import molpy
 import numpy as np
 import pytest
 
 import molpack
 
 
-def _two_water_frame() -> molrs.core.Frame:
+def _two_water_frame() -> molpy.core.Frame:
     """Two trivially distinct atoms so packing has something to do."""
-    return molrs.core.Frame(
+    return molpy.core.Frame(
         {
             "atoms": {
                 "x": np.array([0.0, 1.5]),
@@ -56,7 +56,7 @@ class TestCallbackHooks:
         # iterate — a too-easy setup converges during init and
         # `on_step` never fires.
         target = molpack.Target(_two_water_frame(), count=30).with_restraint(
-            molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+            molpy.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
         _packer().with_callback(log).with_seed(1).run([target], max_loops=5)
 
@@ -90,7 +90,7 @@ class TestCallbackHooks:
                 )
 
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
-            molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+            molpy.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         _packer().with_callback(Grabber()).with_seed(1).run([target], max_loops=2)
 
@@ -111,7 +111,7 @@ class TestCallbackHooks:
             pass
 
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
-            molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+            molpy.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         result = (
             _packer().with_callback(Empty()).with_seed(1).run([target], max_loops=2)
@@ -131,7 +131,7 @@ class TestCallbackEarlyStop:
                 return True  # request immediate stop
 
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
-            molrs.core.Cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
+            molpy.core.Cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])
         )
         _packer().with_callback(StopAfterOne()).with_seed(1).run([target], max_loops=50)
 
@@ -160,7 +160,7 @@ class TestGencanEarlyStop:
                 seen[step.phase] = seen.get(step.phase, 0) + 1
 
         target = molpack.Target(_two_water_frame(), count=20).with_restraint(
-            molrs.core.Cuboid([0.0, 0.0, 0.0], [3.0, 3.0, 3.0])
+            molpy.core.Cuboid([0.0, 0.0, 0.0], [3.0, 3.0, 3.0])
         )
         result = (
             packer.with_callback(Count())
@@ -188,7 +188,7 @@ class TestCallbackErrorPropagation:
                 raise ValueError("boom from callback")
 
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
-            molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+            molpy.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         with pytest.raises(ValueError, match="boom from callback"):
             _packer().with_callback(Explodes()).with_seed(1).run([target], max_loops=5)
@@ -199,7 +199,7 @@ class TestCallbackErrorPropagation:
                 raise RuntimeError("boom from on_start")
 
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
-            molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+            molpy.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         with pytest.raises(RuntimeError, match="boom from on_start"):
             _packer().with_callback(ExplodesEarly()).with_seed(1).run(
@@ -212,7 +212,7 @@ class TestMultipleCallbacks:
         log1 = CallLog()
         log2 = CallLog()
         target = molpack.Target(_two_water_frame(), count=2).with_restraint(
-            molrs.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
+            molpy.core.Cuboid([0.0, 0.0, 0.0], [5.0, 5.0, 5.0])
         )
         _packer().with_callback(log1).with_callback(log2).with_seed(1).run(
             [target], max_loops=2
@@ -234,7 +234,7 @@ class TestPackSystemView:
                 frames.append((step.loop_idx, sys.positions))
 
         target = molpack.Target(_two_water_frame(), count=30).with_restraint(
-            molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+            molpy.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
         _packer().with_callback(Recorder()).with_seed(1).run([target], max_loops=5)
 
@@ -259,7 +259,7 @@ class TestPackSystemView:
                 stashed.append(sys)
 
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
-            molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+            molpy.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
         _packer().with_callback(Stasher()).with_seed(1).run([target], max_loops=2)
 
@@ -271,7 +271,7 @@ class TestPackSystemView:
     def test_callback_ignoring_the_system_view_still_works(self):
         log = CallLog()
         target = molpack.Target(_two_water_frame(), count=4).with_restraint(
-            molrs.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
+            molpy.core.Cuboid([0.0, 0.0, 0.0], [6.0, 6.0, 6.0])
         )
         _packer().with_callback(log).with_seed(1).run([target], max_loops=2)
         assert log.finished is True

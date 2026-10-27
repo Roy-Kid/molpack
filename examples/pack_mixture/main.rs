@@ -37,8 +37,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .expect("file path has no parent")
         .to_path_buf();
-    let water = read_pdb(base.join("water.pdb"))?;
-    let urea = read_pdb(base.join("urea.pdb"))?;
+    let water = read_pdb(&base.join("water.pdb"))?;
+    let urea = read_pdb(&base.join("urea.pdb"))?;
 
     let box_restraint = RegionRestraint(Arc::new(Cuboid::new(
         array![0.0, 0.0, 0.0],

@@ -374,12 +374,12 @@ fn check_positive(value: F, what: &str) -> PyResult<()> {
     Ok(())
 }
 
-/// Marshal a Python weight list into [`molrs::core::BondDistanceWeights`].
+/// Marshal a Python weight list into [`molpack::BondDistanceWeights`].
 ///
 /// Rejects empty, non-finite, or out-of-range entries with ``ValueError``.
 /// Fractional weights are legal here; growth refuses them later.
-fn validate_special_bonds(weights: Vec<F>) -> PyResult<molrs::core::BondDistanceWeights> {
-    molrs::core::BondDistanceWeights::new(weights).map_err(|e| PyValueError::new_err(e.to_string()))
+fn validate_special_bonds(weights: Vec<F>) -> PyResult<molpack::BondDistanceWeights> {
+    molpack::BondDistanceWeights::new(weights).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 // ── Target options ───────────────────────────────────────────────────────────

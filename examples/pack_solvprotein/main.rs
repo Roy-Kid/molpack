@@ -54,10 +54,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .expect("file path has no parent")
         .to_path_buf();
-    let protein = read_pdb(base.join("protein.pdb"))?;
-    let water = read_pdb(base.join("water.pdb"))?;
-    let sodium = read_pdb(base.join("sodium.pdb"))?;
-    let chloride = read_pdb(base.join("chloride.pdb"))?;
+    let protein = read_pdb(&base.join("protein.pdb"))?;
+    let water = read_pdb(&base.join("water.pdb"))?;
+    let sodium = read_pdb(&base.join("sodium.pdb"))?;
+    let chloride = read_pdb(&base.join("chloride.pdb"))?;
 
     let sphere = inside_sphere([0.0, 0.0, 0.0], 50.0);
 
