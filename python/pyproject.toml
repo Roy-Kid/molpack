@@ -189,7 +189,10 @@ commands_pre = [
     "-c",
     "import importlib.metadata as m; v=m.version('molcrafts-molpy'); assert tuple(map(int, v.split('.')[:2]))==(0,20), v",
   ],
-  ["maturin", "build", "--release", "--locked", "-o", "{env_tmp_dir}/wheels"],
+  # CI leaves MOLPACK_WHEEL_PROFILE unset, so the wheel is --release.
+  # The local pre-push hook sets it to --profile=dev: same tests, without
+  # a from-scratch LTO release of molpy on every push.
+  ["maturin", "build", "{env:MOLPACK_WHEEL_PROFILE:--release}", "--locked", "-o", "{env_tmp_dir}/wheels"],
   [
     "{envpython}",
     "-c",

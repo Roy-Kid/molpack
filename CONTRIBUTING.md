@@ -93,8 +93,12 @@ command in `.github/workflows/{lint,test,docs}.yml` has a hook. **Never `git com
   - clippy (`--all-targets --all-features -D warnings`), ty, the rust tests
     and tox -- each in CI's sibling layout (`scripts/partners.py run`: a copy
     of this tree next to molrs at its resolved commit), `--locked`,
-    on the toolchain `rust-toolchain.toml` pins (1.99.0, the same as molrs)
-    and Python 3.12.
+    on the toolchain `rust-toolchain.toml` pins (the same `stable` as molpy)
+    and Python 3.12. They run only when the files they cover are in the push.
+    The layout is kept in `~/.cache/molcrafts-partners` (or
+    `$MOLCRAFTS_PARTNER_CACHE`), so `target/`, `.tox` and `.venv` are not
+    thrown away after each hook. The local wheel build is the dev profile;
+    CI's `tox -e py` stays `--release`.
 - **Dispatch on the MolCrafts cluster:** the compiling gates go through
   `scripts/hook-run.sh`, which hands the command to `$MOLCRAFTS_HOOK_RUNNER`
   when that is set and it is not already inside a Slurm job. The cluster's
@@ -102,8 +106,7 @@ command in `.github/workflows/{lint,test,docs}.yml` has a hook. **Never `git com
   command on a compute node (allocation `$USER-hooks`; it fails after 20
   minutes without a node, never passes) and sets `$MOLCRAFTS_PARTNER_CACHE` so
   the partner checkouts and their `target/` stay warm between pushes.
-  Everything else runs in place, so a commit never waits for Slurm. Elsewhere
-  nothing sets the variables: every hook runs locally, in a temp layout.
+  Everything else runs in place, so a commit never waits for Slurm.
 
 ## Partners
 

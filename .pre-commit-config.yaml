@@ -9,7 +9,11 @@
 #               sibling layout with molrs at the commit
 #               scripts/partners.py resolves (molrs's dev, or its branch
 #               named like this one; scripts/partners.py run), never
-#               the developer's ../molrs.
+#               the developer's ../molrs. Outside CI that layout is kept in
+#               ~/.cache/molcrafts-partners, so target/, .tox and .venv
+#               survive from one hook to the next and from one push to the
+#               next. The Python wheel gate builds the dev profile locally;
+#               CI's tox -e py stays --release.
 #
 # Compiling gates go through scripts/hook-run.sh, which hands them to
 # $MOLCRAFTS_HOOK_RUNNER (a compute node on the MolCrafts cluster) when set and
@@ -112,33 +116,37 @@ repos:
         name: ty (Python type check, lint.yml)
         entry: >-
           scripts/hook-run.sh python3 scripts/partners.py run --
-          env MATURIN_PEP517_ARGS=--locked uv run --locked --python 3.12 --directory python --group typecheck
+          env MATURIN_PEP517_ARGS='--locked --profile=dev'
+          uv run --locked --python 3.12 --directory python --group typecheck
           ty check python tests examples
         language: system
         pass_filenames: false
         files: ^(python/|\.github/partners\.env)
         stages: [pre-push]
 
+      # clippy --all-targets --all-features already compiled the cli union,
+      # so this does not repeat `cargo check --all-targets --features cli`.
+      # The two checks that remain are feature sets clippy does not build.
       - id: rust-tests
         name: rust tests (test.yml)
         entry: >-
           scripts/hook-run.sh python3 scripts/partners.py run -- sh -c
           'cargo test --locked --lib --features cli
           && cargo test --locked --doc --features cli
-          && cargo check --locked --all-targets --features cli
           && cargo check --locked --no-default-features
           && cargo check --locked --features rayon'
         language: system
         pass_filenames: false
-        always_run: true
+        files: ^(src/|examples/|Cargo\.(toml|lock)|\.cargo/|rust-toolchain\.toml|\.github/partners\.env)
         stages: [pre-push]
 
       - id: python-tests
         name: python tests, tox isolated non-editable (test.yml)
         entry: >-
           scripts/hook-run.sh python3 scripts/partners.py run --
-          env MATURIN_PEP517_ARGS=--locked uv run --locked --python 3.12 --directory python --group dev tox -e py
+          env MATURIN_PEP517_ARGS='--locked --profile=dev' MOLPACK_WHEEL_PROFILE=--profile=dev
+          uv run --locked --python 3.12 --directory python --group dev tox -e py
         language: system
         pass_filenames: false
-        always_run: true
+        files: ^(python/|src/|Cargo\.(toml|lock)|\.github/partners\.env)
         stages: [pre-push]

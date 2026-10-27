@@ -42,8 +42,12 @@ A branch resolves to the first of:
 
 ``run`` keeps <root> under $MOLCRAFTS_PARTNER_CACHE when that is set (one
 directory per repository, so the partner builds stay warm between pushes and
-a partner checkout only moves to its newly resolved commit); otherwise <root>
-is a temp directory removed afterwards.
+a partner checkout only moves to its newly resolved commit). Outside CI, when
+the variable is unset, that cache is ``~/.cache/molcrafts-partners`` for the
+same reason: a temp layout would throw away ``target/``, ``.tox`` and
+``.venv`` after every hook, and the next hook would compile molpy again.
+CI leaves the variable unset and still uses a temp directory, because the
+runner's own action cache is the warm store there.
 
 partners.env holds ``KEY=VALUE`` lines and comments, nothing else. ``SELF``
 names this repository's directory in the layout.
@@ -379,19 +383,37 @@ def sync(dest: Path) -> None:
         shutil.copy2(src, dst)
 
 
+def layout_cache() -> str | None:
+    """Directory that keeps partner checkouts and their build output.
+
+    CI stays ephemeral (its action cache is the warm store). A laptop or a
+    login node keeps one directory so the next hook, and the next push, reuse
+    ``target/``, ``.tox`` and ``.venv`` instead of compiling molpy again.
+    """
+    cache = os.environ.get("MOLCRAFTS_PARTNER_CACHE")
+    if cache:
+        return cache
+    if IN_CI:
+        return None
+    return str(Path.home() / ".cache" / "molcrafts-partners")
+
+
 def run(cmd: list[str]) -> int:
     import fcntl  # POSIX only: `run` serves the git hooks; `fetch` also runs on Windows CI.
 
     env = load()
     me = env.get("SELF") or die("partners.env names no SELF")
     found = resolved()
-    cache = os.environ.get("MOLCRAFTS_PARTNER_CACHE")
+    cache = layout_cache()
     key = hashlib.sha256(repr(sorted(partners(env).items())).encode()).hexdigest()
+    ephemeral = cache is None
     root = (
-        Path(cache) / f"{me}-{key[:12]}"
-        if cache
-        else Path(tempfile.mkdtemp(prefix=f"{me}-partners-"))
+        Path(tempfile.mkdtemp(prefix=f"{me}-partners-"))
+        if ephemeral
+        else Path(cache) / f"{me}-{key[:12]}"
     )
+    if not ephemeral:
+        print(f"partners: reusing {root}", file=sys.stderr)
     root.mkdir(parents=True, exist_ok=True)
     try:
         with open(root / ".lock", "w", encoding="utf-8") as lock:
@@ -403,7 +425,7 @@ def run(cmd: list[str]) -> int:
             env_out = dict(ENV, PARTNERS_SOURCE=str(ROOT))
             return subprocess.run(cmd, check=False, cwd=root / me, env=env_out).returncode
     finally:
-        if not cache:
+        if ephemeral:
             shutil.rmtree(root, ignore_errors=True)
 
 
